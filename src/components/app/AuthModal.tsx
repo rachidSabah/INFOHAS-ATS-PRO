@@ -196,26 +196,47 @@ export function AuthModal() {
   const handleOAuth = async (provider: "google" | "github" | "linkedin" | "puter") => {
     setLoading(provider);
 
-    // === GOOGLE — handled by GIS on mount (One Tap + renderButton) ===
-    // If the user clicks the Google area manually, re-trigger the One Tap prompt
+    // === GOOGLE — tries GIS (browser session) → server OAuth → Puter fallback ===
     if (provider === "google") {
-      if (typeof window !== "undefined" && window.google?.accounts?.id) {
-        window.google.accounts.id.prompt();
-      } else {
-        // GIS not loaded — fall back to server OAuth popup
-        const popup = window.open("/api/auth/google", "google-oauth", "width=500,height=650,scrollbars=yes");
-        if (!popup) {
-          toast.error("Google sign-in popup was blocked. Please allow popups and try again.");
-          setLoading(null);
-          return;
-        }
+      const googleClientId = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID || process.env.GOOGLE_CLIENT_ID || "";
+
+      // Option 1: Google Identity Services (uses browser's Google session)
+      if (googleClientId && typeof window !== "undefined" && window.google?.accounts?.id) {
+        window.google.accounts.id.prompt((notification: any) => {
+          if (notification.isNotDisplayed() || notification.isSkippedMoment()) {
+            // One Tap blocked — try server OAuth popup
+            const popup = window.open("/api/auth/google", "google-oauth", "width=500,height=650,scrollbars=yes");
+            if (!popup) {
+              // Popup blocked too — fall back to Puter (which provides Google login)
+              toast.info("Google OAuth popup was blocked. Redirecting to Puter Google login…");
+              handleOAuth("puter");
+            }
+            const checkClosed = setInterval(() => {
+              if (popup?.closed) {
+                clearInterval(checkClosed);
+                setLoading((c) => (c === "google" ? null : c));
+              }
+            }, 1000);
+          }
+        });
+        return;
+      }
+
+      // Option 2: Server-based OAuth popup (needs GOOGLE_CLIENT_ID + GOOGLE_CLIENT_SECRET)
+      const popup = window.open("/api/auth/google", "google-oauth", "width=500,height=650,scrollbars=yes");
+      if (popup) {
         const checkClosed = setInterval(() => {
           if (popup.closed) {
             clearInterval(checkClosed);
             setLoading((c) => (c === "google" ? null : c));
           }
         }, 1000);
+        return;
       }
+
+      // Option 3: Puter.js (provides free Google login — no OAuth app needed)
+      toast.info("Connecting to Google via Puter (free)…");
+      handleOAuth("puter");
       return;
     }
 
@@ -398,33 +419,26 @@ export function AuthModal() {
             </div>
 
             <div className="p-6 space-y-4">
-              {/* Google Sign-In — GIS renders this button inline using the browser's Google session.
-                  If the user is already logged into Google, One Tap shows "Continue as [name]" automatically. */}
-              <div className="space-y-3">
-                {/* GIS-rendered Google button — shows "Continue with Google" with the user's Google account */}
-                <div className="flex justify-center min-h-[44px]">
-                  <div ref={googleButtonRef} />
-                </div>
-                {/* Fallback manual button — shown only if GIS hasn't rendered yet or Google isn't configured */}
-                {loading === "google" && (
-                  <div className="flex items-center justify-center gap-2 text-sm text-muted-foreground">
-                    <Icon name="Loader2" className="w-4 h-4 animate-spin" /> Connecting to Google…
-                  </div>
-                )}
-
-                {/* Other OAuth providers */}
-                <div className="grid grid-cols-3 gap-2">
-                  <Button variant="outline" onClick={() => handleOAuth("github")} disabled={!!loading} className="gap-1.5 text-xs">
-                    {loading === "github" ? <Icon name="Loader2" className="w-3.5 h-3.5 animate-spin" /> : <Icon name="Github" className="w-3.5 h-3.5" />} GitHub
-                  </Button>
-                  <Button variant="outline" onClick={() => handleOAuth("linkedin")} disabled={!!loading} className="gap-1.5 text-xs">
-                    {loading === "linkedin" ? <Icon name="Loader2" className="w-3.5 h-3.5 animate-spin" /> : <Icon name="Linkedin" className="w-3.5 h-3.5" />} LinkedIn
-                  </Button>
-                  <Button variant="outline" onClick={() => handleOAuth("puter")} disabled={!!loading} className="gap-1.5 text-xs border-brand text-brand hover:bg-brand-light">
-                    {loading === "puter" ? <Icon name="Loader2" className="w-3.5 h-3.5 animate-spin" /> : <Icon name="Sparkles" className="w-3.5 h-3.5" />} Puter
-                  </Button>
-                </div>
+              {/* OAuth buttons — simple 2x2 grid, just like any website */}
+              <div className="grid grid-cols-2 gap-2">
+                <Button variant="outline" onClick={() => handleOAuth("google")} disabled={!!loading} className="gap-2">
+                  {loading === "google" ? <Icon name="Loader2" className="w-4 h-4 animate-spin" /> : <Icon name="Chrome" className="w-4 h-4" />} Google
+                </Button>
+                <Button variant="outline" onClick={() => handleOAuth("github")} disabled={!!loading} className="gap-2">
+                  {loading === "github" ? <Icon name="Loader2" className="w-4 h-4 animate-spin" /> : <Icon name="Github" className="w-4 h-4" />} GitHub
+                </Button>
+                <Button variant="outline" onClick={() => handleOAuth("linkedin")} disabled={!!loading} className="gap-2">
+                  {loading === "linkedin" ? <Icon name="Loader2" className="w-4 h-4 animate-spin" /> : <Icon name="Linkedin" className="w-4 h-4" />} LinkedIn
+                </Button>
+                <Button variant="outline" onClick={() => handleOAuth("puter")} disabled={!!loading} className="gap-2 border-brand text-brand hover:bg-brand-light">
+                  {loading === "puter" ? <Icon name="Loader2" className="w-4 h-4 animate-spin" /> : <Icon name="Sparkles" className="w-4 h-4" />} Puter (free AI)
+                </Button>
               </div>
+
+              {/* Hidden GIS container — Google Identity Services renders here if configured.
+                  The visible "Google" button above triggers the login. GIS auto-selects
+                  the user's browser Google session when available. */}
+              <div ref={googleButtonRef} style={{ position: "absolute", left: "-9999px" }} aria-hidden />
 
               {/* GitHub Device Flow UI — shown when device code is requested */}
               {githubDevice && (
