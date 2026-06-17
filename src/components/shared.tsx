@@ -84,23 +84,55 @@ export function SectionTitle({ eyebrow, title, subtitle, center = true }: { eyeb
   );
 }
 
+/**
+ * Deterministic seeded pseudo-random generator.
+ * Same seed → same sequence, so server and client produce identical output
+ * (no React hydration mismatch). Uses a simple mulberry32 algorithm.
+ */
+function seededRandom(seed: number): () => number {
+  let s = seed >>> 0;
+  return () => {
+    s = (s + 0x6D2B79F5) >>> 0;
+    let t = s;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
 export function Sparkles({ count = 12, className }: { count?: number; className?: string }) {
-  const items = Array.from({ length: count });
+  // Generate sparkle properties deterministically (seeded by index) so the server
+  // and client produce identical HTML — avoids React hydration mismatches.
+  // We use a fixed seed so the layout is stable across reloads too.
+  const items = React.useMemo(() => {
+    const rand = seededRandom(42); // fixed seed for stable output
+    return Array.from({ length: count }).map(() => {
+      const sizeRoll = rand();
+      const topRoll = rand();
+      const leftRoll = rand();
+      const colorRoll = rand();
+      const opacityRoll = rand();
+      const durRoll = rand();
+      const delayRoll = rand();
+      return {
+        width: 2 + sizeRoll * 3,
+        height: 2 + sizeRoll * 3, // use same roll for w/h so sparkles are round
+        top: `${topRoll * 100}%`,
+        left: `${leftRoll * 100}%`,
+        background: colorRoll > 0.5 ? "var(--brand)" : "var(--gold)",
+        opacity: 0.4 + opacityRoll * 0.4,
+        animation: `float-up ${1 + durRoll * 2}s ease-out ${delayRoll * 2}s both`,
+      };
+    });
+  }, [count]);
+
   return (
     <div className={cn("pointer-events-none absolute inset-0 overflow-hidden", className)} aria-hidden>
-      {items.map((_, i) => (
+      {items.map((s, i) => (
         <span
           key={i}
           className="absolute rounded-full"
-          style={{
-            width: 2 + Math.random() * 3,
-            height: 2 + Math.random() * 3,
-            top: `${Math.random() * 100}%`,
-            left: `${Math.random() * 100}%`,
-            background: Math.random() > 0.5 ? "var(--brand)" : "var(--gold)",
-            opacity: 0.4 + Math.random() * 0.4,
-            animation: `float-up ${1 + Math.random() * 2}s ease-out ${Math.random() * 2}s both`,
-          }}
+          style={s}
         />
       ))}
     </div>

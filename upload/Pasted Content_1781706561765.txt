@@ -1,0 +1,741 @@
+Console Error
+
+
+A tree hydrated but some attributes of the server rendered HTML didn't match the client properties. This won't be patched up. This can happen if a SSR-ed Client Component used:
+- A server/client branch `if (typeof window !== 'undefined')`.
+- Variable input such as `Date.now()` or `Math.random()` which changes each time it's called.
+- Date formatting in a user's locale which doesn't match the server.
+- External changing data without sending a snapshot of it along with the HTML.
+- Invalid HTML tag nesting.
+
+It can also happen if the client has a browser extension installed which messes with the HTML before React loaded.
+
+See more info here: https://nextjs.org/docs/messages/react-hydration-error
+
+
+  ...
+    <RedirectBoundary>
+      <RedirectErrorBoundary router={{...}}>
+        <InnerLayoutRouter url="/" tree={[...]} params={{}} cacheNode={{rsc:<Fragment>, ...}} segmentPath={[...]} ...>
+          <SegmentViewNode type="page" pagePath="page.tsx">
+            <SegmentTrieNode>
+            <ClientPageRoot Component={function Home} serverProvidedParams={{...}}>
+              <Home params={Promise} searchParams={Promise}>
+                <LandingPage>
+                  <div className="min-h-scre...">
+                    <LandingNav>
+                    <main className="flex-1">
+                      <Hero>
+                        <section className="relative o...">
+                          <div>
+                          <Sparkles count={18}>
+                            <div className="pointer-ev..." aria-hidden={true}>
+                              <span
+                                className="absolute rounded-full"
+                                style={{
++                                 width: 3.7231305332230846
+-                                 width: "3.89963px"
++                                 height: 2.354645908292848
+-                                 height: "2.48805px"
++                                 top: "54.72188008219398%"
+-                                 top: "5.11953%"
++                                 left: "10.268869409023985%"
+-                                 left: "86.1902%"
++                                 background: "var(--gold)"
++                                 opacity: 0.4498314786252952
+-                                 opacity: "0.582654"
++                                 animation: "float-up 2.4823327007150775s ease-out 0.5717198467796631s both"
+-                                 background-image: ""
+-                                 background-position-x: ""
+-                                 background-position-y: ""
+-                                 background-size: ""
+-                                 background-repeat: ""
+-                                 background-attachment: ""
+-                                 background-origin: ""
+-                                 background-clip: ""
+-                                 background-color: ""
+-                                 animation-duration: "1.00166s"
+-                                 animation-timing-function: "ease-out"
+-                                 animation-delay: "0.0626992s"
+-                                 animation-iteration-count: "1"
+-                                 animation-direction: "normal"
+-                                 animation-fill-mode: "both"
+-                                 animation-play-state: "running"
+-                                 animation-name: "float-up"
+-                                 animation-timeline: "auto"
+-                                 animation-range-start: "normal"
+-                                 animation-range-end: "normal"
+                                }}
+                              >
+                              <span
+                                className="absolute rounded-full"
+                                style={{
++                                 width: 2.3865853051482384
+-                                 width: "3.53363px"
++                                 height: 3.914044635083345
+-                                 height: "3.56354px"
++                                 top: "70.89237213001196%"
+-                                 top: "7.58824%"
++                                 left: "93.80982080606918%"
+-                                 left: "91.5686%"
++                                 background: "var(--gold)"
++                                 opacity: 0.49610638027372644
+-                                 opacity: "0.775572"
++                                 animation: "float-up 1.1476669001350621s ease-out 0.14002511326964662s both"
+-                                 background-image: ""
+-                                 background-position-x: ""
+-                                 background-position-y: ""
+-                                 background-size: ""
+-                                 background-repeat: ""
+-                                 background-attachment: ""
+-                                 background-origin: ""
+-                                 background-clip: ""
+-                                 background-color: ""
+-                                 animation-duration: "2.26307s"
+-                                 animation-timing-function: "ease-out"
+-                                 animation-delay: "0.768511s"
+-                                 animation-iteration-count: "1"
+-                                 animation-direction: "normal"
+-                                 animation-fill-mode: "both"
+-                                 animation-play-state: "running"
+-                                 animation-name: "float-up"
+-                                 animation-timeline: "auto"
+-                                 animation-range-start: "normal"
+-                                 animation-range-end: "normal"
+                                }}
+                              >
+                              <span
+                                className="absolute rounded-full"
+                                style={{
++                                 width: 4.664003649996432
+-                                 width: "3.38238px"
++                                 height: 3.5031194224209363
+-                                 height: "4.18926px"
++                                 top: "13.918977664085785%"
+-                                 top: "15.6834%"
++                                 left: "29.33274317793345%"
+-                                 left: "49.6577%"
++                                 background: "var(--gold)"
++                                 opacity: 0.7720469909535677
+-                                 opacity: "0.787676"
++                                 animation: "float-up 1.2525236757817322s ease-out 1.2899330379073675s both"
+-                                 background-image: ""
+-                                 background-position-x: ""
+-                                 background-position-y: ""
+-                                 background-size: ""
+-                                 background-repeat: ""
+-                                 background-attachment: ""
+-                                 background-origin: ""
+-                                 background-clip: ""
+-                                 background-color: ""
+-                                 animation-duration: "1.07549s"
+-                                 animation-timing-function: "ease-out"
+-                                 animation-delay: "1.81141s"
+-                                 animation-iteration-count: "1"
+-                                 animation-direction: "normal"
+-                                 animation-fill-mode: "both"
+-                                 animation-play-state: "running"
+-                                 animation-name: "float-up"
+-                                 animation-timeline: "auto"
+-                                 animation-range-start: "normal"
+-                                 animation-range-end: "normal"
+                                }}
+                              >
+                              <span
+                                className="absolute rounded-full"
+                                style={{
++                                 width: 2.947799934341187
+-                                 width: "4.42807px"
++                                 height: 3.458925747461828
+-                                 height: "2.09088px"
++                                 top: "10.458315110115656%"
+-                                 top: "31.8937%"
++                                 left: "6.057099496289153%"
+-                                 left: "43.314%"
++                                 background: "var(--gold)"
++                                 opacity: 0.7768669886979697
+-                                 opacity: "0.547223"
++                                 animation: "float-up 2.364343844017685s ease-out 0.06730203736302309s both"
+-                                 background-image: ""
+-                                 background-position-x: ""
+-                                 background-position-y: ""
+-                                 background-size: ""
+-                                 background-repeat: ""
+-                                 background-attachment: ""
+-                                 background-origin: ""
+-                                 background-clip: ""
+-                                 background-color: ""
+-                                 animation-duration: "1.35489s"
+-                                 animation-timing-function: "ease-out"
+-                                 animation-delay: "1.21677s"
+-                                 animation-iteration-count: "1"
+-                                 animation-direction: "normal"
+-                                 animation-fill-mode: "both"
+-                                 animation-play-state: "running"
+-                                 animation-name: "float-up"
+-                                 animation-timeline: "auto"
+-                                 animation-range-start: "normal"
+-                                 animation-range-end: "normal"
+                                }}
+                              >
+                              <span
+                                className="absolute rounded-full"
+                                style={{
++                                 width: 2.545633941013159
+-                                 width: "3.09938px"
++                                 height: 2.583154780533278
+-                                 height: "4.03876px"
++                                 top: "37.07754927718501%"
+-                                 top: "61.2124%"
++                                 left: "21.326363485327814%"
+-                                 left: "88.9643%"
++                                 background: "var(--brand)"
++                                 opacity: 0.5355844095166267
+-                                 opacity: "0.681825"
++                                 animation: "float-up 2.884160741560961s ease-out 0.1847664087530283s both"
+-                                 background-image: ""
+-                                 background-position-x: ""
+-                                 background-position-y: ""
+-                                 background-size: ""
+-                                 background-repeat: ""
+-                                 background-attachment: ""
+-                                 background-origin: ""
+-                                 background-clip: ""
+-                                 background-color: ""
+-                                 animation-duration: "2.80518s"
+-                                 animation-timing-function: "ease-out"
+-                                 animation-delay: "0.1427s"
+-                                 animation-iteration-count: "1"
+-                                 animation-direction: "normal"
+-                                 animation-fill-mode: "both"
+-                                 animation-play-state: "running"
+-                                 animation-name: "float-up"
+-                                 animation-timeline: "auto"
+-                                 animation-range-start: "normal"
+-                                 animation-range-end: "normal"
+                                }}
+                              >
+                              <span
+                                className="absolute rounded-full"
+                                style={{
++                                 width: 4.7813002854467825
+-                                 width: "2.14156px"
++                                 height: 4.362035630104235
+-                                 height: "2.22508px"
++                                 top: "84.08305743271839%"
+-                                 top: "47.0327%"
++                                 left: "86.62649467261878%"
+-                                 left: "11.4696%"
++                                 background: "var(--brand)"
++                                 opacity: 0.7205032814359604
+-                                 opacity: "0.414552"
++                                 animation: "float-up 2.8697432979270943s ease-out 0.33626964016604477s both"
+-                                 background-image: ""
+-                                 background-position-x: ""
+-                                 background-position-y: ""
+-                                 background-size: ""
+-                                 background-repeat: ""
+-                                 background-attachment: ""
+-                                 background-origin: ""
+-                                 background-clip: ""
+-                                 background-color: ""
+-                                 animation-duration: "2.62347s"
+-                                 animation-timing-function: "ease-out"
+-                                 animation-delay: "0.344566s"
+-                                 animation-iteration-count: "1"
+-                                 animation-direction: "normal"
+-                                 animation-fill-mode: "both"
+-                                 animation-play-state: "running"
+-                                 animation-name: "float-up"
+-                                 animation-timeline: "auto"
+-                                 animation-range-start: "normal"
+-                                 animation-range-end: "normal"
+                                }}
+                              >
+                              <span
+                                className="absolute rounded-full"
+                                style={{
++                                 width: 2.522564566412119
+-                                 width: "4.09045px"
++                                 height: 2.8518830959531147
+-                                 height: "3.7877px"
++                                 top: "92.3543309701211%"
+-                                 top: "37.0093%"
++                                 left: "61.773731016553945%"
+-                                 left: "73.5085%"
++                                 background: "var(--brand)"
++                                 opacity: 0.7538377705872281
+-                                 opacity: "0.50851"
++                                 animation: "float-up 2.4909588200102206s ease-out 1.9329730075810787s both"
+-                                 background-image: ""
+-                                 background-position-x: ""
+-                                 background-position-y: ""
+-                                 background-size: ""
+-                                 background-repeat: ""
+-                                 background-attachment: ""
+-                                 background-origin: ""
+-                                 background-clip: ""
+-                                 background-color: ""
+-                                 animation-duration: "1.83753s"
+-                                 animation-timing-function: "ease-out"
+-                                 animation-delay: "1.16496s"
+-                                 animation-iteration-count: "1"
+-                                 animation-direction: "normal"
+-                                 animation-fill-mode: "both"
+-                                 animation-play-state: "running"
+-                                 animation-name: "float-up"
+-                                 animation-timeline: "auto"
+-                                 animation-range-start: "normal"
+-                                 animation-range-end: "normal"
+                                }}
+                              >
+                              <span
+                                className="absolute rounded-full"
+                                style={{
++                                 width: 4.237840482587147
+-                                 width: "2.04936px"
++                                 height: 2.364981824094932
+-                                 height: "2.98704px"
++                                 top: "6.535307297165005%"
+-                                 top: "49.8%"
++                                 left: "5.772389625975327%"
+-                                 left: "76.1361%"
++                                 background: "var(--gold)"
++                                 opacity: 0.45155855856928856
+-                                 opacity: "0.414203"
++                                 animation: "float-up 2.649205052077745s ease-out 1.4166669795171862s both"
+-                                 background-image: ""
+-                                 background-position-x: ""
+-                                 background-position-y: ""
+-                                 background-size: ""
+-                                 background-repeat: ""
+-                                 background-attachment: ""
+-                                 background-origin: ""
+-                                 background-clip: ""
+-                                 background-color: ""
+-                                 animation-duration: "1.43371s"
+-                                 animation-timing-function: "ease-out"
+-                                 animation-delay: "1.13505s"
+-                                 animation-iteration-count: "1"
+-                                 animation-direction: "normal"
+-                                 animation-fill-mode: "both"
+-                                 animation-play-state: "running"
+-                                 animation-name: "float-up"
+-                                 animation-timeline: "auto"
+-                                 animation-range-start: "normal"
+-                                 animation-range-end: "normal"
+                                }}
+                              >
+                              <span
+                                className="absolute rounded-full"
+                                style={{
++                                 width: 2.2396779692893287
+-                                 width: "3.935px"
++                                 height: 2.0486413730669364
+-                                 height: "2.31566px"
++                                 top: "87.91959357337923%"
+-                                 top: "47.7025%"
++                                 left: "87.52776361247871%"
+-                                 left: "92.5553%"
++                                 background: "var(--brand)"
++                                 opacity: 0.5387332680685977
+-                                 opacity: "0.784608"
++                                 animation: "float-up 1.859995084617335s ease-out 0.0438277569557155s both"
+-                                 background-image: ""
+-                                 background-position-x: ""
+-                                 background-position-y: ""
+-                                 background-size: ""
+-                                 background-repeat: ""
+-                                 background-attachment: ""
+-                                 background-origin: ""
+-                                 background-clip: ""
+-                                 background-color: ""
+-                                 animation-duration: "1.80618s"
+-                                 animation-timing-function: "ease-out"
+-                                 animation-delay: "0.900332s"
+-                                 animation-iteration-count: "1"
+-                                 animation-direction: "normal"
+-                                 animation-fill-mode: "both"
+-                                 animation-play-state: "running"
+-                                 animation-name: "float-up"
+-                                 animation-timeline: "auto"
+-                                 animation-range-start: "normal"
+-                                 animation-range-end: "normal"
+                                }}
+                              >
+                              <span
+                                className="absolute rounded-full"
+                                style={{
++                                 width: 2.263579066342701
+-                                 width: "3.21502px"
++                                 height: 3.8939383978512145
+-                                 height: "2.57104px"
++                                 top: "65.9160419653494%"
+-                                 top: "84.5162%"
++                                 left: "45.07724555539381%"
+-                                 left: "3.63232%"
++                                 background: "var(--brand)"
++                                 opacity: 0.52269159706108
+-                                 opacity: "0.549708"
++                                 animation: "float-up 2.2077894861416554s ease-out 1.2457689171491904s both"
+-                                 background-image: ""
+-                                 background-position-x: ""
+-                                 background-position-y: ""
+-                                 background-size: ""
+-                                 background-repeat: ""
+-                                 background-attachment: ""
+-                                 background-origin: ""
+-                                 background-clip: ""
+-                                 background-color: ""
+-                                 animation-duration: "1.91995s"
+-                                 animation-timing-function: "ease-out"
+-                                 animation-delay: "0.87594s"
+-                                 animation-iteration-count: "1"
+-                                 animation-direction: "normal"
+-                                 animation-fill-mode: "both"
+-                                 animation-play-state: "running"
+-                                 animation-name: "float-up"
+-                                 animation-timeline: "auto"
+-                                 animation-range-start: "normal"
+-                                 animation-range-end: "normal"
+                                }}
+                              >
+                              <span
+                                className="absolute rounded-full"
+                                style={{
++                                 width: 3.8440892964128777
+-                                 width: "3.08344px"
++                                 height: 2.896731929762484
+-                                 height: "4.64383px"
++                                 top: "17.024380547031235%"
+-                                 top: "49.4688%"
++                                 left: "33.863657299908645%"
+-                                 left: "31.913%"
++                                 background: "var(--gold)"
++                                 opacity: 0.4836273734409227
+-                                 opacity: "0.659995"
++                                 animation: "float-up 2.096298397133008s ease-out 0.6112463245509117s both"
+-                                 background-image: ""
+-                                 background-position-x: ""
+-                                 background-position-y: ""
+-                                 background-size: ""
+-                                 background-repeat: ""
+-                                 background-attachment: ""
+-                                 background-origin: ""
+-                                 background-clip: ""
+-                                 background-color: ""
+-                                 animation-duration: "1.62593s"
+-                                 animation-timing-function: "ease-out"
+-                                 animation-delay: "1.94165s"
+-                                 animation-iteration-count: "1"
+-                                 animation-direction: "normal"
+-                                 animation-fill-mode: "both"
+-                                 animation-play-state: "running"
+-                                 animation-name: "float-up"
+-                                 animation-timeline: "auto"
+-                                 animation-range-start: "normal"
+-                                 animation-range-end: "normal"
+                                }}
+                              >
+                              <span
+                                className="absolute rounded-full"
+                                style={{
++                                 width: 3.6574216463179976
+-                                 width: "4.7049px"
++                                 height: 4.910667154961605
+-                                 height: "3.03369px"
++                                 top: "31.108488337844896%"
+-                                 top: "62.8003%"
++                                 left: "42.18791624322884%"
+-                                 left: "28.8482%"
++                                 background: "var(--gold)"
++                                 opacity: 0.44103397839647673
+-                                 opacity: "0.421885"
++                                 animation: "float-up 1.1503204026316103s ease-out 1.83602095951222s both"
+-                                 background-image: ""
+-                                 background-position-x: ""
+-                                 background-position-y: ""
+-                                 background-size: ""
+-                                 background-repeat: ""
+-                                 background-attachment: ""
+-                                 background-origin: ""
+-                                 background-clip: ""
+-                                 background-color: ""
+-                                 animation-duration: "2.03105s"
+-                                 animation-timing-function: "ease-out"
+-                                 animation-delay: "1.60245s"
+-                                 animation-iteration-count: "1"
+-                                 animation-direction: "normal"
+-                                 animation-fill-mode: "both"
+-                                 animation-play-state: "running"
+-                                 animation-name: "float-up"
+-                                 animation-timeline: "auto"
+-                                 animation-range-start: "normal"
+-                                 animation-range-end: "normal"
+                                }}
+                              >
+                              <span
+                                className="absolute rounded-full"
+                                style={{
++                                 width: 3.5978653794964783
+-                                 width: "3.5555px"
++                                 height: 3.1404252668167967
+-                                 height: "2.73622px"
++                                 top: "30.57066841687832%"
+-                                 top: "48.4362%"
++                                 left: "28.179452256903158%"
+-                                 left: "80.0116%"
++                                 background: "var(--gold)"
++                                 opacity: 0.6409580803252342
+-                                 opacity: "0.748754"
++                                 animation: "float-up 2.795769334880255s ease-out 0.15185529385397079s both"
+-                                 background-image: ""
+-                                 background-position-x: ""
+-                                 background-position-y: ""
+-                                 background-size: ""
+-                                 background-repeat: ""
+-                                 background-attachment: ""
+-                                 background-origin: ""
+-                                 background-clip: ""
+-                                 background-color: ""
+-                                 animation-duration: "1.65571s"
+-                                 animation-timing-function: "ease-out"
+-                                 animation-delay: "0.966418s"
+-                                 animation-iteration-count: "1"
+-                                 animation-direction: "normal"
+-                                 animation-fill-mode: "both"
+-                                 animation-play-state: "running"
+-                                 animation-name: "float-up"
+-                                 animation-timeline: "auto"
+-                                 animation-range-start: "normal"
+-                                 animation-range-end: "normal"
+                                }}
+                              >
+                              <span
+                                className="absolute rounded-full"
+                                style={{
++                                 width: 4.1624156985356695
+-                                 width: "2.25561px"
++                                 height: 4.202630882790099
+-                                 height: "2.11904px"
++                                 top: "4.2359229452840435%"
+-                                 top: "38.9631%"
++                                 left: "11.340666473955352%"
+-                                 left: "50.9655%"
++                                 background: "var(--gold)"
++                                 opacity: 0.5595539667485773
+-                                 opacity: "0.632549"
++                                 animation: "float-up 2.986039956316083s ease-out 0.0660213373121954s both"
+-                                 background-image: ""
+-                                 background-position-x: ""
+-                                 background-position-y: ""
+-                                 background-size: ""
+-                                 background-repeat: ""
+-                                 background-attachment: ""
+-                                 background-origin: ""
+-                                 background-clip: ""
+-                                 background-color: ""
+-                                 animation-duration: "2.32162s"
+-                                 animation-timing-function: "ease-out"
+-                                 animation-delay: "1.48572s"
+-                                 animation-iteration-count: "1"
+-                                 animation-direction: "normal"
+-                                 animation-fill-mode: "both"
+-                                 animation-play-state: "running"
+-                                 animation-name: "float-up"
+-                                 animation-timeline: "auto"
+-                                 animation-range-start: "normal"
+-                                 animation-range-end: "normal"
+                                }}
+                              >
+                              <span
+                                className="absolute rounded-full"
+                                style={{
++                                 width: 3.173040002298214
+-                                 width: "3.31506px"
++                                 height: 3.91012503636892
+-                                 height: "2.59493px"
++                                 top: "96.17095829453807%"
+-                                 top: "53.9882%"
++                                 left: "88.50865571665277%"
+-                                 left: "97.0193%"
++                                 background: "var(--brand)"
++                                 opacity: 0.49826700612365354
+-                                 opacity: "0.607226"
++                                 animation: "float-up 1.5768537088136543s ease-out 0.11466455887067295s both"
+-                                 background-image: ""
+-                                 background-position-x: ""
+-                                 background-position-y: ""
+-                                 background-size: ""
+-                                 background-repeat: ""
+-                                 background-attachment: ""
+-                                 background-origin: ""
+-                                 background-clip: ""
+-                                 background-color: ""
+-                                 animation-duration: "2.2182s"
+-                                 animation-timing-function: "ease-out"
+-                                 animation-delay: "1.00142s"
+-                                 animation-iteration-count: "1"
+-                                 animation-direction: "normal"
+-                                 animation-fill-mode: "both"
+-                                 animation-play-state: "running"
+-                                 animation-name: "float-up"
+-                                 animation-timeline: "auto"
+-                                 animation-range-start: "normal"
+-                                 animation-range-end: "normal"
+                                }}
+                              >
+                              <span
+                                className="absolute rounded-full"
+                                style={{
++                                 width: 2.6083019139251697
+-                                 width: "3.31374px"
++                                 height: 2.6001014663028394
+-                                 height: "2.54597px"
++                                 top: "71.5669710497014%"
+-                                 top: "30.1708%"
++                                 left: "62.72215625806794%"
+-                                 left: "5.65541%"
++                                 background: "var(--brand)"
++                                 opacity: 0.6655130690434019
+-                                 opacity: "0.653918"
++                                 animation: "float-up 1.7379650681686298s ease-out 1.9864626324106736s both"
+-                                 background-image: ""
+-                                 background-position-x: ""
+-                                 background-position-y: ""
+-                                 background-size: ""
+-                                 background-repeat: ""
+-                                 background-attachment: ""
+-                                 background-origin: ""
+-                                 background-clip: ""
+-                                 background-color: ""
+-                                 animation-duration: "1.50026s"
+-                                 animation-timing-function: "ease-out"
+-                                 animation-delay: "0.451239s"
+-                                 animation-iteration-count: "1"
+-                                 animation-direction: "normal"
+-                                 animation-fill-mode: "both"
+-                                 animation-play-state: "running"
+-                                 animation-name: "float-up"
+-                                 animation-timeline: "auto"
+-                                 animation-range-start: "normal"
+-                                 animation-range-end: "normal"
+                                }}
+                              >
+                              <span
+                                className="absolute rounded-full"
+                                style={{
++                                 width: 4.091345172359925
+-                                 width: "4.81831px"
++                                 height: 4.932056156000494
+-                                 height: "3.3391px"
++                                 top: "15.819190570529862%"
+-                                 top: "15.2502%"
++                                 left: "2.147540389645608%"
+-                                 left: "73.3608%"
++                                 background: "var(--brand)"
++                                 opacity: 0.55114731235163
+-                                 opacity: "0.714372"
++                                 animation: "float-up 1.2587472142525633s ease-out 1.8101432549911043s both"
+-                                 background-image: ""
+-                                 background-position-x: ""
+-                                 background-position-y: ""
+-                                 background-size: ""
+-                                 background-repeat: ""
+-                                 background-attachment: ""
+-                                 background-origin: ""
+-                                 background-clip: ""
+-                                 background-color: ""
+-                                 animation-duration: "2.26907s"
+-                                 animation-timing-function: "ease-out"
+-                                 animation-delay: "0.686489s"
+-                                 animation-iteration-count: "1"
+-                                 animation-direction: "normal"
+-                                 animation-fill-mode: "both"
+-                                 animation-play-state: "running"
+-                                 animation-name: "float-up"
+-                                 animation-timeline: "auto"
+-                                 animation-range-start: "normal"
+-                                 animation-range-end: "normal"
+                                }}
+                              >
+                              <span
+                                className="absolute rounded-full"
+                                style={{
++                                 width: 2.395714640413723
+-                                 width: "3.03501px"
++                                 height: 4.570068938732446
+-                                 height: "4.94288px"
++                                 top: "76.62881548170988%"
+-                                 top: "42.4742%"
++                                 left: "3.523831037408065%"
+-                                 left: "76.5077%"
++                                 background: "var(--brand)"
++                                 opacity: 0.7880137113769834
+-                                 opacity: "0.459239"
++                                 animation: "float-up 2.754081093244972s ease-out 1.326393424904852s both"
+-                                 background-image: ""
+-                                 background-position-x: ""
+-                                 background-position-y: ""
+-                                 background-size: ""
+-                                 background-repeat: ""
+-                                 background-attachment: ""
+-                                 background-origin: ""
+-                                 background-clip: ""
+-                                 background-color: ""
+-                                 animation-duration: "2.64793s"
+-                                 animation-timing-function: "ease-out"
+-                                 animation-delay: "1.89178s"
+-                                 animation-iteration-count: "1"
+-                                 animation-direction: "normal"
+-                                 animation-fill-mode: "both"
+-                                 animation-play-state: "running"
+-                                 animation-name: "float-up"
+-                                 animation-timeline: "auto"
+-                                 animation-range-start: "normal"
+-                                 animation-range-end: "normal"
+                                }}
+                              >
+                          ...
+                      ...
+                    ...
+                ...
+          ...
+        ...
+Call Stack
+17
+
+Hide 16 ignore-listed frame(s)
+<unknown>
+https://react.dev/link/hydration-mismatch
+createConsoleError
+node_modules/next/src/next-devtools/shared/console-error.ts (16:35)
+handleConsoleError
+node_modules/next/src/next-devtools/userspace/app/errors/use-error-handler.ts (31:31)
+console.error
+node_modules/next/src/next-devtools/userspace/app/errors/intercept-console-error.ts (33:27)
+<unknown>
+node_modules/next/dist/compiled/react-dom/cjs/react-dom-client.development.js (5731:19)
+runWithFiberInDEV
+node_modules/next/dist/compiled/react-dom/cjs/react-dom-client.development.js (986:30)
+emitPendingHydrationWarnings
+node_modules/next/dist/compiled/react-dom/cjs/react-dom-client.development.js (5730:9)
+completeWork
+node_modules/next/dist/compiled/react-dom/cjs/react-dom-client.development.js (12862:18)
+runWithFiberInDEV
+node_modules/next/dist/compiled/react-dom/cjs/react-dom-client.development.js (989:13)
+completeUnitOfWork
+node_modules/next/dist/compiled/react-dom/cjs/react-dom-client.development.js (19133:19)
+performUnitOfWork
+node_modules/next/dist/compiled/react-dom/cjs/react-dom-client.development.js (19014:11)
+workLoopConcurrentByScheduler
+node_modules/next/dist/compiled/react-dom/cjs/react-dom-client.development.js (18991:9)
+renderRootConcurrent
+node_modules/next/dist/compiled/react-dom/cjs/react-dom-client.development.js (18973:15)
+performWorkOnRoot
+node_modules/next/dist/compiled/react-dom/cjs/react-dom-client.development.js (17834:11)
+performWorkOnRootViaSchedulerTask
+node_modules/next/dist/compiled/react-dom/cjs/react-dom-client.development.js (20384:7)
+MessagePort.performWorkUntilDeadline
+node_modules/next/dist/compiled/scheduler/cjs/scheduler.development.js (45:48)
+span
