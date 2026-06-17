@@ -215,6 +215,8 @@ export type AIProviderType =
   | "ollama"
   | "azure-openai"
   | "bedrock"
+  | "opencode"
+  | "zencode"
   | "custom"
   | "z-ai-fallback";
 
@@ -250,6 +252,10 @@ export interface AIProvider {
   authType?: "bearer" | "header" | "query" | "none";
   // Supports function calling
   supportsFunctionCalling?: boolean;
+  // Whether regular (non-super-admin) users can use this provider.
+  // Super admins control this flag per-provider. When false, only super admins
+  // can route AI requests through this provider. Default: false (super-admin-only).
+  allowedForRegularUsers?: boolean;
   // Cost estimation (USD per 1K tokens)
   costPerInputToken?: number;
   costPerOutputToken?: number;

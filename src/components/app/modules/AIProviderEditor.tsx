@@ -12,6 +12,8 @@ import type { AIProvider, AIProviderType } from "@/lib/types";
 
 const PROVIDER_TYPES: { type: AIProviderType; label: string; icon: string; defaultUrl?: string; defaultModel?: string; authType?: "bearer" | "header" | "query" | "none" }[] = [
   { type: "puter", label: "Puter.js (Free)", icon: "Sparkles", defaultUrl: "https://api.puter.com", defaultModel: "claude-sonnet-4", authType: "none" },
+  { type: "opencode", label: "OpenCode (Free models)", icon: "Gift", defaultUrl: "https://api.opencode.ai/v1", defaultModel: "opencode/gpt-4o-mini", authType: "bearer" },
+  { type: "zencode", label: "ZenCode (Free models)", icon: "Gift", defaultUrl: "https://api.zencode.ai/v1", defaultModel: "zencode/free-1", authType: "bearer" },
   { type: "z-ai-fallback", label: "Z.ai Fallback (built-in)", icon: "Cpu", defaultUrl: "internal", defaultModel: "glm-4.6", authType: "none" },
   { type: "openai", label: "OpenAI", icon: "Bot", defaultUrl: "https://api.openai.com/v1", defaultModel: "gpt-4o-mini", authType: "bearer" },
   { type: "claude", label: "Anthropic Claude", icon: "Bot", defaultUrl: "https://api.anthropic.com/v1", defaultModel: "claude-3-5-sonnet-20241022", authType: "header" },
@@ -56,6 +58,7 @@ export function ProviderEditor({ provider, onClose, onSave }: {
     rateLimitPerMinute: provider?.rateLimitPerMinute ?? 60,
     authType: (provider?.authType ?? "bearer") as "bearer" | "header" | "query" | "none",
     supportsFunctionCalling: provider?.supportsFunctionCalling ?? false,
+    allowedForRegularUsers: provider?.allowedForRegularUsers ?? false,
     costPerInputToken: provider?.costPerInputToken ?? 0,
     costPerOutputToken: provider?.costPerOutputToken ?? 0,
     // Puter
@@ -155,6 +158,38 @@ export function ProviderEditor({ provider, onClose, onSave }: {
             <Toggle label="Set as default" desc="Use as the first-choice provider" checked={form.isDefault} onChange={(v) => setForm({ ...form, isDefault: v })} />
             <Toggle label="Enable streaming" desc="Stream responses token-by-token" checked={form.streamingEnabled} onChange={(v) => setForm({ ...form, streamingEnabled: v })} />
             <Toggle label="Function calling" desc="Provider supports tool/function calls" checked={form.supportsFunctionCalling} onChange={(v) => setForm({ ...form, supportsFunctionCalling: v })} />
+          </div>
+
+          {/* User Access Control — super admin only */}
+          <div className="rounded-lg border-2 border-brand/30 bg-brand-light/30 dark:bg-brand/5 p-4">
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex items-center gap-2">
+                <Icon name="Users" className="w-5 h-5 text-brand" />
+                <div>
+                  <div className="font-semibold text-sm flex items-center gap-2">
+                    Allow regular users to use this provider
+                  </div>
+                  <div className="text-xs text-muted-foreground mt-0.5">
+                    When ON, all signed-in users can route AI requests through this provider.
+                    When OFF, only super admins can use it. Use this to control which AI models
+                    regular users get access to (e.g. Puter.js = free for everyone, OpenAI = super-admin-only).
+                  </div>
+                </div>
+              </div>
+              <Switch checked={form.allowedForRegularUsers} onCheckedChange={(v) => setForm({ ...form, allowedForRegularUsers: v })} />
+            </div>
+            {form.allowedForRegularUsers && (
+              <div className="mt-2 text-xs text-emerald-600 flex items-center gap-1">
+                <Icon name="CheckCircle2" className="w-3.5 h-3.5" />
+                This provider is available to ALL users (regular + admin + super admin)
+              </div>
+            )}
+            {!form.allowedForRegularUsers && (
+              <div className="mt-2 text-xs text-amber-600 flex items-center gap-1">
+                <Icon name="Lock" className="w-3.5 h-3.5" />
+                This provider is super-admin-only
+              </div>
+            )}
           </div>
 
           {/* Puter-specific */}

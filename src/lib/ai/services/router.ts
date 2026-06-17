@@ -29,17 +29,29 @@ export class ProviderRouter {
   /**
    * Send a chat request through the AI gateway.
    * Reads providers + settings from the Zustand store.
+   *
+   * ACCESS CONTROL:
+   *   - Super admins can use ALL active providers
+   *   - Regular users (and admins) can ONLY use providers with allowedForRegularUsers=true
+   *     (typically Puter.js, OpenCode, ZenCode, and the Z.ai fallback)
    */
   static async chat(req: ChatRequest, opts: RouterOptions = {}): Promise<ChatResponse> {
     const state = useApp.getState();
-    const providers = state.providers;
+    const allProviders = state.providers;
     const settings = state.providerSettings;
+    const user = state.user;
+
+    // Filter providers by user role
+    const isSuperAdmin = user?.role === "super_admin";
+    const providers = isSuperAdmin
+      ? allProviders // super admin sees everything
+      : allProviders.filter((p) => p.allowedForRegularUsers === true); // regular users only see allowed providers
 
     if (!settings.enableFailover || opts.singleProvider) {
       const target = opts.preferredProviderId
         ? providers.find((p) => p.id === opts.preferredProviderId)!
         : providers.find((p) => p.id === settings.defaultProviderId)!;
-      if (!target) throw new Error("No provider available");
+      if (!target) throw new Error("No provider available. Sign in with Puter.js (free) to enable AI features.");
       return this.tryProvider(target, req, settings, opts.requestType);
     }
 
@@ -50,7 +62,11 @@ export class ProviderRouter {
     }
 
     if (chain.length === 0) {
-      throw new Error("No active AI providers. Configure one in Super Admin → AI Providers.");
+      throw new Error(
+        isSuperAdmin
+          ? "No active AI providers. Configure one in Super Admin → AI Providers."
+          : "No AI providers available for your account. Use Puter.js (free) by signing in with Google via the Puter button."
+      );
     }
 
     const errors: string[] = [];

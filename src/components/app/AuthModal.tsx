@@ -9,6 +9,7 @@ import { Icon, Logo } from "@/components/shared";
 import { useApp, uid } from "@/lib/store";
 import { toast } from "sonner";
 import { BRAND, getRoleForEmail } from "@/lib/brand";
+import { validateRealEmail } from "@/lib/email-validation";
 import type { User } from "@/lib/types";
 
 export function AuthModal() {
@@ -25,19 +26,45 @@ export function AuthModal() {
     setLoading(provider);
     await new Promise((r) => setTimeout(r, 700));
 
-    // For Puter.js: try to actually sign in via the global window.puter
+    let oauthEmail = "";
+    let oauthName = "";
+
+    // For Puter.js: actually sign in via the global window.puter and get the real user email
     if (provider === "puter" && typeof window !== "undefined" && window.puter?.auth) {
       try {
         await window.puter.auth.signIn();
+        // Get the real signed-in user's email from Puter
+        const puterUser = await window.puter.auth.getUser();
+        oauthEmail = puterUser?.email || puterUser?.username || "";
+        oauthName = puterUser?.username || puterUser?.name || "";
       } catch (e) {
-        // Continue with mock even if Puter popup is closed
+        // Popup closed or failed — ask the user to enter their email manually
       }
     }
 
-    const oauthEmail = `${provider}.user@example.com`;
+    // For Google/GitHub/LinkedIn (without real OAuth secrets in this demo),
+    // we prompt the user to enter the email associated with their account.
+    // In production, this would come from the OAuth provider's userinfo endpoint.
+    if (!oauthEmail) {
+      const providerLabel = provider === "puter" ? "Puter" : provider.charAt(0).toUpperCase() + provider.slice(1);
+      const prompted = prompt(`Enter the email associated with your ${providerLabel} account:`);
+      if (!prompted) {
+        setLoading(null);
+        return; // user cancelled
+      }
+      const emailCheck = validateRealEmail(prompted);
+      if (!emailCheck.valid) {
+        setLoading(null);
+        toast.error(emailCheck.error || "Please enter a valid email.");
+        return;
+      }
+      oauthEmail = prompted.trim().toLowerCase();
+      oauthName = oauthName || oauthEmail.split("@")[0];
+    }
+
     const user: User = {
       id: uid("u"),
-      name: provider === "puter" ? "Puter User" : `${provider.charAt(0).toUpperCase() + provider.slice(1)} User`,
+      name: oauthName || `${provider} User`,
       email: oauthEmail,
       role: getRoleForEmail(oauthEmail),
       provider: provider === "puter" ? "puter" : provider === "google" ? "google" : provider === "github" ? "github" : "linkedin",
@@ -52,8 +79,9 @@ export function AuthModal() {
   };
 
   const handleEmail = async () => {
-    if (!email || !/.+@.+\..+/.test(email)) {
-      toast.error("Please enter a valid email.");
+    const emailCheck = validateRealEmail(email);
+    if (!emailCheck.valid) {
+      toast.error(emailCheck.error || "Please enter a valid email.");
       return;
     }
     if (password.length < 4) {

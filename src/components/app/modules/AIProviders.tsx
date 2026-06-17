@@ -169,6 +169,7 @@ export function AIProviders() {
                                 {p.name}
                                 {p.isDefault && <Badge variant="gold" className="text-[9px]">DEFAULT</Badge>}
                                 {p.isFallback && <Badge variant="brand" className="text-[9px]">FALLBACK</Badge>}
+                                {p.allowedForRegularUsers && <Badge variant="success" className="text-[9px]">USER ACCESS</Badge>}
                                 {p.isBuiltIn && <Badge variant="outline" className="text-[9px]">BUILT-IN</Badge>}
                               </div>
                               <div className="text-xs text-muted-foreground truncate">{p.name}</div>

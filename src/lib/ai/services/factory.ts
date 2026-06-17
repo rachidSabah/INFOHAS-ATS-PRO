@@ -1,13 +1,17 @@
 // ProviderFactory — maps a provider type string to its adapter instance.
 // To add a new provider type, register it here. No other code changes needed.
 import type { AIProviderAdapter } from "../providers/interface";
-import { openaiProvider, deepseekProvider, groqProvider, openrouterProvider, togetherProvider, huggingfaceProvider, mistralProvider, cohereProvider, perplexityProvider, ProviderError } from "../providers/openai-compatible";
+import { OpenAICompatibleProvider, openaiProvider, deepseekProvider, groqProvider, openrouterProvider, togetherProvider, huggingfaceProvider, mistralProvider, cohereProvider, perplexityProvider, ProviderError } from "../providers/openai-compatible";
 import { claudeProvider } from "../providers/claude";
 import { geminiProvider } from "../providers/gemini";
 import { ollamaProvider } from "../providers/ollama";
 import { puterProvider } from "../providers/puter";
 import { customProvider } from "../providers/custom";
 import { zaiFallbackProvider } from "../providers/zai-fallback";
+
+// OpenCode and ZenCode use the OpenAI-compatible API schema (free model gateways)
+const opencodeProvider = new OpenAICompatibleProvider("opencode");
+const zencodeProvider = new OpenAICompatibleProvider("zencode");
 
 const REGISTRY: Record<string, AIProviderAdapter> = {
   openai: openaiProvider,
@@ -24,6 +28,8 @@ const REGISTRY: Record<string, AIProviderAdapter> = {
   gemini: geminiProvider,
   ollama: ollamaProvider,
   puter: puterProvider,
+  opencode: opencodeProvider,   // Free models — OpenAI-compatible
+  zencode: zencodeProvider,     // Free models — OpenAI-compatible
   custom: customProvider,
   bedrock: customProvider, // AWS Bedrock — use custom adapter with SigV4 signing via headers
   "z-ai-fallback": zaiFallbackProvider,
