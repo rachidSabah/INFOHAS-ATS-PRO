@@ -12,6 +12,7 @@ export default function Home() {
   const theme = useApp((s) => s.theme);
   const authOpen = useApp((s) => s.authOpen);
   const openAuth = useApp((s) => s.openAuth);
+  const reconcileRole = useApp((s) => s.reconcileRole);
 
   // Apply theme class
   useEffect(() => {
@@ -19,6 +20,13 @@ export default function Home() {
       document.documentElement.classList.toggle("dark", theme === "dark");
     }
   }, [theme]);
+
+  // On mount: reconcile the signed-in user's role against the email allowlist.
+  // This downgrades any stale super_admin sessions that were created before the
+  // email-based access control was enforced.
+  useEffect(() => {
+    reconcileRole();
+  }, [reconcileRole]);
 
   // If authed but stuck on landing view (e.g. after reload), go to dashboard
   const setView = useApp((s) => s.setView);

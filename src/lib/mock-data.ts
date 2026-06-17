@@ -7,10 +7,10 @@ import { BRAND } from "./brand";
 
 export const SEED_USER: User = {
   id: "u_demo_001",
-  name: "Alex Morgan",
-  email: "alex.morgan@example.com",
+  name: "Rachid El Sabah",
+  email: "relsabah@gmail.com",
   avatarUrl: "",
-  role: "super_admin", // demo: full access
+  role: "super_admin", // exclusive to relsabah@gmail.com (see SUPER_ADMIN_EMAILS in brand.ts)
   provider: "email",
   createdAt: "2025-09-12T10:00:00Z",
   lastActiveAt: new Date().toISOString(),

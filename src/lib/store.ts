@@ -11,7 +11,7 @@ import {
   SEED_USER, SEED_RESUMES, SEED_JDS, SEED_PROVIDERS, SEED_PROVIDER_LOGS, SEED_PROVIDER_SETTINGS,
   SEED_PROMPTS, SEED_BRANDING, SEED_FLAGS, SEED_LOGS, SEED_COVER_LETTERS, SEED_INTERVIEW, SEED_ATS_REPORTS,
 } from "./mock-data";
-import { BRAND } from "./brand";
+import { BRAND, getRoleForEmail } from "./brand";
 
 interface AppState {
   // session
@@ -57,6 +57,8 @@ interface AppState {
   updateUserName: (newName: string) => void;
   updateUserEmail: (newEmail: string) => void;
   changePassword: (currentPassword: string, newPassword: string) => { ok: boolean; error?: string };
+  /** Re-check the signed-in user's role against the email allowlist. Call on app load. */
+  reconcileRole: () => void;
   toggleSidebar: () => void;
   setLandingSection: (s: string | null) => void;
 
@@ -152,14 +154,35 @@ export const useApp = create<AppState>()(
       setView: (v) => set({ view: v, landingSection: null }),
       openAuth: () => set({ authOpen: true }),
       closeAuth: () => set({ authOpen: false }),
-      signIn: (user) =>
+      signIn: (user) => {
+        // Enforce email-based role at sign-in time
+        const enforcedRole = getRoleForEmail(user.email);
+        const userWithRole = { ...user, role: enforcedRole };
         set({
-          user,
+          user: userWithRole,
           isAuthed: true,
           authOpen: false,
           view: "dashboard",
-        }),
+        });
+      },
       signOut: () => set({ user: null, isAuthed: false, view: "landing" }),
+      reconcileRole: () => {
+        const s = get();
+        if (!s.user) return;
+        const correctRole = getRoleForEmail(s.user.email);
+        if (s.user.role !== correctRole) {
+          // Downgrade (or upgrade) to the correct role based on email allowlist
+          set({ user: { ...s.user, role: correctRole } });
+          // If user was viewing a super-admin-only page and lost access, send to dashboard
+          const superAdminViews: ViewKey[] = ["super-admin", "ai-providers", "ai-models", "ai-settings", "prompts", "branding", "feature-flags", "logs"];
+          const adminViews: ViewKey[] = ["admin", "users", "analytics"];
+          if (correctRole === "user" && [...superAdminViews, ...adminViews].includes(s.view)) {
+            set({ view: "dashboard" });
+          } else if (correctRole === "admin" && superAdminViews.includes(s.view)) {
+            set({ view: "dashboard" });
+          }
+        }
+      },
       updateUserName: (newName) => {
         const trimmed = newName.trim();
         if (trimmed.length < 2) return;
@@ -169,8 +192,10 @@ export const useApp = create<AppState>()(
       updateUserEmail: (newEmail) => {
         const trimmed = newEmail.trim().toLowerCase();
         if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(trimmed)) return;
-        set((s) => (s.user ? { user: { ...s.user, email: trimmed, lastActiveAt: new Date().toISOString() } } : s));
-        useApp.getState().log({ actor: "you", action: "Email updated", category: "auth", details: `New email: ${trimmed}`, severity: "info" });
+        // Re-evaluate role based on new email
+        const newRole = getRoleForEmail(trimmed);
+        set((s) => (s.user ? { user: { ...s.user, email: trimmed, role: newRole, lastActiveAt: new Date().toISOString() } } : s));
+        useApp.getState().log({ actor: "you", action: "Email updated", category: "auth", details: `New email: ${trimmed} (role: ${newRole})`, severity: "info" });
       },
       changePassword: (currentPassword, newPassword) => {
         const s = get();

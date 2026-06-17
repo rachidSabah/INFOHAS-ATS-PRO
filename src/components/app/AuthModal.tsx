@@ -8,7 +8,7 @@ import { Label } from "@/components/ui/label";
 import { Icon, Logo } from "@/components/shared";
 import { useApp, uid } from "@/lib/store";
 import { toast } from "sonner";
-import { BRAND } from "@/lib/brand";
+import { BRAND, getRoleForEmail } from "@/lib/brand";
 import type { User } from "@/lib/types";
 
 export function AuthModal() {
@@ -34,11 +34,12 @@ export function AuthModal() {
       }
     }
 
+    const oauthEmail = `${provider}.user@example.com`;
     const user: User = {
       id: uid("u"),
       name: provider === "puter" ? "Puter User" : `${provider.charAt(0).toUpperCase() + provider.slice(1)} User`,
-      email: `${provider}.user@example.com`,
-      role: "super_admin", // demo: full access
+      email: oauthEmail,
+      role: getRoleForEmail(oauthEmail),
       provider: provider === "puter" ? "puter" : provider === "google" ? "google" : provider === "github" ? "github" : "linkedin",
       createdAt: new Date().toISOString(),
       lastActiveAt: new Date().toISOString(),
@@ -65,7 +66,7 @@ export function AuthModal() {
       id: uid("u"),
       name: name || email.split("@")[0],
       email,
-      role: "super_admin",
+      role: getRoleForEmail(email),
       provider: "email",
       createdAt: new Date().toISOString(),
       lastActiveAt: new Date().toISOString(),

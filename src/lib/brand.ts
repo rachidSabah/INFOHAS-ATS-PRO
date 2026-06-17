@@ -1,4 +1,39 @@
 // ResumeAI Pro brand config
+
+/**
+ * ACCESS CONTROL — Super Admin email allowlist.
+ * Only this email receives the super_admin role on sign-in.
+ * All other users get the "user" role by default.
+ * To add more super admins, push additional emails to this array.
+ */
+export const SUPER_ADMIN_EMAILS: string[] = [
+  "relsabah@gmail.com",
+];
+
+/**
+ * Admin email allowlist (can manage users, view analytics — but NOT
+ * AI providers, branding, prompts, feature flags, or audit logs).
+ */
+export const ADMIN_EMAILS: string[] = [
+  "relsabah@gmail.com",
+];
+
+/**
+ * Determine the role for a given email at sign-in time.
+ * Super admin check is case-insensitive and trims whitespace.
+ */
+export function getRoleForEmail(email: string): "super_admin" | "admin" | "user" {
+  const normalized = email.trim().toLowerCase();
+  if (SUPER_ADMIN_EMAILS.some((e) => e.toLowerCase() === normalized)) return "super_admin";
+  if (ADMIN_EMAILS.some((e) => e.toLowerCase() === normalized)) return "admin";
+  return "user";
+}
+
+export function isSuperAdmin(email?: string | null): boolean {
+  if (!email) return false;
+  return SUPER_ADMIN_EMAILS.some((e) => e.toLowerCase() === email.trim().toLowerCase());
+}
+
 export const BRAND = {
   name: "ResumeAI Pro",
   shortName: "ResumeAI",
