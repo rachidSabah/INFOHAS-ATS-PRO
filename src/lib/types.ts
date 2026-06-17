@@ -96,6 +96,8 @@ export interface ResumeData {
   achievements?: string[];
   template: ResumeTemplate;
   accentColor?: string;
+  photoUrl?: string; // optional profile photo for templates with image frame (infohas-pro)
+  dateOfBirth?: string; // optional DOB line shown under contact (infohas-pro)
   createdAt: string;
   updatedAt: string;
   source?: "upload" | "manual" | "ai-optimized" | "template";
@@ -109,7 +111,8 @@ export type ResumeTemplate =
   | "corporate"
   | "europass"
   | "creative"
-  | "minimal";
+  | "minimal"
+  | "infohas-pro";
 
 export interface JobDescription {
   id: string;

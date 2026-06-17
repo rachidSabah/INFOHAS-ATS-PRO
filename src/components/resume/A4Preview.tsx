@@ -43,7 +43,256 @@ const TEMPLATE_MAP: Record<string, React.FC<{ resume: ResumeData; accent: string
   europass: ATSProfessionalTemplate,
   creative: ModernTemplate,
   minimal: ATSProfessionalTemplate,
+  "infohas-pro": InfohasProTemplate,
 };
+
+// ---- InfoHAS Pro template ----
+// Matches the OUSSAMA EL FATIMI reference PDF exactly:
+//   - Times New Roman throughout
+//   - Top-left header: NAME in dark maroon (#660033), then headline + contact lines + DOB
+//   - Blue rule (#0563C1) under header text
+//   - Top-right: portrait photo frame ~54×81mm (2:3 ratio)
+//   - Body: single column; PROFESSIONAL SUMMARY wraps left of the photo frame
+//   - Section headers: UPPERCASE, blue, bold, with blue underline
+//   - Sections in order: Summary → Core Competencies & Skills → Experience → Education → Languages
+function InfohasProTemplate({ resume, accent }: { resume: ResumeData; accent: string }) {
+  const MAROON = "#660033";
+  const BLUE = "#0563C1";
+  // Photo frame: 54mm × 81mm portrait, positioned top-right
+  // Page is 210mm wide, photo ends ~6mm from right edge → starts at x = 210 - 6 - 54 = 150mm
+  // We position it absolutely in a header zone ~0..92mm tall
+  return (
+    <div
+      className="relative text-slate-800"
+      style={{
+        fontFamily: "'Times New Roman', 'Georgia', serif",
+        fontSize: "10.5pt",
+        lineHeight: 1.32,
+        padding: "12mm 12mm",
+        minHeight: "297mm",
+      }}
+    >
+      {/* ============ HEADER ============ */}
+      <header className="relative" style={{ minHeight: "82mm", paddingRight: "60mm" }}>
+        {/* Photo frame — top-right */}
+        <div
+          style={{
+            position: "absolute",
+            top: 0,
+            right: 0,
+            width: "54mm",
+            height: "81mm",
+            border: `1.2pt solid ${BLUE}`,
+            background: resume.photoUrl ? "transparent" : "#F8FAFC",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            overflow: "hidden",
+            boxSizing: "border-box",
+          }}
+        >
+          {resume.photoUrl ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={resume.photoUrl}
+              alt={resume.name}
+              style={{ width: "100%", height: "100%", objectFit: "cover", objectPosition: "center top" }}
+            />
+          ) : (
+            <div style={{ textAlign: "center", color: "#94A3B8", fontSize: "8pt", padding: "4mm" }}>
+              <div style={{ fontSize: "18pt", marginBottom: "2mm" }}>👤</div>
+              Photo
+            </div>
+          )}
+        </div>
+
+        {/* Name — maroon, bold */}
+        <div
+          style={{
+            color: MAROON,
+            fontWeight: 700,
+            fontSize: "16pt",
+            letterSpacing: "0.3pt",
+            marginBottom: "1.5mm",
+            lineHeight: 1.1,
+          }}
+        >
+          {(resume.name || "YOUR NAME").toUpperCase()}
+        </div>
+
+        {/* Headline */}
+        {resume.headline && (
+          <div style={{ fontSize: "11pt", color: "#1F2937", marginBottom: "2mm" }}>
+            {resume.headline}
+          </div>
+        )}
+
+        {/* Contact lines */}
+        <div style={{ fontSize: "10pt", color: "#374151", marginBottom: "0.5mm" }}>
+          {[resume.contact.location, resume.contact.phone].filter(Boolean).join(" | ")}
+        </div>
+        {resume.contact.email && (
+          <div style={{ fontSize: "10pt", color: "#374151", marginBottom: "0.5mm" }}>
+            {resume.contact.email}
+          </div>
+        )}
+        {resume.dateOfBirth && (
+          <div style={{ fontSize: "10pt", color: "#374151", marginBottom: "0.5mm" }}>
+            Date Of Birth : {resume.dateOfBirth}
+          </div>
+        )}
+
+        {/* Blue rule under header */}
+        <div
+          style={{
+            marginTop: "1.5mm",
+            width: "52mm",
+            height: "1pt",
+            background: BLUE,
+          }}
+        />
+      </header>
+
+      {/* ============ BODY ============ */}
+      <div style={{ marginTop: "4mm" }}>
+        {/* PROFESSIONAL SUMMARY */}
+        {resume.summary && (
+          <InfohasSection title="PROFESSIONAL SUMMARY" blue={BLUE}>
+            <p style={{ margin: 0, textAlign: "justify", color: "#1F2937" }}>{resume.summary}</p>
+          </InfohasSection>
+        )}
+
+        {/* CORE COMPETENCIES & SKILLS */}
+        {resume.skills.length > 0 && (
+          <InfohasSection title="CORE COMPETENCIES & SKILLS" blue={BLUE}>
+            <ul style={{ margin: 0, paddingLeft: "5mm", listStyleType: "•" }}>
+              {groupSkillsByCategory(resume.skills).map((g, i) => (
+                <li key={i} style={{ marginBottom: "1mm", color: "#1F2937" }}>
+                  <span style={{ fontWeight: 700 }}>{g.category}:</span>{" "}
+                  <span>{g.items.join(", ")}.</span>
+                </li>
+              ))}
+            </ul>
+          </InfohasSection>
+        )}
+
+        {/* PROFESSIONAL EXPERIENCE */}
+        {resume.experience.length > 0 && (
+          <InfohasSection title="PROFESSIONAL EXPERIENCE" blue={BLUE}>
+            <div style={{ display: "flex", flexDirection: "column", gap: "2mm" }}>
+              {resume.experience.map((e) => (
+                <div key={e.id}>
+                  <div style={{ marginBottom: "0.5mm" }}>
+                    <span style={{ fontWeight: 700, color: "#1F2937" }}>{e.title}</span>{" "}
+                    <span style={{ color: "#1F2937" }}>{e.company}</span>
+                    {e.location && <span style={{ color: "#1F2937" }}> | {e.location}</span>}
+                    {"  "}
+                    <span style={{ color: "#1F2937" }}>{fmtDateInfohas(e.startDate)} – {fmtDateInfohas(e.endDate)}</span>
+                  </div>
+                  <ul style={{ margin: 0, paddingLeft: "5mm", listStyleType: "•" }}>
+                    {e.bullets.map((b, i) => (
+                      <li key={i} style={{ marginBottom: "0.5mm", color: "#1F2937", textAlign: "justify" }}>{b}</li>
+                    ))}
+                  </ul>
+                </div>
+              ))}
+            </div>
+          </InfohasSection>
+        )}
+
+        {/* EDUCATION */}
+        {resume.education.length > 0 && (
+          <InfohasSection title="EDUCATION" blue={BLUE}>
+            <div style={{ display: "flex", flexDirection: "column", gap: "1.5mm" }}>
+              {resume.education.map((ed) => (
+                <div key={ed.id}>
+                  <div>
+                    <span style={{ fontWeight: 700, color: "#1F2937" }}>{ed.degree}</span>{" "}
+                    <span style={{ color: "#1F2937" }}>{ed.institution}</span>
+                    {(ed.location || ed.startDate || ed.endDate) && (
+                      <span style={{ color: "#1F2937" }}>
+                        {" | "}
+                        {[ed.location, ed.startDate && ed.endDate ? `${fmtDateInfohas(ed.startDate)} – ${fmtDateInfohas(ed.endDate)}` : ed.startDate || ed.endDate].filter(Boolean).join(" | ")}
+                      </span>
+                    )}
+                  </div>
+                  {ed.highlights && ed.highlights.length > 0 && (
+                    <ul style={{ margin: "0.5mm 0 0 0", paddingLeft: "5mm", listStyleType: "•" }}>
+                      {ed.highlights.map((h, i) => (
+                        <li key={i} style={{ color: "#1F2937" }}>{h}</li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              ))}
+            </div>
+          </InfohasSection>
+        )}
+
+        {/* LANGUAGES */}
+        {resume.languages.length > 0 && (
+          <InfohasSection title="LANGUAGES" blue={BLUE}>
+            <div style={{ display: "flex", flexDirection: "column", gap: "0.5mm" }}>
+              {resume.languages.map((l) => (
+                <div key={l.id} style={{ color: "#1F2937" }}>
+                  <span style={{ fontWeight: 700 }}>{l.name}:</span>{" "}
+                  <span style={{ textTransform: "capitalize" }}>{l.proficiency}</span>
+                  {(l as any).note ? <span> ({(l as any).note})</span> : null}
+                </div>
+              ))}
+            </div>
+          </InfohasSection>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function InfohasSection({ title, blue, children }: { title: string; blue: string; children: React.ReactNode }) {
+  return (
+    <section style={{ marginBottom: "3mm" }}>
+      <h2
+        style={{
+          color: blue,
+          fontWeight: 700,
+          fontSize: "11pt",
+          letterSpacing: "0.4pt",
+          margin: "0 0 1.5mm 0",
+          paddingBottom: "0.8mm",
+          borderBottom: `0.8pt solid ${blue}`,
+          textTransform: "uppercase",
+        }}
+      >
+        {title}
+      </h2>
+      <div style={{ fontSize: "10.5pt" }}>{children}</div>
+    </section>
+  );
+}
+
+function groupSkillsByCategory(skills: ResumeData["skills"]): { category: string; items: string[] }[] {
+  const map = new Map<string, string[]>();
+  for (const s of skills) {
+    const cat = s.category || "General";
+    if (!map.has(cat)) map.set(cat, []);
+    map.get(cat)!.push(s.name);
+  }
+  return Array.from(map.entries()).map(([category, items]) => ({ category, items }));
+}
+
+function fmtDateInfohas(d?: string): string {
+  if (!d) return "";
+  if (/present/i.test(d)) return "Present";
+  // "2024-05" → "May 2024"
+  const m = d.match(/^(\d{4})-(\d{2})$/);
+  if (m) {
+    const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+    return `${months[parseInt(m[2]) - 1] ?? m[2]} ${m[1]}`;
+  }
+  // "2024" alone
+  if (/^\d{4}$/.test(d)) return d;
+  return d;
+}
 
 function fmtDate(d?: string) {
   if (!d) return "";

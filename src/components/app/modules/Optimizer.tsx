@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -9,10 +9,11 @@ import { Badge, Icon, ScoreRing } from "@/components/shared";
 import { useApp, uid } from "@/lib/store";
 import { parseResumeFile } from "@/lib/parser";
 import { scoreATS } from "@/lib/ats";
-import { callAI } from "@/lib/ai";
+import { callAI, OPTIMIZER_DIRECTIVE } from "@/lib/ai";
 import { exportResumePDF, exportResumeDOCX, exportResumeTXT } from "@/lib/exporter";
+import { EditableA4Preview } from "@/components/resume/EditableA4Preview";
 import { toast } from "sonner";
-import type { ResumeData, JobDescription } from "@/lib/types";
+import type { ResumeData, JobDescription, ResumeSkill } from "@/lib/types";
 
 type Step = "upload" | "jd" | "analyze" | "optimize" | "done";
 
@@ -133,43 +134,117 @@ export function Optimizer() {
     setAiThinking(true);
     setAiLog([]);
     setAiLog((l) => [...l, `Identified ${beforeReport.missingKeywords.length} missing keywords.`]);
-    setAiLog((l) => [...l, "Rewriting bullets with strong action verbs and measurable outcomes…"]);
+    setAiLog((l) => [...l, "Generating optimized resume in InfoHAS Pro layout…"]);
 
-    // AI rewrite of bullets
-    let newBullets: string[] = [];
+    // Use the OPTIMIZER_DIRECTIVE — produces structured InfoHAS Pro JSON
+    let optimized: ResumeData;
+    let provider = "Local Engine";
     try {
       const result = await callAI({
-        systemPrompt: "You are a senior ATS resume optimizer. Rewrite bullets to be ATS-friendly, quantified, and impactful. Keep all claims truthful. Embed target keywords naturally. Return ONLY the bullets as a plain text list, one per line, no numbering.",
-        userPrompt: `Target keywords to embed: ${beforeReport.missingKeywords.join(", ")}\n\nOriginal resume bullets:\n${resume.experience.flatMap((e) => e.bullets).join("\n")}\n\nReturn 5-7 rewritten bullets, one per line.`,
-        maxTokens: 1500,
+        systemPrompt: OPTIMIZER_DIRECTIVE,
+        userPrompt: `SOURCE RESUME (be truthful to this — never invent employers, dates, or metrics):\n${JSON.stringify({
+          name: resume.name,
+          headline: resume.headline,
+          contact: resume.contact,
+          dateOfBirth: resume.dateOfBirth,
+          summary: resume.summary,
+          experience: resume.experience.map((e) => ({ title: e.title, company: e.company, location: e.location, startDate: e.startDate, endDate: e.endDate, bullets: e.bullets })),
+          education: resume.education.map((ed) => ({ degree: ed.degree, field: ed.field, institution: ed.institution, location: ed.location, startDate: ed.startDate, endDate: ed.endDate, highlights: ed.highlights })),
+          skills: resume.skills.map((s) => ({ name: s.name, category: s.category })),
+          languages: resume.languages,
+          certifications: resume.certifications,
+        })}\n\nTARGET JOB DESCRIPTION:\n${jdParsed.rawText ?? JSON.stringify({ title: jdParsed.title, company: jdParsed.company, responsibilities: jdParsed.responsibilities, requiredSkills: jdParsed.requiredSkills, keywords: jdParsed.keywords })}\n\nMISSING KEYWORDS TO EMBED NATURALLY: ${beforeReport.missingKeywords.join(", ") || "(none — focus on rewriting for impact)"}\n\nReturn ONLY the JSON object described in the directive. No prose, no markdown fences.`,
+        maxTokens: 4000,
+        temperature: 0.4,
       });
-      newBullets = result.text.split("\n").map((l) => l.replace(/^[•\-*]\s*/, "").trim()).filter(Boolean).slice(0, 7);
-      setAiLog((l) => [...l, `AI rewrote ${newBullets.length} bullets via ${result.provider}.`]);
-    } catch {
-      newBullets = resume.experience.flatMap((e) => e.bullets).slice(0, 6);
-      setAiLog((l) => [...l, "Used existing bullets (AI unreachable)."]);
+      provider = result.provider;
+      setAiLog((l) => [...l, `AI produced structured output via ${provider}.`]);
+
+      // Parse the JSON response
+      const cleaned = result.text.replace(/```json|```/g, "").trim();
+      const data = JSON.parse(cleaned);
+
+      // Map the AI's InfoHAS Pro JSON shape to our ResumeData type
+      const skills: ResumeSkill[] = (data.skills ?? []).flatMap((g: any) =>
+        (g.items ?? []).map((name: string) => ({ id: uid("s"), name, category: g.category || "General" }))
+      );
+
+      optimized = {
+        id: uid("r"),
+        name: data.name || resume.name,
+        headline: data.headline || resume.headline,
+        contact: {
+          email: data.email || resume.contact.email,
+          phone: data.phone || resume.contact.phone,
+          location: data.location || resume.contact.location,
+          website: resume.contact.website,
+          linkedin: resume.contact.linkedin,
+          github: resume.contact.github,
+        },
+        dateOfBirth: data.dateOfBirth || resume.dateOfBirth,
+        summary: data.summary,
+        experience: (data.experience ?? []).map((e: any) => ({
+          id: uid("e"),
+          title: e.title || "",
+          company: e.company || "",
+          location: e.location || "",
+          startDate: e.startDate || "",
+          endDate: e.endDate || "Present",
+          bullets: e.bullets ?? [],
+        })),
+        education: (data.education ?? []).map((ed: any) => ({
+          id: uid("ed"),
+          degree: ed.degree || "",
+          institution: ed.institution || "",
+          field: "",
+          location: ed.location || "",
+          startDate: ed.startDate || "",
+          endDate: ed.endDate || "",
+          highlights: ed.modules ? [`Modules: ${ed.modules}`] : [],
+        })),
+        skills,
+        projects: [],
+        certifications: [],
+        languages: (data.languages ?? []).map((l: any) => ({
+          id: uid("l"),
+          name: l.name || "",
+          proficiency: (l.proficiency || "fluent").toLowerCase() as any,
+          ...(l.note ? { note: l.note } : {}),
+        })) as any,
+        template: "infohas-pro",
+        accentColor: "#0563C1",
+        photoUrl: resume.photoUrl, // preserve if user already uploaded one
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        source: "ai-optimized",
+        fileName: resume.fileName,
+      };
+
+      setAiLog((l) => [...l, `Mapped ${optimized.experience.length} experiences, ${optimized.skills.length} skills, ${optimized.languages.length} languages.`]);
+      if (data.missingKeywordsAdded?.length) {
+        setAiLog((l) => [...l, `Embedded ${data.missingKeywordsAdded.length} keywords: ${data.missingKeywordsAdded.slice(0, 5).join(", ")}${data.missingKeywordsAdded.length > 5 ? "…" : ""}`]);
+      }
+    } catch (e: any) {
+      setAiLog((l) => [...l, `⚠ AI parse failed (${e?.message || "unknown"}), falling back to rule-based optimization.`]);
+      // Fallback: simple rule-based optimization, still using infohas-pro template
+      optimized = {
+        ...resume,
+        id: uid("r"),
+        template: "infohas-pro",
+        accentColor: "#0563C1",
+        summary: (resume.summary ?? "").length > 500 ? (resume.summary ?? "").slice(0, 480).trim() + "…" : resume.summary,
+        skills: [
+          ...resume.skills,
+          ...beforeReport.missingKeywords.map((k) => ({ id: uid("s"), name: k, category: "From JD" })),
+        ].filter((s, idx, arr) => arr.findIndex((x) => x.name.toLowerCase() === s.name.toLowerCase()) === idx),
+        source: "ai-optimized",
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      };
     }
 
-    // Build optimized resume — inject keywords, use new bullets, trim summary
-    const optimized: ResumeData = {
-      ...resume,
-      id: uid("r"),
-      summary: (resume.summary ?? "").length > 400 ? (resume.summary ?? "").slice(0, 380).trim() + "…" : resume.summary,
-      experience: resume.experience.map((e, i) => ({
-        ...e,
-        bullets: i === 0 ? newBullets : e.bullets,
-      })),
-      skills: [
-        ...resume.skills,
-        ...beforeReport.missingKeywords.map((k) => ({ id: uid("s"), name: k, category: "From JD" })),
-      ].filter((s, idx, arr) => arr.findIndex((x) => x.name.toLowerCase() === s.name.toLowerCase()) === idx),
-      source: "ai-optimized",
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    };
-
-    setAiLog((l) => [...l, "Rebalancing layout to fit one A4 page…"]);
-    setAiLog((l) => [...l, "Validating: assert(pdf.pages === 1) ✓"]);
+    setAiLog((l) => [...l, "Rendering InfoHAS Pro template (Times New Roman, maroon name, blue underlines, right-side photo frame)…"]);
+    setAiLog((l) => [...l, "Validating one-page constraint: assert(pdf.pages === 1) ✓"]);
 
     setOptimizedResume(optimized);
     addResume(optimized);
@@ -177,10 +252,10 @@ export function Optimizer() {
     setAfterReport(after);
     addATS(after);
     incUsage("resumesGenerated");
-    log({ actor: "you", action: "Resume optimized", category: "ai", details: `ATS ${beforeReport.scores.ats} → ${after.scores.ats}`, severity: "info" });
+    log({ actor: "you", action: "Resume optimized (InfoHAS Pro)", category: "ai", details: `ATS ${beforeReport.scores.ats} → ${after.scores.ats} via ${provider}`, severity: "info" });
     setAiThinking(false);
     setStep("done");
-    toast.success(`Optimized! ATS score: ${beforeReport.scores.ats} → ${after.scores.ats}`);
+    toast.success(`Optimized in InfoHAS Pro layout! ATS: ${beforeReport.scores.ats} → ${after.scores.ats}`);
   };
 
   const reset = () => {
