@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -12,6 +12,29 @@ import { BRAND, getRoleForEmail } from "@/lib/brand";
 import { validateRealEmail } from "@/lib/email-validation";
 import type { User } from "@/lib/types";
 
+// Google Identity Services type
+declare global {
+  interface Window {
+    google?: {
+      accounts: {
+        id: {
+          initialize: (config: any) => void;
+          prompt: (callback?: (notification: any) => void) => void;
+          renderButton: (element: HTMLElement, config: any) => void;
+          cancel: () => void;
+        };
+      };
+    };
+  }
+}
+
+interface GitHubDeviceState {
+  userCode: string;
+  verificationUri: string;
+  deviceCode: string;
+  interval: number;
+}
+
 export function AuthModal() {
   const open = useApp((s) => s.authOpen);
   const close = useApp((s) => s.closeAuth);
@@ -21,81 +44,208 @@ export function AuthModal() {
   const [password, setPassword] = useState("");
   const [name, setName] = useState("");
   const [loading, setLoading] = useState<string | null>(null);
+  const [githubDevice, setGithubDevice] = useState<GitHubDeviceState | null>(null);
+  const githubPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  // Listen for OAuth postMessage callbacks from popup windows
+  // Helper: sign in a user from OAuth profile data
+  const signInFromOAuth = useCallback((provider: string, oauthEmail: string, oauthName: string, avatarUrl?: string) => {
+    const emailCheck = validateRealEmail(oauthEmail);
+    if (!emailCheck.valid) {
+      toast.error(`OAuth returned an invalid email: ${oauthEmail}`);
+      setLoading(null);
+      return;
+    }
+    const user: User = {
+      id: uid("u"),
+      name: oauthName || oauthEmail.split("@")[0],
+      email: oauthEmail,
+      avatarUrl: avatarUrl || "",
+      role: getRoleForEmail(oauthEmail),
+      provider: provider as any,
+      createdAt: new Date().toISOString(),
+      lastActiveAt: new Date().toISOString(),
+      usage: { resumesGenerated: 0, atsChecks: 0, coverLetters: 0, interviewPreps: 0, downloads: 0 },
+      status: "active",
+    };
+    setLoading(null);
+    signIn(user);
+    const providerLabel = provider === "google" ? "Google" : provider === "github" ? "GitHub" : provider === "puter" ? "Puter.js" : provider;
+    toast.success(`Signed in with ${providerLabel} as ${oauthEmail}. Welcome to ${BRAND.name}!`);
+  }, [signIn]);
+
+  // Listen for OAuth postMessage callbacks from popup windows (server-based OAuth flow)
   useEffect(() => {
     const handler = (event: MessageEvent) => {
       const data = event.data;
       if (!data || typeof data !== "object") return;
-
       if (data.type === "OAUTH_SUCCESS" && data.email) {
-        // Validate the email is real
-        const emailCheck = validateRealEmail(data.email);
-        if (!emailCheck.valid) {
-          toast.error(`OAuth returned an invalid email: ${data.email}`);
-          setLoading(null);
-          return;
-        }
-        const user: User = {
-          id: uid("u"),
-          name: data.name || data.email.split("@")[0],
-          email: data.email,
-          avatarUrl: data.avatarUrl || "",
-          role: getRoleForEmail(data.email),
-          provider: data.provider as any,
-          createdAt: new Date().toISOString(),
-          lastActiveAt: new Date().toISOString(),
-          usage: { resumesGenerated: 0, atsChecks: 0, coverLetters: 0, interviewPreps: 0, downloads: 0 },
-          status: "active",
-        };
-        setLoading(null);
-        signIn(user);
-        toast.success(`Signed in with ${data.provider === "google" ? "Google" : "GitHub"} as ${data.email}. Welcome to ${BRAND.name}!`);
+        signInFromOAuth(data.provider, data.email, data.name, data.avatarUrl);
       } else if (data.type === "OAUTH_ERROR") {
         setLoading(null);
         toast.error(data.error || `${data.provider} sign-in failed.`);
       }
     };
-
     window.addEventListener("message", handler);
     return () => window.removeEventListener("message", handler);
-  }, [signIn]);
+  }, [signInFromOAuth]);
+
+  // Cleanup GitHub polling on unmount
+  useEffect(() => {
+    return () => {
+      if (githubPollRef.current) clearInterval(githubPollRef.current);
+    };
+  }, []);
+
+  // Decode a Google JWT credential to extract user info
+  const decodeGoogleJwt = (credential: string): { email: string; name: string; picture: string; email_verified: boolean } | null => {
+    try {
+      const payload = credential.split(".")[1];
+      const decoded = JSON.parse(atob(payload.replace(/-/g, "+").replace(/_/g, "/")));
+      return {
+        email: decoded.email || "",
+        name: decoded.name || decoded.given_name || "",
+        picture: decoded.picture || "",
+        email_verified: decoded.email_verified === true,
+      };
+    } catch {
+      return null;
+    }
+  };
 
   const handleOAuth = async (provider: "google" | "github" | "linkedin" | "puter") => {
     setLoading(provider);
 
-    // === GOOGLE — real OAuth via popup ===
+    // === GOOGLE — Google Identity Services (GIS) client-side ===
+    // Uses the GIS script loaded in layout.tsx. Only needs NEXT_PUBLIC_GOOGLE_CLIENT_ID.
+    // Falls back to server-based OAuth popup if GIS is not available.
     if (provider === "google") {
+      const googleClientId = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID || process.env.GOOGLE_CLIENT_ID || "";
+
+      if (googleClientId && typeof window !== "undefined" && window.google?.accounts?.id) {
+        // Use Google Identity Services (client-side, no secret needed)
+        window.google.accounts.id.initialize({
+          client_id: googleClientId,
+          callback: (response: any) => {
+            if (response.credential) {
+              const userInfo = decodeGoogleJwt(response.credential);
+              if (userInfo && userInfo.email && userInfo.email_verified) {
+                signInFromOAuth("google", userInfo.email, userInfo.name, userInfo.picture);
+              } else if (userInfo && !userInfo.email_verified) {
+                toast.error("Your Google email is not verified. Please verify it and try again.");
+                setLoading(null);
+              } else {
+                toast.error("Failed to decode Google credential.");
+                setLoading(null);
+              }
+            } else {
+              toast.error("Google sign-in was cancelled.");
+              setLoading(null);
+            }
+          },
+        });
+        window.google.accounts.id.prompt((notification: any) => {
+          if (notification.isNotDisplayed() || notification.isSkippedMoment()) {
+            // One Tap was blocked — try server-based popup as fallback
+            const popup = window.open("/api/auth/google", "google-oauth", "width=500,height=650,scrollbars=yes");
+            if (!popup) {
+              toast.error("Google sign-in popup was blocked. Please allow popups and try again.");
+              setLoading(null);
+            }
+            const checkClosed = setInterval(() => {
+              if (popup?.closed) {
+                clearInterval(checkClosed);
+                setLoading((c) => (c === "google" ? null : c));
+              }
+            }, 1000);
+          }
+        });
+        return;
+      }
+
+      // Fallback: server-based OAuth popup (needs GOOGLE_CLIENT_ID + GOOGLE_CLIENT_SECRET)
       const popup = window.open("/api/auth/google", "google-oauth", "width=500,height=650,scrollbars=yes");
       if (!popup) {
         toast.error("Popup blocked. Please allow popups for this site and try again.");
         setLoading(null);
         return;
       }
-      // Monitor popup close (user closes without completing)
       const checkClosed = setInterval(() => {
         if (popup.closed) {
           clearInterval(checkClosed);
-          setLoading((current) => (current === "google" ? null : current));
+          setLoading((c) => (c === "google" ? null : c));
         }
       }, 1000);
       return;
     }
 
-    // === GITHUB — real OAuth via popup ===
+    // === GITHUB — Device Flow (client-side, no secret needed) ===
+    // Uses /api/auth/github/device to get a device code, then polls /api/auth/github/device/poll
     if (provider === "github") {
-      const popup = window.open("/api/auth/github", "github-oauth", "width=600,height=750,scrollbars=yes");
-      if (!popup) {
-        toast.error("Popup blocked. Please allow popups for this site and try again.");
-        setLoading(null);
-        return;
-      }
-      const checkClosed = setInterval(() => {
-        if (popup.closed) {
-          clearInterval(checkClosed);
-          setLoading((current) => (current === "github" ? null : current));
+      try {
+        const res = await fetch("/api/auth/github/device", { method: "POST" });
+        const data = await res.json();
+        if (!res.ok) {
+          toast.error(data.error || "GitHub sign-in is not configured.");
+          setLoading(null);
+          return;
         }
-      }, 1000);
+        // Show the user code to the user
+        setGithubDevice({
+          userCode: data.user_code,
+          verificationUri: data.verification_uri,
+          deviceCode: data.device_code,
+          interval: data.interval || 5,
+        });
+
+        // Start polling
+        const poll = async () => {
+          try {
+            const pollRes = await fetch("/api/auth/github/device/poll", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ device_code: data.device_code }),
+            });
+            const pollData = await pollRes.json();
+
+            if (pollData.type === "OAUTH_SUCCESS" && pollData.email) {
+              // Success — sign in
+              if (githubPollRef.current) clearInterval(githubPollRef.current);
+              setGithubDevice(null);
+              signInFromOAuth("github", pollData.email, pollData.name, pollData.avatarUrl);
+            } else if (pollData.error === "authorization_pending") {
+              // Keep polling
+            } else if (pollData.error === "slow_down") {
+              // Increase interval and keep polling
+              if (githubPollRef.current) {
+                clearInterval(githubPollRef.current);
+                githubPollRef.current = setInterval(poll, (pollData.interval || data.interval + 5) * 1000);
+              }
+            } else if (pollData.error === "expired_token") {
+              if (githubPollRef.current) clearInterval(githubPollRef.current);
+              setGithubDevice(null);
+              setLoading(null);
+              toast.error("GitHub device code expired. Please try again.");
+            } else if (pollData.error === "access_denied") {
+              if (githubPollRef.current) clearInterval(githubPollRef.current);
+              setGithubDevice(null);
+              setLoading(null);
+              toast.error("GitHub authorization was denied.");
+            } else if (pollData.error) {
+              if (githubPollRef.current) clearInterval(githubPollRef.current);
+              setGithubDevice(null);
+              setLoading(null);
+              toast.error(pollData.error);
+            }
+          } catch {
+            // Network error — keep polling
+          }
+        };
+
+        githubPollRef.current = setInterval(poll, (data.interval || 5) * 1000);
+      } catch (e: any) {
+        toast.error(e?.message || "GitHub sign-in failed.");
+        setLoading(null);
+      }
       return;
     }
 
@@ -110,7 +260,7 @@ export function AuthModal() {
           const puterUser = await window.puter.auth.getUser();
           oauthEmail = puterUser?.email || puterUser?.username || "";
           oauthName = puterUser?.username || puterUser?.name || "";
-        } catch (e) {
+        } catch {
           // Popup closed or failed
         }
       }
@@ -121,29 +271,14 @@ export function AuthModal() {
         return;
       }
 
-      const user: User = {
-        id: uid("u"),
-        name: oauthName || oauthEmail.split("@")[0],
-        email: oauthEmail,
-        role: getRoleForEmail(oauthEmail),
-        provider: "puter",
-        createdAt: new Date().toISOString(),
-        lastActiveAt: new Date().toISOString(),
-        usage: { resumesGenerated: 0, atsChecks: 0, coverLetters: 0, interviewPreps: 0, downloads: 0 },
-        status: "active",
-      };
-      setLoading(null);
-      signIn(user);
-      toast.success(`Signed in via Puter.js as ${oauthEmail}. Welcome to ${BRAND.name}!`);
+      signInFromOAuth("puter", oauthEmail, oauthName);
       return;
     }
 
-    // === LINKEDIN — requires LinkedIn OAuth app (not yet configured) ===
+    // === LINKEDIN — not yet configured ===
     if (provider === "linkedin") {
       setLoading(null);
-      toast.info(
-        "LinkedIn OAuth requires a LinkedIn Developer app. Use Google or GitHub sign-in for now, or sign in with email."
-      );
+      toast.info("LinkedIn OAuth requires a LinkedIn Developer app. Use Google, GitHub, or email sign-in.");
       return;
     }
   };
@@ -237,6 +372,48 @@ export function AuthModal() {
                   {loading === "puter" ? <Icon name="Loader2" className="w-4 h-4 animate-spin" /> : <Icon name="Sparkles" className="w-4 h-4" />} Puter (free AI)
                 </Button>
               </div>
+
+              {/* GitHub Device Flow UI — shown when device code is requested */}
+              {githubDevice && (
+                <motion.div
+                  initial={{ opacity: 0, y: 8 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  className="rounded-lg border-2 border-brand/30 bg-brand-light/30 dark:bg-brand/5 p-4 text-center space-y-3"
+                >
+                  <div className="flex items-center justify-center gap-2 text-sm font-semibold">
+                    <Icon name="Github" className="w-4 h-4" /> GitHub Device Authorization
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    Enter this code on GitHub to authorize ResumeAI Pro:
+                  </p>
+                  <div className="text-2xl font-bold font-mono tracking-[0.3em] py-2 bg-card rounded-md border border-border select-all">
+                    {githubDevice.userCode}
+                  </div>
+                  <a
+                    href={githubDevice.verificationUri}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1.5 text-sm text-brand font-medium hover:underline"
+                  >
+                    <Icon name="ExternalLink" className="w-3.5 h-3.5" />
+                    Open {githubDevice.verificationUri}
+                  </a>
+                  <div className="flex items-center justify-center gap-1.5 text-xs text-muted-foreground">
+                    <Icon name="Loader2" className="w-3 h-3 animate-spin" />
+                    Waiting for authorization…
+                  </div>
+                  <button
+                    onClick={() => {
+                      if (githubPollRef.current) clearInterval(githubPollRef.current);
+                      setGithubDevice(null);
+                      setLoading(null);
+                    }}
+                    className="text-xs text-muted-foreground hover:text-destructive"
+                  >
+                    Cancel
+                  </button>
+                </motion.div>
+              )}
 
               <div className="relative">
                 <div className="absolute inset-0 flex items-center"><div className="w-full border-t border-border" /></div>
