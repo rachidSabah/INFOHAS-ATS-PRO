@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -22,60 +22,130 @@ export function AuthModal() {
   const [name, setName] = useState("");
   const [loading, setLoading] = useState<string | null>(null);
 
+  // Listen for OAuth postMessage callbacks from popup windows
+  useEffect(() => {
+    const handler = (event: MessageEvent) => {
+      const data = event.data;
+      if (!data || typeof data !== "object") return;
+
+      if (data.type === "OAUTH_SUCCESS" && data.email) {
+        // Validate the email is real
+        const emailCheck = validateRealEmail(data.email);
+        if (!emailCheck.valid) {
+          toast.error(`OAuth returned an invalid email: ${data.email}`);
+          setLoading(null);
+          return;
+        }
+        const user: User = {
+          id: uid("u"),
+          name: data.name || data.email.split("@")[0],
+          email: data.email,
+          avatarUrl: data.avatarUrl || "",
+          role: getRoleForEmail(data.email),
+          provider: data.provider as any,
+          createdAt: new Date().toISOString(),
+          lastActiveAt: new Date().toISOString(),
+          usage: { resumesGenerated: 0, atsChecks: 0, coverLetters: 0, interviewPreps: 0, downloads: 0 },
+          status: "active",
+        };
+        setLoading(null);
+        signIn(user);
+        toast.success(`Signed in with ${data.provider === "google" ? "Google" : "GitHub"} as ${data.email}. Welcome to ${BRAND.name}!`);
+      } else if (data.type === "OAUTH_ERROR") {
+        setLoading(null);
+        toast.error(data.error || `${data.provider} sign-in failed.`);
+      }
+    };
+
+    window.addEventListener("message", handler);
+    return () => window.removeEventListener("message", handler);
+  }, [signIn]);
+
   const handleOAuth = async (provider: "google" | "github" | "linkedin" | "puter") => {
     setLoading(provider);
-    await new Promise((r) => setTimeout(r, 700));
 
-    let oauthEmail = "";
-    let oauthName = "";
-
-    // For Puter.js: actually sign in via the global window.puter and get the real user email
-    if (provider === "puter" && typeof window !== "undefined" && window.puter?.auth) {
-      try {
-        await window.puter.auth.signIn();
-        // Get the real signed-in user's email from Puter
-        const puterUser = await window.puter.auth.getUser();
-        oauthEmail = puterUser?.email || puterUser?.username || "";
-        oauthName = puterUser?.username || puterUser?.name || "";
-      } catch (e) {
-        // Popup closed or failed — ask the user to enter their email manually
-      }
-    }
-
-    // For Google/GitHub/LinkedIn (without real OAuth secrets in this demo),
-    // we prompt the user to enter the email associated with their account.
-    // In production, this would come from the OAuth provider's userinfo endpoint.
-    if (!oauthEmail) {
-      const providerLabel = provider === "puter" ? "Puter" : provider.charAt(0).toUpperCase() + provider.slice(1);
-      const prompted = prompt(`Enter the email associated with your ${providerLabel} account:`);
-      if (!prompted) {
+    // === GOOGLE — real OAuth via popup ===
+    if (provider === "google") {
+      const popup = window.open("/api/auth/google", "google-oauth", "width=500,height=650,scrollbars=yes");
+      if (!popup) {
+        toast.error("Popup blocked. Please allow popups for this site and try again.");
         setLoading(null);
-        return; // user cancelled
-      }
-      const emailCheck = validateRealEmail(prompted);
-      if (!emailCheck.valid) {
-        setLoading(null);
-        toast.error(emailCheck.error || "Please enter a valid email.");
         return;
       }
-      oauthEmail = prompted.trim().toLowerCase();
-      oauthName = oauthName || oauthEmail.split("@")[0];
+      // Monitor popup close (user closes without completing)
+      const checkClosed = setInterval(() => {
+        if (popup.closed) {
+          clearInterval(checkClosed);
+          setLoading((current) => (current === "google" ? null : current));
+        }
+      }, 1000);
+      return;
     }
 
-    const user: User = {
-      id: uid("u"),
-      name: oauthName || `${provider} User`,
-      email: oauthEmail,
-      role: getRoleForEmail(oauthEmail),
-      provider: provider === "puter" ? "puter" : provider === "google" ? "google" : provider === "github" ? "github" : "linkedin",
-      createdAt: new Date().toISOString(),
-      lastActiveAt: new Date().toISOString(),
-      usage: { resumesGenerated: 0, atsChecks: 0, coverLetters: 0, interviewPreps: 0, downloads: 0 },
-      status: "active",
-    };
-    setLoading(null);
-    signIn(user);
-    toast.success(`Signed in via ${provider === "puter" ? "Puter.js" : provider}. Welcome to ${BRAND.name}!`);
+    // === GITHUB — real OAuth via popup ===
+    if (provider === "github") {
+      const popup = window.open("/api/auth/github", "github-oauth", "width=600,height=750,scrollbars=yes");
+      if (!popup) {
+        toast.error("Popup blocked. Please allow popups for this site and try again.");
+        setLoading(null);
+        return;
+      }
+      const checkClosed = setInterval(() => {
+        if (popup.closed) {
+          clearInterval(checkClosed);
+          setLoading((current) => (current === "github" ? null : current));
+        }
+      }, 1000);
+      return;
+    }
+
+    // === PUTER — real Puter.js sign-in ===
+    if (provider === "puter") {
+      let oauthEmail = "";
+      let oauthName = "";
+
+      if (typeof window !== "undefined" && window.puter?.auth) {
+        try {
+          await window.puter.auth.signIn();
+          const puterUser = await window.puter.auth.getUser();
+          oauthEmail = puterUser?.email || puterUser?.username || "";
+          oauthName = puterUser?.username || puterUser?.name || "";
+        } catch (e) {
+          // Popup closed or failed
+        }
+      }
+
+      if (!oauthEmail) {
+        setLoading(null);
+        toast.error("Puter sign-in was cancelled or failed. Please try again.");
+        return;
+      }
+
+      const user: User = {
+        id: uid("u"),
+        name: oauthName || oauthEmail.split("@")[0],
+        email: oauthEmail,
+        role: getRoleForEmail(oauthEmail),
+        provider: "puter",
+        createdAt: new Date().toISOString(),
+        lastActiveAt: new Date().toISOString(),
+        usage: { resumesGenerated: 0, atsChecks: 0, coverLetters: 0, interviewPreps: 0, downloads: 0 },
+        status: "active",
+      };
+      setLoading(null);
+      signIn(user);
+      toast.success(`Signed in via Puter.js as ${oauthEmail}. Welcome to ${BRAND.name}!`);
+      return;
+    }
+
+    // === LINKEDIN — requires LinkedIn OAuth app (not yet configured) ===
+    if (provider === "linkedin") {
+      setLoading(null);
+      toast.info(
+        "LinkedIn OAuth requires a LinkedIn Developer app. Use Google or GitHub sign-in for now, or sign in with email."
+      );
+      return;
+    }
   };
 
   const handleEmail = async () => {
