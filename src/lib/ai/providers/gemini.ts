@@ -53,6 +53,24 @@ export class GeminiProvider extends OpenAICompatibleProvider {
       raw: data,
     };
   }
+
+  async listModels(config: ProviderConfig): Promise<string[]> {
+    const baseUrl = (config.baseUrl || "https://generativelanguage.googleapis.com/v1beta").replace(/\/$/, "");
+    const key = config.apiKey || "";
+    const res = await fetch(`${baseUrl}/models?key=${encodeURIComponent(key)}&pageSize=100`, {
+      method: "GET",
+      signal: AbortSignal.timeout(Math.min(config.timeout, 10000)),
+    });
+    if (!res.ok) {
+      throw new Error(`Gemini listModels ${res.status}: ${(await res.text().catch(() => "")).slice(0, 200)}`);
+    }
+    const data = await res.json();
+    // Gemini returns { models: [{ name: "models/gemini-1.5-pro", ... }] }
+    return (data?.models ?? [])
+      .map((m: any) => m.name?.replace(/^models\//, "") || m.name)
+      .filter((n: string) => n && !n.includes("/"))
+      .sort();
+  }
 }
 
 export const geminiProvider = new GeminiProvider();

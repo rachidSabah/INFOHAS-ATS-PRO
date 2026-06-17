@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Badge, Icon } from "@/components/shared";
+import { ProviderManager } from "@/lib/ai/services";
 import { toast } from "sonner";
 import type { AIProvider, AIProviderType } from "@/lib/types";
 
@@ -37,6 +38,8 @@ export function ProviderEditor({ provider, onClose, onSave }: {
   onClose: () => void;
   onSave: (p: Partial<AIProvider>) => void;
 }) {
+  const [fetchingModels, setFetchingModels] = useState(false);
+  const [fetchedModels, setFetchedModels] = useState<string[]>([]);
   const [form, setForm] = useState(() => ({
     name: provider?.name ?? "",
     type: (provider?.type ?? "custom") as AIProviderType,
@@ -129,7 +132,55 @@ export function ProviderEditor({ provider, onClose, onSave }: {
           {/* Basic fields */}
           <div className="grid sm:grid-cols-2 gap-3">
             <Field label="Display name"><Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="OpenAI Production" /></Field>
-            <Field label="Model name"><Input value={form.modelName} onChange={(e) => setForm({ ...form, modelName: e.target.value })} placeholder={cfg?.defaultModel ?? "gpt-4o-mini"} /></Field>
+            <div className="space-y-1.5">
+              <Label className="text-xs uppercase tracking-wide text-muted-foreground">Model name</Label>
+              <div className="flex gap-2">
+                <Input value={form.modelName} onChange={(e) => setForm({ ...form, modelName: e.target.value })} placeholder={cfg?.defaultModel ?? "gpt-4o-mini"} className="flex-1" />
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={async () => {
+                    if (!form.baseUrl) { toast.error("Enter a Base URL first."); return; }
+                    setFetchingModels(true);
+                    setFetchedModels([]);
+                    const result = await ProviderManager.fetchModelsForConfig({
+                      type: form.type,
+                      baseUrl: form.baseUrl,
+                      apiKey: form.apiKey,
+                      headersJson: form.headersJson,
+                      authType: form.authType,
+                      timeout: form.timeout,
+                    });
+                    setFetchingModels(false);
+                    if (result.ok && result.models.length > 0) {
+                      setFetchedModels(result.models);
+                      toast.success(`Fetched ${result.models.length} models from the API.`);
+                    } else {
+                      toast.error(result.error || "No models returned. Check the API key and Base URL.");
+                    }
+                  }}
+                  disabled={fetchingModels || !form.baseUrl}
+                  className="gap-1.5 shrink-0"
+                >
+                  {fetchingModels ? <Icon name="Loader2" className="w-3.5 h-3.5 animate-spin" /> : <Icon name="DownloadCloud" className="w-3.5 h-3.5" />}
+                  Fetch
+                </Button>
+              </div>
+              {fetchedModels.length > 0 && (
+                <div className="mt-1">
+                  <select
+                    value={form.modelName}
+                    onChange={(e) => setForm({ ...form, modelName: e.target.value })}
+                    className="w-full h-9 px-2 rounded-md border border-input bg-background text-sm"
+                  >
+                    <option value="">— Select a model —</option>
+                    {fetchedModels.map((m) => <option key={m} value={m}>{m}</option>)}
+                  </select>
+                  <p className="text-[10px] text-muted-foreground mt-0.5">{fetchedModels.length} live models fetched from the API</p>
+                </div>
+              )}
+            </div>
             <Field label="Base URL"><Input value={form.baseUrl} onChange={(e) => setForm({ ...form, baseUrl: e.target.value })} placeholder={cfg?.defaultUrl ?? "https://api.example.com/v1"} /></Field>
             <Field label="API key (encrypted at rest)">
               <Input type="password" value={form.apiKey} onChange={(e) => setForm({ ...form, apiKey: e.target.value })} placeholder={isPuter ? "(not required for Puter)" : "sk-..."} disabled={isPuter} />

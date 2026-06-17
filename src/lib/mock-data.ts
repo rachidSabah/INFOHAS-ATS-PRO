@@ -170,6 +170,7 @@ export const SEED_PROVIDERS: AIProvider[] = [
     type: "opencode",
     apiUrl: "https://api.opencode.ai/v1",
     baseUrl: "https://api.opencode.ai/v1",
+    apiKey: "sk-5DCF8XXmP30pnE4xjEJvVnr9LikhJCxSKg8cR5iaCiMERiHGGuMlzfkvLAh0dPKa",
     priority: 2,
     isActive: true,
     isBuiltIn: true,

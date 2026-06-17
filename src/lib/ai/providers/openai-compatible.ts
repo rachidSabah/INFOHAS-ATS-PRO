@@ -83,6 +83,42 @@ export class OpenAICompatibleProvider implements AIProviderAdapter {
     if (!s) return {};
     try { return JSON.parse(s); } catch { return {}; }
   }
+
+  /**
+   * Fetch the list of available models from the provider's /models endpoint.
+   * Works with OpenAI, DeepSeek, Groq, OpenRouter, Together, HuggingFace,
+   * Mistral, Cohere, Perplexity, OpenCode, ZenCode — any OpenAI-compatible API.
+   */
+  async listModels(config: ProviderConfig): Promise<string[]> {
+    const baseUrl = (config.baseUrl || "https://api.openai.com/v1").replace(/\/$/, "");
+    const headers: Record<string, string> = {
+      ...this.parseJson(config.headersJson),
+    };
+    if (config.apiKey) {
+      if (config.authType === "header") {
+        headers["x-api-key"] = config.apiKey;
+      } else {
+        headers["Authorization"] = `Bearer ${config.apiKey}`;
+      }
+    }
+    const url = config.authType === "query" && config.apiKey
+      ? `${baseUrl}/models?api_key=${encodeURIComponent(config.apiKey)}`
+      : `${baseUrl}/models`;
+
+    const res = await fetch(url, {
+      method: "GET",
+      headers,
+      signal: AbortSignal.timeout(Math.min(config.timeout, 10000)),
+    });
+    if (!res.ok) {
+      const errText = await res.text().catch(() => "");
+      throw new ProviderError(`${this.type} listModels ${res.status}: ${errText.slice(0, 200)}`, res.status, 0);
+    }
+    const data = await res.json();
+    // OpenAI-compatible APIs return { data: [{ id: "model-name", ... }, ...] }
+    const models: string[] = (data?.data ?? data?.models ?? []).map((m: any) => m.id || m.name).filter(Boolean);
+    return models.sort();
+  }
 }
 
 export class ProviderError extends Error {

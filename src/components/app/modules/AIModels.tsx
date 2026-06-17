@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge, Icon } from "@/components/shared";
 import { useApp } from "@/lib/store";
+import { ProviderManager } from "@/lib/ai/services";
 import { toast } from "sonner";
 
 // Common models per provider type — used to populate the model picker
@@ -55,10 +56,26 @@ export function AIModels() {
   const updateProvider = useApp((s) => s.updateProvider);
   const [selectedProviderId, setSelectedProviderId] = useState<string>(providers[0]?.id ?? "");
   const [customModel, setCustomModel] = useState("");
+  const [fetching, setFetching] = useState(false);
+  const [liveModels, setLiveModels] = useState<string[]>([]);
 
   const selected = providers.find((p) => p.id === selectedProviderId);
   const catalog = selected ? (MODEL_CATALOG[selected.type] ?? []) : [];
   const enabledModels = selected?.enabledModels ?? [];
+
+  const fetchLiveModels = async () => {
+    if (!selected) return;
+    setFetching(true);
+    setLiveModels([]);
+    const result = await ProviderManager.fetchModels(selected);
+    setFetching(false);
+    if (result.ok && result.models.length > 0) {
+      setLiveModels(result.models);
+      toast.success(`Fetched ${result.models.length} live models from ${selected.name}.`);
+    } else {
+      toast.error(result.error || "Failed to fetch models. Check the provider's API key and Base URL.");
+    }
+  };
 
   const toggleModel = (modelName: string) => {
     if (!selected) return;
@@ -127,13 +144,49 @@ export function AIModels() {
                 </CardContent>
               </Card>
 
-              {/* Add custom model */}
+              {/* Add custom model + fetch live models */}
               <Card>
-                <CardContent className="p-4 flex gap-2">
-                  <Input value={customModel} onChange={(e) => setCustomModel(e.target.value)} placeholder="Add custom model name (e.g. gpt-4o-2024-08-06)" onKeyDown={(e) => e.key === "Enter" && addCustom()} />
-                  <Button onClick={addCustom} disabled={!customModel.trim()} className="bg-brand hover:bg-brand-dark text-white gap-2 shrink-0">
-                    <Icon name="Plus" className="w-4 h-4" /> Add
-                  </Button>
+                <CardContent className="p-4 space-y-3">
+                  <div className="flex gap-2">
+                    <Input value={customModel} onChange={(e) => setCustomModel(e.target.value)} placeholder="Add custom model name (e.g. gpt-4o-2024-08-06)" onKeyDown={(e) => e.key === "Enter" && addCustom()} />
+                    <Button onClick={addCustom} disabled={!customModel.trim()} className="bg-brand hover:bg-brand-dark text-white gap-2 shrink-0">
+                      <Icon name="Plus" className="w-4 h-4" /> Add
+                    </Button>
+                  </div>
+                  <div className="flex items-center gap-2 pt-2 border-t border-border">
+                    <Button onClick={fetchLiveModels} disabled={fetching || !selected} variant="outline" className="gap-2">
+                      {fetching ? <Icon name="Loader2" className="w-4 h-4 animate-spin" /> : <Icon name="DownloadCloud" className="w-4 h-4" />}
+                      {fetching ? "Fetching…" : "Fetch live models from API"}
+                    </Button>
+                    <span className="text-xs text-muted-foreground">Calls GET /v1/models on the provider's API</span>
+                  </div>
+                  {liveModels.length > 0 && (
+                    <div className="space-y-2">
+                      <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{liveModels.length} live models from {selected?.name}</div>
+                      <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-2 max-h-60 overflow-y-auto p-1">
+                        {liveModels.map((m) => {
+                          const isEnabled = enabledModels.includes(m);
+                          const isDefault = selected?.modelName === m;
+                          return (
+                            <div key={m} className={`rounded-md border p-2 ${isEnabled ? "border-brand bg-brand-light/30" : "border-border"}`}>
+                              <div className="flex items-center justify-between gap-1">
+                                <span className="font-mono text-[11px] truncate">{m}</span>
+                                {isDefault && <Badge variant="gold" className="text-[8px] shrink-0">DEFAULT</Badge>}
+                              </div>
+                              <div className="flex gap-1 mt-1">
+                                <button onClick={() => toggleModel(m)} className={`text-[10px] px-1.5 py-0.5 rounded ${isEnabled ? "bg-brand text-white" : "bg-secondary"}`}>
+                                  {isEnabled ? "Enabled" : "Enable"}
+                                </button>
+                                <button onClick={() => setAsDefaultModel(m)} className="text-[10px] px-1.5 py-0.5 rounded bg-secondary" title="Set as default">
+                                  <Icon name="Star" className="w-2.5 h-2.5" />
+                                </button>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
                 </CardContent>
               </Card>
 

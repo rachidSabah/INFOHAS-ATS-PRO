@@ -5,6 +5,8 @@
 
 import { useApp, uid } from "../../store";
 import { ProviderRouter } from "./router";
+import { ProviderFactory } from "./factory";
+import { toProviderConfig } from "./fallback";
 import type { AIProvider, AIProviderLog, AIProviderSettings } from "../../types";
 
 export class ProviderManager {
@@ -88,6 +90,59 @@ export class ProviderManager {
     const provider = this.get(id);
     if (!provider) return { ok: false, latencyMs: 0, message: "Provider not found" };
     return ProviderRouter.testConnection(provider);
+  }
+
+  /**
+   * Fetch the list of available models from a provider's API.
+   * Uses the adapter's listModels() method — calls GET /v1/models (or equivalent).
+   * Returns a list of model ID strings.
+   */
+  static async fetchModels(provider: AIProvider): Promise<{ ok: boolean; models: string[]; error?: string }> {
+    try {
+      const adapter = ProviderFactory.get(provider.type);
+      if (!adapter.listModels) {
+        return { ok: false, models: [], error: `Provider type "${provider.type}" does not support dynamic model listing.` };
+      }
+      const config = toProviderConfig(provider);
+      const models = await adapter.listModels(config);
+      return { ok: true, models };
+    } catch (e: any) {
+      return { ok: false, models: [], error: e?.message || "Failed to fetch models" };
+    }
+  }
+
+  /**
+   * Fetch models for a provider config (without needing a saved provider).
+   * Used by the editor to preview models before saving.
+   */
+  static async fetchModelsForConfig(config: Partial<AIProvider>): Promise<{ ok: boolean; models: string[]; error?: string }> {
+    try {
+      const adapter = ProviderFactory.get(config.type || "custom");
+      if (!adapter.listModels) {
+        return { ok: false, models: [], error: `Provider type "${config.type}" does not support dynamic model listing.` };
+      }
+      const fullConfig = toProviderConfig({
+        id: "preview",
+        name: "preview",
+        type: config.type || "custom",
+        baseUrl: config.baseUrl,
+        apiUrl: config.baseUrl,
+        apiKey: config.apiKey,
+        headersJson: config.headersJson,
+        authType: config.authType,
+        timeout: config.timeout ?? 10000,
+        maxTokens: 4096,
+        temperature: 0.7,
+        priority: 99,
+        isActive: true,
+        status: "untested",
+        usage: { requests: 0, tokens: 0, errors: 0, avgLatencyMs: 0, cost: 0 },
+      } as AIProvider);
+      const models = await adapter.listModels(fullConfig);
+      return { ok: true, models };
+    } catch (e: any) {
+      return { ok: false, models: [], error: e?.message || "Failed to fetch models" };
+    }
   }
 
   static logs(providerId?: string): AIProviderLog[] {

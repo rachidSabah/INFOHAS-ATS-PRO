@@ -54,6 +54,24 @@ export class ClaudeProvider extends OpenAICompatibleProvider {
       raw: data,
     };
   }
+
+  async listModels(config: ProviderConfig): Promise<string[]> {
+    const baseUrl = (config.baseUrl || "https://api.anthropic.com/v1").replace(/\/$/, "");
+    const res = await fetch(`${baseUrl}/models`, {
+      method: "GET",
+      headers: {
+        "x-api-key": config.apiKey || "",
+        "anthropic-version": "2023-06-01",
+        ...this.parseJson(config.headersJson),
+      },
+      signal: AbortSignal.timeout(Math.min(config.timeout, 10000)),
+    });
+    if (!res.ok) {
+      throw new Error(`Claude listModels ${res.status}: ${(await res.text().catch(() => "")).slice(0, 200)}`);
+    }
+    const data = await res.json();
+    return (data?.data ?? []).map((m: any) => m.id).filter(Boolean).sort();
+  }
 }
 
 export const claudeProvider = new ClaudeProvider();
