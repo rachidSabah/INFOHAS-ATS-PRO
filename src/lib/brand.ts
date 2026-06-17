@@ -85,6 +85,9 @@ export const NAV_ADMIN: { key: string; label: string; icon: string; group: strin
 
 export const NAV_SUPER: { key: string; label: string; icon: string; group: string }[] = [
   { key: "super-admin", label: "Super Overview", icon: "Crown", group: "Super Admin" },
+  { key: "users", label: "Users", icon: "Users", group: "Super Admin" },
+  { key: "user-approvals", label: "User Approvals", icon: "UserCheck", group: "Super Admin" },
+  { key: "suspended-users", label: "Suspended Users", icon: "Ban", group: "Super Admin" },
   { key: "ai-providers", label: "AI Providers", icon: "Cpu", group: "Super Admin" },
   { key: "ai-models", label: "AI Models", icon: "Boxes", group: "Super Admin" },
   { key: "prompts", label: "AI Prompts", icon: "Brain", group: "Super Admin" },

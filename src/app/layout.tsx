@@ -88,10 +88,8 @@ export default function RootLayout({
   return (
     <html lang="en" suppressHydrationWarning>
       <head>
-        {/* Puter.js — free, user-authenticated AI provider (Google/GitHub login via Puter) */}
+        {/* Puter.js — free, user-authenticated AI provider + login */}
         <script src="https://js.puter.com/v2/" async></script>
-        {/* Google Identity Services — real Google OAuth (client-side, needs NEXT_PUBLIC_GOOGLE_CLIENT_ID) */}
-        <script src="https://accounts.google.com/gsi/client" async defer></script>
         <script
           type="application/ld+json"
           dangerouslySetInnerHTML={{

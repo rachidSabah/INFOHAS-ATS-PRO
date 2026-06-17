@@ -17,6 +17,7 @@ import { Downloads } from "./modules/Downloads";
 import { Settings } from "./modules/Settings";
 import { Admin } from "./modules/Admin";
 import { Users } from "./modules/Users";
+import { UserApprovals } from "./modules/UserApprovals";
 import { Analytics } from "./modules/Analytics";
 import { SuperAdmin } from "./modules/SuperAdmin";
 import { AIProviders } from "./modules/AIProviders";
@@ -43,6 +44,8 @@ const VIEW_COMPONENTS: Record<ViewKey, React.FC> = {
   settings: Settings,
   admin: Admin,
   users: Users,
+  "user-approvals": UserApprovals,
+  "suspended-users": UserApprovals, // reuse — shows same component, filtered differently
   analytics: Analytics,
   "super-admin": SuperAdmin,
   "ai-providers": AIProviders,

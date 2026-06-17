@@ -2,16 +2,22 @@
 
 export type Role = "guest" | "user" | "admin" | "super_admin";
 
+export type UserStatus = "pending" | "approved" | "suspended" | "deleted";
+
 export interface User {
   id: string;
   name: string;
+  username?: string;
   email: string;
-  passwordHash?: string; // mock hash (in production: bcrypt via Workers)
+  passwordHash?: string;
   avatarUrl?: string;
   role: Role;
-  provider: "email" | "google" | "github" | "linkedin" | "puter" | "magic";
+  status: UserStatus;
+  provider: "email" | "puter";
   createdAt: string;
+  updatedAt?: string;
   lastActiveAt: string;
+  lastLoginAt?: string;
   usage: {
     resumesGenerated: number;
     atsChecks: number;
@@ -19,7 +25,6 @@ export interface User {
     interviewPreps: number;
     downloads: number;
   };
-  status: "active" | "suspended";
 }
 
 export interface ContactInfo {
@@ -358,6 +363,8 @@ export type ViewKey =
   | "super-admin"
   | "analytics"
   | "users"
+  | "user-approvals"
+  | "suspended-users"
   | "logs"
   | "feature-flags"
   | "downloads"

@@ -12,12 +12,17 @@ import {
   SEED_PROMPTS, SEED_BRANDING, SEED_FLAGS, SEED_LOGS, SEED_COVER_LETTERS, SEED_INTERVIEW, SEED_ATS_REPORTS,
 } from "./mock-data";
 import { BRAND, getRoleForEmail } from "./brand";
+import { hashPassword, verifyPassword, SUPER_ADMIN_SEED, canSignIn, canAccessApp, type UserStatus } from "./auth-utils";
+import type { UserStatus as US } from "./types";
 
 interface AppState {
   // session
   user: User | null;
   isAuthed: boolean;
   authOpen: boolean;
+
+  // user registry — all registered users (for admin management)
+  users: User[];
 
   // navigation
   view: ViewKey;
@@ -53,6 +58,10 @@ interface AppState {
   closeAuth: () => void;
   signIn: (user: User) => void;
   signOut: () => void;
+  // email/password auth
+  signInWithEmail: (email: string, password: string) => { ok: boolean; error?: string; user?: User };
+  registerWithEmail: (email: string, password: string, name: string, username?: string) => { ok: boolean; error?: string; user?: User };
+  signInWithPuter: () => Promise<{ ok: boolean; error?: string; user?: User }>;
   // account self-service
   updateUserName: (newName: string) => void;
   updateUserEmail: (newEmail: string) => void;
@@ -61,6 +70,15 @@ interface AppState {
   reconcileRole: () => void;
   toggleSidebar: () => void;
   setLandingSection: (s: string | null) => void;
+  // admin user management
+  approveUser: (userId: string) => void;
+  suspendUser: (userId: string) => void;
+  unsuspendUser: (userId: string) => void;
+  deleteUser: (userId: string) => void;
+  promoteToAdmin: (userId: string) => void;
+  demoteToUser: (userId: string) => void;
+  resetUserPassword: (userId: string, newPassword: string) => void;
+  updateUserStatus: (userId: string, status: US) => void;
 
   // resumes
   addResume: (r: ResumeData) => void;
@@ -127,6 +145,26 @@ export const useApp = create<AppState>()(
       isAuthed: false,
       authOpen: false,
 
+      // User registry — seeded with the super admin
+      users: (() => {
+        const sa: User = {
+          id: "u_superadmin",
+          name: SUPER_ADMIN_SEED.name,
+          username: SUPER_ADMIN_SEED.username,
+          email: SUPER_ADMIN_SEED.email,
+          passwordHash: hashPassword(SUPER_ADMIN_SEED.password),
+          role: "super_admin",
+          status: "approved",
+          provider: "email",
+          createdAt: "2025-01-01T00:00:00Z",
+          updatedAt: new Date().toISOString(),
+          lastActiveAt: new Date().toISOString(),
+          lastLoginAt: undefined,
+          usage: { resumesGenerated: 0, atsChecks: 0, coverLetters: 0, interviewPreps: 0, downloads: 0 },
+        };
+        return [sa];
+      })(),
+
       view: "landing",
       activeResumeId: SEED_RESUMES[0]?.id ?? null,
       activeJdId: SEED_JDS[0]?.id ?? null,
@@ -154,34 +192,208 @@ export const useApp = create<AppState>()(
       setView: (v) => set({ view: v, landingSection: null }),
       openAuth: () => set({ authOpen: true }),
       closeAuth: () => set({ authOpen: false }),
+
       signIn: (user) => {
-        // Enforce email-based role at sign-in time
-        const enforcedRole = getRoleForEmail(user.email);
-        const userWithRole = { ...user, role: enforcedRole };
-        set({
-          user: userWithRole,
+        // Check if user can sign in (not suspended/deleted)
+        const check = canSignIn(user);
+        if (!check.allowed) {
+          // Don't sign in — the caller should show the error message
+          return;
+        }
+        // Update or add user in registry, update lastLoginAt
+        const now = new Date().toISOString();
+        const updatedUser = { ...user, lastLoginAt: now, lastActiveAt: now };
+        set((s) => {
+          const exists = s.users.find((u) => u.email === user.email);
+          const users = exists
+            ? s.users.map((u) => (u.email === user.email ? { ...u, ...updatedUser } : u))
+            : [...s.users, updatedUser];
+          return {
+            users,
+            user: updatedUser,
+            isAuthed: true,
+            authOpen: false,
+            view: "dashboard",
+          };
+        });
+        // Audit log
+        useApp.getState().log({ actor: user.email, action: "User signed in", category: "auth", details: `Provider: ${user.provider}`, severity: "info" });
+      },
+
+      signOut: () => {
+        const s = get();
+        if (s.user) {
+          useApp.getState().log({ actor: s.user.email, action: "User signed out", category: "auth", details: "", severity: "info" });
+        }
+        set({ user: null, isAuthed: false, view: "landing" });
+      },
+
+      // === Email/Password Sign In ===
+      signInWithEmail: (email, password) => {
+        const s = get();
+        const normalizedEmail = email.trim().toLowerCase();
+        const existing = s.users.find((u) => u.email.toLowerCase() === normalizedEmail);
+        if (!existing) {
+          return { ok: false, error: "No account found with this email. Please register first." };
+        }
+        if (existing.status === "suspended") {
+          return { ok: false, error: "Your account has been suspended. Please contact the administrator." };
+        }
+        if (existing.status === "deleted") {
+          return { ok: false, error: "This account has been deleted." };
+        }
+        if (!existing.passwordHash || !verifyPassword(password, existing.passwordHash)) {
+          return { ok: false, error: "Incorrect password." };
+        }
+        const now = new Date().toISOString();
+        const updatedUser = { ...existing, lastLoginAt: now, lastActiveAt: now };
+        set((s) => ({
+          users: s.users.map((u) => (u.id === existing.id ? updatedUser : u)),
+          user: updatedUser,
           isAuthed: true,
           authOpen: false,
           view: "dashboard",
-        });
+        }));
+        useApp.getState().log({ actor: normalizedEmail, action: "User signed in", category: "auth", details: "Provider: email", severity: "info" });
+        return { ok: true, user: updatedUser };
       },
-      signOut: () => set({ user: null, isAuthed: false, view: "landing" }),
-      reconcileRole: () => {
+
+      // === Email/Password Registration ===
+      registerWithEmail: (email, password, name, username) => {
         const s = get();
-        if (!s.user) return;
-        const correctRole = getRoleForEmail(s.user.email);
-        if (s.user.role !== correctRole) {
-          // Downgrade (or upgrade) to the correct role based on email allowlist
-          set({ user: { ...s.user, role: correctRole } });
-          // If user was viewing a super-admin-only page and lost access, send to dashboard
-          const superAdminViews: ViewKey[] = ["super-admin", "ai-providers", "ai-models", "ai-settings", "prompts", "branding", "feature-flags", "logs"];
-          const adminViews: ViewKey[] = ["admin", "users", "analytics"];
-          if (correctRole === "user" && [...superAdminViews, ...adminViews].includes(s.view)) {
-            set({ view: "dashboard" });
-          } else if (correctRole === "admin" && superAdminViews.includes(s.view)) {
-            set({ view: "dashboard" });
-          }
+        const normalizedEmail = email.trim().toLowerCase();
+        const existing = s.users.find((u) => u.email.toLowerCase() === normalizedEmail);
+        if (existing) {
+          return { ok: false, error: "An account with this email already exists. Please sign in." };
         }
+        const now = new Date().toISOString();
+        const newUser: User = {
+          id: uid("u"),
+          name: name.trim() || normalizedEmail.split("@")[0],
+          username: username?.trim() || normalizedEmail.split("@")[0],
+          email: normalizedEmail,
+          passwordHash: hashPassword(password),
+          role: "user",
+          status: "pending", // New users start as pending — require admin approval
+          provider: "email",
+          createdAt: now,
+          updatedAt: now,
+          lastActiveAt: now,
+          lastLoginAt: now,
+          usage: { resumesGenerated: 0, atsChecks: 0, coverLetters: 0, interviewPreps: 0, downloads: 0 },
+        };
+        set((s) => ({ users: [...s.users, newUser] }));
+        useApp.getState().log({ actor: normalizedEmail, action: "User registered (pending approval)", category: "auth", details: `Name: ${newUser.name}`, severity: "warning" });
+        // Auto-sign-in the new user (they'll see the pending approval screen)
+        set({ user: newUser, isAuthed: true, authOpen: false, view: "dashboard" });
+        return { ok: true, user: newUser };
+      },
+
+      // === Puter.js Sign In ===
+      signInWithPuter: async () => {
+        if (typeof window === "undefined" || !window.puter?.auth) {
+          return { ok: false, error: "Puter.js is not loaded. Please refresh the page." };
+        }
+        try {
+          await window.puter.auth.signIn();
+          const puterUser = await window.puter.auth.getUser();
+          const puterEmail = puterUser?.email || puterUser?.username || "";
+          const puterName = puterUser?.username || puterUser?.name || puterEmail.split("@")[0];
+
+          if (!puterEmail) {
+            return { ok: false, error: "Could not retrieve your email from Puter. Please try again." };
+          }
+
+          const s = get();
+          const existing = s.users.find((u) => u.email.toLowerCase() === puterEmail.toLowerCase());
+          const now = new Date().toISOString();
+
+          if (existing) {
+            // Existing user — check status
+            if (existing.status === "suspended") {
+              return { ok: false, error: "Your account has been suspended. Please contact the administrator." };
+            }
+            if (existing.status === "deleted") {
+              return { ok: false, error: "This account has been deleted." };
+            }
+            const updatedUser = { ...existing, lastLoginAt: now, lastActiveAt: now, avatarUrl: puterUser?.photo || existing.avatarUrl };
+            set((s) => ({
+              users: s.users.map((u) => (u.id === existing.id ? updatedUser : u)),
+              user: updatedUser,
+              isAuthed: true,
+              authOpen: false,
+              view: "dashboard",
+            }));
+            useApp.getState().log({ actor: puterEmail, action: "User signed in", category: "auth", details: "Provider: puter", severity: "info" });
+            return { ok: true, user: updatedUser };
+          } else {
+            // New Puter user — create with pending status
+            const newUser: User = {
+              id: uid("u"),
+              name: puterName,
+              username: puterName,
+              email: puterEmail,
+              avatarUrl: puterUser?.photo || "",
+              role: "user",
+              status: "pending",
+              provider: "puter",
+              createdAt: now,
+              updatedAt: now,
+              lastActiveAt: now,
+              lastLoginAt: now,
+              usage: { resumesGenerated: 0, atsChecks: 0, coverLetters: 0, interviewPreps: 0, downloads: 0 },
+            };
+            set((s) => ({ users: [...s.users, newUser], user: newUser, isAuthed: true, authOpen: false, view: "dashboard" }));
+            useApp.getState().log({ actor: puterEmail, action: "User registered via Puter (pending approval)", category: "auth", details: `Name: ${newUser.name}`, severity: "warning" });
+            return { ok: true, user: newUser };
+          }
+        } catch {
+          return { ok: false, error: "Puter sign-in was cancelled or failed." };
+        }
+      },
+
+      reconcileRole: () => {
+        // Keep for backward compat — no-op now since roles are managed by admin actions
+      },
+
+      // === Admin: User Management Actions ===
+      approveUser: (userId) => {
+        set((s) => ({ users: s.users.map((u) => (u.id === userId ? { ...u, status: "approved", updatedAt: new Date().toISOString() } : u)) }));
+        const u = get().users.find((x) => x.id === userId);
+        useApp.getState().log({ actor: get().user?.email ?? "admin", action: "User approved", category: "admin", details: u?.email ?? userId, severity: "info" });
+      },
+      suspendUser: (userId) => {
+        set((s) => ({ users: s.users.map((u) => (u.id === userId ? { ...u, status: "suspended", updatedAt: new Date().toISOString() } : u)) }));
+        const u = get().users.find((x) => x.id === userId);
+        useApp.getState().log({ actor: get().user?.email ?? "admin", action: "User suspended", category: "admin", details: u?.email ?? userId, severity: "warning" });
+      },
+      unsuspendUser: (userId) => {
+        set((s) => ({ users: s.users.map((u) => (u.id === userId ? { ...u, status: "approved", updatedAt: new Date().toISOString() } : u)) }));
+        const u = get().users.find((x) => x.id === userId);
+        useApp.getState().log({ actor: get().user?.email ?? "admin", action: "User unsuspended", category: "admin", details: u?.email ?? userId, severity: "info" });
+      },
+      deleteUser: (userId) => {
+        set((s) => ({ users: s.users.map((u) => (u.id === userId ? { ...u, status: "deleted", updatedAt: new Date().toISOString() } : u)) }));
+        const u = get().users.find((x) => x.id === userId);
+        useApp.getState().log({ actor: get().user?.email ?? "admin", action: "User deleted (soft)", category: "admin", details: u?.email ?? userId, severity: "error" });
+      },
+      promoteToAdmin: (userId) => {
+        set((s) => ({ users: s.users.map((u) => (u.id === userId ? { ...u, role: "admin", updatedAt: new Date().toISOString() } : u)) }));
+        const u = get().users.find((x) => x.id === userId);
+        useApp.getState().log({ actor: get().user?.email ?? "admin", action: "User promoted to admin", category: "admin", details: u?.email ?? userId, severity: "info" });
+      },
+      demoteToUser: (userId) => {
+        set((s) => ({ users: s.users.map((u) => (u.id === userId ? { ...u, role: "user", updatedAt: new Date().toISOString() } : u)) }));
+        const u = get().users.find((x) => x.id === userId);
+        useApp.getState().log({ actor: get().user?.email ?? "admin", action: "User demoted to user", category: "admin", details: u?.email ?? userId, severity: "info" });
+      },
+      resetUserPassword: (userId, newPassword) => {
+        set((s) => ({ users: s.users.map((u) => (u.id === userId ? { ...u, passwordHash: hashPassword(newPassword), updatedAt: new Date().toISOString() } : u)) }));
+        const u = get().users.find((x) => x.id === userId);
+        useApp.getState().log({ actor: get().user?.email ?? "admin", action: "Password reset by admin", category: "admin", details: u?.email ?? userId, severity: "warning" });
+      },
+      updateUserStatus: (userId, status) => {
+        set((s) => ({ users: s.users.map((u) => (u.id === userId ? { ...u, status, updatedAt: new Date().toISOString() } : u)) }));
       },
       updateUserName: (newName) => {
         const trimmed = newName.trim();
@@ -375,6 +587,7 @@ export const useApp = create<AppState>()(
       partialize: (s) => ({
         user: s.user,
         isAuthed: s.isAuthed,
+        users: s.users,
         resumes: s.resumes,
         jobDescriptions: s.jobDescriptions,
         coverLetters: s.coverLetters,
