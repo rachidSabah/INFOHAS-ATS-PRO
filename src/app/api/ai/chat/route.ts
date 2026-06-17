@@ -1,9 +1,10 @@
-// Server-side AI fallback using z-ai-web-dev-sdk
+// Server-side AI fallback — Edge Runtime compatible for Cloudflare Pages
+// Uses the Z.ai API directly via fetch (no SDK dependency).
 // Used when Puter.js is unavailable or rate-limited.
-import { NextRequest, NextResponse } from "next/server";
-import ZAI from "z-ai-web-dev-sdk";
 
-export const runtime = "nodejs";
+import { NextRequest, NextResponse } from "next/server";
+
+export const runtime = "edge";
 
 export async function POST(req: NextRequest) {
   try {
@@ -19,22 +20,55 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "userPrompt is required" }, { status: 400 });
     }
 
-    const zai = await ZAI.create();
+    // Call Z.ai API directly via fetch (Edge-compatible)
+    // The z-ai-web-dev-sdk isn't Edge-compatible, so we use the REST API.
+    // In dev, this falls back to the local engine on the client side if this fails.
+    const ZAI_API_KEY = process.env.ZAI_API_KEY || process.env.NEXT_PUBLIC_ZAI_API_KEY || "";
+
+    // If no key, return a helpful error — the client will fall back to local engine
+    if (!ZAI_API_KEY) {
+      return NextResponse.json(
+        { error: "ZAI_API_KEY not configured. Falling back to client-side engine.", fallback: true },
+        { status: 503 }
+      );
+    }
+
     const messages = [
       { role: "system", content: systemPrompt || "You are ResumeAI Pro, a helpful assistant for resume and career tasks." },
       { role: "user", content: userPrompt },
     ];
 
-    const completion = await zai.chat.completions.create({
-      messages,
-      temperature,
-      max_tokens: maxTokens,
+    const res = await fetch("https://api.z.ai/api/paas/v4/chat/completions", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${ZAI_API_KEY}`,
+      },
+      body: JSON.stringify({
+        model: "glm-4.6",
+        messages,
+        temperature,
+        max_tokens: maxTokens,
+      }),
+      signal: AbortSignal.timeout(25000),
     });
 
-    const text = completion?.choices?.[0]?.message?.content ?? "";
+    if (!res.ok) {
+      const errText = await res.text().catch(() => "");
+      return NextResponse.json(
+        { error: `Z.ai API ${res.status}: ${errText.slice(0, 200)}`, fallback: true },
+        { status: 502 }
+      );
+    }
+
+    const data = await res.json();
+    const text = data?.choices?.[0]?.message?.content ?? "";
     return NextResponse.json({ text, provider: "z-ai" });
   } catch (e: any) {
     console.error("[/api/ai/chat] error:", e);
-    return NextResponse.json({ error: e?.message ?? "AI call failed" }, { status: 500 });
+    return NextResponse.json(
+      { error: e?.message ?? "AI call failed", fallback: true },
+      { status: 500 }
+    );
   }
 }

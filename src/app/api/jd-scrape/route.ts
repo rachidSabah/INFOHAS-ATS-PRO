@@ -1,8 +1,7 @@
-// Server-side job-description scraper.
-// Fetches a URL and extracts raw text for AI to parse.
+// Server-side job-description scraper — Edge Runtime compatible for Cloudflare Pages
 import { NextRequest, NextResponse } from "next/server";
 
-export const runtime = "nodejs";
+export const runtime = "edge";
 
 export async function POST(req: NextRequest) {
   try {
