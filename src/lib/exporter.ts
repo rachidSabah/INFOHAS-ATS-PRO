@@ -1,4 +1,4 @@
-// ResumeAI Pro — client-side document exporters (PDF / DOCX / TXT)
+// ResumeAI Pro — client-side document exporters (PDF / DOCX / DOC / TXT)
 // Critical: ALL resume PDFs MUST fit on exactly ONE A4 page.
 // We use jsPDF with carefully-tuned font sizes & spacing, and validate by checking
 // the resulting PDF page count: assert(pdf.pages === 1).
@@ -12,6 +12,7 @@ import {
 } from "docx";
 import { saveAs } from "file-saver";
 import type { ResumeData, CoverLetter, InterviewPackage } from "./types";
+import { getDocxHtml, resumeToDirectiveHtml } from "./ats-directives";
 
 // ---------- PDF: One A4 page enforcement ----------
 
@@ -370,6 +371,29 @@ export function exportResumeTXT(resume: ResumeData) {
   }
   const blob = new Blob([lines.join("\n")], { type: "text/plain;charset=utf-8" });
   saveAs(blob, (resume.name || "resume").replace(/\s+/g, "_") + "_resume.txt");
+}
+
+// ---------- DOC (strict A4 one-page HTML, Word 97-2003 compatible) ----------
+// Uses getDocxHtml() from ats-directives.ts — enforces @page A4 with 1.27cm margins,
+// Times New Roman 12pt, single column, left-aligned headers. This is the strict
+// one-page layout the aviation ATS directive requires.
+
+export function exportResumeDOC(resume: ResumeData, template: "professional" | "modern" | "minimal" = "professional") {
+  const innerHtml = resumeToDirectiveHtml(resume);
+  const fullHtml = getDocxHtml(innerHtml, template);
+  // .doc with Word namespace opens natively in Word with CSS preserved
+  const blob = new Blob(["\ufeff" + fullHtml], { type: "application/msword" });
+  saveAs(blob, (resume.name || "resume").replace(/\s+/g, "_") + "_resume.doc");
+}
+
+/**
+ * Export a raw HTML content string (e.g. from analyzeWithGemini's optimized_content)
+ * as a strict A4 .doc file. Used when the AI returns HTML directly.
+ */
+export function exportHtmlAsDOC(htmlContent: string, filename: string, template: "professional" | "modern" | "minimal" = "professional") {
+  const fullHtml = getDocxHtml(htmlContent, template);
+  const blob = new Blob(["\ufeff" + fullHtml], { type: "application/msword" });
+  saveAs(blob, filename.replace(/\s+/g, "_") + ".doc");
 }
 
 // ---------- DOCX ----------

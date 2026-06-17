@@ -11,7 +11,7 @@ import { Badge, Icon } from "@/components/shared";
 import { useApp, uid } from "@/lib/store";
 import { TEMPLATES } from "@/lib/brand";
 import { A4Preview } from "@/components/resume/A4Preview";
-import { exportResumePDF, exportResumeDOCX, exportResumeTXT } from "@/lib/exporter";
+import { exportResumePDF, exportResumeDOCX, exportResumeTXT, exportResumeDOC } from "@/lib/exporter";
 import { blankResume } from "@/lib/parser";
 import { toast } from "sonner";
 import type { ResumeData, ResumeExperience, ResumeEducation, ResumeSkill, ResumeTemplate } from "@/lib/types";
@@ -113,6 +113,13 @@ export function Builder() {
     log({ actor: "you", action: "Exported resume (TXT)", category: "export", details: `${resume.name}_resume.txt`, severity: "info" });
     toast.success("TXT exported.");
   };
+  const onExportDOC = () => {
+    const template = resume.template === "modern" ? "modern" : resume.template === "minimal" || resume.template === "ats-professional" ? "minimal" : "professional";
+    exportResumeDOC(resume, template as any);
+    incUsage("downloads");
+    log({ actor: "you", action: "Exported resume (DOC — strict A4)", category: "export", details: `${resume.name}_resume.doc · Times New Roman 12pt · @page A4`, severity: "info" });
+    toast.success("DOC exported — strict A4 one-page layout.");
+  };
 
   // Rough one-page estimate based on content volume
   const contentLen = (resume.summary?.length || 0) +
@@ -144,6 +151,9 @@ export function Builder() {
           </select>
           <Button variant="outline" size="sm" onClick={onExportTXT} className="gap-1.5">
             <Icon name="FileText" className="w-3.5 h-3.5" /> TXT
+          </Button>
+          <Button variant="outline" size="sm" onClick={onExportDOC} className="gap-1.5" title="Strict A4 one-page Word document (Times New Roman 12pt)">
+            <Icon name="FileText" className="w-3.5 h-3.5" /> DOC
           </Button>
           <Button variant="outline" size="sm" onClick={onExportDOCX} disabled={exporting} className="gap-1.5">
             <Icon name="FileType" className="w-3.5 h-3.5" /> DOCX

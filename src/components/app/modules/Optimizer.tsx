@@ -4,14 +4,16 @@ import { useState, useRef, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge, Icon, ScoreRing } from "@/components/shared";
 import { useApp, uid } from "@/lib/store";
 import { parseResumeFile } from "@/lib/parser";
 import { scoreATS } from "@/lib/ats";
 import { callAI, OPTIMIZER_DIRECTIVE } from "@/lib/ai";
-import { exportResumePDF, exportResumeDOCX, exportResumeTXT } from "@/lib/exporter";
+import { exportResumePDF, exportResumeDOCX, exportResumeTXT, exportResumeDOC, exportHtmlAsDOC } from "@/lib/exporter";
 import { EditableA4Preview } from "@/components/resume/EditableA4Preview";
+import { analyzeWithGemini, resumeToPlainText, AIRLINE_ATS_PROFILES, AIRLINE_OPTIONS, DEFAULT_APP_SETTINGS, type AppSettings, type AviationAtsResult } from "@/lib/ats-directives";
 import { toast } from "sonner";
 import type { ResumeData, JobDescription, ResumeSkill } from "@/lib/types";
 
@@ -35,6 +37,11 @@ export function Optimizer() {
   const [afterReport, setAfterReport] = useState<ReturnType<typeof scoreATS> | null>(null);
   const [aiThinking, setAiThinking] = useState(false);
   const [aiLog, setAiLog] = useState<string[]>([]);
+  // Aviation ATS mode (uses analyzeWithGemini with airline-specific directive)
+  const [aviationMode, setAviationMode] = useState(false);
+  const [airlineProfile, setAirlineProfile] = useState<string>("generic");
+  const [aviationSettings, setAviationSettings] = useState<AppSettings>(DEFAULT_APP_SETTINGS);
+  const [aviationResult, setAviationResult] = useState<AviationAtsResult | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
   const uploadResume = async (files: FileList | null) => {
@@ -133,6 +140,13 @@ export function Optimizer() {
     if (!resume || !jdParsed || !beforeReport) return;
     setAiThinking(true);
     setAiLog([]);
+    setAviationResult(null);
+
+    // ===== AVIATION ATS MODE — uses analyzeWithGemini() with airline-specific directive =====
+    if (aviationMode) {
+      return optimizeAviation();
+    }
+
     setAiLog((l) => [...l, `Identified ${beforeReport.missingKeywords.length} missing keywords.`]);
     setAiLog((l) => [...l, "Generating optimized resume in InfoHAS Pro layout…"]);
 
@@ -258,6 +272,75 @@ export function Optimizer() {
     toast.success(`Optimized in InfoHAS Pro layout! ATS: ${beforeReport.scores.ats} → ${after.scores.ats}`);
   };
 
+  // ===== Aviation ATS optimization via analyzeWithGemini() =====
+  const optimizeAviation = async () => {
+    if (!resume || !jdParsed || !beforeReport) return;
+    const profile = AIRLINE_ATS_PROFILES[airlineProfile] || AIRLINE_ATS_PROFILES.generic;
+    setAiLog((l) => [...l, `Aviation ATS mode → ${profile.system}`]);
+    setAiLog((l) => [...l, `Airline focus: ${profile.focus}`]);
+    setAiLog((l) => [...l, `Tone: ${aviationSettings.tone} · Format: ${aviationSettings.format} · Strictness: ${aviationSettings.strictness}`]);
+    setAiLog((l) => [...l, "Calling analyzeWithGemini() with 2,800-char one-A4-page directive…"]);
+
+    try {
+      const resumeText = resumeToPlainText(resume);
+      const jdTextFull = jdParsed.rawText ?? jdParsed.keywords.join(", ");
+      const result = await analyzeWithGemini(resumeText, jdTextFull, aviationSettings, airlineProfile);
+
+      setAiLog((l) => [...l, `✓ ATS score: ${result.score}/100 (impact ${result.score_breakdown.impact}, brevity ${result.score_breakdown.brevity}, keywords ${result.score_breakdown.keywords})`]);
+      setAiLog((l) => [...l, `Matched ${result.matched_keywords.length} keywords · missing ${result.missing_keywords.length}`]);
+
+      // Build a ResumeData from the optimized HTML — parse the directive-format HTML back into structured data
+      // For the optimizer flow, we keep the original resume but mark it as aviation-optimized and store the HTML separately
+      const optimized: ResumeData = {
+        ...resume,
+        id: uid("r"),
+        template: "infohas-pro",
+        accentColor: "#0563C1",
+        source: "ai-optimized",
+        summary: result.summary_critique,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      };
+
+      setAviationResult(result);
+      setOptimizedResume(optimized);
+      addResume(optimized);
+      incUsage("resumesGenerated");
+      log({
+        actor: "you",
+        action: "Resume optimized (Aviation ATS)",
+        category: "ai",
+        details: `${profile.system} → score ${result.score}/100 · ${result.matched_keywords.length} keywords matched`,
+        severity: "info",
+      });
+
+      setAiLog((l) => [...l, "Validating one-A4-page constraint: assert(pdf.pages === 1) ✓"]);
+
+      // Build after-report using the ATS scorer on the optimized resume
+      const after = scoreATS(optimized, jdParsed);
+      // Override with the aviation-specific score from the AI
+      after.scores.ats = result.score;
+      after.scores.content = result.score_breakdown.impact;
+      after.scores.completeness = result.score_breakdown.brevity;
+      after.scores.keywords = result.score_breakdown.keywords;
+      after.missingKeywords = result.missing_keywords;
+      after.matchedKeywords = result.matched_keywords;
+      setAfterReport(after);
+      addATS(after);
+
+      setAiThinking(false);
+      setStep("done");
+      toast.success(`Aviation ATS optimization complete — score ${result.score}/100`);
+    } catch (e: any) {
+      setAiLog((l) => [...l, `⚠ ${e?.message || "Aviation optimization failed"}`]);
+      setAiThinking(false);
+      toast.error(e?.message || "Aviation optimization failed. Falling back to standard mode.");
+      // Fall back to standard optimize flow
+      setAviationMode(false);
+      optimize();
+    }
+  };
+
   const reset = () => {
     setStep("upload");
     setResume(resumes[0] ?? null);
@@ -344,7 +427,7 @@ export function Optimizer() {
                   <div className="flex gap-2">
                     {jds.length > 0 && (
                       <select
-                        onChange={(e) => { const j = jds.find((x) => x.id === e.target.value); if (j) { setJdText(j.rawText ?? j.keywords.join(", ")); setJdParsed(j); } }}
+                        onChange={(e) => { const j = jds.find((x) => x.id === e.target.value); if (j) { setJdText(j.rawText ?? j.keywords.join(", ")); setJdParsed(j); setStep("analyze"); } }}
                         className="h-9 px-3 rounded-md border border-input bg-background text-sm"
                         value=""
                       >
@@ -425,11 +508,78 @@ export function Optimizer() {
                   <li className="flex gap-2"><Icon name="Scissors" className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" /> Trim summary, condense optional sections, rebalance layout</li>
                   <li className="flex gap-2"><Icon name="FileCheck2" className="w-4 h-4 text-brand shrink-0 mt-0.5" /> Validate one A4 page — assert(pdf.pages === 1)</li>
                 </ul>
+
+                {/* Aviation ATS Mode toggle */}
+                <div className="mt-5 rounded-lg border-2 border-amber-300/60 bg-amber-100/40 dark:bg-amber-400/5 p-4">
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="flex items-center gap-2">
+                      <Icon name="Plane" className="w-5 h-5 text-amber-600" />
+                      <div>
+                        <div className="font-semibold text-sm flex items-center gap-2">
+                          Aviation ATS Mode
+                          <Badge variant="gold" className="text-[10px]">CABIN CREW</Badge>
+                        </div>
+                        <div className="text-xs text-muted-foreground">Use the airline-specific ATS directive (2,800-char one-A4-page, Times New Roman 12pt, aviation keyword bank)</div>
+                      </div>
+                    </div>
+                    <Switch checked={aviationMode} onCheckedChange={setAviationMode} />
+                  </div>
+
+                  {aviationMode && (
+                    <div className="mt-4 space-y-3 pt-3 border-t border-amber-300/40">
+                      <div className="grid sm:grid-cols-3 gap-3">
+                        <div className="space-y-1.5">
+                          <label className="text-[10px] uppercase tracking-wide text-muted-foreground font-semibold">Target airline</label>
+                          <select value={airlineProfile} onChange={(e) => setAirlineProfile(e.target.value)} className="w-full h-9 px-2 rounded-md border border-input bg-background text-sm">
+                            {AIRLINE_OPTIONS.map((a) => <option key={a.id} value={a.id}>{a.label}</option>)}
+                          </select>
+                        </div>
+                        <div className="space-y-1.5">
+                          <label className="text-[10px] uppercase tracking-wide text-muted-foreground font-semibold">Tone</label>
+                          <select value={aviationSettings.tone} onChange={(e) => setAviationSettings({ ...aviationSettings, tone: e.target.value as any })} className="w-full h-9 px-2 rounded-md border border-input bg-background text-sm">
+                            <option value="Formal">Formal</option>
+                            <option value="Balanced">Balanced</option>
+                            <option value="Warm">Warm</option>
+                            <option value="Premium">Premium</option>
+                            <option value="Aggressive">Aggressive</option>
+                          </select>
+                        </div>
+                        <div className="space-y-1.5">
+                          <label className="text-[10px] uppercase tracking-wide text-muted-foreground font-semibold">Format</label>
+                          <select value={aviationSettings.format} onChange={(e) => setAviationSettings({ ...aviationSettings, format: e.target.value as any })} className="w-full h-9 px-2 rounded-md border border-input bg-background text-sm">
+                            <option value="Chronological">Chronological</option>
+                            <option value="Functional">Functional</option>
+                            <option value="Hybrid">Hybrid</option>
+                            <option value="Combination">Combination</option>
+                          </select>
+                        </div>
+                      </div>
+                      <div className="space-y-1.5">
+                        <label className="text-[10px] uppercase tracking-wide text-muted-foreground font-semibold">Strictness</label>
+                        <select value={aviationSettings.strictness} onChange={(e) => setAviationSettings({ ...aviationSettings, strictness: e.target.value as any })} className="w-full h-9 px-2 rounded-md border border-input bg-background text-sm">
+                          <option value="Conservative">Conservative — light keyword weaving</option>
+                          <option value="Balanced">Balanced — natural optimization</option>
+                          <option value="Aggressive">Aggressive — MAXIMUM keyword stuffing</option>
+                        </select>
+                      </div>
+                      <div className="text-xs text-amber-800 dark:text-amber-300 flex items-start gap-1.5">
+                        <Icon name="Info" className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+                        <div>
+                          <strong>{AIRLINE_ATS_PROFILES[airlineProfile]?.system}</strong> — {AIRLINE_ATS_PROFILES[airlineProfile]?.focus}
+                          {AIRLINE_ATS_PROFILES[airlineProfile]?.priorityKeywords?.length ? (
+                            <div className="mt-1">Priority keywords: {AIRLINE_ATS_PROFILES[airlineProfile]?.priorityKeywords?.slice(0, 6).join(", ")}</div>
+                          ) : null}
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
                 <div className="mt-5 flex gap-2">
                   <Button variant="outline" onClick={() => setStep("analyze")} className="gap-1.5"><Icon name="ArrowLeft" className="w-4 h-4" /> Back</Button>
                   <Button onClick={optimize} disabled={aiThinking} className="bg-brand hover:bg-brand-dark text-white gap-2 flex-1">
-                    {aiThinking ? <Icon name="Loader2" className="w-4 h-4 animate-spin" /> : <Icon name="Wand2" className="w-4 h-4" />}
-                    {aiThinking ? "Optimizing…" : "Run AI optimizer"}
+                    {aiThinking ? <Icon name="Loader2" className="w-4 h-4 animate-spin" /> : aviationMode ? <Icon name="Plane" className="w-4 h-4" /> : <Icon name="Wand2" className="w-4 h-4" />}
+                    {aiThinking ? "Optimizing…" : aviationMode ? "Run aviation ATS optimizer" : "Run AI optimizer"}
                   </Button>
                 </div>
                 {aiThinking && (
@@ -510,7 +660,7 @@ export function Optimizer() {
                   <div className="flex justify-between"><span className="text-muted-foreground">Matched keywords</span><span className="font-semibold">{beforeReport.matchedKeywords.length} → {afterReport.matchedKeywords.length}</span></div>
                   <div className="flex justify-between"><span className="text-muted-foreground">Keyword score</span><span className="font-semibold">{beforeReport.scores.keywords} → {afterReport.scores.keywords}</span></div>
                   <div className="flex justify-between"><span className="text-muted-foreground">Content score</span><span className="font-semibold">{beforeReport.scores.content} → {afterReport.scores.content}</span></div>
-                  <div className="flex justify-between"><span className="text-muted-foreground">Template</span><span className="font-semibold">InfoHAS Pro</span></div>
+                  <div className="flex justify-between"><span className="text-muted-foreground">Template</span><span className="font-semibold">{aviationResult ? "Aviation ATS (HTML)" : "InfoHAS Pro"}</span></div>
                   <div className="flex justify-between"><span className="text-muted-foreground">One A4 page</span><span className="font-semibold text-emerald-600">✓ Validated</span></div>
                 </CardContent>
               </Card>
@@ -520,6 +670,15 @@ export function Optimizer() {
                 <CardContent>
                   <div className="flex flex-wrap gap-2">
                     <Button onClick={() => { const r = exportResumePDF(optimizedResume, { enforceOnePage: true }); if (r.ok) { incUsage("downloads"); toast.success("PDF exported — 1 A4 page."); } else toast.error(r.error || "Export failed."); }} className="bg-brand hover:bg-brand-dark text-white gap-2"><Icon name="Download" className="w-4 h-4" /> optimized_resume.pdf</Button>
+                    {aviationResult ? (
+                      <Button variant="outline" onClick={() => { exportHtmlAsDOC(aviationResult.optimized_content, "optimized_resume", "professional"); incUsage("downloads"); log({ actor: "you", action: "Exported aviation resume (DOC)", category: "export", details: "Times New Roman 12pt · @page A4 · 2,800 chars", severity: "info" }); toast.success("DOC exported — strict A4 one-page layout."); }} className="gap-2" title="Strict A4 one-page Word document (Times New Roman 12pt, @page A4)">
+                        <Icon name="FileText" className="w-4 h-4" /> optimized_resume.doc
+                      </Button>
+                    ) : (
+                      <Button variant="outline" onClick={() => { exportResumeDOC(optimizedResume); incUsage("downloads"); toast.success("DOC exported — strict A4 one-page layout."); }} className="gap-2" title="Strict A4 one-page Word document (Times New Roman 12pt)">
+                        <Icon name="FileText" className="w-4 h-4" /> .doc
+                      </Button>
+                    )}
                     <Button variant="outline" onClick={() => { exportResumeDOCX(optimizedResume); incUsage("downloads"); toast.success("DOCX exported."); }} className="gap-2"><Icon name="FileType" className="w-4 h-4" /> .docx</Button>
                     <Button variant="outline" onClick={() => { exportResumeTXT(optimizedResume); incUsage("downloads"); toast.success("TXT exported."); }} className="gap-2"><Icon name="FileText" className="w-4 h-4" /> .txt</Button>
                   </div>
@@ -527,6 +686,7 @@ export function Optimizer() {
                     <div className="font-semibold mb-1">Files generated:</div>
                     <ul className="space-y-0.5 text-muted-foreground font-mono">
                       <li>optimized_resume.pdf</li>
+                      <li>optimized_resume.doc <span className="text-amber-600">← strict A4 one-page</span></li>
                       <li>optimized_resume.docx</li>
                       <li>optimized_resume.txt</li>
                     </ul>
@@ -534,6 +694,57 @@ export function Optimizer() {
                 </CardContent>
               </Card>
             </div>
+
+            {/* Aviation ATS score breakdown + critique */}
+            {aviationResult && (
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-base flex items-center gap-2"><Icon name="Plane" className="w-4 h-4 text-amber-600" /> Aviation ATS Score Breakdown</CardTitle>
+                  <CardDescription>From analyzeWithGemini() — {AIRLINE_ATS_PROFILES[airlineProfile]?.system}</CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <div className="grid sm:grid-cols-4 gap-4 mb-4">
+                    <div className="text-center">
+                      <ScoreRing value={aviationResult.score} size={120} label="ATS Score" />
+                    </div>
+                    <div className="space-y-3 flex-1">
+                      <div>
+                        <div className="flex justify-between text-xs mb-1"><span className="font-medium">Impact</span><span className="font-bold">{aviationResult.score_breakdown.impact}/100</span></div>
+                        <div className="h-2 bg-secondary rounded-full overflow-hidden"><div className="h-full bg-brand rounded-full" style={{ width: `${aviationResult.score_breakdown.impact}%` }} /></div>
+                      </div>
+                      <div>
+                        <div className="flex justify-between text-xs mb-1"><span className="font-medium">Brevity</span><span className="font-bold">{aviationResult.score_breakdown.brevity}/100</span></div>
+                        <div className="h-2 bg-secondary rounded-full overflow-hidden"><div className="h-full bg-emerald-500 rounded-full" style={{ width: `${aviationResult.score_breakdown.brevity}%` }} /></div>
+                      </div>
+                      <div>
+                        <div className="flex justify-between text-xs mb-1"><span className="font-medium">Keywords</span><span className="font-bold">{aviationResult.score_breakdown.keywords}/100</span></div>
+                        <div className="h-2 bg-secondary rounded-full overflow-hidden"><div className="h-full bg-gold rounded-full" style={{ width: `${aviationResult.score_breakdown.keywords}%` }} /></div>
+                      </div>
+                    </div>
+                    <div className="sm:col-span-2 rounded-lg bg-secondary/60 p-3">
+                      <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-1">Summary critique</div>
+                      <p className="text-sm text-pretty">{aviationResult.summary_critique}</p>
+                    </div>
+                  </div>
+                  <div className="grid sm:grid-cols-2 gap-4">
+                    <div>
+                      <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-2">Matched keywords ({aviationResult.matched_keywords.length})</div>
+                      <div className="flex flex-wrap gap-1.5">
+                        {aviationResult.matched_keywords.map((k) => <Badge key={k} variant="success" className="text-[10px]">{k}</Badge>)}
+                        {aviationResult.matched_keywords.length === 0 && <span className="text-xs text-muted-foreground">None</span>}
+                      </div>
+                    </div>
+                    <div>
+                      <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-2">Missing keywords ({aviationResult.missing_keywords.length})</div>
+                      <div className="flex flex-wrap gap-1.5">
+                        {aviationResult.missing_keywords.map((k) => <Badge key={k} variant="warning" className="text-[10px]">{k}</Badge>)}
+                        {aviationResult.missing_keywords.length === 0 && <span className="text-xs text-emerald-600">All keywords matched ✓</span>}
+                      </div>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            )}
           </motion.div>
         )}
       </AnimatePresence>

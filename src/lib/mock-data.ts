@@ -348,6 +348,26 @@ export const SEED_PROMPTS: PromptTemplate[] = [
     isActive: true,
     variables: ["role", "company", "resume", "jd"],
   },
+  {
+    id: "pt_004",
+    name: "Aviation Cabin Crew ATS — 2,800-char One-Page",
+    category: "ats",
+    content:
+      "ACT AS: Senior ATS Optimization Expert and Master Executive Resume Writer.\n\nOBJECTIVE: Optimise for maximum ATS score. Rewrite the resume to FILL EXACTLY ONE A4 PAGE (12pt font). Strategically weave in exact keywords, hard skills, and industry terminology to guarantee a 90%+ match rate.\n\nCONTEXT:\n- ATS SYSTEM: {{ats_system}} ({{ats_focus}})\n- INDUSTRY KEYWORDS: {{aviation_keywords}}\n- TONE: {{tone}}\n- FORMAT STYLE: {{format}}\n- STRATEGY: {{strictness}}\n\nINPUT DATA:\n[RESUME]: {{resume}}\n[JOB DESCRIPTION]: {{jd}}\n\nTASK 1: SCORING (Calculate ATS Score, Impact, Brevity, Keywords).\nTASK 2: REWRITE (STRICT PLAIN TEXT).\n\nCRITICAL LENGTH ENFORCEMENT (NON-NEGOTIABLE & STRICT):\nThe generated resume MUST contain EXACTLY 2,800 characters (excluding HTML tags). Not less, not more.\n- 2,100 characters is too short. DO NOT OUTPUT SHORT TEXT.\n- 3,000+ characters will cause page overflow. DO NOT EXCEED.\n- HOW TO HIT EXACTLY 2800 CHARACTERS INTELLIGENTLY:\n  1. If short: Expand content intelligently without filler. Add deep technical context. Improve impact-driven bullet points. Use 5-7 detailed bullets for the 2 most recent roles.\n  2. If too long: Summarize older roles (older than 5 years) to a single line. Keep summary to exactly 3 lines.\n\nFORMATTING RULES (NON-NEGOTIABLE):\n1. NO Emojis, Icons, Graphics, Colors, Tables, Columns, or Decorative Symbols.\n2. NO Underlines or horizontal rules (<hr>).\n3. FONT: Times New Roman, Size 12.\n\nSTRUCTURE:\n1. HEADER: Name (H1, Uppercase, Bold, LEFT ALIGNED), Contact Info (LEFT ALIGNED).\n2. SECTIONS (H3): PROFESSIONAL SUMMARY, EXPERIENCE, EDUCATION, SKILLS.\n3. EXPERIENCE ENTRIES: <h4><strong>Job Title</strong> | <strong>Company</strong>, Location | <strong>YYYY to YYYY</strong></h4>\n4. EDUCATION ENTRIES: <h4><strong>Degree</strong> | <strong>School</strong> | <strong>YYYY to YYYY</strong></h4>\n5. CONTENT: Use <strong> tags for bolding. NO markdown asterisks.\n\nRETURN JSON FORMAT ONLY:\n{\n  \"score\": number,\n  \"score_breakdown\": { \"impact\": number, \"brevity\": number, \"keywords\": number },\n  \"summary_critique\": \"string\",\n  \"missing_keywords\": [\"string\"],\n  \"matched_keywords\": [\"string\"],\n  \"optimized_content\": \"Valid HTML string...\"\n}",
+    version: 1,
+    isActive: true,
+    variables: ["ats_system", "ats_focus", "aviation_keywords", "tone", "format", "strictness", "resume", "jd"],
+  },
+  {
+    id: "pt_005",
+    name: "Cabin Crew Keyword Injection",
+    category: "keywords",
+    content:
+      "You are an aviation ATS keyword specialist. Analyze the candidate's resume and the target cabin crew job description. Identify which aviation keywords are missing and weave them naturally into the resume's experience and skills sections.\n\nAVIATION KEYWORD BANK:\n{{aviation_keywords}}\n\nCandidate resume:\n{{resume}}\n\nTarget job description:\n{{jd}}\n\nReturn JSON: { \"missing\": [\"keyword1\", ...], \"matched\": [\"keyword1\", ...], \"injection_suggestions\": [{ \"section\": \"experience\", \"entry\": \"Job Title at Company\", \"suggestion\": \"Rewritten bullet with keyword\" }] }",
+    version: 1,
+    isActive: true,
+    variables: ["aviation_keywords", "resume", "jd"],
+  },
 ];
 
 export const SEED_BRANDING: BrandingConfig = {
