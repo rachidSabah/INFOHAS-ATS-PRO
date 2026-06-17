@@ -432,7 +432,7 @@ export function resumeToDirectiveHtml(r: ResumeData): string {
 
   const parts: string[] = [];
   // Header
-  parts.push(`<h1>${escapeHtml(r.name || "YOUR NAME")}</h1>`);
+  parts.push(`<h1>${escapeHtml((r.name || "YOUR NAME").toUpperCase())}</h1>`);
   const contactBits = [r.contact.email, r.contact.phone, r.contact.location, r.contact.linkedin, r.contact.github, r.contact.website].filter(Boolean);
   if (contactBits.length) parts.push(`<p class="contact">${contactBits.map(escapeHtml).join(" | ")}</p>`);
 

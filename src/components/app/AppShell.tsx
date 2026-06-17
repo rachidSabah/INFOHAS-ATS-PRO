@@ -63,7 +63,7 @@ export function AppShell() {
       <Sidebar />
       <div className="flex-1 flex flex-col min-w-0">
         <TopBar />
-        <main className="flex-1 p-4 sm:p-6 max-w-[1400px] w-full mx-auto">
+        <main className="flex-1 p-4 sm:p-6 max-w-[1400px] w-full mx-auto overflow-x-hidden">
           <AnimatePresence mode="wait">
             <motion.div
               key={view}
