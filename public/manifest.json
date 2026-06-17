@@ -1,0 +1,30 @@
+{
+  "name": "ResumeAI Pro — Free AI Resume Builder & ATS Checker",
+  "short_name": "ResumeAI Pro",
+  "description": "Premium, completely free AI-powered resume builder, ATS checker, optimizer, cover letter generator, and interview prep platform.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#0B1F3A",
+  "theme_color": "#1154A3",
+  "categories": ["productivity", "business", "career"],
+  "lang": "en",
+  "dir": "ltr",
+  "icons": [
+    { "src": "/brand/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/brand/icon-256.png", "sizes": "256x256", "type": "image/png", "purpose": "any" },
+    { "src": "/brand/icon-384.png", "sizes": "384x384", "type": "image/png", "purpose": "any" },
+    { "src": "/brand/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/brand/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" },
+    { "src": "/brand/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "maskable" }
+  ],
+  "shortcuts": [
+    { "name": "ATS Checker", "short_name": "ATS", "url": "/#ats", "icons": [{ "src": "/brand/icon-192.png", "sizes": "192x192" }] },
+    { "name": "Resume Builder", "short_name": "Builder", "url": "/#builder", "icons": [{ "src": "/brand/icon-192.png", "sizes": "192x192" }] },
+    { "name": "Cover Letter", "short_name": "Cover", "url": "/#cover-letter", "icons": [{ "src": "/brand/icon-192.png", "sizes": "192x192" }] }
+  ],
+  "screenshots": [
+    { "src": "/brand/og-image.png", "sizes": "1200x630", "type": "image/png", "form_factor": "wide" }
+  ]
+}
