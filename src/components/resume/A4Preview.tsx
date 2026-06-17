@@ -92,7 +92,6 @@ function InfohasProTemplate({ resume, accent }: { resume: ResumeData; accent: st
           }}
         >
           {resume.photoUrl ? (
-            // eslint-disable-next-line @next/next/no-img-element
             <img
               src={resume.photoUrl}
               alt={resume.name}

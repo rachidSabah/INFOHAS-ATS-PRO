@@ -4,12 +4,12 @@
 import { create } from "zustand";
 import { persist, createJSONStorage } from "zustand/middleware";
 import type {
-  User, ResumeData, JobDescription, AIProvider, PromptTemplate,
+  User, ResumeData, JobDescription, AIProvider, AIProviderLog, AIProviderSettings, PromptTemplate,
   BrandingConfig, FeatureFlags, AuditLog, ViewKey, CoverLetter, InterviewPackage, ATSReport,
 } from "./types";
 import {
-  SEED_USER, SEED_RESUMES, SEED_JDS, SEED_PROVIDERS, SEED_PROMPTS,
-  SEED_BRANDING, SEED_FLAGS, SEED_LOGS, SEED_COVER_LETTERS, SEED_INTERVIEW, SEED_ATS_REPORTS,
+  SEED_USER, SEED_RESUMES, SEED_JDS, SEED_PROVIDERS, SEED_PROVIDER_LOGS, SEED_PROVIDER_SETTINGS,
+  SEED_PROMPTS, SEED_BRANDING, SEED_FLAGS, SEED_LOGS, SEED_COVER_LETTERS, SEED_INTERVIEW, SEED_ATS_REPORTS,
 } from "./mock-data";
 import { BRAND } from "./brand";
 
@@ -36,6 +36,8 @@ interface AppState {
 
   // admin
   providers: AIProvider[];
+  providerLogs: AIProviderLog[];
+  providerSettings: AIProviderSettings;
   prompts: PromptTemplate[];
   branding: BrandingConfig;
   flags: FeatureFlags;
@@ -84,6 +86,15 @@ interface AppState {
   addProvider: (p: AIProvider) => void;
   updateProvider: (id: string, patch: Partial<AIProvider>) => void;
   removeProvider: (id: string) => void;
+  duplicateProvider: (id: string) => string | null;
+  setDefaultProvider: (id: string) => void;
+  toggleFallback: (id: string) => void;
+  reorderFallback: (id: string, direction: "up" | "down") => void;
+  // provider logs
+  addProviderLog: (l: AIProviderLog) => void;
+  clearProviderLogs: (providerId?: string) => void;
+  // provider settings
+  updateProviderSettings: (patch: Partial<AIProviderSettings>) => void;
 
   // prompts
   addPrompt: (p: PromptTemplate) => void;
@@ -125,6 +136,8 @@ export const useApp = create<AppState>()(
       atsReports: SEED_ATS_REPORTS,
 
       providers: SEED_PROVIDERS,
+      providerLogs: SEED_PROVIDER_LOGS,
+      providerSettings: SEED_PROVIDER_SETTINGS,
       prompts: SEED_PROMPTS,
       branding: SEED_BRANDING,
       flags: SEED_FLAGS,
@@ -190,8 +203,90 @@ export const useApp = create<AppState>()(
 
       addProvider: (p) => set((s) => ({ providers: [...s.providers, p] })),
       updateProvider: (id, patch) =>
-        set((s) => ({ providers: s.providers.map((p) => (p.id === id ? { ...p, ...patch } : p)) })),
-      removeProvider: (id) => set((s) => ({ providers: s.providers.filter((p) => p.id !== id) })),
+        set((s) => ({ providers: s.providers.map((p) => (p.id === id ? { ...p, ...patch, updatedAt: new Date().toISOString() } : p)) })),
+      removeProvider: (id) =>
+        set((s) => ({
+          providers: s.providers.filter((p) => p.id !== id),
+          providerLogs: s.providerLogs.filter((l) => l.providerId !== id),
+          providerSettings: {
+            ...s.providerSettings,
+            defaultProviderId: s.providerSettings.defaultProviderId === id ? null : s.providerSettings.defaultProviderId,
+            fallbackProviderIds: s.providerSettings.fallbackProviderIds.filter((fid) => fid !== id),
+          },
+        })),
+      duplicateProvider: (id) => {
+        const src = get().providers.find((p) => p.id === id);
+        if (!src) return null;
+        const newId = uid("p");
+        const copy: AIProvider = {
+          ...src,
+          id: newId,
+          name: `${src.name} (copy)`,
+          isDefault: false,
+          isBuiltIn: false,
+          isActive: false,
+          status: "untested",
+          usage: { requests: 0, tokens: 0, errors: 0, avgLatencyMs: 0, cost: 0 },
+          lastUsedAt: undefined,
+        };
+        set((s) => ({ providers: [...s.providers, copy] }));
+        return newId;
+      },
+      setDefaultProvider: (id) =>
+        set((s) => ({
+          providers: s.providers.map((p) => ({ ...p, isDefault: p.id === id })),
+          providerSettings: { ...s.providerSettings, defaultProviderId: id },
+        })),
+      toggleFallback: (id) =>
+        set((s) => {
+          const isIn = s.providerSettings.fallbackProviderIds.includes(id);
+          return {
+            providers: s.providers.map((p) => (p.id === id ? { ...p, isFallback: !isIn } : p)),
+            providerSettings: {
+              ...s.providerSettings,
+              fallbackProviderIds: isIn
+                ? s.providerSettings.fallbackProviderIds.filter((fid) => fid !== id)
+                : [...s.providerSettings.fallbackProviderIds, id],
+            },
+          };
+        }),
+      reorderFallback: (id, direction) =>
+        set((s) => {
+          const ids = [...s.providerSettings.fallbackProviderIds];
+          const i = ids.indexOf(id);
+          if (i < 0) return s;
+          const j = direction === "up" ? i - 1 : i + 1;
+          if (j < 0 || j >= ids.length) return s;
+          [ids[i], ids[j]] = [ids[j], ids[i]];
+          return { providerSettings: { ...s.providerSettings, fallbackProviderIds: ids } };
+        }),
+      addProviderLog: (l) =>
+        set((s) => ({
+          providerLogs: [l, ...s.providerLogs].slice(0, 1000),
+          providers: s.providers.map((p) =>
+            p.id === l.providerId
+              ? {
+                  ...p,
+                  lastUsedAt: l.createdAt,
+                  status: l.status === "success" ? "healthy" : l.status === "timeout" || l.status === "rate_limited" ? "degraded" : "down",
+                  usage: {
+                    ...p.usage,
+                    requests: p.usage.requests + 1,
+                    tokens: p.usage.tokens + (l.inputTokens ?? 0) + (l.outputTokens ?? 0),
+                    errors: p.usage.errors + (l.status === "success" ? 0 : 1),
+                    avgLatencyMs: Math.round((p.usage.avgLatencyMs * p.usage.requests + l.latencyMs) / (p.usage.requests + 1)),
+                    cost: p.usage.cost + (l.inputTokens ?? 0) * (p.costPerInputToken ?? 0) + (l.outputTokens ?? 0) * (p.costPerOutputToken ?? 0),
+                  },
+                }
+              : p
+          ),
+        })),
+      clearProviderLogs: (providerId) =>
+        set((s) => ({
+          providerLogs: providerId ? s.providerLogs.filter((l) => l.providerId !== providerId) : [],
+        })),
+      updateProviderSettings: (patch) =>
+        set((s) => ({ providerSettings: { ...s.providerSettings, ...patch } })),
 
       addPrompt: (p) => set((s) => ({ prompts: [...s.prompts, p] })),
       updatePrompt: (id, patch) =>
@@ -231,6 +326,8 @@ export const useApp = create<AppState>()(
         interviews: s.interviews,
         atsReports: s.atsReports,
         providers: s.providers,
+        providerLogs: s.providerLogs,
+        providerSettings: s.providerSettings,
         prompts: s.prompts,
         branding: s.branding,
         flags: s.flags,

@@ -221,19 +221,68 @@ export interface AIProvider {
   id: string;
   name: string;
   type: AIProviderType;
-  apiUrl?: string;
-  apiKey?: string; // encrypted in real impl; here we just store (sandbox)
-  headersJson?: string;
-  parametersJson?: string;
+  apiUrl?: string;          // base URL (alias of base_url)
+  baseUrl?: string;         // base URL (canonical name from spec)
+  apiKey?: string;          // encrypted at rest in production
+  headersJson?: string;     // custom headers (JSON)
+  parametersJson?: string;  // custom parameters (JSON)
+  requestTemplate?: string; // for custom providers: request body template (JSON with {{vars}})
+  responsePath?: string;    // for custom providers: JSON path to extract text (e.g. "choices[0].message.content")
+  streamingEnabled?: boolean;
   modelName?: string;
   priority: number;
   isActive: boolean;
+  isDefault?: boolean;      // default provider for new requests
+  isFallback?: boolean;     // included in fallback chain
   isBuiltIn?: boolean;
   timeout: number;
   maxTokens: number;
   temperature: number;
-  status: "healthy" | "degraded" | "down";
-  usage: { requests: number; tokens: number; errors: number; avgLatencyMs: number };
+  retryAttempts?: number;
+  rateLimitPerMinute?: number;
+  // Puter.js-specific fields
+  applicationId?: string;
+  clientId?: string;
+  redirectUri?: string;
+  enabledModels?: string[];
+  // Auth type for custom providers
+  authType?: "bearer" | "header" | "query" | "none";
+  // Supports function calling
+  supportsFunctionCalling?: boolean;
+  // Cost estimation (USD per 1K tokens)
+  costPerInputToken?: number;
+  costPerOutputToken?: number;
+  status: "healthy" | "degraded" | "down" | "untested";
+  usage: { requests: number; tokens: number; errors: number; avgLatencyMs: number; cost: number };
+  lastUsedAt?: string;
+}
+
+export interface AIProviderLog {
+  id: string;
+  providerId: string;
+  providerName: string;
+  requestType: "chat" | "test" | "stream" | "embed";
+  modelName?: string;
+  status: "success" | "error" | "timeout" | "rate_limited";
+  latencyMs: number;
+  inputTokens?: number;
+  outputTokens?: number;
+  errorMessage?: string;
+  requestPreview?: string; // first 200 chars of the prompt
+  responsePreview?: string; // first 200 chars of the response
+  createdAt: string;
+}
+
+export interface AIProviderSettings {
+  defaultProviderId: string | null;
+  defaultModel: string;
+  fallbackProviderIds: string[]; // ordered
+  retryAttempts: number;
+  timeout: number;
+  rateLimitPerMinute: number;
+  enableFailover: boolean;
+  enableCaching: boolean;
+  enableCostTracking: boolean;
 }
 
 export interface PromptTemplate {
@@ -293,6 +342,9 @@ export type ViewKey =
   | "jd-scraper"
   | "ai-tools"
   | "ai-providers"
+  | "ai-models"
+  | "ai-settings"
+  | "ai-logs"
   | "prompts"
   | "branding"
   | "admin"

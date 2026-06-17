@@ -442,7 +442,7 @@ export function Optimizer() {
           </motion.div>
         )}
 
-        {/* Step 5: Done */}
+        {/* Step 5: Done — InfoHAS Pro layout with live editing + photo upload */}
         {step === "done" && optimizedResume && afterReport && beforeReport && (
           <motion.div key="done" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} className="space-y-4">
             <Card className="gradient-brand text-white">
@@ -461,9 +461,44 @@ export function Optimizer() {
                     <Badge variant="gold" className="text-sm">+{afterReport.scores.ats - beforeReport.scores.ats} pts</Badge>
                   </div>
                 </div>
-                <Button onClick={reset} variant="outline" className="bg-transparent border-white/40 text-white hover:bg-white/10 hover:text-white gap-2">
-                  <Icon name="RotateCcw" className="w-4 h-4" /> Optimize another
-                </Button>
+                <div className="flex gap-2">
+                  <Button onClick={() => { setOptimizedResume({ ...optimizedResume, photoUrl: "/brand/sample-photo.png" }); updateResume(optimizedResume.id, { photoUrl: "/brand/sample-photo.png" }); toast.success("Sample photo loaded — click the photo frame to replace it."); }} variant="outline" className="bg-white/10 border-white/40 text-white hover:bg-white/20 hover:text-white gap-2">
+                    <Icon name="ImagePlus" className="w-4 h-4" /> Load sample photo
+                  </Button>
+                  <Button onClick={reset} variant="outline" className="bg-transparent border-white/40 text-white hover:bg-white/10 hover:text-white gap-2">
+                    <Icon name="RotateCcw" className="w-4 h-4" /> Optimize another
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* Live-editable InfoHAS Pro preview */}
+            <Card>
+              <CardContent className="p-5">
+                <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
+                  <div>
+                    <h3 className="font-display text-lg font-bold flex items-center gap-2">
+                      <Icon name="FileText" className="w-4 h-4 text-brand" /> Optimized resume — InfoHAS Pro layout
+                    </h3>
+                    <p className="text-xs text-muted-foreground mt-0.5">
+                      Hover any section to see a <Icon name="Pencil" className="w-3 h-3 inline text-brand" /> pencil — click to edit live. Click the photo frame to upload your photo. Final step before export.
+                    </p>
+                  </div>
+                  <Badge variant="brand"><Icon name="Lock" className="w-3 h-3" /> One A4 page · validated</Badge>
+                </div>
+                <div className="rounded-xl bg-secondary/60 p-4 overflow-auto" style={{ maxHeight: "calc(100vh - 240px)" }}>
+                  <div className="flex justify-center">
+                    <EditableA4Preview
+                      resume={optimizedResume}
+                      onChange={(p) => {
+                        const next = { ...optimizedResume, ...p, updatedAt: new Date().toISOString() };
+                        setOptimizedResume(next);
+                        updateResume(next.id, p);
+                      }}
+                      scale={typeof window !== "undefined" && window.innerWidth < 768 ? 0.45 : typeof window !== "undefined" && window.innerWidth < 1280 ? 0.55 : 0.7}
+                    />
+                  </div>
+                </div>
               </CardContent>
             </Card>
 
@@ -475,6 +510,7 @@ export function Optimizer() {
                   <div className="flex justify-between"><span className="text-muted-foreground">Matched keywords</span><span className="font-semibold">{beforeReport.matchedKeywords.length} → {afterReport.matchedKeywords.length}</span></div>
                   <div className="flex justify-between"><span className="text-muted-foreground">Keyword score</span><span className="font-semibold">{beforeReport.scores.keywords} → {afterReport.scores.keywords}</span></div>
                   <div className="flex justify-between"><span className="text-muted-foreground">Content score</span><span className="font-semibold">{beforeReport.scores.content} → {afterReport.scores.content}</span></div>
+                  <div className="flex justify-between"><span className="text-muted-foreground">Template</span><span className="font-semibold">InfoHAS Pro</span></div>
                   <div className="flex justify-between"><span className="text-muted-foreground">One A4 page</span><span className="font-semibold text-emerald-600">✓ Validated</span></div>
                 </CardContent>
               </Card>

@@ -20,6 +20,8 @@ import { Users } from "./modules/Users";
 import { Analytics } from "./modules/Analytics";
 import { SuperAdmin } from "./modules/SuperAdmin";
 import { AIProviders } from "./modules/AIProviders";
+import { AIModels } from "./modules/AIModels";
+import { AIProviderSettings } from "./modules/AIProviderSettings";
 import { Prompts } from "./modules/Prompts";
 import { Branding } from "./modules/Branding";
 import { FeatureFlags } from "./modules/FeatureFlags";
@@ -44,6 +46,8 @@ const VIEW_COMPONENTS: Record<ViewKey, React.FC> = {
   analytics: Analytics,
   "super-admin": SuperAdmin,
   "ai-providers": AIProviders,
+  "ai-models": AIModels,
+  "ai-settings": AIProviderSettings,
   prompts: Prompts,
   branding: Branding,
   "feature-flags": FeatureFlags,

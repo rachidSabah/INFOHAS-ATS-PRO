@@ -1,9 +1,9 @@
 "use client";
 
-import { useRef, useState, useEffect } from "react";
+import { useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Icon } from "@/components/shared";
-import type { ResumeData, ResumeExperience, ResumeEducation, ResumeLanguage } from "@/lib/types";
+import type { ResumeData, ResumeLanguage } from "@/lib/types";
 import { uid } from "@/lib/store";
 
 /**
@@ -37,14 +37,11 @@ const BLUE = "#0563C1";
 
 export function EditableA4Preview({ resume, onChange, scale = 0.7, className }: EditableA4PreviewProps) {
   const [editing, setEditing] = useState<EditTarget>(null);
-  const [draft, setDraft] = useState<ResumeData>(resume);
   const fileRef = useRef<HTMLInputElement>(null);
 
-  useEffect(() => setDraft(resume), [resume]);
-
+  // No local draft — the parent owns the state. Edits call onChange() directly,
+  // which updates the parent's `resume` prop, which re-renders this component.
   const patch = (p: Partial<ResumeData>) => {
-    const next = { ...draft, ...p, updatedAt: new Date().toISOString() };
-    setDraft(next);
     onChange(p);
   };
 
@@ -101,7 +98,7 @@ export function EditableA4Preview({ resume, onChange, scale = 0.7, className }: 
                   width: "54mm",
                   height: "81mm",
                   border: `1.2pt solid ${BLUE}`,
-                  background: draft.photoUrl ? "transparent" : "#F8FAFC",
+                  background: resume.photoUrl ? "transparent" : "#F8FAFC",
                   display: "flex",
                   alignItems: "center",
                   justifyContent: "center",
@@ -112,9 +109,8 @@ export function EditableA4Preview({ resume, onChange, scale = 0.7, className }: 
                 }}
                 title="Click to upload profile photo"
               >
-                {draft.photoUrl ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img src={draft.photoUrl} alt={draft.name} style={{ width: "100%", height: "100%", objectFit: "cover", objectPosition: "center top" }} />
+                {resume.photoUrl ? (
+                  <img src={resume.photoUrl} alt={resume.name} style={{ width: "100%", height: "100%", objectFit: "cover", objectPosition: "center top" }} />
                 ) : (
                   <div style={{ textAlign: "center", color: "#94A3B8", fontSize: "8pt", padding: "4mm" }} className="group-hover:text-brand">
                     <div style={{ fontSize: "18pt", marginBottom: "2mm" }}>👤</div>
@@ -132,14 +128,14 @@ export function EditableA4Preview({ resume, onChange, scale = 0.7, className }: 
               </button>
 
               <div style={{ color: MAROON, fontWeight: 700, fontSize: "16pt", letterSpacing: "0.3pt", marginBottom: "1.5mm", lineHeight: 1.1 }}>
-                {(draft.name || "YOUR NAME").toUpperCase()}
+                {(resume.name || "YOUR NAME").toUpperCase()}
               </div>
-              {draft.headline && <div style={{ fontSize: "11pt", color: "#1F2937", marginBottom: "2mm" }}>{draft.headline}</div>}
+              {resume.headline && <div style={{ fontSize: "11pt", color: "#1F2937", marginBottom: "2mm" }}>{resume.headline}</div>}
               <div style={{ fontSize: "10pt", color: "#374151", marginBottom: "0.5mm" }}>
-                {[draft.contact.location, draft.contact.phone].filter(Boolean).join(" | ")}
+                {[resume.contact.location, resume.contact.phone].filter(Boolean).join(" | ")}
               </div>
-              {draft.contact.email && <div style={{ fontSize: "10pt", color: "#374151", marginBottom: "0.5mm" }}>{draft.contact.email}</div>}
-              {draft.dateOfBirth && <div style={{ fontSize: "10pt", color: "#374151", marginBottom: "0.5mm" }}>Date Of Birth : {draft.dateOfBirth}</div>}
+              {resume.contact.email && <div style={{ fontSize: "10pt", color: "#374151", marginBottom: "0.5mm" }}>{resume.contact.email}</div>}
+              {resume.dateOfBirth && <div style={{ fontSize: "10pt", color: "#374151", marginBottom: "0.5mm" }}>Date Of Birth : {resume.dateOfBirth}</div>}
               <div style={{ marginTop: "1.5mm", width: "52mm", height: "1pt", background: BLUE }} />
             </header>
           </EditableBlock>
@@ -147,20 +143,20 @@ export function EditableA4Preview({ resume, onChange, scale = 0.7, className }: 
           {/* ============ BODY ============ */}
           <div style={{ marginTop: "4mm" }}>
             {/* SUMMARY */}
-            {draft.summary && (
+            {resume.summary && (
               <EditableBlock isEditing={editing === "summary"} onEdit={() => setEditing("summary")} label="Edit summary">
                 <InfohasSection title="PROFESSIONAL SUMMARY" blue={BLUE}>
-                  <p style={{ margin: 0, textAlign: "justify", color: "#1F2937" }}>{draft.summary}</p>
+                  <p style={{ margin: 0, textAlign: "justify", color: "#1F2937" }}>{resume.summary}</p>
                 </InfohasSection>
               </EditableBlock>
             )}
 
             {/* SKILLS */}
-            {draft.skills.length > 0 && (
+            {resume.skills.length > 0 && (
               <EditableBlock isEditing={editing === "skills"} onEdit={() => setEditing("skills")} label="Edit skills">
                 <InfohasSection title="CORE COMPETENCIES & SKILLS" blue={BLUE}>
                   <ul style={{ margin: 0, paddingLeft: "5mm", listStyleType: "•" }}>
-                    {groupSkillsByCategory(draft.skills).map((g, i) => (
+                    {groupSkillsByCategory(resume.skills).map((g, i) => (
                       <li key={i} style={{ marginBottom: "1mm", color: "#1F2937" }}>
                         <span style={{ fontWeight: 700 }}>{g.category}:</span> <span>{g.items.join(", ")}.</span>
                       </li>
@@ -171,10 +167,10 @@ export function EditableA4Preview({ resume, onChange, scale = 0.7, className }: 
             )}
 
             {/* EXPERIENCE — section header once, then all entries */}
-            {draft.experience.length > 0 && (
+            {resume.experience.length > 0 && (
               <>
                 <SectionDividerInline title="PROFESSIONAL EXPERIENCE" blue={BLUE} />
-                {draft.experience.map((e) => (
+                {resume.experience.map((e) => (
                   <EditableBlock
                     key={e.id}
                     isEditing={editing === `experience:${e.id}`}
@@ -201,10 +197,10 @@ export function EditableA4Preview({ resume, onChange, scale = 0.7, className }: 
             )}
 
             {/* EDUCATION — section header once, then all entries */}
-            {draft.education.length > 0 && (
+            {resume.education.length > 0 && (
               <>
                 <SectionDividerInline title="EDUCATION" blue={BLUE} />
-                {draft.education.map((ed) => (
+                {resume.education.map((ed) => (
                   <EditableBlock
                     key={ed.id}
                     isEditing={editing === `education:${ed.id}`}
@@ -236,10 +232,10 @@ export function EditableA4Preview({ resume, onChange, scale = 0.7, className }: 
             )}
 
             {/* LANGUAGES */}
-            {draft.languages.length > 0 && (
+            {resume.languages.length > 0 && (
               <EditableBlock isEditing={editing === "languages"} onEdit={() => setEditing("languages")} label="Edit languages">
                 <div style={{ display: "flex", flexDirection: "column", gap: "0.5mm" }}>
-                  {draft.languages.map((l) => (
+                  {resume.languages.map((l) => (
                     <div key={l.id} style={{ color: "#1F2937" }}>
                       <span style={{ fontWeight: 700 }}>{l.name}:</span>{" "}
                       <span style={{ textTransform: "capitalize" }}>{l.proficiency}</span>
@@ -257,8 +253,9 @@ export function EditableA4Preview({ resume, onChange, scale = 0.7, className }: 
       <AnimatePresence>
         {editing && (
           <EditorDrawer
+            key={editing}
             target={editing}
-            resume={draft}
+            resume={resume}
             onClose={() => setEditing(null)}
             onCommit={commit}
           />
@@ -340,10 +337,8 @@ function EditorDrawer({ target, resume, onClose, onCommit }: {
   onClose: () => void;
   onCommit: (p: Partial<ResumeData>) => void;
 }) {
-  // local form state
+  // local form state — keyed by target so it resets when target changes (controlled via key prop from parent)
   const [form, setForm] = useState<ResumeData>(resume);
-
-  useEffect(() => setForm(resume), [resume]);
 
   const save = () => {
     if (target === "header") {

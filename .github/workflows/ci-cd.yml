@@ -142,12 +142,18 @@ jobs:
     if: github.ref == 'refs/heads/main'
     steps:
       - uses: actions/checkout@v4
-      - name: Apply migrations
+      - name: Apply initial schema (0001_init.sql)
         uses: cloudflare/wrangler-action@v3
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          command: d1 migrations apply resumeai-pro-db --env production
+          command: d1 execute resumeai-pro-db --file=migrations/0001_init.sql --remote --env production
+      - name: Apply enhanced AI providers (0002_ai_providers_enhanced.sql)
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: d1 execute resumeai-pro-db --file=migrations/0002_ai_providers_enhanced.sql --remote --env production
 
   # ----------------------------------------------------------
   # 6. Publish release on tag

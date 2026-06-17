@@ -127,40 +127,170 @@ This is implemented in `src/lib/exporter.ts → exportResumePDF()`.
 
 ## Multi-AI provider system
 
+A complete, OpenWebUI/LibreChat-style AI provider management system. All AI requests flow through a single `ProviderRouter` gateway — no feature calls any provider adapter directly.
+
+### Architecture
+
+```
+src/lib/ai/
+├── providers/                  # Provider adapters (one per type)
+│   ├── interface.ts            # AIProviderAdapter contract
+│   ├── openai-compatible.ts    # OpenAI, DeepSeek, Groq, OpenRouter, Together, HuggingFace, Mistral, Cohere, Perplexity
+│   ├── claude.ts               # Anthropic Claude (Messages API)
+│   ├── gemini.ts               # Google Gemini (GenerateContent API)
+│   ├── ollama.ts               # Ollama (self-hosted)
+│   ├── puter.ts                # Puter.js (free, user-auth)
+│   ├── custom.ts               # Custom provider with templated request/response
+│   └── zai-fallback.ts         # Built-in Z.ai SDK fallback
+└── services/
+    ├── factory.ts              # ProviderFactory — maps type string → adapter
+    ├── fallback.ts             # FallbackManager — builds provider chain, retry policy
+    ├── router.ts               # ProviderRouter — single entrypoint for all AI calls
+    ├── manager.ts              # ProviderManager — high-level UI helpers
+    └── index.ts                # Public API
+```
+
 ### Primary: Puter.js (free, user-authenticated)
 
-Loaded from CDN in `src/app/layout.tsx`. When a user clicks "Sign in with Puter" in the auth modal, they authenticate with their own Google account via Puter — all AI calls then run under their free Puter quota. No API key needed from the app owner.
+Loaded from CDN in `src/app/layout.tsx`. When a user clicks "Sign in with Puter" in the auth modal, they authenticate with their own Google account via Puter — all AI calls then run under their free Puter quota. No API key needed from the app owner. Configure `applicationId`, `clientId`, `redirectUri`, and `enabledModels` in Super Admin → AI Providers.
 
 ### Fallback: Z.ai SDK (built-in)
 
-If Puter is unavailable or rate-limited, the app falls back to `/api/ai/chat` which uses the Z.ai web dev SDK. This is bundled — no configuration needed.
+If Puter is unavailable or rate-limited, the router falls back to `/api/ai/chat` which uses the Z.ai web dev SDK. This is bundled — no configuration needed.
 
 ### Custom providers (Super Admin → AI Providers)
 
-Add any of 15+ supported providers by entering your own API URL, key, headers, parameters, model name, priority, timeout, max tokens, and temperature. Supported types:
+Add any of 17 supported provider types by entering your own:
+- Display name, type, base URL, API key (encrypted at rest)
+- Model name, temperature, max tokens, timeout, retry attempts, rate limit
+- Auth type (bearer / header / query / none)
+- Custom headers (JSON), custom parameters (JSON)
+- Request body template + response JSON path (for custom providers — supports `{{model}}`, `{{messages}}`, `{{temperature}}`, `{{max_tokens}}`, `{{api_key}}` placeholders)
+- Cost per 1K input/output tokens (for cost tracking)
+- Streaming, function calling toggles
 
-`OpenAI · Claude · Gemini · DeepSeek · Groq · Mistral · Cohere · Perplexity · OpenRouter · Together · HuggingFace · Ollama · Azure OpenAI · AWS Bedrock · Custom / self-hosted LLM`
+Supported types:
 
-Future providers can be added without code changes — just register a new row in the `ai_providers` table.
+`Puter.js · Z.ai Fallback · OpenAI · Anthropic Claude · Google Gemini · DeepSeek · Groq · Mistral · Cohere · Perplexity · OpenRouter · Together AI · HuggingFace · Ollama · Azure OpenAI · AWS Bedrock · Custom / self-hosted LLM`
 
-### Automatic failover
+Future providers can be added **without code changes** — just register a new row in the `ai_providers` table. The `ProviderFactory` falls back to the `CustomProvider` adapter for unknown types, which uses the `requestTemplate` + `responsePath` config.
 
-The `callAI()` function in `src/lib/ai.ts` tries providers in priority order and rotates on:
-- Timeout
-- Rate limit (429)
-- Quota exceeded
-- Service unavailable (5xx)
-- Network error
+### Provider routing
 
-### Production failover
+Every AI request goes through:
 
-In production (Cloudflare Workers), the same logic lives in `workers/api/index.ts → /api/ai/chat`, which tries OpenAI → Anthropic → ... in order.
+```ts
+import { ProviderRouter } from "@/lib/ai/services";
+
+const response = await ProviderRouter.chat({
+  messages: [{ role: "user", content: "Hello" }],
+  maxTokens: 100,
+});
+// → tries default provider → fallbacks (in order) → other active providers by priority
+```
+
+The router:
+1. Builds the provider chain: default → fallbacks (in saved order) → other active providers by priority
+2. Tries each provider in order, with retries per provider per the retry policy
+3. Logs every attempt (success or failure) to `ai_provider_logs` with latency, tokens, error message
+4. Throws only if ALL providers in the chain fail
+
+### Failover policy
+
+The `FallbackManager` decides whether to retry or move to the next provider:
+- **429 rate limited** → don't retry, move to next provider
+- **5xx server error** → retry with exponential backoff (500ms × 2^attempt, max 8s)
+- **Timeout / network error** → retry
+- **Other errors** → don't retry, move to next
+
+### Super Admin → AI Providers (3 tabs)
+
+1. **Providers** — searchable, filterable table with columns: Provider, Type, Base URL, Model, Status, Priority, Requests, Last Used, Actions (Edit / Test Connection / Duplicate / Set as Default / Delete)
+2. **Usage Analytics** — 6 KPI cards (Total requests, Success rate, Error rate, Avg latency, Total tokens, Est. cost) + 4 charts (Requests per provider, Success vs errors, Latency per provider, Token usage 7 days) + per-provider breakdown table
+3. **Error Logs** — filterable log table (by provider, status, search) with expandable rows showing request preview + response/error message
+
+### Super Admin → AI Models
+
+Browse a model catalog per provider type (OpenAI, Claude, Gemini, DeepSeek, Groq, Puter, Ollama). Enable/disable specific models, add custom model names, set the default model per provider. Shows context window, cost per 1K tokens, and tags (flagship, fast, reasoning, vision, free, self-hosted).
+
+### Super Admin → AI Routing
+
+Configure default provider, default model, fallback chain (with reorder), retry attempts, timeout, rate limit, and feature toggles (failover, caching, cost tracking).
+
+### Test Connection
+
+Every provider has a "Test Connection" button that:
+1. Resolves the adapter for the provider type
+2. Builds the config (baseUrl, model, etc.)
+3. Sends a test prompt (editable)
+4. Displays the step-by-step log, latency, input/output tokens, and the response (or error message)
+5. Logs the test attempt to `ai_provider_logs`
+
+### Database tables
+
+- `ai_providers` — 25+ columns including `base_url`, `request_template`, `response_path`, `streaming_enabled`, `is_default`, `is_fallback`, `auth_type`, `cost_per_input_token`, `cost_per_output_token`, `application_id`, `client_id`, `redirect_uri`, `enabled_models_json`, `last_used_at`, `usage_cost`
+- `ai_provider_logs` — every AI call logged with `provider_id`, `request_type`, `model_name`, `status` (success/error/timeout/rate_limited), `latency_ms`, `input_tokens`, `output_tokens`, `error_message`, `request_preview`, `response_preview`
+- `ai_provider_settings` — singleton row with `default_provider_id`, `default_model`, `fallback_provider_ids_json`, `retry_attempts`, `timeout`, `rate_limit_per_minute`, `enable_failover`, `enable_caching`, `enable_cost_tracking`
+
+### Production deployment (Cloudflare Workers)
+
+In production, the same routing logic lives in `workers/api/index.ts → /api/ai/chat`. Set provider keys as Worker secrets via `wrangler secret put OPENAI_API_KEY` etc. The `ProviderManager` reads from D1 (production) or Zustand store (dev).
 
 ---
 
 ## Deployment
 
-### Option A: Cloudflare Pages + Workers (recommended, free tier)
+### ⚠️ Security first — revoke exposed tokens
+
+The tokens shared in the original build spec were transmitted in plaintext and should be considered **compromised**. Before deploying:
+
+1. **Revoke the GitHub PAT** at https://github.com/settings/tokens
+2. **Revoke the Cloudflare API token** at https://dash.cloudflare.com/profile/api-tokens
+3. **Create fresh tokens** with the same scopes
+4. **Store them as environment variables** in `.env` (gitignored) — never in source code, never as command-line arguments
+
+### Option A: Use the deployment helper script (recommended)
+
+A complete deployment helper script is provided at `scripts/deploy.sh`. It reads all credentials from your local `.env` file (gitignored) — never from command-line arguments or hardcoded values.
+
+```bash
+# 1. Copy the env template and fill in your fresh tokens
+cp .env.example .env
+# Edit .env: set GITHUB_TOKEN, CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID,
+#           NEXTAUTH_SECRET, JWT_SECRET, ENCRYPTION_KEY
+#           (and any optional provider keys you want server-side)
+
+# 2. Generate secrets
+openssl rand -base64 32  # → NEXTAUTH_SECRET
+openssl rand -base64 32  # → JWT_SECRET
+openssl rand -base64 32  # → ENCRYPTION_KEY
+
+# 3. One-time setup: configure git remote
+./scripts/deploy.sh setup
+
+# 4. Push to GitHub (creates the repo if needed, pushes to main)
+./scripts/deploy.sh push
+
+# 5. Apply D1 migrations (both 0001_init.sql and 0002_ai_providers_enhanced.sql)
+./scripts/deploy.sh migrate
+
+# 6. Deploy Cloudflare Workers (Hono API)
+./scripts/deploy.sh workers
+
+# 7. Set Worker secrets from .env (skips empty ones)
+./scripts/deploy.sh secrets
+
+# 8. Build & deploy frontend to Cloudflare Pages
+./scripts/deploy.sh pages
+
+# Or: do all of 4-8 in order
+./scripts/deploy.sh all
+
+# Optional: sync .env values to GitHub Actions secrets (for CI/CD)
+./scripts/deploy.sh github-secrets
+```
+
+### Option B: Manual Cloudflare Pages + Workers
 
 1. **Prerequisites**
    - Cloudflare account (free)
@@ -189,8 +319,9 @@ In production (Cloudflare Workers), the same logic lives in `workers/api/index.t
    # Create Queue
    wrangler queues create resumeai-pro-queue
 
-   # Apply migrations
-   wrangler d1 migrations apply resumeai-pro-db --remote
+   # Apply migrations (both files)
+   wrangler d1 execute resumeai-pro-db --file=migrations/0001_init.sql --remote
+   wrangler d1 execute resumeai-pro-db --file=migrations/0002_ai_providers_enhanced.sql --remote
    ```
 
 3. **Set secrets**
