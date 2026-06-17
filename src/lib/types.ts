@@ -6,6 +6,7 @@ export interface User {
   id: string;
   name: string;
   email: string;
+  passwordHash?: string; // mock hash (in production: bcrypt via Workers)
   avatarUrl?: string;
   role: Role;
   provider: "email" | "google" | "github" | "linkedin" | "puter" | "magic";

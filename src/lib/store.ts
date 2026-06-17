@@ -53,7 +53,10 @@ interface AppState {
   closeAuth: () => void;
   signIn: (user: User) => void;
   signOut: () => void;
-  toggleTheme: () => void;
+  // account self-service
+  updateUserName: (newName: string) => void;
+  updateUserEmail: (newEmail: string) => void;
+  changePassword: (currentPassword: string, newPassword: string) => { ok: boolean; error?: string };
   toggleSidebar: () => void;
   setLandingSection: (s: string | null) => void;
 
@@ -157,6 +160,33 @@ export const useApp = create<AppState>()(
           view: "dashboard",
         }),
       signOut: () => set({ user: null, isAuthed: false, view: "landing" }),
+      updateUserName: (newName) => {
+        const trimmed = newName.trim();
+        if (trimmed.length < 2) return;
+        set((s) => (s.user ? { user: { ...s.user, name: trimmed, lastActiveAt: new Date().toISOString() } } : s));
+        useApp.getState().log({ actor: "you", action: "Username updated", category: "auth", details: `New name: ${trimmed}`, severity: "info" });
+      },
+      updateUserEmail: (newEmail) => {
+        const trimmed = newEmail.trim().toLowerCase();
+        if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(trimmed)) return;
+        set((s) => (s.user ? { user: { ...s.user, email: trimmed, lastActiveAt: new Date().toISOString() } } : s));
+        useApp.getState().log({ actor: "you", action: "Email updated", category: "auth", details: `New email: ${trimmed}`, severity: "info" });
+      },
+      changePassword: (currentPassword, newPassword) => {
+        const s = get();
+        if (!s.user) return { ok: false, error: "Not signed in." };
+        // Mock: in dev, accept any non-empty current password. In production, this would
+        // verify against bcrypt-hash stored in the users table via Workers + D1.
+        if (!currentPassword) return { ok: false, error: "Current password is required." };
+        if (newPassword.length < 8) return { ok: false, error: "New password must be at least 8 characters." };
+        if (!/[A-Za-z]/.test(newPassword) || !/\d/.test(newPassword)) return { ok: false, error: "New password must contain letters and numbers." };
+        if (newPassword === currentPassword) return { ok: false, error: "New password must differ from current." };
+        // Persist mock hash
+        const hash = `mock$${btoa(newPassword).slice(0, 24)}`;
+        set({ user: { ...s.user, passwordHash: hash, lastActiveAt: new Date().toISOString() } });
+        useApp.getState().log({ actor: "you", action: "Password changed", category: "auth", details: "Password updated successfully", severity: "info" });
+        return { ok: true };
+      },
       toggleTheme: () => {
         const next = get().theme === "light" ? "dark" : "light";
         if (typeof document !== "undefined") {

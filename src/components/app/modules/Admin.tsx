@@ -39,8 +39,6 @@ const GEO_DATA = [
 
 export function Admin() {
   const setView = useApp((s) => s.setView);
-  const resumes = useApp((s) => s.resumes);
-  const atsReports = useApp((s) => s.atsReports);
 
   return (
     <div className="space-y-6">
