@@ -1,103 +1,27 @@
-# ============================================================
-# ResumeAI Pro — Cloudflare Wrangler configuration
-# https://developers.cloudflare.com/workers/wrangler/configuration/
-# ============================================================
-
+# ResumeAI Pro — Cloudflare Worker API config
 name = "resumeai-pro-api"
 main = "workers/api/index.ts"
 compatibility_date = "2026-01-01"
 compatibility_flags = ["nodejs_compat"]
 
-# ---- Environment: production ----
-[env.production]
-name = "resumeai-pro-api"
-routes = [
-  { pattern = "api.resumeai.pro/*", zone_name = "resumeai.pro" },
-]
-
-# D1 database (Drizzle ORM)
-[[env.production.d1_databases]]
+# D1 database
+[[d1_databases]]
 binding = "DB"
 database_name = "resumeai-pro-db"
-database_id = "REPLACE_WITH_CLOUDFLARE_D1_DATABASE_ID"
+database_id = "4485ee27-7fec-4077-a39d-c5cc4b1b9167"
 
-# R2 storage bucket
-[[env.production.r2_buckets]]
-binding = "STORAGE"
-bucket_name = "resumeai-pro-storage"
-
-# KV namespace (cache + rate-limit counters)
-[[env.production.kv_namespaces]]
+# KV namespace for caching
+[[kv_namespaces]]
 binding = "CACHE"
-id = "REPLACE_WITH_CLOUDFLARE_KV_NAMESPACE_ID"
+id = "4521e79873524900bb373a245d095fcf"
 
-# Queues (async AI work, exports, email)
-[[env.production.queues.producers]]
-binding = "JOB_QUEUE"
-queue = "resumeai-pro-queue"
-
-[[env.production.queues.consumers]]
-queue = "resumeai-pro-queue"
-max_batch_size = 10
-max_batch_timeout = 5
-max_retries = 3
-
-# Analytics Engine
-[[env.production.analytics_engine_datasets]]
-binding = "ANALYTICS"
-
-# Durable Objects (real-time collaboration)
-[[env.production.durable_objects.bindings]]
-name = "REALTIME"
-class_name = "RealtimeObject"
-
-# Environment vars (non-secret)
-[env.production.vars]
+[vars]
 APP_NAME = "ResumeAI Pro"
-APP_URL = "https://resumeai.pro"
-ENABLE_DONATIONS = "true"
-ENABLE_ADS = "false"
-RATE_LIMIT_RPM = "60"
+APP_URL = "https://resumeai-pro.pages.dev"
+CORS_ORIGIN = "https://resumeai-pro.pages.dev"
 
-# Secrets — set via: wrangler secret put NAME
-# Required secrets (do NOT put values here):
-#   NEXTAUTH_SECRET
-#   JWT_SECRET
-#   ENCRYPTION_KEY
-#   OPENAI_API_KEY  (optional)
-#   ANTHROPIC_API_KEY  (optional)
-#   GEMINI_API_KEY  (optional)
-#   ... see .env.example
-
-# ---- Environment: preview ----
-[env.preview]
-name = "resumeai-pro-api-preview"
-
-[[env.preview.d1_databases]]
-binding = "DB"
-database_name = "resumeai-pro-db-preview"
-database_id = "REPLACE_WITH_PREVIEW_D1_DATABASE_ID"
-
-[[env.preview.r2_buckets]]
-binding = "STORAGE"
-bucket_name = "resumeai-pro-storage-preview"
-
-[[env.preview.kv_namespaces]]
-binding = "CACHE"
-id = "REPLACE_WITH_PREVIEW_KV_NAMESPACE_ID"
-
-# ---- Observability ----
 [observability]
 enabled = true
-head_sampling_rate = 1
 
-# ---- Smart Placement (run Workers close to data) ----
 [placement]
 mode = "smart"
-
-# ---- Workers Logs ----
-[triggers]
-crons = [
-  "0 3 * * *",   # daily 3am backup
-  "*/15 * * * *", # every 15 min health check
-]

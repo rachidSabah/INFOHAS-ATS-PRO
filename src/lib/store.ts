@@ -1,8 +1,7 @@
-// ResumeAI Pro — global Zustand store with localStorage persistence
+// ResumeAI Pro — global Zustand store (cloud-backed, no localStorage persistence)
 "use client";
 
 import { create } from "zustand";
-import { persist, createJSONStorage } from "zustand/middleware";
 import type {
   User, ResumeData, JobDescription, AIProvider, AIProviderLog, AIProviderSettings, PromptTemplate,
   BrandingConfig, FeatureFlags, AuditLog, ViewKey, CoverLetter, InterviewPackage, ATSReport,
@@ -14,6 +13,7 @@ import {
 import { BRAND, getRoleForEmail } from "./brand";
 import { hashPassword, verifyPassword, SUPER_ADMIN_SEED, canSignIn, canAccessApp, type UserStatus } from "./auth-utils";
 import type { UserStatus as US } from "./types";
+import { setUserId, clearUserId } from "./cloud-api";
 
 interface AppState {
   // session
@@ -51,6 +51,7 @@ interface AppState {
   // ui
   theme: "light" | "dark";
   sidebarCollapsed: boolean;
+  synced: boolean; // whether cloud data has been loaded
 
   // actions
   setView: (v: ViewKey) => void;
@@ -139,7 +140,6 @@ interface AppState {
 const uid = (p = "id") => `${p}_${Math.random().toString(36).slice(2, 9)}${Date.now().toString(36).slice(-4)}`;
 
 export const useApp = create<AppState>()(
-  persist(
     (set, get) => ({
       user: null,
       isAuthed: false,
@@ -186,37 +186,27 @@ export const useApp = create<AppState>()(
       flags: SEED_FLAGS,
       logs: SEED_LOGS,
 
-      theme: "light",
+      theme: (typeof localStorage !== "undefined" && localStorage.getItem("resumeai-theme") === "dark") ? "dark" : "light",
       sidebarCollapsed: false,
+      synced: false,
 
       setView: (v) => set({ view: v, landingSection: null }),
       openAuth: () => set({ authOpen: true }),
       closeAuth: () => set({ authOpen: false }),
 
       signIn: (user) => {
-        // Check if user can sign in (not suspended/deleted)
         const check = canSignIn(user);
-        if (!check.allowed) {
-          // Don't sign in — the caller should show the error message
-          return;
-        }
-        // Update or add user in registry, update lastLoginAt
+        if (!check.allowed) return;
         const now = new Date().toISOString();
         const updatedUser = { ...user, lastLoginAt: now, lastActiveAt: now };
+        setUserId(updatedUser.id); // Set user ID for API calls
         set((s) => {
           const exists = s.users.find((u) => u.email === user.email);
           const users = exists
             ? s.users.map((u) => (u.email === user.email ? { ...u, ...updatedUser } : u))
             : [...s.users, updatedUser];
-          return {
-            users,
-            user: updatedUser,
-            isAuthed: true,
-            authOpen: false,
-            view: "dashboard",
-          };
+          return { users, user: updatedUser, isAuthed: true, authOpen: false, view: "dashboard", synced: false };
         });
-        // Audit log
         useApp.getState().log({ actor: user.email, action: "User signed in", category: "auth", details: `Provider: ${user.provider}`, severity: "info" });
       },
 
@@ -225,7 +215,8 @@ export const useApp = create<AppState>()(
         if (s.user) {
           useApp.getState().log({ actor: s.user.email, action: "User signed out", category: "auth", details: "", severity: "info" });
         }
-        set({ user: null, isAuthed: false, view: "landing" });
+        clearUserId();
+        set({ user: null, isAuthed: false, view: "landing", synced: false });
       },
 
       // === Email/Password Sign In ===
@@ -253,7 +244,9 @@ export const useApp = create<AppState>()(
           isAuthed: true,
           authOpen: false,
           view: "dashboard",
+          synced: false,
         }));
+        setUserId(updatedUser.id);
         useApp.getState().log({ actor: normalizedEmail, action: "User signed in", category: "auth", details: "Provider: email", severity: "info" });
         return { ok: true, user: updatedUser };
       },
@@ -285,7 +278,7 @@ export const useApp = create<AppState>()(
         set((s) => ({ users: [...s.users, newUser] }));
         useApp.getState().log({ actor: normalizedEmail, action: "User registered (pending approval)", category: "auth", details: `Name: ${newUser.name}`, severity: "warning" });
         // Auto-sign-in the new user (they'll see the pending approval screen)
-        set({ user: newUser, isAuthed: true, authOpen: false, view: "dashboard" });
+        set({ user: newUser, isAuthed: true, authOpen: false, view: "dashboard", synced: false });
         return { ok: true, user: newUser };
       },
 
@@ -323,7 +316,9 @@ export const useApp = create<AppState>()(
               isAuthed: true,
               authOpen: false,
               view: "dashboard",
+              synced: false,
             }));
+            setUserId(updatedUser.id);
             useApp.getState().log({ actor: puterEmail, action: "User signed in", category: "auth", details: "Provider: puter", severity: "info" });
             return { ok: true, user: updatedUser };
           } else {
@@ -343,7 +338,8 @@ export const useApp = create<AppState>()(
               lastLoginAt: now,
               usage: { resumesGenerated: 0, atsChecks: 0, coverLetters: 0, interviewPreps: 0, downloads: 0 },
             };
-            set((s) => ({ users: [...s.users, newUser], user: newUser, isAuthed: true, authOpen: false, view: "dashboard" }));
+            set((s) => ({ users: [...s.users, newUser], user: newUser, isAuthed: true, authOpen: false, view: "dashboard", synced: false }));
+            setUserId(newUser.id);
             useApp.getState().log({ actor: puterEmail, action: "User registered via Puter (pending approval)", category: "auth", details: `Name: ${newUser.name}`, severity: "warning" });
             return { ok: true, user: newUser };
           }
@@ -428,6 +424,10 @@ export const useApp = create<AppState>()(
         const next = get().theme === "light" ? "dark" : "light";
         if (typeof document !== "undefined") {
           document.documentElement.classList.toggle("dark", next === "dark");
+        }
+        // Theme is a UI preference — allowed in localStorage (not business data)
+        if (typeof localStorage !== "undefined") {
+          localStorage.setItem("resumeai-theme", next);
         }
         set({ theme: next });
       },
@@ -580,31 +580,7 @@ export const useApp = create<AppState>()(
             ? { user: { ...s.user, usage: { ...s.user.usage, [k]: s.user.usage[k] + 1 } } }
             : s
         ),
-    }),
-    {
-      name: "resumeai-pro",
-      storage: createJSONStorage(() => localStorage),
-      partialize: (s) => ({
-        user: s.user,
-        isAuthed: s.isAuthed,
-        users: s.users,
-        resumes: s.resumes,
-        jobDescriptions: s.jobDescriptions,
-        coverLetters: s.coverLetters,
-        interviews: s.interviews,
-        atsReports: s.atsReports,
-        providers: s.providers,
-        providerLogs: s.providerLogs,
-        providerSettings: s.providerSettings,
-        prompts: s.prompts,
-        branding: s.branding,
-        flags: s.flags,
-        logs: s.logs,
-        theme: s.theme,
-        sidebarCollapsed: s.sidebarCollapsed,
-      }),
-    }
-  )
+    })
 );
 
 export { BRAND };

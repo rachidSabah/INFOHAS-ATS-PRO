@@ -1,0 +1,286 @@
+// ResumeAI Pro — Cloud API client
+// All data flows through this client → Cloudflare Worker → D1
+// The browser is NEVER the permanent storage location for business data.
+
+const API_BASE = "https://resumeai-pro-api.rachidelsabah.workers.dev";
+
+// Session user ID — stored in sessionStorage (temporary, not business data)
+function getUserId(): string {
+  if (typeof window === "undefined") return "anonymous";
+  return sessionStorage.getItem("resumeai-user-id") || "anonymous";
+}
+
+export function setUserId(id: string) {
+  if (typeof window !== "undefined") {
+    sessionStorage.setItem("resumeai-user-id", id);
+  }
+}
+
+export function clearUserId() {
+  if (typeof window !== "undefined") {
+    sessionStorage.removeItem("resumeai-user-id");
+  }
+}
+
+async function apiFetch<T = any>(path: string, options: RequestInit = {}): Promise<T> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 15000);
+  try {
+    const res = await fetch(`${API_BASE}${path}`, {
+      ...options,
+      headers: {
+        "Content-Type": "application/json",
+        "X-User-Id": getUserId(),
+        ...options.headers,
+      },
+      signal: controller.signal,
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: res.statusText }));
+      throw new Error(err.error || `API ${res.status}`);
+    }
+    return res.json();
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+// ============ RESUMES ============
+export const api = {
+  // Resumes
+  getResumes: () => apiFetch<{ resumes: any[] }>("/api/resumes"),
+  createResume: (resume: any) => apiFetch("/api/resumes", { method: "POST", body: JSON.stringify(resume) }),
+  updateResume: (id: string, patch: any) => apiFetch(`/api/resumes/${id}`, { method: "PUT", body: JSON.stringify(patch) }),
+  deleteResume: (id: string) => apiFetch(`/api/resumes/${id}`, { method: "DELETE" }),
+
+  // Cover Letters
+  getCoverLetters: () => apiFetch<{ coverLetters: any[] }>("/api/cover-letters"),
+  createCoverLetter: (cl: any) => apiFetch("/api/cover-letters", { method: "POST", body: JSON.stringify(cl) }),
+  updateCoverLetter: (id: string, patch: any) => apiFetch(`/api/cover-letters/${id}`, { method: "PUT", body: JSON.stringify(patch) }),
+  deleteCoverLetter: (id: string) => apiFetch(`/api/cover-letters/${id}`, { method: "DELETE" }),
+
+  // Job Descriptions
+  getJobDescriptions: () => apiFetch<{ jobDescriptions: any[] }>("/api/job-descriptions"),
+  createJobDescription: (jd: any) => apiFetch("/api/job-descriptions", { method: "POST", body: JSON.stringify(jd) }),
+  deleteJobDescription: (id: string) => apiFetch(`/api/job-descriptions/${id}`, { method: "DELETE" }),
+
+  // Interview Packages
+  getInterviews: () => apiFetch<{ interviews: any[] }>("/api/interviews"),
+  createInterview: (iv: any) => apiFetch("/api/interviews", { method: "POST", body: JSON.stringify(iv) }),
+  deleteInterview: (id: string) => apiFetch(`/api/interviews/${id}`, { method: "DELETE" }),
+
+  // ATS Reports
+  getATSReports: () => apiFetch<{ atsReports: any[] }>("/api/ats-reports"),
+  createATSReport: (report: any) => apiFetch("/api/ats-reports", { method: "POST", body: JSON.stringify(report) }),
+
+  // Users
+  getUsers: () => apiFetch<{ users: any[] }>("/api/users"),
+  createUser: (user: any) => apiFetch("/api/users", { method: "POST", body: JSON.stringify(user) }),
+  updateUser: (id: string, patch: any) => apiFetch(`/api/users/${id}`, { method: "PUT", body: JSON.stringify(patch) }),
+  deleteUser: (id: string) => apiFetch(`/api/users/${id}`, { method: "DELETE" }),
+
+  // AI Providers
+  getProviders: () => apiFetch<{ providers: any[] }>("/api/providers"),
+  createProvider: (provider: any) => apiFetch("/api/providers", { method: "POST", body: JSON.stringify(provider) }),
+  updateProvider: (id: string, patch: any) => apiFetch(`/api/providers/${id}`, { method: "PUT", body: JSON.stringify(patch) }),
+  deleteProvider: (id: string) => apiFetch(`/api/providers/${id}`, { method: "DELETE" }),
+
+  // Prompts
+  getPrompts: () => apiFetch<{ prompts: any[] }>("/api/prompts"),
+  createPrompt: (prompt: any) => apiFetch("/api/prompts", { method: "POST", body: JSON.stringify(prompt) }),
+  updatePrompt: (id: string, patch: any) => apiFetch(`/api/prompts/${id}`, { method: "PUT", body: JSON.stringify(patch) }),
+  deletePrompt: (id: string) => apiFetch(`/api/prompts/${id}`, { method: "DELETE" }),
+
+  // Audit Logs
+  getAuditLogs: () => apiFetch<{ logs: any[] }>("/api/audit-logs"),
+  createAuditLog: (log: any) => apiFetch("/api/audit-logs", { method: "POST", body: JSON.stringify(log) }),
+
+  // Settings
+  getBranding: () => apiFetch<{ branding: any }>("/api/settings/branding"),
+  updateBranding: (branding: any) => apiFetch("/api/settings/branding", { method: "PUT", body: JSON.stringify(branding) }),
+  getFlags: () => apiFetch<{ flags: Record<string, boolean> }>("/api/settings/flags"),
+  updateFlag: (key: string, value: boolean) => apiFetch(`/api/settings/flags/${key}`, { method: "PUT", body: JSON.stringify({ value }) }),
+
+  // Downloads
+  getDownloads: () => apiFetch<{ downloads: any[] }>("/api/downloads"),
+  createDownload: (download: any) => apiFetch("/api/downloads", { method: "POST", body: JSON.stringify(download) }),
+
+  // Health
+  health: () => apiFetch<{ ok: boolean }>("/api/health"),
+};
+
+// ============ SYNC HOOK ============
+// On app load, sync all data from D1 to the Zustand store
+export async function syncAllFromCloud(store: any): Promise<void> {
+  try {
+    const [resumesRes, clsRes, jdsRes, ivsRes, atsRes, providersRes, promptsRes, logsRes, brandingRes, flagsRes] = await Promise.all([
+      api.getResumes().catch(() => ({ resumes: [] })),
+      api.getCoverLetters().catch(() => ({ coverLetters: [] })),
+      api.getJobDescriptions().catch(() => ({ jobDescriptions: [] })),
+      api.getInterviews().catch(() => ({ interviews: [] })),
+      api.getATSReports().catch(() => ({ atsReports: [] })),
+      api.getProviders().catch(() => ({ providers: [] })),
+      api.getPrompts().catch(() => ({ prompts: [] })),
+      api.getAuditLogs().catch(() => ({ logs: [] })),
+      api.getBranding().catch(() => ({ branding: null })),
+      api.getFlags().catch(() => ({ flags: null })),
+    ]);
+
+    // Hydrate store with cloud data
+    if (resumesRes.resumes?.length) store.setState({ resumes: resumesRes.resumes.map(parseDbResume) });
+    if (clsRes.coverLetters?.length) store.setState({ coverLetters: clsRes.coverLetters.map(parseDbCoverLetter) });
+    if (jdsRes.jobDescriptions?.length) store.setState({ jobDescriptions: jdsRes.jobDescriptions.map(parseDbJD) });
+    if (ivsRes.interviews?.length) store.setState({ interviews: ivsRes.interviews.map(parseDbInterview) });
+    if (atsRes.atsReports?.length) store.setState({ atsReports: atsRes.atsReports.map(parseDbATS) });
+    if (providersRes.providers?.length) store.setState({ providers: providersRes.providers.map(parseDbProvider) });
+    if (promptsRes.prompts?.length) store.setState({ prompts: promptsRes.prompts.map(parseDbPrompt) });
+    if (logsRes.logs?.length) store.setState({ logs: logsRes.logs });
+    if (brandingRes.branding) store.setState({ branding: brandingRes.branding });
+    if (flagsRes.flags) store.setState({ flags: flagsRes.flags });
+  } catch (e) {
+    console.error("[syncAllFromCloud] Error:", e);
+  }
+}
+
+// ============ PARSERS ============
+function safeJson(s: any, fallback: any) { try { return typeof s === "string" ? JSON.parse(s) : s; } catch { return fallback; } }
+
+function parseDbResume(r: any): any {
+  return {
+    id: r.id, name: r.name, headline: r.headline,
+    contact: safeJson(r.contact_json, {}),
+    summary: r.summary,
+    experience: safeJson(r.experience_json, []),
+    education: safeJson(r.education_json, []),
+    skills: safeJson(r.skills_json, []),
+    projects: safeJson(r.projects_json, []),
+    certifications: safeJson(r.certifications_json, []),
+    languages: safeJson(r.languages_json, []),
+    achievements: safeJson(r.achievements_json, []),
+    template: r.template, accentColor: r.accent_color,
+    photoUrl: r.photo_url, dateOfBirth: r.date_of_birth,
+    source: r.source, fileName: r.file_name,
+    createdAt: r.created_at, updatedAt: r.updated_at,
+  };
+}
+
+function parseDbCoverLetter(c: any): any {
+  return { id: c.id, title: c.title, template: c.template, content: c.content, resumeId: c.resume_id, jdId: c.jd_id, company: c.company, role: c.role, createdAt: c.created_at, updatedAt: c.updated_at };
+}
+
+function parseDbJD(j: any): any {
+  return {
+    id: j.id, title: j.title, company: j.company, location: j.location,
+    employmentType: j.employment_type, salary: j.salary,
+    responsibilities: safeJson(j.responsibilities_json, []),
+    requiredSkills: safeJson(j.required_skills_json, []),
+    preferredSkills: safeJson(j.preferred_skills_json, []),
+    technologies: safeJson(j.technologies_json, []),
+    experienceYears: j.experience_years, education: j.education,
+    keywords: safeJson(j.keywords_json, []),
+    rawText: j.raw_text, url: j.url, source: j.source, createdAt: j.created_at,
+  };
+}
+
+function parseDbInterview(i: any): any {
+  return { id: i.id, resumeId: i.resume_id, jdId: i.jd_id, company: i.company, role: i.role, questions: safeJson(i.questions_json, []), createdAt: i.created_at };
+}
+
+function parseDbATS(a: any): any {
+  return {
+    id: a.id, resumeId: a.resume_id, jdId: a.jd_id,
+    scores: { ats: a.ats_score, formatting: a.formatting_score, keywords: a.keywords_score, content: a.content_score, grammar: a.grammar_score, completeness: a.completeness_score },
+    recommendations: safeJson(a.recommendations_json, []),
+    missingKeywords: safeJson(a.missing_keywords_json, []),
+    matchedKeywords: safeJson(a.matched_keywords_json, []),
+    weakSections: safeJson(a.weak_sections_json, []),
+    jdMatchPercent: a.jd_match_percent,
+    createdAt: a.created_at,
+  };
+}
+
+function parseDbProvider(p: any): any {
+  return {
+    id: p.id, name: p.name, type: p.provider_type,
+    apiUrl: p.base_url, baseUrl: p.base_url, apiKey: p.api_key_encrypted,
+    headersJson: p.headers_json, parametersJson: p.parameters_json,
+    requestTemplate: p.request_template, responsePath: p.response_path,
+    streamingEnabled: p.streaming_enabled === 1,
+    modelName: p.model_name, priority: p.priority,
+    isActive: p.is_active === 1, isDefault: p.is_default === 1,
+    isFallback: p.is_fallback === 1, isBuiltIn: p.is_built_in === 1,
+    allowedForRegularUsers: p.allowed_for_regular_users === 1,
+    timeout: p.timeout, maxTokens: p.max_tokens, temperature: p.temperature,
+    retryAttempts: p.retry_attempts, rateLimitPerMinute: p.rate_limit_per_minute,
+    authType: p.auth_type, supportsFunctionCalling: p.supports_function_calling === 1,
+    costPerInputToken: p.cost_per_input_token, costPerOutputToken: p.cost_per_output_token,
+    applicationId: p.application_id, clientId: p.client_id, redirectUri: p.redirect_uri,
+    enabledModels: safeJson(p.enabled_models_json, []),
+    lastUsedAt: p.last_used_at, status: p.status,
+    usage: { requests: p.usage_requests, tokens: p.usage_tokens, errors: p.usage_errors, avgLatencyMs: p.usage_avg_latency_ms, cost: p.usage_cost },
+  };
+}
+
+function parseDbPrompt(p: any): any {
+  return {
+    id: p.id, name: p.name, category: p.category, content: p.content,
+    providerId: p.provider_id, version: p.version, isActive: p.is_active === 1,
+    variables: safeJson(p.variables_json, []),
+  };
+}
+
+// ============ LOCALSTORAGE MIGRATION ============
+// On first login, check if there's old data in localStorage and migrate it to D1
+export async function migrateLocalStorageToCloud(store: any): Promise<void> {
+  if (typeof window === "undefined") return;
+  const migrationKey = "resumeai-cloud-migration-done";
+  if (localStorage.getItem(migrationKey)) return; // already migrated
+
+  try {
+    const oldData = localStorage.getItem("resumeai-pro");
+    if (!oldData) {
+      localStorage.setItem(migrationKey, "1");
+      return;
+    }
+
+    const parsed = JSON.parse(oldData);
+    const state = parsed.state || {};
+
+    // Migrate resumes
+    if (state.resumes?.length) {
+      for (const r of state.resumes) {
+        await api.createResume(r).catch(() => {});
+      }
+    }
+
+    // Migrate cover letters
+    if (state.coverLetters?.length) {
+      for (const cl of state.coverLetters) {
+        await api.createCoverLetter(cl).catch(() => {});
+      }
+    }
+
+    // Migrate job descriptions
+    if (state.jobDescriptions?.length) {
+      for (const jd of state.jobDescriptions) {
+        await api.createJobDescription(jd).catch(() => {});
+      }
+    }
+
+    // Migrate interview packages
+    if (state.interviews?.length) {
+      for (const iv of state.interviews) {
+        await api.createInterview(iv).catch(() => {});
+      }
+    }
+
+    // Mark migration as done
+    localStorage.setItem(migrationKey, "1");
+
+    // DON'T clear old localStorage data yet — keep as backup
+    // User can clear it manually from Settings → Privacy → Clear all local data
+    console.log("[Cloud Migration] Migrated localStorage data to D1 successfully.");
+  } catch (e) {
+    console.error("[Cloud Migration] Error:", e);
+  }
+}

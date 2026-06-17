@@ -6,6 +6,7 @@ import { LandingPage } from "@/components/landing/LandingPage";
 import { AppShell } from "@/components/app/AppShell";
 import { AuthModal } from "@/components/app/AuthModal";
 import { canAccessApp } from "@/lib/auth-utils";
+import { syncAllFromCloud, migrateLocalStorageToCloud, setUserId } from "@/lib/cloud-api";
 import { Icon } from "@/components/shared";
 import { Button } from "@/components/ui/button";
 
@@ -18,6 +19,7 @@ export default function Home() {
   const user = useApp((s) => s.user);
   const signOut = useApp((s) => s.signOut);
   const setView = useApp((s) => s.setView);
+  const synced = useApp((s) => s.synced);
 
   // Apply theme class
   useEffect(() => {
@@ -25,6 +27,18 @@ export default function Home() {
       document.documentElement.classList.toggle("dark", theme === "dark");
     }
   }, [theme]);
+
+  // Sync all data from D1 on app mount
+  useEffect(() => {
+    if (isAuthed && !synced && user) {
+      setUserId(user.id);
+      syncAllFromCloud(useApp).then(() => {
+        useApp.setState({ synced: true });
+      });
+      // Also migrate old localStorage data if present
+      migrateLocalStorageToCloud(useApp);
+    }
+  }, [isAuthed, synced, user]);
 
   // If authed but stuck on landing view, go to dashboard
   useEffect(() => {
