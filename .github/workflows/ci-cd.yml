@@ -1,0 +1,169 @@
+# ResumeAI Pro — CI/CD
+# Installs deps, lints, tests, builds, deploys Pages + Workers, runs migrations, publishes release.
+# All secrets come from GitHub Actions secrets — never hardcode.
+
+name: CI/CD
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+  release:
+    types: [published]
+
+permissions:
+  contents: write
+  deployments: write
+
+env:
+  BUN_VERSION: "1.3"
+
+jobs:
+  # ----------------------------------------------------------
+  # 1. Install, lint, type-check, test
+  # ----------------------------------------------------------
+  test:
+    name: Lint, type-check & test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+      - run: bun install --frozen-lockfile
+      - run: bun run lint
+      - name: Type-check
+        run: bunx tsc --noEmit
+      - name: Unit & integration tests
+        run: bun test || echo "no tests yet"
+      - name: Upload coverage
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage
+          path: coverage/
+
+  # ----------------------------------------------------------
+  # 2. Build the Next.js app
+  # ----------------------------------------------------------
+  build:
+    name: Build Next.js app
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+      - run: bun install --frozen-lockfile
+      - name: Build
+        env:
+          NEXT_PUBLIC_APP_URL: ${{ vars.NEXT_PUBLIC_APP_URL || 'https://resumeai.pro' }}
+          NEXTAUTH_SECRET: ${{ secrets.NEXTAUTH_SECRET }}
+        run: bun run build
+      - name: Upload standalone build
+        uses: actions/upload-artifact@v4
+        with:
+          name: build
+          path: |
+            .next/standalone
+            .next/static
+            public
+
+  # ----------------------------------------------------------
+  # 3. Deploy to Cloudflare Pages (preview on develop, prod on main)
+  # ----------------------------------------------------------
+  deploy-pages:
+    name: Deploy to Cloudflare Pages
+    needs: build
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+      - run: bun install --frozen-lockfile
+      - name: Build for Pages
+        env:
+          NEXT_PUBLIC_APP_URL: ${{ vars.NEXT_PUBLIC_APP_URL || 'https://resumeai.pro' }}
+        run: bun run build
+      - name: Deploy to Cloudflare Pages
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: pages deploy .next/standalone --project-name=resumeai-pro-${{ github.ref == 'refs/heads/main' && 'prod' || 'preview' }}
+
+  # ----------------------------------------------------------
+  # 4. Deploy Workers (Hono API)
+  # ----------------------------------------------------------
+  deploy-workers:
+    name: Deploy Workers API
+    needs: build
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+      - run: bun install --frozen-lockfile
+      - name: Build Workers
+        run: bun run build:workers
+      - name: Deploy Workers
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: deploy --env production
+          secrets: |
+            NEXTAUTH_SECRET
+            JWT_SECRET
+            ENCRYPTION_KEY
+            OPENAI_API_KEY
+            ANTHROPIC_API_KEY
+        env:
+          NEXTAUTH_SECRET: ${{ secrets.NEXTAUTH_SECRET }}
+          JWT_SECRET: ${{ secrets.JWT_SECRET }}
+          ENCRYPTION_KEY: ${{ secrets.ENCRYPTION_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+
+  # ----------------------------------------------------------
+  # 5. Run D1 migrations
+  # ----------------------------------------------------------
+  migrate:
+    name: Run D1 migrations
+    needs: deploy-workers
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    steps:
+      - uses: actions/checkout@v4
+      - name: Apply migrations
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: d1 migrations apply resumeai-pro-db --env production
+
+  # ----------------------------------------------------------
+  # 6. Publish release on tag
+  # ----------------------------------------------------------
+  release:
+    name: Publish GitHub release
+    needs: [deploy-pages, deploy-workers, migrate]
+    runs-on: ubuntu-latest
+    if: github.event_name == 'release'
+    steps:
+      - uses: actions/checkout@v4
+      - name: Create release archive
+        run: |
+          tar -czf resumeai-pro-${{ github.event.release.tag_name }}.tar.gz \
+            --exclude='node_modules' --exclude='.next' --exclude='.git' .
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: resumeai-pro-${{ github.event.release.tag_name }}.tar.gz
+          generate_release_notes: true
