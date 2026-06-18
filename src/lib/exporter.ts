@@ -118,17 +118,19 @@ export function exportResumePDF(resume: ResumeData, opts: PDFOptions = {}): { ok
 //   Photo frame: 54×81mm in top-right corner (drawn as empty rectangle).
 // ============================================================================
 
-const INFOHAS_MAROON: [number, number, number] = [102 / 255, 0, 51 / 255]; // #660033
+const INFOHAS_DARK_RED: [number, number, number] = [139 / 255, 0, 0]; // #8B0000 — dark red per master layout
 const INFOHAS_BLACK: [number, number, number] = [0, 0, 0];
-const INFOHAS_LEFT_MARGIN = 12.5; // mm
-const INFOHAS_RIGHT_MARGIN = 14.5; // mm
-const INFOHAS_TOP_MARGIN = 11; // mm
-const INFOHAS_BOTTOM_MARGIN = 10.5; // mm
-const INFOHAS_FONT_SIZE = 13; // pt
-const INFOHAS_LINE_HEIGHT_MM = 15 * 0.352778; // 15pt → mm (1pt = 0.352778mm)
-const INFOHAS_SECTION_GAP_MM = 27 * 0.352778; // 27pt → mm
-const INFOHAS_PHOTO_WIDTH = 54; // mm
-const INFOHAS_PHOTO_HEIGHT = 81; // mm
+const INFOHAS_LEFT_MARGIN = 8.89; // mm (0.35 inch)
+const INFOHAS_RIGHT_MARGIN = 8.89; // mm (0.35 inch)
+const INFOHAS_TOP_MARGIN = 6.35; // mm (0.25 inch)
+const INFOHAS_BOTTOM_MARGIN = 6.35; // mm (0.25 inch)
+const INFOHAS_FONT_SIZE = 10.5; // pt (body 10-11pt per master layout)
+const INFOHAS_SECTION_TITLE_SIZE = 12; // pt (section titles 12-13pt)
+const INFOHAS_NAME_SIZE = 14; // pt (name)
+const INFOHAS_LINE_HEIGHT_MM = 12 * 0.352778; // 12pt line height (compact)
+const INFOHAS_SECTION_GAP_MM = 3; // mm (compact section gap)
+const INFOHAS_PHOTO_WIDTH = 30; // mm (3.0cm per master layout)
+const INFOHAS_PHOTO_HEIGHT = 40; // mm (4.0cm per master layout)
 
 function exportInfohasProPDF(resume: ResumeData, opts: PDFOptions = {}): { ok: boolean; pages: number; error?: string } {
   const doc = new jsPDF({ unit: "mm", format: "a4", orientation: "portrait" });
@@ -140,20 +142,21 @@ function exportInfohasProPDF(resume: ResumeData, opts: PDFOptions = {}): { ok: b
   const contentW = right - left; // ≈ 183mm
   const photoLeft = right - INFOHAS_PHOTO_WIDTH; // photo sits at right edge
   const photoTop = INFOHAS_TOP_MARGIN;
-  const photoBottom = photoTop + INFOHAS_PHOTO_HEIGHT; // ≈ 92mm from top
+  // photoBottom computed below after hasPhoto check
 
   let y = INFOHAS_TOP_MARGIN;
 
-  // ===== HEADER (left column, wraps around photo) =====
-  // Name — maroon, bold, uppercase, 13pt
+  // ===== HEADER (left column, photo on right if exists) =====
+  // Name — dark red, bold, uppercase, 14pt
   doc.setFont("times", "bold");
-  doc.setFontSize(INFOHAS_FONT_SIZE);
-  doc.setTextColor(INFOHAS_MAROON[0], INFOHAS_MAROON[1], INFOHAS_MAROON[2]);
-  doc.text((resume.name || "YOUR NAME").toUpperCase(), left, y + INFOHAS_FONT_SIZE * 0.352778 * 0.7);
-  y += INFOHAS_LINE_HEIGHT_MM + 1;
+  doc.setFontSize(INFOHAS_NAME_SIZE);
+  doc.setTextColor(INFOHAS_DARK_RED[0], INFOHAS_DARK_RED[1], INFOHAS_DARK_RED[2]);
+  doc.text((resume.name || "YOUR NAME").toUpperCase(), left, y + INFOHAS_NAME_SIZE * 0.352778 * 0.7);
+  y += INFOHAS_NAME_SIZE * 0.352778 + 1;
 
-  // Headline — black, regular, 13pt
+  // Headline — black, regular, 10.5pt
   doc.setFont("times", "normal");
+  doc.setFontSize(INFOHAS_FONT_SIZE);
   doc.setTextColor(INFOHAS_BLACK[0], INFOHAS_BLACK[1], INFOHAS_BLACK[2]);
   if (resume.headline) {
     doc.text(resume.headline, left, y + INFOHAS_FONT_SIZE * 0.352778 * 0.7);
@@ -179,29 +182,27 @@ function exportInfohasProPDF(resume: ResumeData, opts: PDFOptions = {}): { ok: b
     y += INFOHAS_LINE_HEIGHT_MM;
   }
 
-  // ===== Photo frame (top-right) =====
-  doc.setDrawColor(0, 0, 0);
-  doc.setLineWidth(0.3);
-  doc.rect(photoLeft, photoTop, INFOHAS_PHOTO_WIDTH, INFOHAS_PHOTO_HEIGHT);
-  // If photoUrl is a data URL, embed it
-  if (resume.photoUrl && resume.photoUrl.startsWith("data:image")) {
+  // ===== Photo (top-right, 30x40mm) — only if photoUrl exists, no placeholder =====
+  const hasPhoto = !!(resume.photoUrl && resume.photoUrl.startsWith("data:image"));
+  if (hasPhoto && resume.photoUrl) {
     try {
       doc.addImage(resume.photoUrl, "JPEG", photoLeft, photoTop, INFOHAS_PHOTO_WIDTH, INFOHAS_PHOTO_HEIGHT, undefined, "FAST");
     } catch {
-      // ignore — keep the empty rectangle
+      // ignore photo errors
     }
   }
+  const photoBottom = hasPhoto ? photoTop + INFOHAS_PHOTO_HEIGHT : photoTop;
 
   // ===== Section gap before PROFESSIONAL SUMMARY =====
-  y += INFOHAS_SECTION_GAP_MM - INFOHAS_LINE_HEIGHT_MM; // already advanced one line height
+  y += INFOHAS_SECTION_GAP_MM; // already advanced one line height
 
-  // Helper: draw section header (13pt bold uppercase black)
+  // Helper: draw section header (12pt bold uppercase DARK RED)
   const sectionHeader = (title: string) => {
     doc.setFont("times", "bold");
-    doc.setFontSize(INFOHAS_FONT_SIZE);
-    doc.setTextColor(INFOHAS_BLACK[0], INFOHAS_BLACK[1], INFOHAS_BLACK[2]);
-    doc.text(title, left, y + INFOHAS_FONT_SIZE * 0.352778 * 0.7);
-    y += INFOHAS_LINE_HEIGHT_MM + 1; // 16pt gap to content
+    doc.setFontSize(INFOHAS_SECTION_TITLE_SIZE);
+    doc.setTextColor(INFOHAS_DARK_RED[0], INFOHAS_DARK_RED[1], INFOHAS_DARK_RED[2]);
+    doc.text(title, left, y + INFOHAS_SECTION_TITLE_SIZE * 0.352778 * 0.7);
+    y += INFOHAS_SECTION_TITLE_SIZE * 0.352778 + 1; // compact gap to content
   };
 
   // Helper: wrap text within a width (returns lines and advances y)
@@ -232,22 +233,16 @@ function exportInfohasProPDF(resume: ResumeData, opts: PDFOptions = {}): { ok: b
     doc.setFont("times", "normal");
     doc.setTextColor(INFOHAS_BLACK[0], INFOHAS_BLACK[1], INFOHAS_BLACK[2]);
 
-    // Split summary into lines at the narrow width (left of photo)
-    const narrowW = photoLeft - left - 2; // 2mm gap before photo
+    // Split summary into lines — narrow width if photo exists, full width otherwise
+    const narrowW = hasPhoto ? photoLeft - left - 2 : contentW;
     const fullW = contentW;
     const summaryLines = wrapText(resume.summary, narrowW);
 
     for (const line of summaryLines) {
-      // If we're below the photo, use full width
-      const w = y > photoBottom ? fullW : narrowW;
       doc.text(line, left, y + INFOHAS_FONT_SIZE * 0.352778 * 0.7);
       y += INFOHAS_LINE_HEIGHT_MM;
-      // Re-wrap remaining if we just crossed the photo bottom
-      if (y > photoBottom && w === narrowW) {
-        // No-op — the next line will use full width naturally
-      }
     }
-    y += INFOHAS_SECTION_GAP_MM - INFOHAS_LINE_HEIGHT_MM;
+    y += INFOHAS_SECTION_GAP_MM;
   }
 
   // ===== CORE COMPETENCIES & SKILLS =====
@@ -260,7 +255,7 @@ function exportInfohasProPDF(resume: ResumeData, opts: PDFOptions = {}): { ok: b
       const bulletText = `${g.category}: ${g.items.join(", ")}.`;
       drawBullet(bulletText, contentW);
     }
-    y += INFOHAS_SECTION_GAP_MM - INFOHAS_LINE_HEIGHT_MM;
+    y += INFOHAS_SECTION_GAP_MM;
   }
 
   // ===== PROFESSIONAL EXPERIENCE =====
@@ -287,7 +282,7 @@ function exportInfohasProPDF(resume: ResumeData, opts: PDFOptions = {}): { ok: b
         drawBullet(b, contentW);
       }
     }
-    y += INFOHAS_SECTION_GAP_MM - INFOHAS_LINE_HEIGHT_MM;
+    y += INFOHAS_SECTION_GAP_MM;
   }
 
   // ===== EDUCATION =====
@@ -311,7 +306,7 @@ function exportInfohasProPDF(resume: ResumeData, opts: PDFOptions = {}): { ok: b
         }
       }
     }
-    y += INFOHAS_SECTION_GAP_MM - INFOHAS_LINE_HEIGHT_MM;
+    y += INFOHAS_SECTION_GAP_MM;
   }
 
   // ===== LANGUAGES =====

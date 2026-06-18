@@ -56,8 +56,8 @@ const TEMPLATE_MAP: Record<string, React.FC<{ resume: ResumeData; accent: string
 //   - Section headers: UPPERCASE, blue, bold, with blue underline
 //   - Sections in order: Summary → Core Competencies & Skills → Experience → Education → Languages
 function InfohasProTemplate({ resume, accent }: { resume: ResumeData; accent: string }) {
-  const MAROON = "#660033";
-  const BLUE = "#0563C1";
+  const DARK_RED = "#8B0000";
+  const BLACK = "#000000";
   // Photo frame: 54mm × 81mm portrait, positioned top-right
   // Page is 210mm wide, photo ends ~6mm from right edge → starts at x = 210 - 6 - 54 = 150mm
   // We position it absolutely in a header zone ~0..92mm tall
@@ -65,56 +65,48 @@ function InfohasProTemplate({ resume, accent }: { resume: ResumeData; accent: st
     <div
       className="relative text-slate-800"
       style={{
-        fontFamily: "'Times New Roman', 'Georgia', serif",
-        fontSize: "13pt",
-        lineHeight: 1.15, // 15pt line gap at 13pt font — matches model
-        padding: "11mm 12.5mm 10.5mm 12.5mm", // matches model margins exactly
+        fontFamily: "'Times New Roman', 'Georgia', 'Cambria', serif",
+        fontSize: "10.5pt", // body 10-11pt per master layout
+        lineHeight: 1.2, // compact single-spacing
+        padding: "6.35mm 8.89mm", // 0.25" top/bottom, 0.35" left/right
         minHeight: "297mm",
-        color: "#000",
+        color: BLACK,
       }}
     >
       {/* ============ HEADER ============ */}
-      <header className="relative" style={{ minHeight: "82mm", paddingRight: "60mm" }}>
-        {/* Photo frame — top-right */}
-        <div
-          style={{
-            position: "absolute",
-            top: 0,
-            right: 0,
-            width: "54mm",
-            height: "81mm",
-            border: `1.2pt solid ${BLUE}`,
-            background: resume.photoUrl ? "transparent" : "#F8FAFC",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            overflow: "hidden",
-            boxSizing: "border-box",
-          }}
-        >
-          {resume.photoUrl ? (
+      <header className="relative" style={{ paddingRight: resume.photoUrl ? "36mm" : 0, minHeight: resume.photoUrl ? "42mm" : "auto" }}>
+        {/* Photo — top-right, 30x40mm. Only render if photoUrl exists (no placeholder per master layout). */}
+        {resume.photoUrl && (
+          <div
+            style={{
+              position: "absolute",
+              top: 0,
+              right: 0,
+              width: "30mm",
+              height: "40mm",
+              border: "0.5pt solid #999",
+              background: "transparent",
+              overflow: "hidden",
+              boxSizing: "border-box",
+            }}
+          >
             <img
               src={resume.photoUrl}
               alt={resume.name}
               style={{ width: "100%", height: "100%", objectFit: "cover", objectPosition: "center top" }}
             />
-          ) : (
-            <div style={{ textAlign: "center", color: "#94A3B8", fontSize: "8pt", padding: "4mm" }}>
-              <div style={{ fontSize: "18pt", marginBottom: "2mm" }}>👤</div>
-              Photo
-            </div>
-          )}
-        </div>
+          </div>
+        )}
 
         {/* Name — maroon, bold, 13pt, uppercase (matches model) */}
         <div
           style={{
-            color: MAROON,
+            color: DARK_RED,
             fontWeight: 700,
-            fontSize: "13pt",
+            fontSize: "14pt",
             letterSpacing: "0.3pt",
             marginBottom: "0.5mm",
-            lineHeight: 1.15,
+            lineHeight: 1.1,
             textTransform: "uppercase",
           }}
         >
@@ -123,22 +115,22 @@ function InfohasProTemplate({ resume, accent }: { resume: ResumeData; accent: st
 
         {/* Headline — black, 13pt */}
         {resume.headline && (
-          <div style={{ fontSize: "13pt", color: "#000", marginBottom: "0.5mm", lineHeight: 1.15 }}>
+          <div style={{ fontSize: "10.5pt", color: BLACK, marginBottom: "0.3mm", lineHeight: 1.2 }}>
             {resume.headline}
           </div>
         )}
 
         {/* Contact lines — black, 13pt */}
-        <div style={{ fontSize: "13pt", color: "#000", marginBottom: "0.5mm", lineHeight: 1.15 }}>
+        <div style={{ fontSize: "10.5pt", color: BLACK, marginBottom: "0.3mm", lineHeight: 1.2 }}>
           {[resume.contact.location, resume.contact.phone].filter(Boolean).join(" | ")}
         </div>
         {resume.contact.email && (
-          <div style={{ fontSize: "13pt", color: "#000", marginBottom: "0.5mm", lineHeight: 1.15 }}>
+          <div style={{ fontSize: "10.5pt", color: BLACK, marginBottom: "0.3mm", lineHeight: 1.2 }}>
             {resume.contact.email}
           </div>
         )}
         {resume.dateOfBirth && (
-          <div style={{ fontSize: "13pt", color: "#000", marginBottom: "0.5mm", lineHeight: 1.15 }}>
+          <div style={{ fontSize: "10.5pt", color: BLACK, marginBottom: "0.3mm", lineHeight: 1.2 }}>
             Date Of Birth : {resume.dateOfBirth}
           </div>
         )}
@@ -148,20 +140,20 @@ function InfohasProTemplate({ resume, accent }: { resume: ResumeData; accent: st
 
       {/* ============ BODY ============ */}
       {/* 27pt gap from header to first section header (matches model PDF) */}
-      <div style={{ marginTop: "9.5mm" }}>
+      <div style={{ marginTop: "3mm" }}>
         {/* PROFESSIONAL SUMMARY */}
         {resume.summary && (
-          <InfohasSection title="PROFESSIONAL SUMMARY" blue={BLUE}>
-            <p style={{ margin: 0, textAlign: "justify", color: "#1F2937" }}>{resume.summary}</p>
+          <InfohasSection title="PROFESSIONAL SUMMARY">
+            <p style={{ margin: 0, textAlign: "justify", color: "#000" }}>{resume.summary}</p>
           </InfohasSection>
         )}
 
         {/* CORE COMPETENCIES & SKILLS */}
         {resume.skills.length > 0 && (
-          <InfohasSection title="CORE COMPETENCIES & SKILLS" blue={BLUE}>
+          <InfohasSection title="CORE COMPETENCIES & SKILLS">
             <ul style={{ margin: 0, paddingLeft: "5mm", listStyleType: "•" }}>
               {groupSkillsByCategory(resume.skills).map((g, i) => (
-                <li key={i} style={{ marginBottom: "1mm", color: "#1F2937" }}>
+                <li key={i} style={{ marginBottom: "1mm", color: "#000" }}>
                   <span style={{ fontWeight: 700 }}>{g.category}:</span>{" "}
                   <span>{g.items.join(", ")}.</span>
                 </li>
@@ -172,20 +164,20 @@ function InfohasProTemplate({ resume, accent }: { resume: ResumeData; accent: st
 
         {/* PROFESSIONAL EXPERIENCE */}
         {resume.experience.length > 0 && (
-          <InfohasSection title="PROFESSIONAL EXPERIENCE" blue={BLUE}>
+          <InfohasSection title="PROFESSIONAL EXPERIENCE">
             <div style={{ display: "flex", flexDirection: "column", gap: "2mm" }}>
               {resume.experience.map((e) => (
                 <div key={e.id}>
                   <div style={{ marginBottom: "0.5mm" }}>
-                    <span style={{ fontWeight: 700, color: "#1F2937" }}>{e.title}</span>{" "}
-                    <span style={{ color: "#1F2937" }}>{e.company}</span>
-                    {e.location && <span style={{ color: "#1F2937" }}> | {e.location}</span>}
+                    <span style={{ fontWeight: 700, color: "#000" }}>{e.title}</span>{" "}
+                    <span style={{ color: "#000" }}>{e.company}</span>
+                    {e.location && <span style={{ color: "#000" }}> | {e.location}</span>}
                     {"  "}
-                    <span style={{ color: "#1F2937" }}>{fmtDateInfohas(e.startDate)} – {fmtDateInfohas(e.endDate)}</span>
+                    <span style={{ color: "#000" }}>{fmtDateInfohas(e.startDate)} – {fmtDateInfohas(e.endDate)}</span>
                   </div>
                   <ul style={{ margin: 0, paddingLeft: "5mm", listStyleType: "•" }}>
                     {e.bullets.map((b, i) => (
-                      <li key={i} style={{ marginBottom: "0.5mm", color: "#1F2937", textAlign: "justify" }}>{b}</li>
+                      <li key={i} style={{ marginBottom: "0.5mm", color: "#000", textAlign: "justify" }}>{b}</li>
                     ))}
                   </ul>
                 </div>
@@ -196,15 +188,15 @@ function InfohasProTemplate({ resume, accent }: { resume: ResumeData; accent: st
 
         {/* EDUCATION */}
         {resume.education.length > 0 && (
-          <InfohasSection title="EDUCATION" blue={BLUE}>
+          <InfohasSection title="EDUCATION">
             <div style={{ display: "flex", flexDirection: "column", gap: "1.5mm" }}>
               {resume.education.map((ed) => (
                 <div key={ed.id}>
                   <div>
-                    <span style={{ fontWeight: 700, color: "#1F2937" }}>{ed.degree}</span>{" "}
-                    <span style={{ color: "#1F2937" }}>{ed.institution}</span>
+                    <span style={{ fontWeight: 700, color: "#000" }}>{ed.degree}</span>{" "}
+                    <span style={{ color: "#000" }}>{ed.institution}</span>
                     {(ed.location || ed.startDate || ed.endDate) && (
-                      <span style={{ color: "#1F2937" }}>
+                      <span style={{ color: "#000" }}>
                         {" | "}
                         {[ed.location, ed.startDate && ed.endDate ? `${fmtDateInfohas(ed.startDate)} – ${fmtDateInfohas(ed.endDate)}` : ed.startDate || ed.endDate].filter(Boolean).join(" | ")}
                       </span>
@@ -213,7 +205,7 @@ function InfohasProTemplate({ resume, accent }: { resume: ResumeData; accent: st
                   {ed.highlights && ed.highlights.length > 0 && (
                     <ul style={{ margin: "0.5mm 0 0 0", paddingLeft: "5mm", listStyleType: "•" }}>
                       {ed.highlights.map((h, i) => (
-                        <li key={i} style={{ color: "#1F2937" }}>{h}</li>
+                        <li key={i} style={{ color: "#000" }}>{h}</li>
                       ))}
                     </ul>
                   )}
@@ -225,10 +217,10 @@ function InfohasProTemplate({ resume, accent }: { resume: ResumeData; accent: st
 
         {/* LANGUAGES */}
         {resume.languages.length > 0 && (
-          <InfohasSection title="LANGUAGES" blue={BLUE}>
+          <InfohasSection title="LANGUAGES">
             <div style={{ display: "flex", flexDirection: "column", gap: "0.5mm" }}>
               {resume.languages.map((l) => (
-                <div key={l.id} style={{ color: "#1F2937" }}>
+                <div key={l.id} style={{ color: "#000" }}>
                   <span style={{ fontWeight: 700 }}>{l.name}:</span>{" "}
                   <span style={{ textTransform: "capitalize" }}>{l.proficiency}</span>
                   {(l as any).note ? <span> ({(l as any).note})</span> : null}
@@ -242,27 +234,27 @@ function InfohasProTemplate({ resume, accent }: { resume: ResumeData; accent: st
   );
 }
 
-/** Infohas section header — matches the OUSSAMA EL FATIMI model PDF exactly:
- * 13pt bold UPPERCASE BLACK (no color, no underline), 27pt margin before, 16pt after. */
-function InfohasSection({ title, blue: _blue, children }: { title: string; blue: string; children: React.ReactNode }) {
+/** Infohas section header - per master layout:
+ * 12pt BOLD UPPERCASE DARK RED (#8B0000), no underline, compact spacing. */
+function InfohasSection({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <section style={{ marginBottom: "9.5mm" /* 27pt — matches model section gap */ }}>
+    <section style={{ marginBottom: "3mm" }}>
       <h2
         style={{
-          color: "#000",
+          color: "#8B0000",
           fontWeight: 700,
-          fontSize: "13pt",
-          letterSpacing: "0.2pt",
-          margin: "0 0 2mm 0",
+          fontSize: "12pt",
+          letterSpacing: "0.3pt",
+          margin: "0 0 1mm 0",
           paddingBottom: 0,
           borderBottom: "none",
           textTransform: "uppercase",
-          lineHeight: 1.15,
+          lineHeight: 1.2,
         }}
       >
         {title}
       </h2>
-      <div style={{ fontSize: "13pt", lineHeight: 1.15 }}>{children}</div>
+      <div style={{ fontSize: "10.5pt", lineHeight: 1.2 }}>{children}</div>
     </section>
   );
 }
