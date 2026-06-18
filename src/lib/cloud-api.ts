@@ -126,16 +126,26 @@ export async function syncAllFromCloud(store: any): Promise<void> {
       api.getFlags().catch(() => ({ flags: null })),
     ]);
 
-    // Hydrate store with cloud data
-    if (resumesRes.resumes?.length) store.setState({ resumes: resumesRes.resumes.map(parseDbResume) });
-    if (clsRes.coverLetters?.length) store.setState({ coverLetters: clsRes.coverLetters.map(parseDbCoverLetter) });
-    if (jdsRes.jobDescriptions?.length) store.setState({ jobDescriptions: jdsRes.jobDescriptions.map(parseDbJD) });
-    if (ivsRes.interviews?.length) store.setState({ interviews: ivsRes.interviews.map(parseDbInterview) });
-    if (atsRes.atsReports?.length) store.setState({ atsReports: atsRes.atsReports.map(parseDbATS) });
-    if (providersRes.providers?.length) store.setState({ providers: providersRes.providers.map(parseDbProvider) });
-    if (promptsRes.prompts?.length) store.setState({ prompts: promptsRes.prompts.map(parseDbPrompt) });
-    if (logsRes.logs?.length) store.setState({ logs: logsRes.logs });
-    if (brandingRes.branding) store.setState({ branding: brandingRes.branding });
+    // Hydrate store with cloud data — ALWAYS set arrays even if empty
+    const resumes = (resumesRes.resumes || []).map(parseDbResume);
+    const coverLetters = (clsRes.coverLetters || []).map(parseDbCoverLetter);
+    const jobDescriptions = (jdsRes.jobDescriptions || []).map(parseDbJD);
+    const interviews = (ivsRes.interviews || []).map(parseDbInterview);
+    const atsReports = (atsRes.atsReports || []).map(parseDbATS);
+    const providers = (providersRes.providers || []).map(parseDbProvider);
+    const prompts = (promptsRes.prompts || []).map(parseDbPrompt);
+    const logs = logsRes.logs || [];
+
+    // Only override if we got data from the cloud — otherwise keep seed data
+    if (resumes.length) store.setState({ resumes });
+    if (coverLetters.length) store.setState({ coverLetters });
+    if (jobDescriptions.length) store.setState({ jobDescriptions });
+    if (interviews.length) store.setState({ interviews });
+    if (atsReports.length) store.setState({ atsReports });
+    if (providers.length) store.setState({ providers });
+    if (prompts.length) store.setState({ prompts });
+    if (logs.length) store.setState({ logs });
+    if (brandingRes.branding && Object.keys(brandingRes.branding).length > 0) store.setState({ branding: brandingRes.branding });
     if (flagsRes.flags) store.setState({ flags: flagsRes.flags });
   } catch (e) {
     console.error("[syncAllFromCloud] Error:", e);
@@ -143,23 +153,57 @@ export async function syncAllFromCloud(store: any): Promise<void> {
 }
 
 // ============ PARSERS ============
-function safeJson(s: any, fallback: any) { try { return typeof s === "string" ? JSON.parse(s) : s; } catch { return fallback; } }
+function safeJson(s: any, fallback: any) {
+  if (s === null || s === undefined) return fallback;
+  if (typeof s === "object") return s;
+  try { return JSON.parse(s); } catch { return fallback; }
+}
+function safeArray(s: any): any[] { const v = safeJson(s, []); return Array.isArray(v) ? v : []; }
+function safeObj(s: any): Record<string, any> { const v = safeJson(s, {}); return v && typeof v === "object" ? v : {}; }
+function safeStr(s: any): string { return s ? String(s) : ""; }
 
 function parseDbResume(r: any): any {
+  const experience = safeArray(r.experience_json).map((e: any) => ({
+    id: e.id || `e_${Math.random().toString(36).slice(2, 8)}`,
+    title: e.title || "",
+    company: e.company || "",
+    location: e.location || "",
+    startDate: e.startDate || "",
+    endDate: e.endDate || "Present",
+    bullets: Array.isArray(e.bullets) ? e.bullets : [],
+  }));
+  const education = safeArray(r.education_json).map((e: any) => ({
+    id: e.id || `ed_${Math.random().toString(36).slice(2, 8)}`,
+    institution: e.institution || "",
+    degree: e.degree || "",
+    field: e.field || "",
+    location: e.location || "",
+    startDate: e.startDate || "",
+    endDate: e.endDate || "",
+    gpa: e.gpa || "",
+    highlights: Array.isArray(e.highlights) ? e.highlights : [],
+  }));
+  const skills = safeArray(r.skills_json).map((s: any) => ({
+    id: s.id || `s_${Math.random().toString(36).slice(2, 8)}`,
+    name: s.name || "",
+    category: s.category || "",
+    level: s.level || undefined,
+  }));
   return {
-    id: r.id, name: r.name, headline: r.headline,
-    contact: safeJson(r.contact_json, {}),
-    summary: r.summary,
-    experience: safeJson(r.experience_json, []),
-    education: safeJson(r.education_json, []),
-    skills: safeJson(r.skills_json, []),
-    projects: safeJson(r.projects_json, []),
-    certifications: safeJson(r.certifications_json, []),
-    languages: safeJson(r.languages_json, []),
-    achievements: safeJson(r.achievements_json, []),
-    template: r.template, accentColor: r.accent_color,
-    photoUrl: r.photo_url, dateOfBirth: r.date_of_birth,
-    source: r.source, fileName: r.file_name,
+    id: r.id, name: r.name || "", headline: r.headline || "",
+    contact: safeObj(r.contact_json),
+    summary: r.summary || "",
+    experience, education, skills,
+    projects: safeArray(r.projects_json),
+    certifications: safeArray(r.certifications_json),
+    languages: safeArray(r.languages_json),
+    achievements: safeArray(r.achievements_json),
+    template: r.template || "ats-professional",
+    accentColor: r.accent_color || "#1154A3",
+    photoUrl: r.photo_url || undefined,
+    dateOfBirth: r.date_of_birth || undefined,
+    source: r.source || "manual",
+    fileName: r.file_name || undefined,
     createdAt: r.created_at, updatedAt: r.updated_at,
   };
 }
@@ -170,30 +214,30 @@ function parseDbCoverLetter(c: any): any {
 
 function parseDbJD(j: any): any {
   return {
-    id: j.id, title: j.title, company: j.company, location: j.location,
+    id: j.id, title: j.title || "Untitled", company: j.company, location: j.location,
     employmentType: j.employment_type, salary: j.salary,
-    responsibilities: safeJson(j.responsibilities_json, []),
-    requiredSkills: safeJson(j.required_skills_json, []),
-    preferredSkills: safeJson(j.preferred_skills_json, []),
-    technologies: safeJson(j.technologies_json, []),
+    responsibilities: safeArray(j.responsibilities_json),
+    requiredSkills: safeArray(j.required_skills_json),
+    preferredSkills: safeArray(j.preferred_skills_json),
+    technologies: safeArray(j.technologies_json),
     experienceYears: j.experience_years, education: j.education,
-    keywords: safeJson(j.keywords_json, []),
-    rawText: j.raw_text, url: j.url, source: j.source, createdAt: j.created_at,
+    keywords: safeArray(j.keywords_json),
+    rawText: j.raw_text, url: j.url, source: j.source || "text", createdAt: j.created_at,
   };
 }
 
 function parseDbInterview(i: any): any {
-  return { id: i.id, resumeId: i.resume_id, jdId: i.jd_id, company: i.company, role: i.role, questions: safeJson(i.questions_json, []), createdAt: i.created_at };
+  return { id: i.id, resumeId: i.resume_id, jdId: i.jd_id, company: i.company, role: i.role, questions: safeArray(i.questions_json), createdAt: i.created_at };
 }
 
 function parseDbATS(a: any): any {
   return {
     id: a.id, resumeId: a.resume_id, jdId: a.jd_id,
-    scores: { ats: a.ats_score, formatting: a.formatting_score, keywords: a.keywords_score, content: a.content_score, grammar: a.grammar_score, completeness: a.completeness_score },
-    recommendations: safeJson(a.recommendations_json, []),
-    missingKeywords: safeJson(a.missing_keywords_json, []),
-    matchedKeywords: safeJson(a.matched_keywords_json, []),
-    weakSections: safeJson(a.weak_sections_json, []),
+    scores: { ats: a.ats_score || 0, formatting: a.formatting_score || 0, keywords: a.keywords_score || 0, content: a.content_score || 0, grammar: a.grammar_score || 0, completeness: a.completeness_score || 0 },
+    recommendations: safeArray(a.recommendations_json),
+    missingKeywords: safeArray(a.missing_keywords_json),
+    matchedKeywords: safeArray(a.matched_keywords_json),
+    weakSections: safeArray(a.weak_sections_json),
     jdMatchPercent: a.jd_match_percent,
     createdAt: a.created_at,
   };
