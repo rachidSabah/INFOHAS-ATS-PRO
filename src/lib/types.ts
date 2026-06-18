@@ -403,6 +403,114 @@ export interface AuditLog {
   severity: "info" | "warning" | "error";
 }
 
+// ============================================================================
+// AI Development Agent — production-grade autonomous engineering assistant
+// ============================================================================
+
+/** Settings for the AI Development Agent. Stored in D1 (ai_agent_settings). */
+export interface AIDevAgentSettings {
+  providerId: string;          // ID of the AI provider to use (from AI Providers)
+  modelName: string;           // e.g. "deepseek-v4-flash"
+  temperature: number;         // 0.0 - 2.0
+  maxTokens: number;           // max output tokens
+  timeout: number;             // request timeout in seconds
+  streaming: boolean;          // stream responses
+  reasoningLevel: "none" | "minimal" | "low" | "medium" | "high";
+  systemPrompt: string;        // custom system prompt for the agent
+  fallbackProviderId: string;  // fallback provider if primary fails
+  fallbackModel: string;       // fallback model name
+  autoScanEnabled: boolean;    // run scheduled scans automatically
+  autoReportEnabled: boolean;  // generate reports automatically
+  safeApplyEnabled: boolean;   // require staging + approval before applying
+  requireApprovalEnabled: boolean; // require super admin approval for changes
+}
+
+/** A single issue found during a code audit, security scan, etc. */
+export interface AIDevIssue {
+  id: string;
+  type: "code" | "error" | "route" | "database" | "security" | "performance" | "deployment";
+  severity: "info" | "warning" | "error" | "critical";
+  file?: string;
+  line?: number;
+  title: string;
+  description: string;
+  recommendedFix?: string;
+  status: "open" | "fixing" | "fixed" | "ignored";
+}
+
+/** A generated patch (unified diff format). */
+export interface AIDevPatch {
+  id: string;
+  title: string;
+  description: string;
+  diff: string;               // unified git diff
+  modifiedFiles: string[];
+  newFiles: string[];
+  deletedFiles: string[];
+  impactAnalysis: string;
+  riskAnalysis: "low" | "medium" | "high";
+  status: "draft" | "staging" | "tested" | "approved" | "applied" | "rejected";
+  generatedTests?: string;    // test code generated for this patch
+  createdAt: string;
+}
+
+/** A generated feature (UI + API + DB + tests). */
+export interface AIDevFeature {
+  id: string;
+  title: string;
+  description: string;
+  request: string;            // the original user request
+  files: Array<{
+    path: string;
+    content: string;
+    type: "component" | "api" | "migration" | "test" | "config" | "other";
+  }>;
+  status: "draft" | "staging" | "tested" | "approved" | "applied" | "rejected";
+  createdAt: string;
+}
+
+/** Health check result for a specific area. */
+export interface HealthCheck {
+  area: "frontend" | "backend" | "api" | "database" | "security" | "performance" | "accessibility";
+  score: number;              // 0-100
+  status: "healthy" | "degraded" | "down";
+  details: string;
+  lastChecked: string;
+}
+
+/** Overall application health dashboard data. */
+export interface AppHealthDashboard {
+  overall: number;            // 0-100
+  checks: HealthCheck[];
+  lastFullScan: string;
+}
+
+/** Audit history entry — stored in D1 (ai_agent_history). */
+export interface AIDevAgentHistory {
+  id: string;
+  userId: string;
+  provider: string;           // provider name
+  model: string;              // model name
+  action: string;             // e.g. "code_audit", "security_scan", "feature_generation"
+  prompt: string;             // the prompt sent to the AI
+  response: string;           // the AI's response (truncated if very long)
+  patch?: string;             // generated patch (if any)
+  status: "success" | "failed" | "pending" | "approved" | "rejected";
+  createdAt: string;
+}
+
+/** Scan report — stored result of an audit/scan. */
+export interface AIDevReport {
+  id: string;
+  type: "code_audit" | "error_analysis" | "route_inspector" | "database_inspector" | "security_scan" | "performance" | "deployment_validation";
+  title: string;
+  summary: string;
+  issues: AIDevIssue[];
+  score?: number;             // 0-100 for health metrics
+  createdAt: string;
+  createdBy: string;
+}
+
 export type ViewKey =
   | "landing"
   | "dashboard"
@@ -429,5 +537,6 @@ export type ViewKey =
   | "logs"
   | "feature-flags"
   | "optimizer-directive"
+  | "ai-dev-agent"
   | "downloads"
   | "settings";

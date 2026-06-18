@@ -6,11 +6,13 @@ import type {
   User, ResumeData, JobDescription, AIProvider, AIProviderLog, AIProviderSettings, PromptTemplate,
   BrandingConfig, FeatureFlags, AuditLog, ViewKey, CoverLetter, InterviewPackage, ATSReport,
   OptimizerDirectiveConfig,
+  AIDevAgentSettings, AIDevAgentHistory, AIDevReport,
 } from "./types";
 import {
   SEED_USER, SEED_RESUMES, SEED_JDS, SEED_PROVIDERS, SEED_PROVIDER_LOGS, SEED_PROVIDER_SETTINGS,
   SEED_PROMPTS, SEED_BRANDING, SEED_FLAGS, SEED_LOGS, SEED_COVER_LETTERS, SEED_INTERVIEW, SEED_ATS_REPORTS,
   SEED_OPTIMIZER_DIRECTIVE,
+  SEED_AI_DEV_SETTINGS, SEED_AI_DEV_HISTORY, SEED_AI_DEV_REPORTS,
 } from "./mock-data";
 import { BRAND, getRoleForEmail } from "./brand";
 import { hashPassword, verifyPassword, SUPER_ADMIN_SEED, canSignIn, canAccessApp } from "./auth-utils";
@@ -75,6 +77,9 @@ interface AppState {
   branding: BrandingConfig;
   flags: FeatureFlags;
   optimizerDirective: OptimizerDirectiveConfig;
+  aiDevSettings: AIDevAgentSettings;
+  aiDevHistory: AIDevAgentHistory[];
+  aiDevReports: AIDevReport[];
   logs: AuditLog[];
 
   // ui
@@ -160,6 +165,10 @@ interface AppState {
   updateFlag: (k: keyof FeatureFlags, v: boolean) => void;
   updateOptimizerDirective: (patch: Partial<OptimizerDirectiveConfig>) => void;
   resetOptimizerDirective: () => void;
+  // AI Dev Agent
+  updateAIDevSettings: (patch: Partial<AIDevAgentSettings>) => void;
+  addAIDevHistory: (entry: Omit<AIDevAgentHistory, "id" | "createdAt">) => void;
+  addAIDevReport: (report: Omit<AIDevReport, "id" | "createdAt">) => void;
 
   // logs
   log: (entry: Omit<AuditLog, "id" | "timestamp">) => void;
@@ -217,6 +226,9 @@ export const useApp = create<AppState>()(
       branding: SEED_BRANDING,
       flags: SEED_FLAGS,
       optimizerDirective: SEED_OPTIMIZER_DIRECTIVE,
+      aiDevSettings: SEED_AI_DEV_SETTINGS,
+      aiDevHistory: SEED_AI_DEV_HISTORY,
+      aiDevReports: SEED_AI_DEV_REPORTS,
       logs: SEED_LOGS,
 
       theme: (typeof localStorage !== "undefined" && localStorage.getItem("resumeai-theme") === "dark") ? "dark" : "light",
@@ -707,6 +719,27 @@ export const useApp = create<AppState>()(
         set({ optimizerDirective: SEED_OPTIMIZER_DIRECTIVE });
         cloudApiSafe(cloudApi.updateBranding as any)({ optimizerDirective: SEED_OPTIMIZER_DIRECTIVE }).catch(() => {});
         useApp.getState().log({ actor: get().user?.email ?? "admin", action: "Optimizer directive reset to defaults", category: "admin", details: "All parameters restored to factory defaults", severity: "warning" });
+      },
+      updateAIDevSettings: (patch) => {
+        set((s) => ({ aiDevSettings: { ...s.aiDevSettings, ...patch } }));
+        cloudApiSafe(cloudApi.updateBranding as any)({ aiDevSettings: { ...get().aiDevSettings, ...patch } }).catch(() => {});
+        useApp.getState().log({ actor: get().user?.email ?? "admin", action: "AI Dev Agent settings updated", category: "admin", details: Object.keys(patch).join(", "), severity: "info" });
+      },
+      addAIDevHistory: (entry) => {
+        const full: AIDevAgentHistory = {
+          ...entry,
+          id: uid("h"),
+          createdAt: new Date().toISOString(),
+        };
+        set((s) => ({ aiDevHistory: [full, ...s.aiDevHistory].slice(0, 200) }));
+      },
+      addAIDevReport: (report) => {
+        const full: AIDevReport = {
+          ...report,
+          id: uid("rpt"),
+          createdAt: new Date().toISOString(),
+        };
+        set((s) => ({ aiDevReports: [full, ...s.aiDevReports].slice(0, 100) }));
       },
 
       log: (entry) => {

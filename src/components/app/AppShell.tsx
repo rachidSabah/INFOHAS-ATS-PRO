@@ -29,6 +29,7 @@ import { Branding } from "./modules/Branding";
 import { FeatureFlags } from "./modules/FeatureFlags";
 import { Logs } from "./modules/Logs";
 import { OptimizerDirective } from "./modules/OptimizerDirective";
+import { AIDevAgent } from "./modules/AIDevAgent";
 import type { ViewKey } from "@/lib/types";
 
 const VIEW_COMPONENTS: Record<ViewKey, React.FC> = {
@@ -58,6 +59,7 @@ const VIEW_COMPONENTS: Record<ViewKey, React.FC> = {
   branding: Branding,
   "feature-flags": FeatureFlags,
   "optimizer-directive": OptimizerDirective,
+  "ai-dev-agent": AIDevAgent,
   logs: Logs,
 };
 
@@ -82,6 +84,7 @@ const SUPER_ADMIN_VIEWS: ViewKey[] = [
   "branding",
   "feature-flags",
   "optimizer-directive",
+  "ai-dev-agent",
   "logs",
 ];
 

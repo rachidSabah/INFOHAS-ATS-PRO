@@ -3,6 +3,7 @@ import type {
   User, ResumeData, JobDescription, AIProvider, AIProviderLog, AIProviderSettings, PromptTemplate,
   BrandingConfig, FeatureFlags, AuditLog, CoverLetter, InterviewPackage, ATSReport,
   OptimizerDirectiveConfig,
+  AIDevAgentSettings, AIDevAgentHistory, AIDevReport,
 } from "./types";
 import { BRAND } from "./brand";
 
@@ -551,6 +552,58 @@ export const SEED_OPTIMIZER_DIRECTIVE: OptimizerDirectiveConfig = {
   // === CUSTOM DIRECTIVE (ADVANCED) ===
   customDirectiveOverride: "", // empty = use generated directive
 };
+
+/**
+ * Default AI Development Agent settings.
+ * Default provider: DeepSeek (OpenCode-compatible API), model: deepseek-v4-flash.
+ * Super admins can override these via Super Admin → AI Development Agent → Settings.
+ */
+export const SEED_AI_DEV_SETTINGS: AIDevAgentSettings = {
+  providerId: "",             // will be set dynamically to the first DeepSeek provider
+  modelName: "deepseek-v4-flash",
+  temperature: 0.4,
+  maxTokens: 8000,
+  timeout: 60,
+  streaming: false,
+  reasoningLevel: "medium",
+  systemPrompt: `You are an elite AI Development Agent for ResumeAI Pro — a production Next.js 16 + Cloudflare Pages + D1 application. You have deep expertise in:
+- TypeScript, React 19, Next.js 16, Tailwind CSS 4, shadcn/ui
+- Cloudflare Pages (Edge Runtime), Workers (Hono), D1 (SQLite), KV
+- Code auditing, security analysis, performance optimization, testing
+- Git diff/patch generation, migration scripts, deployment validation
+
+RULES:
+1. ALWAYS analyze the actual code/files before making recommendations.
+2. Return structured JSON when asked — no prose preambles, no markdown fences.
+3. For patches, use unified git diff format (diff --git a/... b/...).
+4. For migrations, use SQL compatible with Cloudflare D1 (SQLite).
+5. NEVER invent APIs, dependencies, or files that don't exist.
+6. Be specific — cite file paths and line numbers when possible.
+7. For security issues, provide a severity (info/warning/error/critical) and a remediation plan.
+8. Respect the Safe Apply workflow: never modify production directly.`,
+  fallbackProviderId: "",
+  fallbackModel: "gpt-4o-mini",
+  autoScanEnabled: false,
+  autoReportEnabled: true,
+  safeApplyEnabled: true,
+  requireApprovalEnabled: true,
+};
+
+export const SEED_AI_DEV_HISTORY: AIDevAgentHistory[] = [
+  {
+    id: "h1",
+    userId: "u_demo_001",
+    provider: "DeepSeek",
+    model: "deepseek-v4-flash",
+    action: "code_audit",
+    prompt: "Scan the project for TypeScript errors and ESLint issues",
+    response: "Found 3 issues: 1) src/lib/ai.ts:249 — Property 'message' does not exist on type '{}'. 2) src/components/app/modules/Optimizer.tsx:166 — Property 'location' does not exist on type 'ResumeEducation'. 3) src/lib/exporter.ts:75 — Comparison appears unintentional.",
+    status: "success",
+    createdAt: new Date(Date.now() - 1000 * 60 * 60 * 2).toISOString(),
+  },
+];
+
+export const SEED_AI_DEV_REPORTS: AIDevReport[] = [];
 
 export const SEED_LOGS: AuditLog[] = [
   { id: "l1", timestamp: new Date(Date.now() - 1000 * 60 * 4).toISOString(), actor: "alex.morgan@example.com", action: "ATS check completed", category: "resume", details: "Score 87/100 for resume r_seed_001", severity: "info" },
