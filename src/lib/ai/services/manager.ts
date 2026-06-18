@@ -95,52 +95,41 @@ export class ProviderManager {
 
   /**
    * Fetch the list of available models from a provider's API.
-   * Uses the adapter's listModels() method — calls GET /v1/models (or equivalent).
-   * Returns a list of model ID strings.
+   * Routes through /api/providers/models to avoid CORS issues.
    */
   static async fetchModels(provider: AIProvider): Promise<{ ok: boolean; models: string[]; error?: string }> {
-    try {
-      const adapter = ProviderFactory.get(provider.type);
-      if (!adapter.listModels) {
-        return { ok: false, models: [], error: `Provider type "${provider.type}" does not support dynamic model listing.` };
-      }
-      const config = toProviderConfig(provider);
-      const models = await adapter.listModels(config);
-      return { ok: true, models };
-    } catch (e: any) {
-      return { ok: false, models: [], error: e?.message || "Failed to fetch models" };
-    }
+    return this.fetchModelsForConfig(provider);
   }
 
   /**
    * Fetch models for a provider config (without needing a saved provider).
    * Used by the editor to preview models before saving.
+   * Routes through /api/providers/models to avoid CORS issues.
    */
   static async fetchModelsForConfig(config: Partial<AIProvider>): Promise<{ ok: boolean; models: string[]; error?: string }> {
     try {
-      const adapter = ProviderFactory.get(config.type || "custom");
-      if (!adapter.listModels) {
-        return { ok: false, models: [], error: `Provider type "${config.type}" does not support dynamic model listing.` };
+      // Use the CORS proxy route instead of calling the provider API directly
+      const res = await fetch("/api/providers/models", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          baseUrl: config.baseUrl,
+          apiKey: config.apiKey,
+          authType: config.authType,
+          headersJson: config.headersJson,
+        }),
+      });
+
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
+        return { ok: false, models: [], error: err.error || `Failed to fetch models (${res.status})` };
       }
-      const fullConfig = toProviderConfig({
-        id: "preview",
-        name: "preview",
-        type: config.type || "custom",
-        baseUrl: config.baseUrl,
-        apiUrl: config.baseUrl,
-        apiKey: config.apiKey,
-        headersJson: config.headersJson,
-        authType: config.authType,
-        timeout: config.timeout ?? 10000,
-        maxTokens: 4096,
-        temperature: 0.7,
-        priority: 99,
-        isActive: true,
-        status: "untested",
-        usage: { requests: 0, tokens: 0, errors: 0, avgLatencyMs: 0, cost: 0 },
-      } as AIProvider);
-      const models = await adapter.listModels(fullConfig);
-      return { ok: true, models };
+
+      const data = await res.json();
+      if (data.models && data.models.length > 0) {
+        return { ok: true, models: data.models };
+      }
+      return { ok: false, models: [], error: "No models returned from the API." };
     } catch (e: any) {
       return { ok: false, models: [], error: e?.message || "Failed to fetch models" };
     }

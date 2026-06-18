@@ -12,7 +12,7 @@ import { useApp, uid } from "@/lib/store";
 import { TEMPLATES } from "@/lib/brand";
 import { A4Preview } from "@/components/resume/A4Preview";
 import { exportResumePDF, exportResumeDOCX, exportResumeTXT, exportResumeDOC } from "@/lib/exporter";
-import { blankResume } from "@/lib/parser";
+import { blankResume, parseResumeFile } from "@/lib/parser";
 import { toast } from "sonner";
 import type { ResumeData, ResumeExperience, ResumeEducation, ResumeSkill, ResumeTemplate } from "@/lib/types";
 
@@ -32,7 +32,9 @@ export function Builder() {
   const [tab, setTab] = useState<"basics" | "experience" | "education" | "skills" | "extra" | "design">("basics");
   const [scale, setScale] = useState(0.6);
   const [exporting, setExporting] = useState(false);
+  const [importing, setImporting] = useState(false);
   const previewRef = useRef<HTMLDivElement>(null);
+  const importFileRef = useRef<HTMLInputElement>(null);
 
   // Responsive scaling
   useEffect(() => {
@@ -121,6 +123,43 @@ export function Builder() {
     toast.success("DOC exported — strict A4 one-page layout.");
   };
 
+  // === Import resume from file ===
+  const onImport = async (files: FileList | null) => {
+    if (!files?.[0]) return;
+    const file = files[0];
+    if (file.size > 20 * 1024 * 1024) {
+      toast.error("File too large. Maximum 20MB.");
+      return;
+    }
+    setImporting(true);
+    try {
+      const parsed = await parseResumeFile(file);
+      // Patch all fields into the current resume
+      updateResume(resume.id, {
+        name: parsed.name,
+        headline: parsed.headline,
+        contact: parsed.contact,
+        summary: parsed.summary,
+        experience: parsed.experience,
+        education: parsed.education,
+        skills: parsed.skills,
+        projects: parsed.projects,
+        certifications: parsed.certifications,
+        languages: parsed.languages,
+        dateOfBirth: parsed.dateOfBirth,
+        source: "upload",
+        fileName: file.name,
+      });
+      setTab("basics"); // Switch to Basics tab so user can review
+      toast.success(`Imported "${file.name}" — ${parsed.experience.length} experiences, ${parsed.skills.length} skills, ${parsed.education.length} education entries extracted.`);
+    } catch (e: any) {
+      toast.error(e?.message || "Failed to parse file.");
+    } finally {
+      setImporting(false);
+      if (importFileRef.current) importFileRef.current.value = "";
+    }
+  };
+
   // Rough one-page estimate based on content volume
   const contentLen = (resume.summary?.length || 0) +
     resume.experience.reduce((n, e) => n + e.bullets.join(" ").length, 0) +
@@ -139,7 +178,7 @@ export function Builder() {
           </h1>
           <p className="text-sm text-muted-foreground mt-1">Edit on the left, see the live A4 preview on the right. Always one page.</p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex gap-2 flex-wrap">
           <select
             value={resume.id}
             onChange={(e) => setActiveResume(e.target.value)}
@@ -149,6 +188,11 @@ export function Builder() {
               <option key={r.id} value={r.id}>{r.name}</option>
             ))}
           </select>
+          {/* Import button — accepts PDF/DOCX/DOC/TXT, parses into all fields */}
+          <input ref={importFileRef} type="file" accept=".pdf,.docx,.doc,.txt" className="hidden" onChange={(e) => onImport(e.target.files)} />
+          <Button variant="outline" size="sm" onClick={() => importFileRef.current?.click()} disabled={importing} className="gap-1.5 border-brand text-brand hover:bg-brand-light" title="Import a resume from PDF, DOCX, or TXT — extracts all fields automatically">
+            {importing ? <Icon name="Loader2" className="w-3.5 h-3.5 animate-spin" /> : <Icon name="Upload" className="w-3.5 h-3.5" />} Import
+          </Button>
           <Button variant="outline" size="sm" onClick={onExportTXT} className="gap-1.5">
             <Icon name="FileText" className="w-3.5 h-3.5" /> TXT
           </Button>

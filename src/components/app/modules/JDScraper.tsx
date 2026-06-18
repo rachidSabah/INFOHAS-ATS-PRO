@@ -45,15 +45,29 @@ export function JDScraper() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ url }),
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Fetch failed");
+
+      // Safely parse JSON — handle empty/non-JSON responses
+      const text = await res.text();
+      let data: any;
+      try {
+        data = JSON.parse(text);
+      } catch {
+        throw new Error(`Server returned a non-JSON response (${res.status} ${res.statusText}). The site may be blocking our scraper.`);
+      }
+
+      if (!res.ok) throw new Error(data.error || `Fetch failed (${res.status})`);
+
+      if (!data.text || data.text.trim().length < 30) {
+        throw new Error("The page was fetched but no readable text was found. The site may use JavaScript rendering. Please paste the JD text manually.");
+      }
+
       setLogLines((l) => [...l, `Retrieved ${data.text.length} chars.`, "Page text ready for AI extraction."]);
       setRawText(data.text);
       toast.success(`Scraped ${data.title || url}`);
     } catch (e: any) {
-      // CORS or fetch failure — fallback to instructions
-      setLogLines((l) => [...l, `⚠ ${e?.message}`, "Falling back: paste the JD text manually below."]);
-      toast.error("Couldn't fetch directly (CORS or network). Please paste the text manually.");
+      const msg = e?.message || "Unknown error";
+      setLogLines((l) => [...l, `⚠ ${msg}`, "Falling back: paste the JD text manually below."]);
+      toast.error(msg.includes("paste") ? msg : "Couldn't fetch the URL. Please paste the JD text manually below — same AI extraction.");
     } finally {
       setScraping(false);
     }

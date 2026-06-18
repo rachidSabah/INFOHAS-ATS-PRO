@@ -39,11 +39,18 @@ export async function parseResumeFile(file: File): Promise<ResumeData> {
 
 async function parsePdf(file: File): Promise<string> {
   const pdfjs: any = await import("pdfjs-dist/build/pdf.mjs");
-  // Use CDN worker URL — works in all environments (browser, Cloudflare Pages, etc.)
-  // The bundled worker import doesn't resolve correctly in Edge/Workers environments
-  pdfjs.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjs.version || "4.0.379"}/pdf.worker.min.mjs`;
+  // Disable the worker entirely — run PDF parsing on the main thread.
+  // This avoids all worker URL / dynamic import issues on Cloudflare Pages.
+  pdfjs.GlobalWorkerOptions.workerSrc = "";
+  pdfjs.GlobalWorkerOptions.workerPort = null;
   const buf = await file.arrayBuffer();
-  const pdf = await pdfjs.getDocument({ data: buf }).promise;
+  const pdf = await pdfjs.getDocument({
+    data: buf,
+    disableWorker: true,
+    useWorkerFetch: false,
+    isEvalSupported: false,
+    useSystemFonts: true,
+  }).promise;
   let text = "";
   for (let i = 1; i <= pdf.numPages; i++) {
     const page = await pdf.getPage(i);
