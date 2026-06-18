@@ -179,9 +179,16 @@ export function Optimizer() {
       const data = JSON.parse(cleaned);
 
       // Map the AI's InfoHAS Pro JSON shape to our ResumeData type
-      const skills: ResumeSkill[] = (data.skills ?? []).flatMap((g: any) =>
+      const aiSkills: ResumeSkill[] = (data.skills ?? []).flatMap((g: any) =>
         (g.items ?? []).map((name: string) => ({ id: uid("s"), name, category: g.category || "General" }))
       );
+      // If AI didn't return skills, keep original + add missing keywords
+      const skills: ResumeSkill[] = aiSkills.length > 0
+        ? aiSkills
+        : [
+            ...resume.skills,
+            ...beforeReport.missingKeywords.map((k) => ({ id: uid("s"), name: k, category: "From JD" })),
+          ].filter((s, idx, arr) => arr.findIndex((x) => x.name.toLowerCase() === s.name.toLowerCase()) === idx);
 
       optimized = {
         id: uid("r"),
@@ -197,34 +204,40 @@ export function Optimizer() {
         },
         dateOfBirth: data.dateOfBirth || resume.dateOfBirth,
         summary: data.summary,
-        experience: (data.experience ?? []).map((e: any) => ({
-          id: uid("e"),
-          title: e.title || "",
-          company: e.company || "",
-          location: e.location || "",
-          startDate: e.startDate || "",
-          endDate: e.endDate || "Present",
-          bullets: e.bullets ?? [],
-        })),
-        education: (data.education ?? []).map((ed: any) => ({
-          id: uid("ed"),
-          degree: ed.degree || "",
-          institution: ed.institution || "",
-          field: "",
-          location: ed.location || "",
-          startDate: ed.startDate || "",
-          endDate: ed.endDate || "",
-          highlights: ed.modules ? [`Modules: ${ed.modules}`] : [],
-        })),
+        experience: (data.experience ?? []).length > 0
+          ? (data.experience ?? []).map((e: any) => ({
+              id: uid("e"),
+              title: e.title || "",
+              company: e.company || "",
+              location: e.location || "",
+              startDate: e.startDate || "",
+              endDate: e.endDate || "Present",
+              bullets: e.bullets ?? [],
+            }))
+          : resume.experience, // preserve original experience if AI didn't return any
+        education: (data.education ?? []).length > 0
+          ? (data.education ?? []).map((ed: any) => ({
+              id: uid("ed"),
+              degree: ed.degree || "",
+              institution: ed.institution || "",
+              field: ed.field || "",
+              location: ed.location || "",
+              startDate: ed.startDate || "",
+              endDate: ed.endDate || "",
+              highlights: ed.modules ? [`Modules: ${ed.modules}`] : ed.highlights || [],
+            }))
+          : resume.education, // preserve original education if AI didn't return any
         skills,
-        projects: [],
-        certifications: [],
-        languages: (data.languages ?? []).map((l: any) => ({
-          id: uid("l"),
-          name: l.name || "",
-          proficiency: (l.proficiency || "fluent").toLowerCase() as any,
-          ...(l.note ? { note: l.note } : {}),
-        })) as any,
+        projects: resume.projects, // preserve original projects
+        certifications: resume.certifications, // preserve original certifications
+        languages: (data.languages ?? []).length > 0
+          ? (data.languages ?? []).map((l: any) => ({
+              id: uid("l"),
+              name: l.name || "",
+              proficiency: (l.proficiency || "fluent").toLowerCase() as any,
+              ...(l.note ? { note: l.note } : {}),
+            })) as any
+          : resume.languages, // preserve original languages if AI didn't return any
         template: "infohas-pro",
         accentColor: "#0563C1",
         photoUrl: resume.photoUrl, // preserve if user already uploaded one
@@ -292,12 +305,17 @@ export function Optimizer() {
       // Build a ResumeData from the optimized HTML — parse the directive-format HTML back into structured data
       // For the optimizer flow, we keep the original resume but mark it as aviation-optimized and store the HTML separately
       const optimized: ResumeData = {
-        ...resume,
+        ...resume, // preserves education, skills, projects, certifications, languages, contact, etc.
         id: uid("r"),
         template: "infohas-pro",
         accentColor: "#0563C1",
         source: "ai-optimized",
-        summary: result.summary_critique,
+        summary: result.summary_critique || resume.summary,
+        // Add missing keywords to skills
+        skills: [
+          ...resume.skills,
+          ...result.missing_keywords.map((k) => ({ id: uid("s"), name: k, category: "From JD" })),
+        ].filter((s, idx, arr) => arr.findIndex((x) => x.name.toLowerCase() === s.name.toLowerCase()) === idx),
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
       };

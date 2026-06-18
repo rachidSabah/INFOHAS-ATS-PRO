@@ -38,11 +38,10 @@ export async function parseResumeFile(file: File): Promise<ResumeData> {
 }
 
 async function parsePdf(file: File): Promise<string> {
-  const pdfjs = await import("pdfjs-dist/build/pdf.mjs");
-  // Use bundled worker
-  // @ts-ignore
-  const worker = await import("pdfjs-dist/build/pdf.worker.mjs");
-  pdfjs.GlobalWorkerOptions.workerSrc = worker;
+  const pdfjs: any = await import("pdfjs-dist/build/pdf.mjs");
+  // Use CDN worker URL — works in all environments (browser, Cloudflare Pages, etc.)
+  // The bundled worker import doesn't resolve correctly in Edge/Workers environments
+  pdfjs.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjs.version || "4.0.379"}/pdf.worker.min.mjs`;
   const buf = await file.arrayBuffer();
   const pdf = await pdfjs.getDocument({ data: buf }).promise;
   let text = "";

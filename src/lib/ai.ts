@@ -433,25 +433,106 @@ function localBullets(prompt: string): string {
 }
 
 function localJD(prompt: string): string {
+  // Try to extract real data from the actual JD text in the prompt
+  // The prompt format is: "Extract from this job description:\n\n[JD TEXT]\n\nReturn JSON..."
+  const jdTextMatch = prompt.match(/Extract from this job description:\s*\n+(.*?)\n+Return JSON/s);
+  const jdText = jdTextMatch?.[1] || prompt;
+
+  // Extract title — usually the first non-empty line that looks like a job title
+  const lines = jdText.split(/\n/).map((l) => l.trim()).filter(Boolean);
+  let title = "Untitled Role";
+  let company = "";
+  let location = "";
+
+  for (const line of lines.slice(0, 10)) {
+    // Title: first line that has 2-8 words and no digits (heuristic)
+    if (!title || title === "Untitled Role") {
+      const words = line.split(/\s+/);
+      if (words.length >= 2 && words.length <= 10 && !/\d{3,}/.test(line) && line.length < 80) {
+        title = line.replace(/[^a-zA-Z0-9\s\-\/]/g, "").trim();
+      }
+    }
+    // Company: look for "at [Company]" or "Company: X" patterns
+    if (!company) {
+      const companyMatch = line.match(/\bat\s+([A-Z][a-zA-Z0-9&.\s]{2,30})/) || line.match(/\bcompany[:\s]+([a-zA-Z0-9&.\s]{2,30})/i);
+      if (companyMatch) company = companyMatch[1].trim();
+    }
+    // Location: look for "City, State" or "City, Country" or "Remote"
+    if (!location) {
+      const locMatch = line.match(/\b([A-Z][a-zA-Z]+,\s*[A-Z]{2,})\b/) || line.match(/\b(Remote|Hybrid|On-site)\b/i);
+      if (locMatch) location = locMatch[1];
+    }
+  }
+
+  // Extract keywords from the JD text — look for skill-like terms
+  const skillPatterns = [
+    /\b(JavaScript|TypeScript|React|Next\.js|Vue|Angular|Node\.js|Express|Python|Java|Go|Rust|C\+\+|Ruby|PHP|Swift|Kotlin)\b/gi,
+    /\b(HTML5?|CSS3?|SASS|SCSS|Tailwind|Bootstrap|Material.UI)\b/gi,
+    /\b(GraphQL|REST|gRPC|WebSocket|PostgreSQL|MySQL|MongoDB|Redis|DynamoDB|Firebase)\b/gi,
+    /\b(AWS|Azure|GCP|Docker|Kubernetes|Terraform|Jenkins|GitHub.Actions|CI\/CD)\b/gi,
+    /\b(React.Native|Flutter|iOS|Android|Electron)\b/gi,
+    /\b(Machine.Learning|AI|Deep.Learning|TensorFlow|PyTorch|NLP|Computer.Vision)\b/gi,
+    /\b(Agile|Scrum|Kanban|JIRA|Confluence)\b/gi,
+    /\b(Salesforce|SAP|Oracle|ServiceNow|Workday)\b/gi,
+    /\b(Photoshop|Illustrator|Figma|Sketch|Adobe.XD|InDesign)\b/gi,
+    /\b(SEO|SEM|Google.Analytics|Google.Ads|Facebook.Ads|HubSpot|Marketo)\b/gi,
+    /\b(Cabin.Crew|Aviation|Safety|Emergency|First.Aid|CPR|AED|SEP|CRM|DGR|AVSEC|Passenger.Service|Hospitality)\b/gi,
+    /\b(Leadership|Management|Communication|Presentation|Negotiation|Problem.Solving|Analytical|Teamwork)\b/gi,
+  ];
+  const foundSkills = new Set<string>();
+  for (const pattern of skillPatterns) {
+    const matches = jdText.matchAll(pattern);
+    for (const m of matches) {
+      foundSkills.add(m[0].trim());
+    }
+  }
+  // Also extract any words that appear frequently and look like skills (capitalized, 3+ chars)
+  const wordFreq: Record<string, number> = {};
+  const words = jdText.match(/\b[A-Z][a-zA-Z0-9.+#]{2,20}\b/g) ?? [];
+  for (const w of words) {
+    wordFreq[w] = (wordFreq[w] || 0) + 1;
+  }
+  const frequentWords = Object.entries(wordFreq)
+    .filter(([w, c]) => c >= 2 && !["The", "And", "For", "With", "You", "Will", "Our", "Are", "This", "That", "Have", "Your", "From"].includes(w))
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 15)
+    .map(([w]) => w);
+
+  const keywords = Array.from(new Set([...foundSkills, ...frequentWords])).slice(0, 15);
+  const technologies = Array.from(foundSkills).slice(0, 10);
+
+  // Extract responsibilities (lines starting with • or - or numbered)
+  const responsibilities = lines
+    .filter((l) => /^[•\-*▪◦]\s+/.test(l) || /^\d+\.\s+/.test(l))
+    .map((l) => l.replace(/^[•\-*▪◦\d.]\s+/, "").trim())
+    .filter((l) => l.length > 10)
+    .slice(0, 10);
+
+  // Extract experience requirement
+  const expMatch = jdText.match(/(\d+)[\+]?\s*years?\s*(of\s*)?(experience|exp)/i);
+  const experienceYears = expMatch ? `${expMatch[1]}+ years` : "";
+
+  // Extract education
+  const eduMatch = jdText.match(/(Bachelor|Master|B\.?[SC]\.?|M\.?[SC]\.?|PhD|Degree|Diploma)[^.\n]{0,60}/i);
+  const education = eduMatch ? eduMatch[0].trim() : "";
+
+  // Extract salary
+  const salaryMatch = jdText.match(/\$[\d,]+(?:\s*[-–]\s*\$[\d,]+)?(?:\s*(?:per\s*)?(?:year|annum|yr))?/i);
+
   return JSON.stringify(
     {
-      title: extract(prompt, /\btitle[:\s]+([a-zA-Z][a-zA-Z0-9\- ]{2,40})/, "Senior Engineer"),
-      company: extract(prompt, /\bcompany[:\s]+([a-zA-Z][a-zA-Z0-9&. ]{2,40})/, "the company"),
-      location: "Remote",
-      employmentType: "Full-time",
-      salary: "Competitive",
-      responsibilities: [
-        "Build and maintain customer-facing features used by millions of users.",
-        "Collaborate cross-functionally with design, product, and backend teams.",
-        "Drive performance, accessibility, and reliability improvements.",
-        "Mentor mid-level engineers and contribute to technical design reviews.",
-      ],
-      requiredSkills: ["JavaScript", "TypeScript", "React", "HTML", "CSS"],
-      preferredSkills: ["Next.js", "Node.js", "GraphQL", "Testing", "Accessibility"],
-      technologies: ["React", "TypeScript", "Next.js", "GraphQL", "Playwright"],
-      experienceYears: "5+ years",
-      education: "B.S. in Computer Science or equivalent experience",
-      keywords: ["React", "TypeScript", "performance", "accessibility", "Next.js", "GraphQL", "frontend"],
+      title,
+      company: company || undefined,
+      location: location || undefined,
+      employmentType: /part.time/i.test(jdText) ? "Part-time" : /contract/i.test(jdText) ? "Contract" : "Full-time",
+      salary: salaryMatch?.[0] || undefined,
+      responsibilities: responsibilities.length > 0 ? responsibilities : undefined,
+      requiredSkills: technologies.slice(0, 8),
+      preferredSkills: technologies.slice(8),
+      technologies,
+      experienceYears: experienceYears || undefined,
+      education: education || undefined,
+      keywords: keywords.length > 0 ? keywords : technologies,
     },
     null,
     2
