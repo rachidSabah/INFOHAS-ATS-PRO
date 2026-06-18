@@ -91,19 +91,45 @@ export class ProviderManager {
     const provider = typeof providerOrId === "string" ? this.get(providerOrId) : providerOrId;
     if (!provider) return { ok: false, latencyMs: 0, message: "Provider not found" };
 
-    // Route through the CORS proxy — browser can't call provider APIs directly
-    const baseUrl = provider.baseUrl || provider.apiUrl || "";
-    if (!baseUrl || baseUrl === "internal") {
-      // Z.ai fallback or Puter.js — use the direct adapter
+    // Puter.js uses window.puter.ai.chat() — can only be tested client-side
+    if (provider.type === "puter") {
+      if (typeof window !== "undefined" && window.puter?.ai?.chat) {
+        try {
+          const t0 = performance.now();
+          const resp = await window.puter.ai.chat(
+            [{ role: "user", content: "Reply with exactly: OK" }],
+            { model: provider.modelName || "claude-sonnet-4", max_tokens: 10 }
+          );
+          const latencyMs = Math.round(performance.now() - t0);
+          const text = typeof resp === "string" ? resp : (resp?.message?.content ?? resp?.text ?? "OK");
+          useApp.getState().addProviderLog({
+            id: uid("pl"), createdAt: new Date().toISOString(),
+            providerId: provider.id, providerName: provider.name,
+            requestType: "test", modelName: provider.modelName,
+            status: "success", latencyMs, responsePreview: String(text).slice(0, 200),
+            requestPreview: "Test prompt: 'Reply with exactly: OK'",
+          });
+          return { ok: true, latencyMs, message: `OK — ${provider.modelName}`, response: String(text) };
+        } catch (e: any) {
+          return { ok: false, latencyMs: 0, message: `Puter.js test failed: ${e?.message || "Unknown error"}. Make sure you're signed in to Puter.` };
+        }
+      } else {
+        return { ok: false, latencyMs: 0, message: "Puter.js is not loaded. Please refresh the page and try again." };
+      }
+    }
+
+    // Z.ai fallback — use the internal adapter
+    if (provider.type === "z-ai-fallback" || !provider.baseUrl || provider.baseUrl === "internal") {
       return ProviderRouter.testConnection(provider);
     }
 
+    // All other providers — route through the CORS proxy
     try {
       const res = await fetch("/api/providers/test", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          baseUrl,
+          baseUrl: provider.baseUrl,
           apiKey: provider.apiKey,
           authType: provider.authType || "bearer",
           headersJson: provider.headersJson,
@@ -112,7 +138,15 @@ export class ProviderManager {
           timeout: Math.min(provider.timeout || 30000, 15000),
         }),
       });
-      const data = await res.json();
+
+      // Safely parse response
+      const responseText = await res.text();
+      let data: any;
+      try {
+        data = JSON.parse(responseText);
+      } catch {
+        data = { ok: false, message: "Proxy returned a non-JSON response." };
+      }
 
       // Log the test
       useApp.getState().addProviderLog({
