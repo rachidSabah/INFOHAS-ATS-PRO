@@ -29,17 +29,16 @@ export function AuthModal() {
   const [loading, setLoading] = useState<string | null>(null);
 
   // === Puter.js sign in ===
+  // Puter users are auto-approved (their email is verified by Puter's OAuth:
+  // Google/GitHub/etc), so they go straight to the dashboard without admin approval.
   const handlePuter = async () => {
     setLoading("puter");
     const result = await signInWithPuter();
     if (!result.ok) {
       toast.error(result.error || "Puter sign-in failed.");
     } else if (result.user) {
-      if (result.user.status === "pending") {
-        toast.success("Signed in via Puter. Your account is awaiting admin approval.");
-      } else {
-        toast.success(`Welcome to ${BRAND.name}!`);
-      }
+      // Puter users are always auto-approved — no pending state possible.
+      toast.success(`Welcome to ${BRAND.name}!`);
     }
     setLoading(null);
   };

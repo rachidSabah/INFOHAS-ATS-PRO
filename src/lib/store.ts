@@ -340,7 +340,18 @@ export const useApp = create<AppState>()(
             if (existing.status === "deleted") {
               return { ok: false, error: "This account has been deleted." };
             }
-            const updatedUser = { ...existing, lastLoginAt: now, lastActiveAt: now, avatarUrl: puterUser?.photo || existing.avatarUrl };
+            // If this is a Puter-authenticated user who was previously stuck in
+            // "pending" status (from the old approval flow), auto-approve them now.
+            // Puter OAuth already verified their email, so admin approval is unnecessary.
+            const shouldAutoApprove = existing.provider === "puter" && existing.status === "pending";
+            const updatedUser = {
+              ...existing,
+              status: shouldAutoApprove ? "approved" as const : existing.status,
+              lastLoginAt: now,
+              lastActiveAt: now,
+              avatarUrl: puterUser?.photo || existing.avatarUrl,
+              updatedAt: shouldAutoApprove ? now : existing.updatedAt,
+            };
             set((s) => ({
               users: s.users.map((u) => (u.id === existing.id ? updatedUser : u)),
               user: updatedUser,
@@ -350,10 +361,18 @@ export const useApp = create<AppState>()(
               synced: false,
             }));
             setUserId(updatedUser.id);
-            useApp.getState().log({ actor: puterEmail, action: "User signed in", category: "auth", details: "Provider: puter", severity: "info" });
+            if (shouldAutoApprove) {
+              useApp.getState().log({ actor: puterEmail, action: "Puter user auto-approved on sign-in", category: "auth", details: `Name: ${updatedUser.name}`, severity: "info" });
+            } else {
+              useApp.getState().log({ actor: puterEmail, action: "User signed in", category: "auth", details: "Provider: puter", severity: "info" });
+            }
             return { ok: true, user: updatedUser };
           } else {
-            // New Puter user — create with pending status
+            // New Puter user — AUTO-APPROVED.
+            // Puter users authenticate via Google/GitHub/etc through Puter's OAuth,
+            // so their email is already verified by the upstream provider. There's
+            // no need for an admin approval step — they can use the app immediately.
+            // (Email/password registrations still go through the pending approval flow.)
             const newUser: User = {
               id: uid("u"),
               name: puterName,
@@ -361,7 +380,7 @@ export const useApp = create<AppState>()(
               email: puterEmail,
               avatarUrl: puterUser?.photo || "",
               role: "user",
-              status: "pending",
+              status: "approved", // Auto-approved — Puter OAuth already verified the email
               provider: "puter",
               createdAt: now,
               updatedAt: now,
@@ -371,7 +390,7 @@ export const useApp = create<AppState>()(
             };
             set((s) => ({ users: [...s.users, newUser], user: newUser, isAuthed: true, authOpen: false, view: "dashboard", synced: false }));
             setUserId(newUser.id);
-            useApp.getState().log({ actor: puterEmail, action: "User registered via Puter (pending approval)", category: "auth", details: `Name: ${newUser.name}`, severity: "warning" });
+            useApp.getState().log({ actor: puterEmail, action: "User registered via Puter (auto-approved)", category: "auth", details: `Name: ${newUser.name}`, severity: "info" });
             return { ok: true, user: newUser };
           }
         } catch {
