@@ -1,4 +1,8 @@
 # ResumeAI Pro — Cloudflare Worker API config
+# NOTE: This file is for the Workers API deployment only.
+# Cloudflare Pages uses its own build process (next-on-pages).
+# The pages_build_output_dir is NOT set here to avoid conflicts with Pages auto-build.
+
 name = "resumeai-pro-api"
 main = "workers/api/index.ts"
 compatibility_date = "2026-01-01"

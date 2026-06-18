@@ -38,27 +38,54 @@ export async function parseResumeFile(file: File): Promise<ResumeData> {
 }
 
 async function parsePdf(file: File): Promise<string> {
-  const pdfjs: any = await import("pdfjs-dist/build/pdf.mjs");
-  // Disable the worker entirely — run PDF parsing on the main thread.
-  // This avoids all worker URL / dynamic import issues on Cloudflare Pages.
-  pdfjs.GlobalWorkerOptions.workerSrc = "";
-  pdfjs.GlobalWorkerOptions.workerPort = null;
-  const buf = await file.arrayBuffer();
-  const pdf = await pdfjs.getDocument({
-    data: buf,
-    disableWorker: true,
-    useWorkerFetch: false,
-    isEvalSupported: false,
-    useSystemFonts: true,
-  }).promise;
-  let text = "";
+  // Load pdf.js v3.11.174 from CDN — most reliable approach for all environments
+  // (browser, Cloudflare Pages, Edge runtime). Uses script tag injection.
+  if (!(window as any).pdfjsLib) {
+    await new Promise<void>((resolve, reject) => {
+      const script = document.createElement("script");
+      script.src = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js";
+      script.onload = () => {
+        (window as any).pdfjsLib.GlobalWorkerOptions.workerSrc =
+          "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+        resolve();
+      };
+      script.onerror = () => reject(new Error("Failed to load PDF.js from CDN."));
+      document.head.appendChild(script);
+    });
+  }
+
+  const pdfjsLib = (window as any).pdfjsLib;
+  const arrayBuffer = await file.arrayBuffer();
+
+  const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+  const textParts: string[] = [];
+
   for (let i = 1; i <= pdf.numPages; i++) {
     const page = await pdf.getPage(i);
-    const content = await page.getTextContent();
-    const strings = content.items.map((it: any) => it.str);
-    text += strings.join(" ") + "\n";
+    const textContent = await page.getTextContent();
+
+    let lastY: number | null = null;
+    let pageText = "";
+
+    for (const item of textContent.items) {
+      if (item.str && item.str.trim()) {
+        // Add newline if Y position changed significantly (preserves line breaks)
+        if (lastY !== null && Math.abs(item.transform[5] - lastY) > 5) {
+          pageText += "\n";
+        } else if (pageText && !pageText.endsWith(" ") && !pageText.endsWith("\n")) {
+          pageText += " ";
+        }
+        pageText += item.str;
+        lastY = item.transform[5];
+      }
+    }
+
+    if (pageText.trim()) {
+      textParts.push(pageText.trim());
+    }
   }
-  return text;
+
+  return textParts.join("\n\n");
 }
 
 async function parseDocx(file: File): Promise<string> {

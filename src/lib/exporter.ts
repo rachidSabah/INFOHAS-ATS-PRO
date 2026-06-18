@@ -56,27 +56,33 @@ export function exportResumePDF(resume: ResumeData, opts: PDFOptions = {}): { ok
   }
 
   if (!result.ok && opts.enforceOnePage !== false) {
-    // Final attempt: strip optional sections
+    // Final attempt: compress more aggressively but DON'T strip sections.
+    // Keep all education, experience, skills, certifications, languages.
+    // Only trim achievements (least important) and limit projects to 1.
     doc.deletePage(1);
     doc.addPage("a4", "portrait");
-    const stripped: ResumeData = {
+    const trimmed: ResumeData = {
       ...resume,
-      projects: [],
-      certifications: resume.certifications.slice(0, 2),
-      languages: resume.languages.slice(0, 2),
-      achievements: [],
+      projects: resume.projects.slice(0, 1), // keep 1 project instead of 0
+      certifications: resume.certifications.slice(0, 4), // keep up to 4
+      languages: resume.languages.slice(0, 4), // keep up to 4
+      achievements: resume.achievements?.slice(0, 2), // keep up to 2
     };
-    renderResumeToPdf(doc, stripped, compressSizes(currentSizes), accentRgb);
+    // Use extra-compressed sizes
+    const extraCompressed = compressSizes(compressSizes(currentSizes));
+    renderResumeToPdf(doc, trimmed, extraCompressed, accentRgb);
     const pages = doc.getNumberOfPages();
     if (pages > 1 && opts.enforceOnePage !== false) {
-      return { ok: false, pages, error: "Could not fit resume on one A4 page after compression. Please reduce content manually." };
+      // Last resort: allow 2 pages rather than losing content
+      result = { ok: true, pages };
+    } else {
+      result = { ok: true, pages };
     }
-    result = { ok: true, pages };
   }
 
-  // Validation: assert(pdf.pages === 1)
-  if (opts.enforceOnePage !== false && result.pages !== 1) {
-    return { ok: false, pages: result.pages, error: `Validation failed: ${result.pages} pages generated, expected 1.` };
+  // Validation: prefer 1 page, but allow 2 as fallback rather than losing content
+  if (opts.enforceOnePage !== false && result.pages > 2) {
+    return { ok: false, pages: result.pages, error: `Resume is ${result.pages} pages — too long. Please reduce content manually.` };
   }
 
   const fname = (resume.name || "resume").replace(/\s+/g, "_") + "_resume.pdf";
@@ -171,47 +177,39 @@ function renderResumeToPdf(doc: jsPDF, r: ResumeData, sizes: ResumeSizes, accent
     }
   }
 
-  // Education
+  // Education — always render (don't skip even if tight)
   if (r.education.length) {
-    if (y > pageH - MARGIN - 25) {
-      // skip if no room
-    } else {
-      y = sectionTitle(doc, "EDUCATION", left, y, sizes.section, accent);
-      for (const ed of r.education) {
-        if (y > pageH - MARGIN - 12) break;
-        doc.setFont("helvetica", "bold");
-        doc.setTextColor(11, 31, 58);
-        doc.setFontSize(sizes.subhead);
-        const edStr = `${ed.degree}${ed.field ? " in " + ed.field : ""}`;
-        doc.text(edStr, left, y + sizes.subhead * 0.35);
-        y += sizes.subhead * 0.5 + 1;
-        doc.setFont("helvetica", "normal");
-        doc.setTextColor(100, 116, 139);
-        doc.setFontSize(sizes.small);
-        doc.text(`${ed.institution}${ed.startDate || ed.endDate ? "  •  " + formatDate(ed.startDate) + " – " + formatDate(ed.endDate) : ""}`, left, y + sizes.small * 0.35);
-        y += sizes.small * 0.5 + 2;
-      }
-    }
-  }
-
-  // Skills
-  if (r.skills.length) {
-    if (y <= pageH - MARGIN - 18) {
-      y = sectionTitle(doc, "SKILLS", left, y, sizes.section, accent);
+    y = sectionTitle(doc, "EDUCATION", left, y, sizes.section, accent);
+    for (const ed of r.education) {
+      doc.setFont("helvetica", "bold");
+      doc.setTextColor(11, 31, 58);
+      doc.setFontSize(sizes.subhead);
+      const edStr = `${ed.degree}${ed.field ? " in " + ed.field : ""}`;
+      doc.text(edStr, left, y + sizes.subhead * 0.35);
+      y += sizes.subhead * 0.5 + 1;
       doc.setFont("helvetica", "normal");
-      doc.setTextColor(51, 65, 85);
-      doc.setFontSize(sizes.body);
-      const skillStr = r.skills.map((s) => s.name).join("  •  ");
-      y = drawWrappedText(doc, skillStr, left, y, contentW, sizes.body, 4);
-      y += 2;
+      doc.setTextColor(100, 116, 139);
+      doc.setFontSize(sizes.small);
+      doc.text(`${ed.institution}${ed.startDate || ed.endDate ? "  •  " + formatDate(ed.startDate) + " – " + formatDate(ed.endDate) : ""}`, left, y + sizes.small * 0.35);
+      y += sizes.small * 0.5 + 2;
     }
   }
 
-  // Projects (only if room)
-  if (r.projects.length && y <= pageH - MARGIN - 20) {
+  // Skills — always render
+  if (r.skills.length) {
+    y = sectionTitle(doc, "SKILLS", left, y, sizes.section, accent);
+    doc.setFont("helvetica", "normal");
+    doc.setTextColor(51, 65, 85);
+    doc.setFontSize(sizes.body);
+    const skillStr = r.skills.map((s) => s.name).join("  •  ");
+    y = drawWrappedText(doc, skillStr, left, y, contentW, sizes.body, 4);
+    y += 2;
+  }
+
+  // Projects — always render (limit to 2)
+  if (r.projects.length) {
     y = sectionTitle(doc, "PROJECTS", left, y, sizes.section, accent);
     for (const p of r.projects.slice(0, 2)) {
-      if (y > pageH - MARGIN - 12) break;
       doc.setFont("helvetica", "bold");
       doc.setTextColor(11, 31, 58);
       doc.setFontSize(sizes.subhead);
@@ -227,14 +225,13 @@ function renderResumeToPdf(doc: jsPDF, r: ResumeData, sizes: ResumeSizes, accent
     }
   }
 
-  // Certifications (only if room)
-  if (r.certifications.length && y <= pageH - MARGIN - 14) {
+  // Certifications — always render
+  if (r.certifications.length) {
     y = sectionTitle(doc, "CERTIFICATIONS", left, y, sizes.section, accent);
     doc.setFont("helvetica", "normal");
     doc.setTextColor(51, 65, 85);
     doc.setFontSize(sizes.body);
     for (const c of r.certifications.slice(0, 4)) {
-      if (y > pageH - MARGIN - 6) break;
       const cStr = `${c.name}${c.issuer ? " — " + c.issuer : ""}${c.date ? " (" + formatDate(c.date) + ")" : ""}`;
       y = drawBullet(doc, cStr, left, y, contentW, sizes.body, 2);
     }
