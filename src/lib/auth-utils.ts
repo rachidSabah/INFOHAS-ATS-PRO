@@ -12,16 +12,24 @@ export function hashPassword(password: string): string {
   // Simple salted hash — in production use bcrypt via Workers
   const salt = "resumeai_salt_2026";
   const input = salt + password + salt;
-  // Use Web Crypto API (available in browsers and Edge runtime)
-  // For synchronous use, we fall back to a simple hash
+  // Use a simple hash that works in all environments (browser, Edge, SSR)
   let hash = 0;
   for (let i = 0; i < input.length; i++) {
     const char = input.charCodeAt(i);
     hash = (hash << 5) - hash + char;
     hash = hash & hash;
   }
-  // Combine with btoa for a longer string
-  return `rh1$${btoa(input.slice(0, 16))}${Math.abs(hash).toString(36)}${btoa(input.slice(16, 32))}`;
+  // Use btoa if available, otherwise use a hex encoding fallback
+  const encode = (str: string): string => {
+    try {
+      if (typeof btoa !== "undefined") return btoa(str);
+      // Fallback: simple hex encoding
+      return Array.from(str).map((c) => c.charCodeAt(0).toString(16).padStart(2, "0")).join("");
+    } catch {
+      return Array.from(str).map((c) => c.charCodeAt(0).toString(16).padStart(2, "0")).join("");
+    }
+  };
+  return `rh1$${encode(input.slice(0, 16))}${Math.abs(hash).toString(36)}${encode(input.slice(16, 32))}`;
 }
 
 /**

@@ -414,8 +414,8 @@ export const useApp = create<AppState>()(
         if (newPassword.length < 8) return { ok: false, error: "New password must be at least 8 characters." };
         if (!/[A-Za-z]/.test(newPassword) || !/\d/.test(newPassword)) return { ok: false, error: "New password must contain letters and numbers." };
         if (newPassword === currentPassword) return { ok: false, error: "New password must differ from current." };
-        // Persist mock hash
-        const hash = `mock$${btoa(newPassword).slice(0, 24)}`;
+        // Persist mock hash — use hashPassword for consistency
+        const hash = hashPassword(newPassword);
         set({ user: { ...s.user, passwordHash: hash, lastActiveAt: new Date().toISOString() } });
         useApp.getState().log({ actor: "you", action: "Password changed", category: "auth", details: "Password updated successfully", severity: "info" });
         return { ok: true };
