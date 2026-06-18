@@ -86,8 +86,9 @@ export class ProviderManager {
     useApp.getState().reorderFallback(id, direction);
   }
 
-  static async testConnection(id: string) {
-    const provider = this.get(id);
+  static async testConnection(providerOrId: string | AIProvider) {
+    // Accept either a provider ID string or a full AIProvider object
+    const provider = typeof providerOrId === "string" ? this.get(providerOrId) : providerOrId;
     if (!provider) return { ok: false, latencyMs: 0, message: "Provider not found" };
     return ProviderRouter.testConnection(provider);
   }
