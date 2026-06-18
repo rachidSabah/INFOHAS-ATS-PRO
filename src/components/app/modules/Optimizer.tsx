@@ -10,7 +10,7 @@ import { Badge, Icon, ScoreRing } from "@/components/shared";
 import { useApp, uid } from "@/lib/store";
 import { parseResumeFile } from "@/lib/parser";
 import { scoreATS } from "@/lib/ats";
-import { callAI, OPTIMIZER_DIRECTIVE, extractJSON } from "@/lib/ai";
+import { callAI, OPTIMIZER_DIRECTIVE, getOptimizerDirective, extractJSON } from "@/lib/ai";
 import { exportResumePDF, exportResumeDOCX, exportResumeTXT, exportResumeDOC, exportHtmlAsDOC } from "@/lib/exporter";
 import { EditableA4Preview } from "@/components/resume/EditableA4Preview";
 import { analyzeWithGemini, resumeToPlainText, AIRLINE_ATS_PROFILES, AIRLINE_OPTIONS, DEFAULT_APP_SETTINGS, type AppSettings, type AviationAtsResult } from "@/lib/ats-directives";
@@ -152,12 +152,14 @@ export function Optimizer() {
     setAiLog((l) => [...l, `Identified ${beforeReport.missingKeywords.length} missing keywords.`]);
     setAiLog((l) => [...l, "Generating optimized resume in InfoHAS Pro layout…"]);
 
-    // Use the OPTIMIZER_DIRECTIVE — produces structured InfoHAS Pro JSON
+    // Use the dynamic optimizer directive — reads from the super admin's
+    // configured parameters (Optimizer Directive settings page). Falls back
+    // to the hardcoded OPTIMIZER_DIRECTIVE if the store isn't available.
     let optimized: ResumeData;
     let provider = "Local Engine";
     try {
       const result = await callAI({
-        systemPrompt: OPTIMIZER_DIRECTIVE,
+        systemPrompt: getOptimizerDirective(),
         userPrompt: `SOURCE RESUME (be truthful to this — never invent employers, dates, or metrics):\n${JSON.stringify({
           name: resume.name,
           headline: resume.headline,

@@ -339,6 +339,158 @@ CONTENT RULES:
 
 ONE-PAGE CONSTRAINT: The output MUST fit on exactly one A4 page. Apply the CONTENT COMPRESSION ENGINE (above) if needed. NEVER create page two. assert(pdf.pages === 1).`;
 
+/**
+ * Generate the optimizer directive from the stored config.
+ *
+ * This reads the `optimizerDirective` config from the Zustand store (which is
+ * synced from D1) and generates a directive string with the exact values the
+ * super admin configured. If the config has a `customDirectiveOverride` set,
+ * that COMPLETELY REPLACES the generated directive.
+ *
+ * If the store isn't available (e.g. during SSR) or the config is missing,
+ * falls back to the hardcoded OPTIMIZER_DIRECTIVE constant above.
+ *
+ * Usage in the Optimizer:
+ *   const directive = getOptimizerDirective();
+ *   const result = await callAI({ systemPrompt: directive, ... });
+ */
+export function getOptimizerDirective(): string {
+  try {
+    const state: any = useApp.getState();
+    const c: OptimizerDirectiveConfig | undefined = state?.optimizerDirective;
+
+    // If no config in store, use the hardcoded default
+    if (!c) return OPTIMIZER_DIRECTIVE;
+
+    // If custom override is set, use it completely
+    if (c.customDirectiveOverride?.trim()) {
+      return c.customDirectiveOverride.trim();
+    }
+
+    // Otherwise, generate from the structured config
+    return `You are the ResumeAI Pro Optimizer. You MUST preserve the EXACT layout framework described below. Only modify CONTENT — never modify LAYOUT, section order, content density, photo position, or the compact recruiter-friendly structure.
+
+═══════════════════════════════════════════════════════════════
+PAGE FORMAT
+═══════════════════════════════════════════════════════════════
+- Document size: ${c.pageSize}
+- Maximum pages: 1
+- Required pages: EXACTLY 1
+- NEVER generate a second page.
+${c.enforceOnePage ? "- Validation: assert(pdf.pages === 1)" : ""}
+
+═══════════════════════════════════════════════════════════════
+MARGINS (very compact — use these EXACT values)
+═══════════════════════════════════════════════════════════════
+- Top: ${c.marginTopMm}mm
+- Bottom: ${c.marginBottomMm}mm
+- Left: ${c.marginLeftMm}mm
+- Right: ${c.marginRightMm}mm
+
+═══════════════════════════════════════════════════════════════
+FONT RULES
+═══════════════════════════════════════════════════════════════
+- Primary font: ${c.fontFamily} (fallback: Georgia, Cambria)
+- Body size: ${c.bodyFontSizePt}pt
+- Section titles: ${c.sectionTitleSizePt}pt, BOLD, UPPERCASE, color ${c.sectionTitleColor}
+- Name: BOLD, ${c.nameSizePt}pt, color ${c.nameColor}, UPPERCASE
+- Body text: color ${c.bodyTextColor}
+
+═══════════════════════════════════════════════════════════════
+SPACING
+═══════════════════════════════════════════════════════════════
+- Line height: ${c.lineHeight} (compact single-spacing)
+- Section gap: ${c.sectionGapMm}mm
+- Bullet indent: ${c.bulletIndentMm}mm from left margin
+
+═══════════════════════════════════════════════════════════════
+PHOTO
+═══════════════════════════════════════════════════════════════
+${c.photoEnabled
+  ? `- Photo: ${c.photoWidthMm}×${c.photoHeightMm}mm, top-right corner
+- ${c.showPlaceholderIfNoPhoto ? "Show empty placeholder if no photo uploaded" : "If no photo exists: remove photo section ENTIRELY. Do NOT use placeholders. Do NOT draw an empty box."}`
+  : "- Photo section DISABLED. Do not include any photo."}
+
+═══════════════════════════════════════════════════════════════
+SECTION ORDER (MANDATORY — in this exact order)
+═══════════════════════════════════════════════════════════════
+1. PROFESSIONAL SUMMARY — ${c.summaryMinWords}-${c.summaryMaxWords} words, single paragraph, no bullets
+2. CORE COMPETENCIES & SKILLS — max ${c.skillsMaxGroups} groups, bullet format
+3. PROFESSIONAL EXPERIENCE — max ${c.experienceMaxEntries} entries, ${c.experienceBulletsPerEntry} bullets each
+4. EDUCATION — max ${c.educationMaxEntries} entries
+5. LANGUAGES — max ${c.languagesMaxEntries} entries, one line per language
+
+═══════════════════════════════════════════════════════════════
+CONTENT COMPRESSION ENGINE (if content exceeds one page)
+═══════════════════════════════════════════════════════════════
+${c.enforceOnePage
+  ? `Apply IN THIS ORDER until content fits one page:
+1. Compress summary (reduce to ${c.summaryMinWords} words minimum)
+2. Reduce bullet length (split long bullets, remove filler)
+3. Remove repetitive achievements
+4. Reduce spacing (tighten line height)
+5. Reduce font size to MINIMUM ${c.minFontSizePt}pt (never below ${c.minFontSizePt}pt)
+6. Merge similar skills (combine categories)
+NEVER create page two. assert(pdf.pages === 1).`
+  : "Multi-page output allowed if content exceeds one page."}
+
+═══════════════════════════════════════════════════════════════
+OUTPUT FORMAT
+═══════════════════════════════════════════════════════════════
+Return ONLY valid JSON with this exact shape:
+{
+  "name": "FULL NAME",
+  "headline": "Target Role Title",
+  "location": "City, Country",
+  "phone": "+X ...",
+  "email": "...",
+  "dateOfBirth": "DD/MM/YYYY" | "",
+  "summary": "${c.summaryMinWords}-${c.summaryMaxWords} word professional summary paragraph...",
+  "skills": [
+    { "category": "Category Name", "items": ["skill1", "skill2", "skill3"] }
+  ],
+  "experience": [
+    {
+      "title": "Job Title",
+      "company": "Company",
+      "location": "City, Country",
+      "startDate": "Mon YYYY",
+      "endDate": "Mon YYYY" | "Present",
+      "bullets": ["Achievement bullet 1...", "Achievement bullet 2..."]
+    }
+  ],
+  "education": [
+    {
+      "degree": "Degree Name",
+      "institution": "Institution",
+      "location": "City, Country" | "",
+      "startDate": "YYYY",
+      "endDate": "YYYY",
+      "modules": "Module 1, Module 2, ..." | ""
+    }
+  ],
+  "languages": [
+    { "name": "English", "proficiency": "Fluent", "note": "" | "optional note" }
+  ],
+  "missingKeywordsAdded": ["keyword1", "keyword2", ...],
+  "bulletsRewritten": 5
+}
+
+CONTENT RULES:
+- Truthful to the source resume. Never invent employers, dates, or metrics.
+- Embed target job-description keywords naturally.
+- Each bullet MUST fit on ONE line (≤ 90 characters) to avoid wrapping.
+- Trim EVERY word that doesn't earn its place.`;
+  } catch {
+    // If anything goes wrong reading the store, use the hardcoded default
+    return OPTIMIZER_DIRECTIVE;
+  }
+}
+
+// Import the type for the directive config (imported here to avoid circular deps
+// at the top of the file — useApp is already imported)
+import type { OptimizerDirectiveConfig } from "./types";
+
 
 export interface AICallOptions {
   systemPrompt?: string;

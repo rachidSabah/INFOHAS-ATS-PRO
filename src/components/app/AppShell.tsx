@@ -28,6 +28,7 @@ import { Prompts } from "./modules/Prompts";
 import { Branding } from "./modules/Branding";
 import { FeatureFlags } from "./modules/FeatureFlags";
 import { Logs } from "./modules/Logs";
+import { OptimizerDirective } from "./modules/OptimizerDirective";
 import type { ViewKey } from "@/lib/types";
 
 const VIEW_COMPONENTS: Record<ViewKey, React.FC> = {
@@ -56,6 +57,7 @@ const VIEW_COMPONENTS: Record<ViewKey, React.FC> = {
   prompts: Prompts,
   branding: Branding,
   "feature-flags": FeatureFlags,
+  "optimizer-directive": OptimizerDirective,
   logs: Logs,
 };
 
@@ -79,6 +81,7 @@ const SUPER_ADMIN_VIEWS: ViewKey[] = [
   "prompts",
   "branding",
   "feature-flags",
+  "optimizer-directive",
   "logs",
 ];
 

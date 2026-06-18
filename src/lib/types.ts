@@ -332,6 +332,67 @@ export interface FeatureFlags {
   maintenanceMode: boolean;
 }
 
+/**
+ * Optimizer Directive Configuration — tunable parameters that control the
+ * InfoHAS Pro resume layout. Super admins can edit these via the
+ * "Optimizer Directive" settings page instead of changing source code.
+ *
+ * When the optimizer runs, these values are injected into the AI prompt
+ * (overriding the hardcoded OPTIMIZER_DIRECTIVE defaults) AND into the
+ * rendering components (EditableA4Preview, A4Preview, PDF exporter).
+ *
+ * All measurements are in the units noted in the field name (mm for margins,
+ * pt for font sizes, etc.).
+ */
+export interface OptimizerDirectiveConfig {
+  // === PAGE ===
+  pageSize: "A4" | "Letter";
+  marginTopMm: number;       // top margin in mm
+  marginBottomMm: number;    // bottom margin in mm
+  marginLeftMm: number;      // left margin in mm
+  marginRightMm: number;     // right margin in mm
+
+  // === FONTS ===
+  fontFamily: string;        // e.g. "Times New Roman"
+  bodyFontSizePt: number;    // body text size (10-11pt typical)
+  sectionTitleSizePt: number; // section header size (12-13pt typical)
+  nameSizePt: number;        // candidate name size (14pt typical)
+
+  // === COLORS ===
+  nameColor: string;         // hex color for candidate name (e.g. "#8B0000")
+  sectionTitleColor: string; // hex color for section headers
+  bodyTextColor: string;     // hex color for body text
+
+  // === SPACING ===
+  lineHeight: number;        // CSS line-height (1.2 = tight, 1.5 = loose)
+  sectionGapMm: number;      // gap between sections in mm
+  bulletIndentMm: number;    // bullet indent from left margin in mm
+
+  // === PHOTO ===
+  photoEnabled: boolean;     // whether to show photo frame
+  photoWidthMm: number;      // photo width in mm
+  photoHeightMm: number;     // photo height in mm
+  showPlaceholderIfNoPhoto: boolean; // show empty box if no photo uploaded
+
+  // === CONTENT LIMITS ===
+  summaryMinWords: number;   // minimum words in summary
+  summaryMaxWords: number;   // maximum words in summary
+  skillsMaxGroups: number;   // max skill category groups
+  experienceMaxEntries: number; // max experience entries
+  experienceBulletsPerEntry: number; // bullets per experience entry
+  educationMaxEntries: number; // max education entries
+  languagesMaxEntries: number; // max language entries
+
+  // === ONE-PAGE ENFORCEMENT ===
+  enforceOnePage: boolean;   // assert(pdf.pages === 1)
+  minFontSizePt: number;     // never go below this font size when compressing
+
+  // === CUSTOM DIRECTIVE (ADVANCED) ===
+  // If non-empty, this COMPLETELY REPLACES the generated directive text.
+  // Use for advanced fine-tuning that the structured fields above can't express.
+  customDirectiveOverride: string;
+}
+
 export interface AuditLog {
   id: string;
   timestamp: string;
@@ -367,5 +428,6 @@ export type ViewKey =
   | "suspended-users"
   | "logs"
   | "feature-flags"
+  | "optimizer-directive"
   | "downloads"
   | "settings";

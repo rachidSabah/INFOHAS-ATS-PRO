@@ -2,6 +2,7 @@
 import type {
   User, ResumeData, JobDescription, AIProvider, AIProviderLog, AIProviderSettings, PromptTemplate,
   BrandingConfig, FeatureFlags, AuditLog, CoverLetter, InterviewPackage, ATSReport,
+  OptimizerDirectiveConfig,
 } from "./types";
 import { BRAND } from "./brand";
 
@@ -495,6 +496,60 @@ export const SEED_FLAGS: FeatureFlags = {
   enableDonations: true,
   enableAds: false,
   maintenanceMode: false,
+};
+
+/**
+ * Default optimizer directive config — matches the strict master layout
+ * derived from the OUSSAMA EL FATIMI model PDF.
+ *
+ * Super admins can override these values via the "Optimizer Directive"
+ * settings page. The values are stored in D1 and synced to all clients.
+ */
+export const SEED_OPTIMIZER_DIRECTIVE: OptimizerDirectiveConfig = {
+  // === PAGE ===
+  pageSize: "A4",
+  marginTopMm: 6.35,       // 0.25 inch
+  marginBottomMm: 6.35,    // 0.25 inch
+  marginLeftMm: 8.89,      // 0.35 inch
+  marginRightMm: 8.89,     // 0.35 inch
+
+  // === FONTS ===
+  fontFamily: "Times New Roman",
+  bodyFontSizePt: 10.5,
+  sectionTitleSizePt: 12,
+  nameSizePt: 14,
+
+  // === COLORS ===
+  nameColor: "#8B0000",       // dark red
+  sectionTitleColor: "#8B0000", // dark red
+  bodyTextColor: "#000000",   // pure black
+
+  // === SPACING ===
+  lineHeight: 1.2,          // compact single-spacing
+  sectionGapMm: 3,          // compact section gap
+  bulletIndentMm: 4,        // bullet indent from left margin
+
+  // === PHOTO ===
+  photoEnabled: true,
+  photoWidthMm: 30,         // 3.0cm
+  photoHeightMm: 40,        // 4.0cm
+  showPlaceholderIfNoPhoto: false, // remove photo section entirely if no photo
+
+  // === CONTENT LIMITS ===
+  summaryMinWords: 60,
+  summaryMaxWords: 90,
+  skillsMaxGroups: 4,
+  experienceMaxEntries: 4,
+  experienceBulletsPerEntry: 4,
+  educationMaxEntries: 3,
+  languagesMaxEntries: 4,
+
+  // === ONE-PAGE ENFORCEMENT ===
+  enforceOnePage: true,
+  minFontSizePt: 10,
+
+  // === CUSTOM DIRECTIVE (ADVANCED) ===
+  customDirectiveOverride: "", // empty = use generated directive
 };
 
 export const SEED_LOGS: AuditLog[] = [

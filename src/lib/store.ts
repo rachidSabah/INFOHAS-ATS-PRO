@@ -5,10 +5,12 @@ import { create } from "zustand";
 import type {
   User, ResumeData, JobDescription, AIProvider, AIProviderLog, AIProviderSettings, PromptTemplate,
   BrandingConfig, FeatureFlags, AuditLog, ViewKey, CoverLetter, InterviewPackage, ATSReport,
+  OptimizerDirectiveConfig,
 } from "./types";
 import {
   SEED_USER, SEED_RESUMES, SEED_JDS, SEED_PROVIDERS, SEED_PROVIDER_LOGS, SEED_PROVIDER_SETTINGS,
   SEED_PROMPTS, SEED_BRANDING, SEED_FLAGS, SEED_LOGS, SEED_COVER_LETTERS, SEED_INTERVIEW, SEED_ATS_REPORTS,
+  SEED_OPTIMIZER_DIRECTIVE,
 } from "./mock-data";
 import { BRAND, getRoleForEmail } from "./brand";
 import { hashPassword, verifyPassword, SUPER_ADMIN_SEED, canSignIn, canAccessApp } from "./auth-utils";
@@ -72,6 +74,7 @@ interface AppState {
   prompts: PromptTemplate[];
   branding: BrandingConfig;
   flags: FeatureFlags;
+  optimizerDirective: OptimizerDirectiveConfig;
   logs: AuditLog[];
 
   // ui
@@ -155,6 +158,8 @@ interface AppState {
   // branding & flags
   updateBranding: (patch: Partial<BrandingConfig>) => void;
   updateFlag: (k: keyof FeatureFlags, v: boolean) => void;
+  updateOptimizerDirective: (patch: Partial<OptimizerDirectiveConfig>) => void;
+  resetOptimizerDirective: () => void;
 
   // logs
   log: (entry: Omit<AuditLog, "id" | "timestamp">) => void;
@@ -211,6 +216,7 @@ export const useApp = create<AppState>()(
       prompts: SEED_PROMPTS,
       branding: SEED_BRANDING,
       flags: SEED_FLAGS,
+      optimizerDirective: SEED_OPTIMIZER_DIRECTIVE,
       logs: SEED_LOGS,
 
       theme: (typeof localStorage !== "undefined" && localStorage.getItem("resumeai-theme") === "dark") ? "dark" : "light",
@@ -687,6 +693,20 @@ export const useApp = create<AppState>()(
       updateFlag: (k, v) => {
         set((s) => ({ flags: { ...s.flags, [k]: v } }));
         cloudApiSafe(updateFlag)(k, v).catch(() => {});
+      },
+      updateOptimizerDirective: (patch) => {
+        set((s) => ({ optimizerDirective: { ...s.optimizerDirective, ...patch } }));
+        // Sync to D1 via the branding/settings endpoint (stored as a JSON blob)
+        // We reuse the updateBranding cloud API since optimizerDirective is a
+        // settings blob like branding. The cloud API stores it under a
+        // dedicated key in the settings table.
+        cloudApiSafe(cloudApi.updateBranding as any)({ optimizerDirective: { ...get().optimizerDirective, ...patch } }).catch(() => {});
+        useApp.getState().log({ actor: get().user?.email ?? "admin", action: "Optimizer directive updated", category: "admin", details: Object.keys(patch).join(", "), severity: "info" });
+      },
+      resetOptimizerDirective: () => {
+        set({ optimizerDirective: SEED_OPTIMIZER_DIRECTIVE });
+        cloudApiSafe(cloudApi.updateBranding as any)({ optimizerDirective: SEED_OPTIMIZER_DIRECTIVE }).catch(() => {});
+        useApp.getState().log({ actor: get().user?.email ?? "admin", action: "Optimizer directive reset to defaults", category: "admin", details: "All parameters restored to factory defaults", severity: "warning" });
       },
 
       log: (entry) => {
