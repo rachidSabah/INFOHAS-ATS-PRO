@@ -174,9 +174,21 @@ export function Optimizer() {
       provider = result.provider;
       setAiLog((l) => [...l, `AI produced structured output via ${provider}.`]);
 
-      // Parse the JSON response
-      const cleaned = result.text.replace(/```json|```/g, "").trim();
-      const data = JSON.parse(cleaned);
+      // Parse the JSON response — handle markdown fences, leading text, and non-JSON responses
+      let cleaned = result.text.replace(/```json|```/g, "").trim();
+      // If the response doesn't start with {, try to extract JSON from it
+      if (!cleaned.startsWith("{")) {
+        const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
+        if (jsonMatch) {
+          cleaned = jsonMatch[0];
+        }
+      }
+      let data;
+      try {
+        data = JSON.parse(cleaned);
+      } catch (parseError) {
+        throw new Error(`AI returned non-JSON response (provider: ${provider}). The response started with: "${cleaned.slice(0, 80)}...". Falling back to rule-based optimization.`);
+      }
 
       // Map the AI's InfoHAS Pro JSON shape to our ResumeData type
       const aiSkills: ResumeSkill[] = (data.skills ?? []).flatMap((g: any) =>
