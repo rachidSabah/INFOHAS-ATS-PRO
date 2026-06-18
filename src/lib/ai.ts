@@ -231,8 +231,10 @@ export async function callAI(opts: AICallOptions): Promise<AICallResult> {
             : [{ role: "user", content: opts.userPrompt }];
 
           // Wrap the Puter chat call in a 30s timeout so a slow/stuck Puter
-          // endpoint doesn't make the UI spin forever.
-          const resp = await withTimeout(
+          // endpoint doesn't make the UI spin forever. Cast to any because
+          // Puter returns a variety of shapes (string, { message: { content } },
+          // { text }, etc.) and we handle them all below.
+          const resp: any = await withTimeout(
             window.puter.ai.chat(messages, {
               model: "claude-sonnet-4",
               max_tokens: opts.maxTokens ?? 4096,

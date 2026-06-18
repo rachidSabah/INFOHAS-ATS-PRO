@@ -44,7 +44,30 @@ const eslintConfig = [...nextCoreWebVitals, ...nextTypescript, {
     "no-useless-escape": "off",
   },
 }, {
-  ignores: ["node_modules/**", ".next/**", "out/**", "build/**", "next-env.d.ts", "examples/**", "skills"]
+  // Ignore build artifacts, dependencies, and non-app code.
+  // `.wrangler/**` and `.vercel/**` are critical — next-on-pages and Vercel
+  // generate JS files in there that contain `var self = this` patterns which
+  // trip @typescript-eslint/no-this-alias and fail CI if scanned.
+  // `.next/**` is Next.js build output. `dist/**` is Workers build output.
+  ignores: [
+    "node_modules/**",
+    ".next/**",
+    ".wrangler/**",
+    ".vercel/**",
+    "out/**",
+    "build/**",
+    "dist/**",
+    "coverage/**",
+    "next-env.d.ts",
+    "examples/**",
+    "skills/**",
+    "workers/api/dist/**",
+    "workers/**/dist/**",
+    "scripts/**",
+    "*.config.ts",
+    "*.config.mjs",
+    "*.config.js",
+  ]
 }];
 
 export default eslintConfig;

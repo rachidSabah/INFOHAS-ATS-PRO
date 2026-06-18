@@ -15,7 +15,7 @@ export const SEED_USER: User = {
   createdAt: "2025-09-12T10:00:00Z",
   lastActiveAt: new Date().toISOString(),
   usage: { resumesGenerated: 14, atsChecks: 27, coverLetters: 9, interviewPreps: 6, downloads: 41 },
-  status: "active",
+  status: "approved",
 };
 
 export const SEED_RESUMES: ResumeData[] = [

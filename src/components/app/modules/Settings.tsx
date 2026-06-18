@@ -81,7 +81,7 @@ export function Settings() {
     }
   };
 
-  const isOAuthUser = user && user.provider !== "email";
+  const isOAuthUser = !!(user && user.provider !== "email");
 
   return (
     <div className="space-y-6 max-w-3xl">

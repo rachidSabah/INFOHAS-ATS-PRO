@@ -11,7 +11,7 @@ import {
   SEED_PROMPTS, SEED_BRANDING, SEED_FLAGS, SEED_LOGS, SEED_COVER_LETTERS, SEED_INTERVIEW, SEED_ATS_REPORTS,
 } from "./mock-data";
 import { BRAND, getRoleForEmail } from "./brand";
-import { hashPassword, verifyPassword, SUPER_ADMIN_SEED, canSignIn, canAccessApp, type UserStatus } from "./auth-utils";
+import { hashPassword, verifyPassword, SUPER_ADMIN_SEED, canSignIn, canAccessApp } from "./auth-utils";
 import type { UserStatus as US } from "./types";
 import { setUserId, clearUserId, api as cloudApi, cloudApiSafe } from "./cloud-api";
 

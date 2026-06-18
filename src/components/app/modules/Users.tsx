@@ -47,9 +47,15 @@ export function Users() {
   };
 
   const toManaged = (u: any): ManagedUser => ({
-    id: u.id, name: u.name, email: u.email, username: u.username, role: u.role,
-    status: u.status, provider: u.provider, createdAt: u.createdAt,
-    lastLogin: u.lastLoginAt ? new Date(u.lastLoginAt).toLocaleDateString() : "Never",
+    id: u.id,
+    name: u.name,
+    email: u.email,
+    role: u.role,
+    status: u.status === "suspended" ? "suspended" : "active",
+    resumes: u.usage?.resumesGenerated ?? 0,
+    lastActive: u.lastActiveAt ? new Date(u.lastActiveAt).toLocaleDateString() : "Never",
+    provider: u.provider || "email",
+    createdAt: u.createdAt,
     avatarColor: AVATAR_COLORS[users.indexOf(u) % AVATAR_COLORS.length],
   });
 

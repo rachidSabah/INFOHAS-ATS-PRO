@@ -107,7 +107,7 @@ export function Prompts() {
               toast.success("Prompt updated.");
             } else {
               addPrompt({ ...editing, ...p });
-              log({ actor: "you", action: `Added prompt: ${p.name}`, category: "admin", details: p.category, severity: "info" });
+              log({ actor: "you", action: `Added prompt: ${p.name}`, category: "admin", details: p.category || "uncategorized", severity: "info" });
               toast.success("Prompt added.");
             }
             setEditing(null);
