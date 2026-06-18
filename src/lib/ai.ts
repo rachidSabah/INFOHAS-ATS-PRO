@@ -19,88 +19,93 @@ declare global {
 }
 
 /**
- * OPTIMIZER DIRECTIVE — InfoHAS Pro template
+ * OPTIMIZER DIRECTIVE — InfoHAS Pro template (strict, derived from OUSSAMA EL FATIMI model PDF)
  *
- * All optimized resumes produced by the Resume Optimizer MUST match this exact layout,
- * derived from the OUSSAMA EL FATIMI reference PDF. The AI must:
- *   1. Use this layout, these sections, this header style, this typography.
- *   2. Output structured content that fits the InfoHAS Pro template fields.
- *   3. Leave the right-side image frame empty (filled later by the user via upload).
- *   4. Produce content that fits ONE A4 page when rendered with the infohas-pro template.
+ * EXACT model specs (measured from the reference PDF on 2026-06-18):
+ *   Page: A4 (210 × 297 mm)
+ *   Margins: Left 12.5mm, Right 14.5mm, Top 11mm, Bottom 10.5mm
+ *   Font: Times New Roman throughout
+ *   Body font size: 13pt (NOT 10-11pt — the model uses 13pt)
+ *   Line height: 15pt between consecutive body lines (tight — single-spaced)
+ *   Section gap: 27pt between the last line of one section and the next section header
+ *   Section headers: BOLD UPPERCASE, same 13pt size as body, NO color (pure black),
+ *     NO underline. Spacing before a section header: 27pt. Spacing after: 16pt.
+ *   Name: BOLD UPPERCASE, 13pt, dark maroon #660033
+ *   Headline / contact / DOB: regular 13pt, black, 15pt line gap
+ *   No blue rule under header (the model has none)
+ *   Bullets: • marker at 18pt indent from left margin, continuation lines at 36pt indent
+ *   Photo frame: top-right, 54×81mm (2:3 portrait), reserved as empty placeholder
  *
- * Layout spec (A4, 210 × 297 mm):
- * ┌──────────────────────────────────────────────┐
- * │ NAME (maroon #660033, Times Bold 13pt)        │  ┌────────────┐
- * │ Headline (black, Times 13pt)                  │  │            │
- * │ Location | Phone                              │  │  PHOTO     │
- * │ email                                         │  │  FRAME     │
- * │ Date of Birth : DD/MM/YYYY                    │  │ 54×81mm    │
- * │ ──── blue rule #0563C1 ────                   │  │ portrait   │
- * │                                               │  └────────────┘
- * │ PROFESSIONAL SUMMARY                          │   (top-right corner)
- * │   Summary paragraph wraps to fit LEFT of the  │
- * │   photo frame (text width ~70% until y=255pt, │
- * │   then full width).                           │
- * │                                               │
- * │ CORE COMPETENCIES & SKILLS                    │
- * │   • Category: bullet text                     │
- * │   • Category: bullet text                     │
- * │                                               │
- * │ PROFESSIONAL EXPERIENCE                       │
- * │   Job Title Company | Location  Start – End   │
- * │   • Achievement bullet                        │
- * │   • Achievement bullet                        │
- * │                                               │
- * │ EDUCATION                                     │
- * │   Degree Institution | Location | Dates       │
- * │   • Modules: ...                              │
- * │                                               │
- * │ LANGUAGES                                     │
- * │   Language: Proficiency (note)                │
- * └──────────────────────────────────────────────┘
- *
- * Typography:
- *   - Font: Times New Roman (Bold for name & section headers, Regular for body)
- *   - Name color: #660033 (dark maroon)
- *   - Section headers: uppercase, blue #0563C1, with blue underline
- *   - Body: black, 10-11pt
- *   - Bullets: • marker at left margin, text indented
- *
- * Section order (MANDATORY):
- *   1. PROFESSIONAL SUMMARY (1 paragraph, 60-90 words)
- *   2. CORE COMPETENCIES & SKILLS (4-6 grouped bullets)
- *   3. PROFESSIONAL EXPERIENCE (most recent first, 2-4 entries, 3-4 bullets each)
- *   4. EDUCATION (1-2 entries with optional modules bullet)
- *   5. LANGUAGES (1-4 entries with proficiency note)
- *
- * Constraints:
- *   - maxPages = 1, paperSize = A4, allowOverflow = false
- *   - assert(pdf.pages === 1)
- *   - The image frame on the right MUST be preserved as a placeholder; never fill with text.
- *   - All claims must be truthful to the source resume — never invent employers, dates, or metrics.
- *   - Embed target job-description keywords naturally in summary, skills, and experience.
+ * The AI MUST produce content that fits these exact dimensions. Do NOT use smaller
+ * fonts than 13pt. Do NOT add extra spacing. The goal is a DENSE, professional,
+ * single-page A4 resume that looks exactly like the OUSSAMA EL FATIMI model.
  */
-export const OPTIMIZER_DIRECTIVE = `You are the ResumeAI Pro Optimizer. Every optimized resume you produce MUST follow the InfoHAS Pro template — a single-page A4 layout derived from the OUSSAMA EL FATIMI reference resume.
+export const OPTIMIZER_DIRECTIVE = `You are the ResumeAI Pro Optimizer. Every optimized resume you produce MUST follow the InfoHAS Pro template — a single-page A4 layout derived EXACTLY from the OUSSAMA EL FATIMI reference resume. Your output will be rendered with Times New Roman 13pt on A4 (210 × 297 mm) with 12.5mm left margin, 14.5mm right margin, 11mm top margin, 10.5mm bottom margin, and 15pt line spacing. The photo frame (54×81mm) sits in the top-right corner — text in the PROFESSIONAL SUMMARY section wraps around it.
 
-LAYOUT (A4, 210 × 297 mm):
-- Top-left header zone (~60% width): candidate NAME in dark maroon (#660033, Times New Roman Bold, 13pt), then headline, then 3-4 contact lines (location | phone, email, date of birth). A thin blue rule (#0563C1) sits under the header text.
-- Top-right corner: an empty portrait image frame (~54 × 81 mm, 2:3 ratio). The image frame MUST be preserved as a placeholder — never fill it with text. The user uploads their photo later.
-- Body: Times New Roman, single column. The PROFESSIONAL SUMMARY wraps to fit LEFT of the photo frame (text ends at ~70% page width until the photo's bottom edge, then uses full width).
-- Section headers: UPPERCASE, blue (#0563C1), bold, with a thin blue underline. Spacing between sections is generous.
-- Bullets use the • marker, text indented.
+ABSOLUTE RULES (NON-NEGOTIABLE):
+1. The output MUST fit on EXACTLY ONE A4 page. assert(pdf.pages === 1).
+2. Font is Times New Roman 13pt throughout. NEVER use smaller fonts to fit content.
+3. Line spacing is 15pt (tight, single-spaced). NEVER add extra blank lines between bullets.
+4. Section gap is 27pt (one blank line worth). Section header → first content line is 16pt.
+5. The photo frame on the right is a PLACEHOLDER — never fill it with text.
+6. All claims must be TRUTHFUL to the source resume — never invent employers, dates, or metrics.
+7. Section headers are BOLD UPPERCASE, 13pt, BLACK (no color, no underline).
+8. The candidate NAME is BOLD UPPERCASE 13pt, dark maroon #660033.
+9. Bullets use the • marker. Each bullet is ONE sentence — break long bullets into the next bullet instead of wrapping.
+10. Trim EVERY word that doesn't earn its place. Verbosity is the enemy of one-page fit.
 
-SECTION ORDER (MANDATORY — in this exact order, no other sections):
-1. PROFESSIONAL SUMMARY — one paragraph, 60-90 words. Embed 2-3 target keywords naturally.
-2. CORE COMPETENCIES & SKILLS — 4-6 grouped bullets. Each bullet is "Category: skill, skill, skill".
-3. PROFESSIONAL EXPERIENCE — most recent first, 2-4 entries. Each entry: "Job Title Company | Location  Start – End" then 3-4 achievement bullets with measurable outcomes (start with action verbs: Led, Built, Increased, Reduced, Delivered, Executed).
-4. EDUCATION — 1-2 entries: "Degree Institution | Location | Dates" then optional "• Modules: ..." bullet.
-5. LANGUAGES — 1-4 entries: "Language: Proficiency (optional note)".
+LAYOUT (top to bottom, EXACT order):
+┌──────────────────────────────────────────────────────────────┐
+│ NAME (maroon #660033, Times Bold 13pt, UPPERCASE)            │  ┌──────────────┐
+│ Headline (black, Times 13pt regular)                         │  │              │
+│ Location | Phone (black, Times 13pt)                         │  │   PHOTO      │
+│ email (black, Times 13pt)                                    │  │   FRAME      │
+│ Date Of Birth : DD/MM/YYYY (black, Times 13pt)               │  │  54 × 81 mm  │
+│                                                              │  │  portrait    │
+│ ── 27pt gap ──                                               │  │  (top-right) │
+│ PROFESSIONAL SUMMARY (bold uppercase 13pt black)             │  └──────────────┘
+│   16pt gap, then summary paragraph (13pt, justified, wraps   │
+│   LEFT of photo frame at ~70% width until photo bottom,      │
+│   then full width). 60-90 words, 7-9 lines.                  │
+│                                                              │
+│ ── 27pt gap ──                                               │
+│ CORE COMPETENCIES & SKILLS (bold uppercase 13pt black)       │
+│   • Category: skill, skill, skill.  (4-6 grouped bullets)    │
+│   • Category: skill, skill, skill.                           │
+│                                                              │
+│ ── 27pt gap ──                                               │
+│ PROFESSIONAL EXPERIENCE (bold uppercase 13pt black)          │
+│   Job Title Company | Location  Mon YYYY – Mon YYYY          │
+│   • Achievement bullet starting with action verb.            │
+│   • Achievement bullet with measurable outcome.              │
+│   • Achievement bullet.                                      │
+│   (2-4 entries, most recent first, 3-4 bullets each)         │
+│                                                              │
+│ ── 27pt gap ──                                               │
+│ EDUCATION (bold uppercase 13pt black)                        │
+│   Degree Institution | Location | YYYY – YYYY                │
+│   • Modules: Module 1, Module 2, Module 3.                   │
+│   (1-2 entries)                                              │
+│                                                              │
+│ ── 27pt gap ──                                               │
+│ LANGUAGES (bold uppercase 13pt black)                        │
+│   Language: Proficiency (optional note)                      │
+│   (1-4 entries, 15pt between)                                │
+└──────────────────────────────────────────────────────────────┘
+
+SECTION ORDER (MANDATORY — in this exact order, no other sections, no exceptions):
+1. PROFESSIONAL SUMMARY — one paragraph, 60-90 words, 7-9 lines. Embed 2-3 target keywords naturally. Justified text.
+2. CORE COMPETENCIES & SKILLS — 4-6 grouped bullets. Each bullet is "Category: skill, skill, skill." ending with a period.
+3. PROFESSIONAL EXPERIENCE — most recent first, 2-4 entries. Each entry header: "Job Title Company | Location  Start – End" (bold title+company+location+dates, all on ONE line). Then 3-4 achievement bullets starting with action verbs (Led, Built, Increased, Reduced, Delivered, Executed, Managed, Designed, Implemented, Achieved). Each bullet ONE sentence with a measurable outcome where the source supports it.
+4. EDUCATION — 1-2 entries: "Degree Institution | Location | YYYY – YYYY" then optional "• Modules: ..." bullet.
+5. LANGUAGES — 1-4 entries: "Language: Proficiency (optional note)". 15pt between entries.
 
 CONTENT RULES:
 - Truthful to the source resume. Never invent employers, dates, or metrics not supported by the source.
 - Embed target job-description keywords naturally (do not list them blankly).
 - Quantify bullets where the source supports it (%, $, counts, time saved).
-- Trim verbosity. Every word earns its place.
+- Trim verbosity. Every word earns its place. If a bullet is two sentences, split into two bullets.
+- Each bullet MUST fit on ONE line (≤ 95 characters) to avoid wrapping. If a bullet would wrap, split it.
 
 OUTPUT FORMAT:
 Return ONLY valid JSON with this exact shape:
@@ -146,7 +151,13 @@ Return ONLY valid JSON with this exact shape:
   "bulletsRewritten": 5
 }
 
-ONE-PAGE CONSTRAINT: The output must fit on exactly one A4 page when rendered with the InfoHAS Pro template. If content is too long, condense — do not split. assert(pdf.pages === 1).`;
+ONE-PAGE CONSTRAINT: The output must fit on exactly one A4 page when rendered with the InfoHAS Pro template (Times New Roman 13pt, 15pt line spacing, 12.5mm margins). If content is too long, CONDENSE by:
+  1. Trimming bullet wording (split long bullets, remove filler words)
+  2. Reducing experience entries from 4 to 3 to 2 (keep most recent)
+  3. Reducing education entries to 1
+  4. Reducing languages to 2
+  5. NEVER reduce font size below 13pt. NEVER reduce line spacing below 15pt.
+assert(pdf.pages === 1).`;
 
 export interface AICallOptions {
   systemPrompt?: string;

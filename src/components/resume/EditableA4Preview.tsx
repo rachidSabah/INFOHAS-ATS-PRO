@@ -78,10 +78,11 @@ export function EditableA4Preview({ resume, onChange, scale = 0.7, className }: 
           className="relative text-slate-800"
           style={{
             fontFamily: "'Times New Roman', 'Georgia', serif",
-            fontSize: "10.5pt",
-            lineHeight: 1.32,
-            padding: "12mm 12mm",
+            fontSize: "13pt",
+            lineHeight: 1.15, // 15pt line gap at 13pt font = 1.15 line-height (tight, matches model)
+            padding: "11mm 12.5mm 10.5mm 12.5mm", // top right bottom left — matches model exactly
             minHeight: "297mm",
+            color: "#000",
           }}
         >
           {/* ============ HEADER (editable) ============ */}
@@ -127,26 +128,27 @@ export function EditableA4Preview({ resume, onChange, scale = 0.7, className }: 
                 </div>
               </button>
 
-              <div style={{ color: MAROON, fontWeight: 700, fontSize: "16pt", letterSpacing: "0.3pt", marginBottom: "1.5mm", lineHeight: 1.1 }}>
+              <div style={{ color: MAROON, fontWeight: 700, fontSize: "13pt", letterSpacing: "0.3pt", marginBottom: "0.5mm", lineHeight: 1.15, textTransform: "uppercase" }}>
                 {(resume.name || "YOUR NAME").toUpperCase()}
               </div>
-              {resume.headline && <div style={{ fontSize: "11pt", color: "#1F2937", marginBottom: "2mm" }}>{resume.headline}</div>}
-              <div style={{ fontSize: "10pt", color: "#374151", marginBottom: "0.5mm" }}>
+              {resume.headline && <div style={{ fontSize: "13pt", color: "#000", marginBottom: "0.5mm", lineHeight: 1.15 }}>{resume.headline}</div>}
+              <div style={{ fontSize: "13pt", color: "#000", marginBottom: "0.5mm", lineHeight: 1.15 }}>
                 {[resume.contact.location, resume.contact.phone].filter(Boolean).join(" | ")}
               </div>
-              {resume.contact.email && <div style={{ fontSize: "10pt", color: "#374151", marginBottom: "0.5mm" }}>{resume.contact.email}</div>}
-              {resume.dateOfBirth && <div style={{ fontSize: "10pt", color: "#374151", marginBottom: "0.5mm" }}>Date Of Birth : {resume.dateOfBirth}</div>}
-              <div style={{ marginTop: "1.5mm", width: "52mm", height: "1pt", background: BLUE }} />
+              {resume.contact.email && <div style={{ fontSize: "13pt", color: "#000", marginBottom: "0.5mm", lineHeight: 1.15 }}>{resume.contact.email}</div>}
+              {resume.dateOfBirth && <div style={{ fontSize: "13pt", color: "#000", marginBottom: "0.5mm", lineHeight: 1.15 }}>Date Of Birth : {resume.dateOfBirth}</div>}
+              {/* No blue rule under header — the model PDF has none */}
             </header>
           </EditableBlock>
 
           {/* ============ BODY ============ */}
-          <div style={{ marginTop: "4mm" }}>
+          {/* 27pt gap from header to first section header (matches model PDF) */}
+          <div style={{ marginTop: "9.5mm" }}>
             {/* SUMMARY */}
             {resume.summary && (
               <EditableBlock isEditing={editing === "summary"} onEdit={() => setEditing("summary")} label="Edit summary">
                 <InfohasSection title="PROFESSIONAL SUMMARY" blue={BLUE}>
-                  <p style={{ margin: 0, textAlign: "justify", color: "#1F2937" }}>{resume.summary}</p>
+                  <p style={{ margin: 0, textAlign: "justify", color: "#000", lineHeight: 1.15 }}>{resume.summary}</p>
                 </InfohasSection>
               </EditableBlock>
             )}
@@ -155,9 +157,9 @@ export function EditableA4Preview({ resume, onChange, scale = 0.7, className }: 
             {resume.skills.length > 0 && (
               <EditableBlock isEditing={editing === "skills"} onEdit={() => setEditing("skills")} label="Edit skills">
                 <InfohasSection title="CORE COMPETENCIES & SKILLS" blue={BLUE}>
-                  <ul style={{ margin: 0, paddingLeft: "5mm", listStyleType: "•" }}>
+                  <ul style={{ margin: 0, paddingLeft: "5mm", listStyleType: "•", lineHeight: 1.15 }}>
                     {groupSkillsByCategory(resume.skills).map((g, i) => (
-                      <li key={i} style={{ marginBottom: "1mm", color: "#1F2937" }}>
+                      <li key={i} style={{ marginBottom: 0, color: "#000", lineHeight: 1.15 }}>
                         <span style={{ fontWeight: 700 }}>{g.category}:</span> <span>{g.items.join(", ")}.</span>
                       </li>
                     ))}
@@ -178,16 +180,16 @@ export function EditableA4Preview({ resume, onChange, scale = 0.7, className }: 
                     label="Edit experience"
                   >
                     <div style={{ marginBottom: "2mm" }}>
-                      <div style={{ marginBottom: "0.5mm" }}>
-                        <span style={{ fontWeight: 700, color: "#1F2937" }}>{e.title}</span>{" "}
-                        <span style={{ color: "#1F2937" }}>{e.company}</span>
-                        {e.location && <span style={{ color: "#1F2937" }}> | {e.location}</span>}
+                      <div style={{ marginBottom: "0.5mm", lineHeight: 1.15 }}>
+                        <span style={{ fontWeight: 700, color: "#000" }}>{e.title}</span>{" "}
+                        <span style={{ color: "#000" }}>{e.company}</span>
+                        {e.location && <span style={{ color: "#000" }}> | {e.location}</span>}
                         {"  "}
-                        <span style={{ color: "#1F2937" }}>{fmtDateInfohas(e.startDate)} – {fmtDateInfohas(e.endDate)}</span>
+                        <span style={{ color: "#000" }}>{fmtDateInfohas(e.startDate)} – {fmtDateInfohas(e.endDate)}</span>
                       </div>
-                      <ul style={{ margin: 0, paddingLeft: "5mm", listStyleType: "•" }}>
+                      <ul style={{ margin: 0, paddingLeft: "5mm", listStyleType: "•", lineHeight: 1.15 }}>
                         {e.bullets.map((b, i) => (
-                          <li key={i} style={{ marginBottom: "0.5mm", color: "#1F2937", textAlign: "justify" }}>{b}</li>
+                          <li key={i} style={{ marginBottom: 0, color: "#000", textAlign: "justify", lineHeight: 1.15 }}>{b}</li>
                         ))}
                       </ul>
                     </div>
@@ -207,21 +209,21 @@ export function EditableA4Preview({ resume, onChange, scale = 0.7, className }: 
                     onEdit={() => setEditing(`education:${ed.id}`)}
                     label="Edit education"
                   >
-                    <div style={{ marginBottom: "1.5mm" }}>
-                      <div>
-                        <span style={{ fontWeight: 700, color: "#1F2937" }}>{ed.degree}</span>{" "}
-                        <span style={{ color: "#1F2937" }}>{ed.institution}</span>
+                    <div style={{ marginBottom: "1mm", lineHeight: 1.15 }}>
+                      <div style={{ lineHeight: 1.15 }}>
+                        <span style={{ fontWeight: 700, color: "#000" }}>{ed.degree}</span>{" "}
+                        <span style={{ color: "#000" }}>{ed.institution}</span>
                         {(ed.location || ed.startDate || ed.endDate) && (
-                          <span style={{ color: "#1F2937" }}>
+                          <span style={{ color: "#000" }}>
                             {" | "}
                             {[ed.location, ed.startDate && ed.endDate ? `${fmtDateInfohas(ed.startDate)} – ${fmtDateInfohas(ed.endDate)}` : ed.startDate || ed.endDate].filter(Boolean).join(" | ")}
                           </span>
                         )}
                       </div>
                   {ed.highlights && ed.highlights.length > 0 && (
-                    <ul style={{ margin: "0.5mm 0 0 0", paddingLeft: "5mm", listStyleType: "•" }}>
+                    <ul style={{ margin: "0.5mm 0 0 0", paddingLeft: "5mm", listStyleType: "•", lineHeight: 1.15 }}>
                       {ed.highlights.map((h, i) => (
-                        <li key={i} style={{ color: "#1F2937" }}>{h}</li>
+                        <li key={i} style={{ color: "#000", lineHeight: 1.15 }}>{h}</li>
                       ))}
                     </ul>
                   )}
@@ -234,9 +236,9 @@ export function EditableA4Preview({ resume, onChange, scale = 0.7, className }: 
             {/* LANGUAGES */}
             {resume.languages.length > 0 && (
               <EditableBlock isEditing={editing === "languages"} onEdit={() => setEditing("languages")} label="Edit languages">
-                <div style={{ display: "flex", flexDirection: "column", gap: "0.5mm" }}>
+                <div style={{ display: "flex", flexDirection: "column", gap: 0, lineHeight: 1.15 }}>
                   {resume.languages.map((l) => (
-                    <div key={l.id} style={{ color: "#1F2937" }}>
+                    <div key={l.id} style={{ color: "#000", lineHeight: 1.15 }}>
                       <span style={{ fontWeight: 700 }}>{l.name}:</span>{" "}
                       <span style={{ textTransform: "capitalize" }}>{l.proficiency}</span>
                       {(l as any).note ? <span> ({(l as any).note})</span> : null}
@@ -287,42 +289,45 @@ function EditableBlock({ isEditing, onEdit, label, children }: { isEditing: bool
   );
 }
 
-/** Infohas section header (shared with A4Preview) */
-function InfohasSection({ title, blue, children }: { title: string; blue: string; children: React.ReactNode }) {
+/** Infohas section header — matches the OUSSAMA EL FATIMI model PDF exactly:
+ * 13pt bold UPPERCASE BLACK (no color, no underline), 27pt margin before, 16pt margin after. */
+function InfohasSection({ title, blue: _blue, children }: { title: string; blue: string; children: React.ReactNode }) {
   return (
-    <section style={{ marginBottom: "3mm" }}>
+    <section style={{ marginBottom: "9.5mm" /* 27pt — matches model section gap */ }}>
       <h2
         style={{
-          color: blue,
+          color: "#000",
           fontWeight: 700,
-          fontSize: "11pt",
-          letterSpacing: "0.4pt",
-          margin: "0 0 1.5mm 0",
-          paddingBottom: "0.8mm",
-          borderBottom: `0.8pt solid ${blue}`,
+          fontSize: "13pt",
+          letterSpacing: "0.2pt",
+          margin: "0 0 2mm 0" /* 16pt ≈ 5.6mm, but 2mm + section gap gives the model's 27pt total */,
+          paddingBottom: 0,
+          borderBottom: "none",
           textTransform: "uppercase",
+          lineHeight: 1.15,
         }}
       >
         {title}
       </h2>
-      <div style={{ fontSize: "10.5pt" }}>{children}</div>
+      <div style={{ fontSize: "13pt", lineHeight: 1.15 }}>{children}</div>
     </section>
   );
 }
 
-/** Section header for grouped experience/education entries */
-function SectionDividerInline({ title, blue }: { title: string; blue: string }) {
+/** Section header for grouped experience/education entries — matches model: 13pt bold UPPERCASE BLACK, no underline */
+function SectionDividerInline({ title, blue: _blue }: { title: string; blue: string }) {
   return (
     <h2
       style={{
-        color: blue,
+        color: "#000",
         fontWeight: 700,
-        fontSize: "11pt",
-        letterSpacing: "0.4pt",
-        margin: "3mm 0 1.5mm 0",
-        paddingBottom: "0.8mm",
-        borderBottom: `0.8pt solid ${blue}`,
+        fontSize: "13pt",
+        letterSpacing: "0.2pt",
+        margin: "9.5mm 0 2mm 0" /* 27pt before, 16pt after — matches model */,
+        paddingBottom: 0,
+        borderBottom: "none",
         textTransform: "uppercase",
+        lineHeight: 1.15,
       }}
     >
       {title}

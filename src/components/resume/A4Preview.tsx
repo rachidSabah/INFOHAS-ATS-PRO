@@ -66,10 +66,11 @@ function InfohasProTemplate({ resume, accent }: { resume: ResumeData; accent: st
       className="relative text-slate-800"
       style={{
         fontFamily: "'Times New Roman', 'Georgia', serif",
-        fontSize: "10.5pt",
-        lineHeight: 1.32,
-        padding: "12mm 12mm",
+        fontSize: "13pt",
+        lineHeight: 1.15, // 15pt line gap at 13pt font — matches model
+        padding: "11mm 12.5mm 10.5mm 12.5mm", // matches model margins exactly
         minHeight: "297mm",
+        color: "#000",
       }}
     >
       {/* ============ HEADER ============ */}
@@ -105,55 +106,49 @@ function InfohasProTemplate({ resume, accent }: { resume: ResumeData; accent: st
           )}
         </div>
 
-        {/* Name — maroon, bold */}
+        {/* Name — maroon, bold, 13pt, uppercase (matches model) */}
         <div
           style={{
             color: MAROON,
             fontWeight: 700,
-            fontSize: "16pt",
+            fontSize: "13pt",
             letterSpacing: "0.3pt",
-            marginBottom: "1.5mm",
-            lineHeight: 1.1,
+            marginBottom: "0.5mm",
+            lineHeight: 1.15,
+            textTransform: "uppercase",
           }}
         >
           {(resume.name || "YOUR NAME").toUpperCase()}
         </div>
 
-        {/* Headline */}
+        {/* Headline — black, 13pt */}
         {resume.headline && (
-          <div style={{ fontSize: "11pt", color: "#1F2937", marginBottom: "2mm" }}>
+          <div style={{ fontSize: "13pt", color: "#000", marginBottom: "0.5mm", lineHeight: 1.15 }}>
             {resume.headline}
           </div>
         )}
 
-        {/* Contact lines */}
-        <div style={{ fontSize: "10pt", color: "#374151", marginBottom: "0.5mm" }}>
+        {/* Contact lines — black, 13pt */}
+        <div style={{ fontSize: "13pt", color: "#000", marginBottom: "0.5mm", lineHeight: 1.15 }}>
           {[resume.contact.location, resume.contact.phone].filter(Boolean).join(" | ")}
         </div>
         {resume.contact.email && (
-          <div style={{ fontSize: "10pt", color: "#374151", marginBottom: "0.5mm" }}>
+          <div style={{ fontSize: "13pt", color: "#000", marginBottom: "0.5mm", lineHeight: 1.15 }}>
             {resume.contact.email}
           </div>
         )}
         {resume.dateOfBirth && (
-          <div style={{ fontSize: "10pt", color: "#374151", marginBottom: "0.5mm" }}>
+          <div style={{ fontSize: "13pt", color: "#000", marginBottom: "0.5mm", lineHeight: 1.15 }}>
             Date Of Birth : {resume.dateOfBirth}
           </div>
         )}
 
-        {/* Blue rule under header */}
-        <div
-          style={{
-            marginTop: "1.5mm",
-            width: "52mm",
-            height: "1pt",
-            background: BLUE,
-          }}
-        />
+        {/* No blue rule under header — the model PDF has none */}
       </header>
 
       {/* ============ BODY ============ */}
-      <div style={{ marginTop: "4mm" }}>
+      {/* 27pt gap from header to first section header (matches model PDF) */}
+      <div style={{ marginTop: "9.5mm" }}>
         {/* PROFESSIONAL SUMMARY */}
         {resume.summary && (
           <InfohasSection title="PROFESSIONAL SUMMARY" blue={BLUE}>
@@ -247,24 +242,27 @@ function InfohasProTemplate({ resume, accent }: { resume: ResumeData; accent: st
   );
 }
 
-function InfohasSection({ title, blue, children }: { title: string; blue: string; children: React.ReactNode }) {
+/** Infohas section header — matches the OUSSAMA EL FATIMI model PDF exactly:
+ * 13pt bold UPPERCASE BLACK (no color, no underline), 27pt margin before, 16pt after. */
+function InfohasSection({ title, blue: _blue, children }: { title: string; blue: string; children: React.ReactNode }) {
   return (
-    <section style={{ marginBottom: "3mm" }}>
+    <section style={{ marginBottom: "9.5mm" /* 27pt — matches model section gap */ }}>
       <h2
         style={{
-          color: blue,
+          color: "#000",
           fontWeight: 700,
-          fontSize: "11pt",
-          letterSpacing: "0.4pt",
-          margin: "0 0 1.5mm 0",
-          paddingBottom: "0.8mm",
-          borderBottom: `0.8pt solid ${blue}`,
+          fontSize: "13pt",
+          letterSpacing: "0.2pt",
+          margin: "0 0 2mm 0",
+          paddingBottom: 0,
+          borderBottom: "none",
           textTransform: "uppercase",
+          lineHeight: 1.15,
         }}
       >
         {title}
       </h2>
-      <div style={{ fontSize: "10.5pt" }}>{children}</div>
+      <div style={{ fontSize: "13pt", lineHeight: 1.15 }}>{children}</div>
     </section>
   );
 }
