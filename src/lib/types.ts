@@ -220,6 +220,7 @@ export type AIProviderType =
   | "ollama"
   | "azure-openai"
   | "bedrock"
+  | "opencode"
   | "custom"
   | "z-ai-fallback";
 

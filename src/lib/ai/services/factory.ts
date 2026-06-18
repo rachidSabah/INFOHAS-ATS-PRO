@@ -9,12 +9,12 @@ import { puterProvider } from "../providers/puter";
 import { customProvider } from "../providers/custom";
 import { zaiFallbackProvider } from "../providers/zai-fallback";
 
-// OpenCode and ZenCode use the OpenAI-compatible API schema (free model gateways)
+// OpenCode Zen uses the OpenAI-compatible API schema
 const opencodeProvider = new OpenAICompatibleProvider("opencode");
-const zencodeProvider = new OpenAICompatibleProvider("zencode");
 
 const REGISTRY: Record<string, AIProviderAdapter> = {
   openai: openaiProvider,
+  opencode: opencodeProvider,   // OpenCode Zen — OpenAI-compatible, free models
   deepseek: deepseekProvider,
   groq: groqProvider,
   openrouter: openrouterProvider,
@@ -24,14 +24,12 @@ const REGISTRY: Record<string, AIProviderAdapter> = {
   cohere: cohereProvider,
   perplexity: perplexityProvider,
   claude: claudeProvider,
-  "azure-openai": openaiProvider, // same OpenAI schema, different baseUrl
+  "azure-openai": openaiProvider,
   gemini: geminiProvider,
   ollama: ollamaProvider,
   puter: puterProvider,
-  opencode: opencodeProvider,   // Free models — OpenAI-compatible
-  zencode: zencodeProvider,     // Free models — OpenAI-compatible
   custom: customProvider,
-  bedrock: customProvider, // AWS Bedrock — use custom adapter with SigV4 signing via headers
+  bedrock: customProvider,
   "z-ai-fallback": zaiFallbackProvider,
 };
 

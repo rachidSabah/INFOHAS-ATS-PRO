@@ -49,6 +49,23 @@ const MODEL_CATALOG: Record<string, { name: string; contextWindow: string; input
     { name: "mistral-nemo", contextWindow: "128K", tags: ["self-hosted"] },
     { name: "phi4:14b", contextWindow: "16K", tags: ["self-hosted", "small"] },
   ],
+  opencode: [
+    { name: "deepseek-v4-flash-free", contextWindow: "64K", tags: ["free", "fast"] },
+    { name: "mimo-v2.5-free", contextWindow: "32K", tags: ["free"] },
+    { name: "minimax-m3-free", contextWindow: "32K", tags: ["free"] },
+    { name: "nemotron-3-ultra-free", contextWindow: "32K", tags: ["free"] },
+    { name: "north-mini-code-free", contextWindow: "32K", tags: ["free", "code"] },
+    { name: "claude-sonnet-4", contextWindow: "200K", tags: ["premium"] },
+    { name: "claude-opus-4-8", contextWindow: "200K", tags: ["premium"] },
+    { name: "gpt-5", contextWindow: "128K", tags: ["premium"] },
+    { name: "gpt-5.5", contextWindow: "128K", tags: ["premium"] },
+    { name: "gemini-3-flash", contextWindow: "1M", tags: ["premium"] },
+    { name: "gemini-3.5-flash", contextWindow: "1M", tags: ["premium"] },
+    { name: "deepseek-v4-pro", contextWindow: "64K", tags: ["premium"] },
+    { name: "glm-5", contextWindow: "128K", tags: ["premium"] },
+    { name: "kimi-k2.6", contextWindow: "128K", tags: ["premium"] },
+    { name: "qwen3.6-plus", contextWindow: "128K", tags: ["premium"] },
+  ],
 };
 
 export function AIModels() {
