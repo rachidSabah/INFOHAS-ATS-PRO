@@ -23,6 +23,7 @@ export function Optimizer() {
   const resumes = useApp((s) => s.resumes);
   const jds = useApp((s) => s.jobDescriptions);
   const addResume = useApp((s) => s.addResume);
+  const updateResume = useApp((s) => s.updateResume);
   const addJD = useApp((s) => s.addJD);
   const addATS = useApp((s) => s.addATSReport);
   const incUsage = useApp((s) => s.incUsage);

@@ -39,11 +39,15 @@ export function JDScraper() {
     }
     setScraping(true);
     setLogLines([`Fetching ${url}…`]);
+    // Abort the request after 20s so the spinner never spins forever.
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 20000);
     try {
       const res = await fetch("/api/jd-scrape", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ url }),
+        signal: controller.signal,
       });
 
       // Safely parse JSON — handle empty/non-JSON responses
@@ -65,10 +69,13 @@ export function JDScraper() {
       setRawText(data.text);
       toast.success(`Scraped ${data.title || url}`);
     } catch (e: any) {
-      const msg = e?.message || "Unknown error";
+      const msg = e?.name === "AbortError"
+        ? "The scrape request timed out after 20 seconds. The site may be slow or blocking our request — please paste the JD text manually below."
+        : (e?.message || "Unknown error");
       setLogLines((l) => [...l, `⚠ ${msg}`, "Falling back: paste the JD text manually below."]);
       toast.error(msg.includes("paste") ? msg : "Couldn't fetch the URL. Please paste the JD text manually below — same AI extraction.");
     } finally {
+      clearTimeout(timeout);
       setScraping(false);
     }
   };

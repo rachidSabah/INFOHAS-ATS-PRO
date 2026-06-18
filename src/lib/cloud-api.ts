@@ -109,6 +109,45 @@ export const api = {
   health: () => apiFetch<{ ok: boolean }>("/api/health"),
 };
 
+/**
+ * Wraps an async API function so it NEVER throws synchronously and NEVER rejects.
+ *
+ * Why this exists:
+ *   The Zustand store calls cloud APIs in a fire-and-forget manner — local state
+ *   is updated optimistically and the cloud sync is a side effect. If the cloud
+ *   API throws synchronously (e.g. undefined function) or rejects (e.g. network
+ *   error, CORS, 500), the calling action would crash the page.
+ *
+ * Behavior:
+ *   - If `fn` is not a function (undefined, null), returns a no-op async function
+ *     that resolves to undefined. This makes the call site safe even if the
+ *     cloud API surface changes.
+ *   - If `fn` is a function, returns an async wrapper that catches all errors
+ *     and logs a warning to the console. The promise always resolves.
+ *
+ * Usage:
+ *   cloudApiSafe(cloudApi.createResume)(resume).catch(() => {});
+ *   // or with destructured methods:
+ *   cloudApiSafe(createResume)(resume).catch(() => {});
+ */
+export function cloudApiSafe<T extends (...args: any[]) => Promise<any>>(
+  fn: T | undefined | null,
+): T {
+  if (typeof fn !== "function") {
+    return ((..._: any[]) => Promise.resolve(undefined)) as unknown as T;
+  }
+  return (async (...args: Parameters<T>) => {
+    try {
+      return await fn(...args);
+    } catch (e: any) {
+      if (typeof console !== "undefined" && console.warn) {
+        console.warn("[cloudApiSafe] Cloud sync failed (non-fatal):", e?.message || e);
+      }
+      return undefined as any;
+    }
+  }) as T;
+}
+
 // ============ SYNC HOOK ============
 // On app load, sync all data from D1 to the Zustand store
 export async function syncAllFromCloud(store: any): Promise<void> {

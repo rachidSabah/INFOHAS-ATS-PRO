@@ -167,6 +167,21 @@ export interface AICallResult {
 const estTokens = (s: string) => Math.ceil(s.length / 4);
 
 /**
+ * Race a promise against a timeout. Resolves with the promise result or rejects
+ * with a timeout error. Used to prevent AI provider calls from hanging forever
+ * (e.g. Puter sign-in popup that the user dismisses, or a slow provider endpoint).
+ */
+function withTimeout<T>(promise: Promise<T>, ms: number, label = "operation"): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms);
+  });
+  return Promise.race([promise, timeout]).finally(() => {
+    if (timer) clearTimeout(timer);
+  }) as Promise<T>;
+}
+
+/**
  * Main AI entrypoint. Tries Puter → server (z-ai) → local rule-based fallback.
  */
 export async function callAI(opts: AICallOptions): Promise<AICallResult> {
@@ -186,9 +201,17 @@ export async function callAI(opts: AICallOptions): Promise<AICallResult> {
               puterReady = true; // assume signed in if we can't check
             }
             if (!puterReady) {
-              // Try to sign in — this opens a popup
-              await window.puter.auth.signIn();
-              puterReady = true;
+              // Try to sign in — this opens a popup. Wrap in an 8s timeout so
+              // the AI flow doesn't hang forever if the popup is blocked or the
+              // user walks away. On timeout we fall through to the next provider.
+              try {
+                await withTimeout(window.puter.auth.signIn(), 8000, "Puter sign-in");
+                puterReady = true;
+              } catch (signInErr: any) {
+                console.warn("[AI] Puter sign-in failed or timed out:", signInErr?.message || signInErr);
+                // Don't try to use Puter if sign-in failed/timed out — fall through
+                puterReady = false;
+              }
             }
           } else {
             puterReady = true; // auth not available, try anyway
@@ -207,11 +230,17 @@ export async function callAI(opts: AICallOptions): Promise<AICallResult> {
               ]
             : [{ role: "user", content: opts.userPrompt }];
 
-          const resp = await window.puter.ai.chat(messages, {
-            model: "claude-sonnet-4",
-            max_tokens: opts.maxTokens ?? 4096,
-            temperature: opts.temperature ?? 0.7,
-          });
+          // Wrap the Puter chat call in a 30s timeout so a slow/stuck Puter
+          // endpoint doesn't make the UI spin forever.
+          const resp = await withTimeout(
+            window.puter.ai.chat(messages, {
+              model: "claude-sonnet-4",
+              max_tokens: opts.maxTokens ?? 4096,
+              temperature: opts.temperature ?? 0.7,
+            }),
+            30000,
+            "Puter AI chat",
+          );
 
           // Parse the response — Puter returns different shapes
           let text = "";

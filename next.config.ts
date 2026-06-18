@@ -16,10 +16,9 @@ const nextConfig: NextConfig = {
   images: {
     unoptimized: true,
   },
-  // Ensure API routes work on Cloudflare
-  api: {
-    externalResolver: true,
-  },
+  // Note: Next.js 16 removed the top-level `api` config key.
+  // `externalResolver` was only needed for custom servers and is no longer
+  // required for Cloudflare Pages (the Edge runtime handles routing natively).
 };
 
 export default nextConfig;

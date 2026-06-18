@@ -13,7 +13,33 @@ import {
 import { BRAND, getRoleForEmail } from "./brand";
 import { hashPassword, verifyPassword, SUPER_ADMIN_SEED, canSignIn, canAccessApp, type UserStatus } from "./auth-utils";
 import type { UserStatus as US } from "./types";
-import { setUserId, clearUserId, api as cloudApi } from "./cloud-api";
+import { setUserId, clearUserId, api as cloudApi, cloudApiSafe } from "./cloud-api";
+
+// Destructure cloud API methods so the existing cloudApiSafe(createResume)(...) call sites
+// in this file resolve to the real functions. Each of these is an async function that hits
+// the Cloudflare Worker → D1. cloudApiSafe wraps them so they never throw or reject.
+const {
+  createResume,
+  updateResume,
+  deleteResume,
+  createJobDescription,
+  deleteJobDescription,
+  createCoverLetter,
+  updateCoverLetter,
+  deleteCoverLetter,
+  createInterview,
+  deleteInterview,
+  createATSReport,
+  createProvider,
+  updateProvider,
+  deleteProvider,
+  createPrompt,
+  updatePrompt,
+  deletePrompt,
+  updateBranding,
+  updateFlag,
+  createAuditLog,
+} = cloudApi;
 
 interface AppState {
   // session
@@ -70,6 +96,7 @@ interface AppState {
   /** Re-check the signed-in user's role against the email allowlist. Call on app load. */
   reconcileRole: () => void;
   toggleSidebar: () => void;
+  toggleTheme: () => void;
   setLandingSection: (s: string | null) => void;
   // admin user management
   approveUser: (userId: string) => void;

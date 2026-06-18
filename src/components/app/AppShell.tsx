@@ -51,6 +51,7 @@ const VIEW_COMPONENTS: Record<ViewKey, React.FC> = {
   "ai-providers": AIProviders,
   "ai-models": AIModels,
   "ai-settings": AIProviderSettings,
+  "ai-logs": Logs,
   prompts: Prompts,
   branding: Branding,
   "feature-flags": FeatureFlags,

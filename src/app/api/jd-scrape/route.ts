@@ -29,7 +29,8 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Only http/https URLs are supported" }, { status: 400 });
     }
 
-    // Fetch with a realistic User-Agent to avoid being blocked
+    // Fetch with a realistic User-Agent to avoid being blocked.
+    // Abort after 15s so a slow/hanging target site can't make our API hang forever.
     const res = await fetch(url, {
       headers: {
         "User-Agent":
@@ -41,6 +42,7 @@ export async function POST(req: NextRequest) {
         "Upgrade-Insecure-Requests": "1",
       },
       redirect: "follow",
+      signal: AbortSignal.timeout(15000),
     });
 
     if (!res.ok) {
