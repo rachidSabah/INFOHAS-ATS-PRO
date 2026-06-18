@@ -18,6 +18,104 @@ declare global {
   }
 }
 
+// ============================================================================
+// Puter.js helpers — user-initiated auth + status checks
+// ============================================================================
+
+/**
+ * Check if Puter.js is loaded and the user is signed in.
+ * Returns: { loaded, signedIn, user }
+ *   - loaded: whether the Puter.js script has loaded (window.puter exists)
+ *   - signedIn: whether the user is authenticated to Puter
+ *   - user: the Puter user object if signed in, else null
+ *
+ * This is safe to call anytime — it does NOT open popups.
+ */
+export function getPuterStatus(): { loaded: boolean; signedIn: boolean; user: any | null } {
+  if (typeof window === "undefined" || !window.puter) {
+    return { loaded: false, signedIn: false, user: null };
+  }
+  try {
+    let signedIn = false;
+    if (window.puter.auth) {
+      if (typeof window.puter.auth.isSignedIn === "function") {
+        signedIn = !!window.puter.auth.isSignedIn();
+      } else {
+        // If isSignedIn isn't a function, assume not signed in
+        signedIn = false;
+      }
+    }
+    // We don't call getUser() here because it may throw if not signed in.
+    // The UI can call getPuterUser() separately when needed.
+    return { loaded: true, signedIn, user: null };
+  } catch {
+    return { loaded: true, signedIn: false, user: null };
+  }
+}
+
+/**
+ * Get the signed-in Puter user's info (email, username, etc.).
+ * Returns null if not signed in or Puter isn't loaded.
+ * Does NOT open a popup — only reads existing session.
+ */
+export async function getPuterUser(): Promise<any | null> {
+  if (typeof window === "undefined" || !window.puter?.auth) return null;
+  try {
+    const isSignedIn = typeof window.puter.auth.isSignedIn === "function"
+      ? window.puter.auth.isSignedIn()
+      : false;
+    if (!isSignedIn) return null;
+    const user = await window.puter.auth.getUser();
+    return user || null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Sign in to Puter — MUST be called from a user click handler.
+ *
+ * Per https://docs.puter.com/Auth/signIn/:
+ *   "The puter.auth.signIn() function must be triggered by a user action (such
+ *   as a click event) because it opens a popup window. Most browsers block
+ *   popups that are not initiated by user interactions."
+ *
+ * So this function should only be called from an onClick handler in the UI.
+ * Calling it from an async flow (like callAI) will likely be blocked by the
+ * browser's popup blocker.
+ *
+ * Returns: { ok: boolean; user?: any; error?: string }
+ */
+export async function signInToPuter(): Promise<{ ok: boolean; user?: any; error?: string }> {
+  if (typeof window === "undefined" || !window.puter?.auth) {
+    return { ok: false, error: "Puter.js is not loaded. Please refresh the page." };
+  }
+  try {
+    // signIn() opens a popup. Because this is called from a click handler,
+    // the browser allows it.
+    await window.puter.auth.signIn();
+    const user = await window.puter.auth.getUser().catch(() => null);
+    return { ok: true, user };
+  } catch (e: any) {
+    return { ok: false, error: e?.message || "Puter sign-in was cancelled or failed." };
+  }
+}
+
+/**
+ * Sign out of Puter.
+ */
+export async function signOutFromPuter(): Promise<{ ok: boolean; error?: string }> {
+  if (typeof window === "undefined" || !window.puter?.auth) {
+    return { ok: false, error: "Puter.js is not loaded." };
+  }
+  try {
+    await window.puter.auth.signOut();
+    return { ok: true };
+  } catch (e: any) {
+    return { ok: false, error: e?.message || "Sign-out failed." };
+  }
+}
+
 /**
  * OPTIMIZER DIRECTIVE — InfoHAS Pro template (STRICT MASTER LAYOUT)
  *
@@ -539,114 +637,112 @@ export async function callAI(opts: AICallOptions): Promise<AICallResult> {
   }
 
   if (!opts.preferServer) {
-    // 1) Try Puter.js — the primary free AI provider
+    // 1) Try Puter.js — the free, keyless AI provider.
+    //
+    // Per https://docs.puter.com/AI/chat/:
+    //   - "all essential methods in Puter handle authentication automatically"
+    //   - puter.auth.signIn() "must be triggered by a user action (such as a click
+    //     event) because it opens a popup window. Most browsers block popups that
+    //     are not initiated by user interactions."
+    //
+    // So we do NOT call signIn() from here (it would be blocked as a non-user-initiated
+    // popup). Instead, we just call puter.ai.chat() directly. If the user is not
+    // signed in, Puter will either:
+    //   (a) auto-create a temporary user (if the app allows it), or
+    //   (b) reject the call with an auth error — in which case we fall through to
+    //       the next provider. The UI exposes a "Sign in to Puter" button that the
+    //       user can click (a real user gesture) to authenticate before retrying.
+    //
+    // Model: omit the `model` option to use Puter's default (currently gpt-5-nano
+    // per the docs), which is free and reliably available. Previously we hardcoded
+    // "claude-sonnet-4" (404 — Anthropic deprecated that exact ID) and then
+    // "gpt-4o-mini" (works but is not the documented default). Using the default
+    // avoids model-name drift.
     try {
       if (typeof window !== "undefined" && window.puter?.ai?.chat) {
-        // Check if user is signed in to Puter
-        let puterReady = false;
+        const messages = opts.systemPrompt
+          ? [
+              { role: "system", content: opts.systemPrompt },
+              { role: "user", content: opts.userPrompt },
+            ]
+          : [{ role: "user", content: opts.userPrompt }];
+
+        // Build options — only pass model if the user has explicitly chosen one
+        // via the Puter provider settings. Otherwise let Puter pick its default.
+        const chatOpts: any = {
+          max_tokens: opts.maxTokens ?? 4096,
+          temperature: opts.temperature ?? 0.7,
+        };
+        // Check if the user configured a specific Puter model in provider settings
         try {
-          if (window.puter.auth) {
-            if (typeof window.puter.auth.isSignedIn === "function") {
-              puterReady = window.puter.auth.isSignedIn();
-            } else {
-              puterReady = true; // assume signed in if we can't check
-            }
-            if (!puterReady) {
-              // Try to sign in — this opens a popup. Wrap in an 8s timeout so
-              // the AI flow doesn't hang forever if the popup is blocked or the
-              // user walks away. On timeout we fall through to the next provider.
-              try {
-                await withTimeout(window.puter.auth.signIn(), 8000, "Puter sign-in");
-                puterReady = true;
-              } catch (signInErr: any) {
-                console.warn("[AI] Puter sign-in failed or timed out:", signInErr?.message || signInErr);
-                // Don't try to use Puter if sign-in failed/timed out — fall through
-                puterReady = false;
-              }
-            }
-          } else {
-            puterReady = true; // auth not available, try anyway
-          }
-        } catch (signInError) {
-          console.warn("[AI] Puter sign-in failed or was cancelled:", signInError);
-          // Continue anyway — some Puter endpoints work without sign-in
-          puterReady = true;
-        }
-
-        if (puterReady) {
-          const messages = opts.systemPrompt
-            ? [
-                { role: "system", content: opts.systemPrompt },
-                { role: "user", content: opts.userPrompt },
-              ]
-            : [{ role: "user", content: opts.userPrompt }];
-
-          // Wrap the Puter chat call in a 30s timeout so a slow/stuck Puter
-          // endpoint doesn't make the UI spin forever. Cast to any because
-          // Puter returns a variety of shapes (string, { message: { content } },
-          // { text }, etc.) and we handle them all below.
-          //
-          // Model: use gpt-4o-mini as the default — it's free on Puter and
-          // reliably available. (claude-sonnet-4 returns 404 on Puter because
-          // Puter maps it to claude-sonnet-4-20250514 which Anthropic has
-          // deprecated. gpt-4o-mini is fast, cheap, and handles all our
-          // structured-output prompts well.)
-          const resp: any = await withTimeout(
-            window.puter.ai.chat(messages, {
-              model: "gpt-4o-mini",
-              max_tokens: opts.maxTokens ?? 4096,
-              temperature: opts.temperature ?? 0.7,
-            }),
-            30000,
-            "Puter AI chat",
+          const state: any = useApp.getState();
+          const puterProvider = (state?.providers || []).find(
+            (p: any) => p.type === "puter" && p.isActive && p.modelName,
           );
-
-          // Parse the response — Puter returns different shapes
-          let text = "";
-          if (typeof resp === "string") {
-            text = resp;
-          } else if (resp?.message?.content) {
-            text = Array.isArray(resp.message.content)
-              ? resp.message.content.map((c: any) => c?.text ?? "").join("")
-              : String(resp.message.content);
-          } else if (resp?.text) {
-            text = resp.text;
-          } else if (resp?.message?.role === "assistant" && typeof resp.message.content === "string") {
-            text = resp.message.content;
-          } else {
-            // Try to extract from any other shape
-            text = JSON.stringify(resp);
-            // If it looks like JSON wrapping actual content, try to extract
-            try {
-              const parsed = JSON.parse(text);
-              if (parsed?.text) text = parsed.text;
-              else if (parsed?.content) text = parsed.content;
-              else if (parsed?.message) text = typeof parsed.message === "string" ? parsed.message : JSON.stringify(parsed.message);
-            } catch {
-              // Keep the stringified version
-            }
+          if (puterProvider?.modelName) {
+            chatOpts.model = puterProvider.modelName;
           }
+        } catch {
+          // ignore — use Puter default
+        }
 
-          if (text && text.trim().length > 0 && !text.startsWith("{") && !text.startsWith("[")) {
-            return {
-              text,
-              provider: "Puter.js",
-              latencyMs: Math.round(performance.now() - t0),
-              tokensEstimate: estTokens(opts.userPrompt + (opts.systemPrompt ?? "")),
-            };
-          } else if (text && text.trim().length > 0) {
-            // Even JSON-like responses might be valid AI output (e.g., for JD extraction)
-            return {
-              text,
-              provider: "Puter.js",
-              latencyMs: Math.round(performance.now() - t0),
-              tokensEstimate: estTokens(opts.userPrompt + (opts.systemPrompt ?? "")),
-            };
+        // Wrap in a 45s timeout — Puter can be slow on first call (cold start).
+        const resp: any = await withTimeout(
+          window.puter.ai.chat(messages, chatOpts),
+          45000,
+          "Puter AI chat",
+        );
+
+        // Parse the response — Puter returns a ChatResponse object per the docs:
+        //   { message: { role: "assistant", content: "..." } }
+        // But it can also return a string or other shapes depending on the model.
+        let text = "";
+        if (typeof resp === "string") {
+          text = resp;
+        } else if (resp?.message?.content) {
+          // Standard ChatResponse shape
+          text = Array.isArray(resp.message.content)
+            ? resp.message.content.map((c: any) => c?.text ?? "").join("")
+            : String(resp.message.content);
+        } else if (resp?.text) {
+          text = resp.text;
+        } else if (resp?.message?.role === "assistant" && typeof resp.message.content === "string") {
+          text = resp.message.content;
+        } else if (resp?.toString && typeof resp.toString === "function") {
+          // Some responses are objects with a useful toString()
+          const str = resp.toString();
+          if (str && str !== "[object Object]") text = str;
+        }
+        if (!text) {
+          // Last resort — stringify
+          try {
+            text = JSON.stringify(resp);
+          } catch {
+            text = String(resp ?? "");
           }
         }
+
+        if (text && text.trim().length > 0) {
+          return {
+            text,
+            provider: "Puter.js",
+            latencyMs: Math.round(performance.now() - t0),
+            tokensEstimate: estTokens(opts.userPrompt + (opts.systemPrompt ?? "")),
+          };
+        }
+      } else if (typeof window !== "undefined" && !window.puter) {
+        // Puter.js script not yet loaded — this is common on first render.
+        // Don't warn (it's noisy); just fall through to the next provider.
+        console.debug("[AI] Puter.js not yet loaded, skipping to next provider");
       }
     } catch (e: any) {
-      console.warn("[AI] Puter.js failed, trying next provider:", e?.message || e);
+      const msg = e?.message || String(e || "");
+      // Detect auth errors specifically so the UI can prompt the user to sign in
+      if (/auth|sign.?in|unauthor|401|403/i.test(msg)) {
+        console.warn("[AI] Puter auth required — user should sign in via the Puter button. Error:", msg);
+      } else {
+        console.warn("[AI] Puter.js failed, trying next provider:", msg);
+      }
     }
   }
 

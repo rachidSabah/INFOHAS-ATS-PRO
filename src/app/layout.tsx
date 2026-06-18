@@ -88,8 +88,36 @@ export default function RootLayout({
   return (
     <html lang="en" suppressHydrationWarning>
       <head>
-        {/* Puter.js — free, user-authenticated AI provider + login */}
+        {/* Puter.js — free, keyless, user-authenticated AI provider.
+            Loaded from the official CDN per https://docs.puter.com/getting-started/.
+            `async` so it doesn't block page render; Puter attaches to window.puter
+            and is available by the time user interactions happen. */}
         <script src="https://js.puter.com/v2/" async></script>
+        {/* Suppress Puter's "Submit this app to the Puter App Store" console banner.
+            Per https://docs.puter.com/ — set puter.quiet = true after load. */}
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `
+              window.addEventListener('load', function() {
+                try {
+                  if (window.puter) {
+                    window.puter.quiet = true;
+                  } else {
+                    // Puter may load after window.load — watch for it
+                    var observer = new MutationObserver(function() {
+                      if (window.puter) {
+                        window.puter.quiet = true;
+                        observer.disconnect();
+                      }
+                    });
+                    observer.observe(document, { childList: true, subtree: true });
+                    setTimeout(function() { observer.disconnect(); }, 5000);
+                  }
+                } catch (e) {}
+              });
+            `,
+          }}
+        />
         <script
           type="application/ld+json"
           dangerouslySetInnerHTML={{

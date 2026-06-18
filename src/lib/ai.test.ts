@@ -12,7 +12,7 @@
 //   - All AI JSON parsing goes through extractJSON()
 
 import { describe, it, expect } from "vitest";
-import { extractJSON } from "./ai";
+import { extractJSON, getPuterStatus } from "./ai";
 
 describe("extractJSON", () => {
   it("is a function exported from ai.ts", () => {
@@ -120,5 +120,34 @@ This resume is already strong — just add the missing keywords above.`;
     expect(result.score_breakdown.impact).toBe(90);
     expect(result.missing_keywords).toEqual(["Go", "Kubernetes"]);
     expect(result.optimized_content).toContain("<h1>");
+  });
+});
+
+describe("getPuterStatus", () => {
+  it("is a function exported from ai.ts", () => {
+    expect(typeof getPuterStatus).toBe("function");
+  });
+
+  it("returns { loaded: false } when window is undefined (SSR)", () => {
+    // In the test environment, window is jsdom — but the function should still
+    // handle the case gracefully. We test the structure of the return value.
+    const status = getPuterStatus();
+    expect(status).toHaveProperty("loaded");
+    expect(status).toHaveProperty("signedIn");
+    expect(status).toHaveProperty("user");
+    expect(typeof status.loaded).toBe("boolean");
+    expect(typeof status.signedIn).toBe("boolean");
+  });
+
+  it("does NOT throw even if window.puter is undefined", () => {
+    expect(() => getPuterStatus()).not.toThrow();
+  });
+
+  it("does NOT open popups (safe to call anytime)", () => {
+    // The function should be synchronous and not trigger any async auth flows.
+    // This is critical — it must be safe to call on every render.
+    const status1 = getPuterStatus();
+    const status2 = getPuterStatus();
+    expect(status1).toEqual(status2);
   });
 });

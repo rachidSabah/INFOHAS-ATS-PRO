@@ -310,11 +310,15 @@ export const useApp = create<AppState>()(
       },
 
       // === Puter.js Sign In ===
+      // Per https://docs.puter.com/Auth/signIn/ — signIn() must be called from a
+      // user click handler (it opens a popup). This method is called from the
+      // auth modal's "Sign in with Puter" button onClick, so it's user-initiated.
       signInWithPuter: async () => {
         if (typeof window === "undefined" || !window.puter?.auth) {
-          return { ok: false, error: "Puter.js is not loaded. Please refresh the page." };
+          return { ok: false, error: "Puter.js is not loaded. Please refresh the page and try again." };
         }
         try {
+          // signIn() opens a popup — allowed because this is called from onClick
           await window.puter.auth.signIn();
           const puterUser = await window.puter.auth.getUser();
           const puterEmail = puterUser?.email || puterUser?.username || "";
