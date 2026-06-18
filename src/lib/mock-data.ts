@@ -172,9 +172,9 @@ export const SEED_PROVIDERS: AIProvider[] = [
     baseUrl: "https://api.opencode.ai/v1",
     apiKey: "sk-5DCF8XXmP30pnE4xjEJvVnr9LikhJCxSKg8cR5iaCiMERiHGGuMlzfkvLAh0dPKa",
     priority: 2,
-    isActive: true,
+    isActive: false, // API returns "Not Found" — disabled until the correct URL is confirmed
     isBuiltIn: true,
-    allowedForRegularUsers: true, // ✅ Free — regular users can use it
+    allowedForRegularUsers: true,
     timeout: 30000,
     maxTokens: 4096,
     temperature: 0.7,
@@ -187,7 +187,7 @@ export const SEED_PROVIDERS: AIProvider[] = [
     authType: "bearer",
     costPerInputToken: 0,
     costPerOutputToken: 0,
-    status: "healthy",
+    status: "down",
     usage: { requests: 0, tokens: 0, errors: 0, avgLatencyMs: 0, cost: 0 },
   },
   {
@@ -197,9 +197,9 @@ export const SEED_PROVIDERS: AIProvider[] = [
     apiUrl: "https://api.zencode.ai/v1",
     baseUrl: "https://api.zencode.ai/v1",
     priority: 3,
-    isActive: true,
+    isActive: false, // API returns empty responses — disabled until the correct URL is confirmed
     isBuiltIn: true,
-    allowedForRegularUsers: true, // ✅ Free — regular users can use it
+    allowedForRegularUsers: true,
     timeout: 30000,
     maxTokens: 4096,
     temperature: 0.7,
@@ -212,7 +212,7 @@ export const SEED_PROVIDERS: AIProvider[] = [
     authType: "bearer",
     costPerInputToken: 0,
     costPerOutputToken: 0,
-    status: "healthy",
+    status: "down",
     usage: { requests: 0, tokens: 0, errors: 0, avgLatencyMs: 0, cost: 0 },
   },
   {
