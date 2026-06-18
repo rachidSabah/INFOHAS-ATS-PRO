@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Sidebar } from "./Sidebar";
 import { TopBar } from "./TopBar";
@@ -58,9 +59,72 @@ const VIEW_COMPONENTS: Record<ViewKey, React.FC> = {
   logs: Logs,
 };
 
+// ============================================================================
+// Access control — which views require which role.
+// ============================================================================
+// The sidebar already hides these views from non-superadmin users, but this
+// map enforces access control at the AppShell level too. If a user somehow
+// navigates to a restricted view (via browser history, URL, or programmatic
+// setView), they'll be redirected to the dashboard instead of seeing the
+// restricted content.
+
+const SUPER_ADMIN_VIEWS: ViewKey[] = [
+  "super-admin",
+  "user-approvals",
+  "suspended-users",
+  "ai-providers",
+  "ai-models",
+  "ai-settings",
+  "ai-logs",
+  "prompts",
+  "branding",
+  "feature-flags",
+  "logs",
+];
+
+const ADMIN_VIEWS: ViewKey[] = [
+  "admin",
+  "users",
+  "analytics",
+];
+
+/**
+ * Check if the user's role allows access to the given view.
+ *   - "user" → only NAV_USER views (dashboard, resumes, tools, settings, downloads)
+ *   - "admin" → NAV_USER + NAV_ADMIN views (admin overview, users, analytics)
+ *   - "super_admin" → all views (including AI providers, branding, feature flags, logs)
+ */
+function canAccessView(view: ViewKey, role: string): boolean {
+  // Super admin can access everything
+  if (role === "super_admin") return true;
+  // Admin can access user + admin views (but NOT super-admin views)
+  if (role === "admin") {
+    return !SUPER_ADMIN_VIEWS.includes(view);
+  }
+  // Regular user can only access user views (NOT admin or super-admin views)
+  return !SUPER_ADMIN_VIEWS.includes(view) && !ADMIN_VIEWS.includes(view);
+}
+
 export function AppShell() {
   const view = useApp((s) => s.view) as ViewKey;
-  const ActiveView = VIEW_COMPONENTS[view] ?? Dashboard;
+  const setView = useApp((s) => s.setView);
+  const user = useApp((s) => s.user);
+  const role = user?.role ?? "user";
+
+  // Access control: if the current view requires a higher role than the user
+  // has, redirect to the dashboard. This prevents non-superadmin users from
+  // seeing AI Providers, API settings, branding, feature flags, etc. even if
+  // they somehow trigger setView("ai-providers").
+  useEffect(() => {
+    if (!canAccessView(view, role)) {
+      console.warn(`[AppShell] Access denied: user role "${role}" cannot view "${view}". Redirecting to dashboard.`);
+      setView("dashboard");
+    }
+  }, [view, role, setView]);
+
+  // If the view is restricted, render the dashboard while the redirect effect runs
+  const effectiveView = canAccessView(view, role) ? view : "dashboard";
+  const ActiveView = VIEW_COMPONENTS[effectiveView] ?? Dashboard;
 
   return (
     <div className="min-h-screen flex bg-background">
@@ -70,7 +134,7 @@ export function AppShell() {
         <main className="flex-1 p-4 sm:p-6 max-w-[1400px] w-full mx-auto overflow-x-hidden">
           <AnimatePresence mode="wait">
             <motion.div
-              key={view}
+              key={effectiveView}
               initial={{ opacity: 0, y: 8 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -4 }}

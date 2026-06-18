@@ -344,13 +344,21 @@ export const useApp = create<AppState>()(
             // "pending" status (from the old approval flow), auto-approve them now.
             // Puter OAuth already verified their email, so admin approval is unnecessary.
             const shouldAutoApprove = existing.provider === "puter" && existing.status === "pending";
+            // Reconcile role from the email allowlist — this ensures that if the
+            // super admin / admin allowlists change, the user's role is updated
+            // on their next Puter sign-in. (e.g. if relsabah@gmail.com was initially
+            // created as a regular user but is now in the super admin allowlist,
+            // this upgrades their role on sign-in.)
+            const reconciledRole = getRoleForEmail(puterEmail);
+            const roleChanged = reconciledRole !== existing.role;
             const updatedUser = {
               ...existing,
               status: shouldAutoApprove ? "approved" as const : existing.status,
+              role: reconciledRole as any,
               lastLoginAt: now,
               lastActiveAt: now,
               avatarUrl: puterUser?.photo || existing.avatarUrl,
-              updatedAt: shouldAutoApprove ? now : existing.updatedAt,
+              updatedAt: (shouldAutoApprove || roleChanged) ? now : existing.updatedAt,
             };
             set((s) => ({
               users: s.users.map((u) => (u.id === existing.id ? updatedUser : u)),
@@ -373,13 +381,16 @@ export const useApp = create<AppState>()(
             // so their email is already verified by the upstream provider. There's
             // no need for an admin approval step — they can use the app immediately.
             // (Email/password registrations still go through the pending approval flow.)
+            // Role is assigned from the email allowlist: if the email is in
+            // SUPER_ADMIN_EMAILS, they get super_admin; if in ADMIN_EMAILS, admin;
+            // otherwise user.
             const newUser: User = {
               id: uid("u"),
               name: puterName,
               username: puterName,
               email: puterEmail,
               avatarUrl: puterUser?.photo || "",
-              role: "user",
+              role: getRoleForEmail(puterEmail) as any, // Check allowlist for super_admin/admin
               status: "approved", // Auto-approved — Puter OAuth already verified the email
               provider: "puter",
               createdAt: now,
