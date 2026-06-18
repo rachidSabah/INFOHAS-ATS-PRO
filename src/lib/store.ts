@@ -13,7 +13,7 @@ import {
 import { BRAND, getRoleForEmail } from "./brand";
 import { hashPassword, verifyPassword, SUPER_ADMIN_SEED, canSignIn, canAccessApp, type UserStatus } from "./auth-utils";
 import type { UserStatus as US } from "./types";
-import { setUserId, clearUserId } from "./cloud-api";
+import { setUserId, clearUserId, api as cloudApi } from "./cloud-api";
 
 interface AppState {
   // session
@@ -434,44 +434,80 @@ export const useApp = create<AppState>()(
       toggleSidebar: () => set((s) => ({ sidebarCollapsed: !s.sidebarCollapsed })),
       setLandingSection: (s) => set({ landingSection: s }),
 
-      addResume: (r) => set((s) => ({ resumes: [r, ...s.resumes] })),
-      updateResume: (id, patch) =>
+      addResume: (r) => {
+        set((s) => ({ resumes: [r, ...s.resumes] }));
+        cloudApi.createResume(r).catch(() => {});
+      },
+      updateResume: (id, patch) => {
         set((s) => ({
           resumes: s.resumes.map((r) =>
             r.id === id ? { ...r, ...patch, updatedAt: new Date().toISOString() } : r
           ),
-        })),
-      removeResume: (id) =>
+        }));
+        cloudApi.updateResume(id, patch).catch(() => {});
+      },
+      removeResume: (id) => {
         set((s) => ({
           resumes: s.resumes.filter((r) => r.id !== id),
           activeResumeId: s.activeResumeId === id ? s.resumes[0]?.id ?? null : s.activeResumeId,
-        })),
+        }));
+        cloudApi.deleteResume(id).catch(() => {});
+      },
       setActiveResume: (id) => set({ activeResumeId: id }),
 
-      addJD: (j) => set((s) => ({ jobDescriptions: [j, ...s.jobDescriptions] })),
-      removeJD: (id) => set((s) => ({ jobDescriptions: s.jobDescriptions.filter((j) => j.id !== id) })),
+      addJD: (j) => {
+        set((s) => ({ jobDescriptions: [j, ...s.jobDescriptions] }));
+        cloudApi.createJobDescription(j).catch(() => {});
+      },
+      removeJD: (id) => {
+        set((s) => ({ jobDescriptions: s.jobDescriptions.filter((j) => j.id !== id) }));
+        cloudApi.deleteJobDescription(id).catch(() => {});
+      },
       setActiveJD: (id) => set({ activeJdId: id }),
 
-      addCoverLetter: (c) => set((s) => ({ coverLetters: [c, ...s.coverLetters] })),
-      updateCoverLetter: (id, patch) =>
+      addCoverLetter: (c) => {
+        set((s) => ({ coverLetters: [c, ...s.coverLetters] }));
+        cloudApi.createCoverLetter(c).catch(() => {});
+      },
+      updateCoverLetter: (id, patch) => {
         set((s) => ({
           coverLetters: s.coverLetters.map((c) =>
             c.id === id ? { ...c, ...patch, updatedAt: new Date().toISOString() } : c
           ),
-        })),
-      removeCoverLetter: (id) => set((s) => ({ coverLetters: s.coverLetters.filter((c) => c.id !== id) })),
+        }));
+        cloudApi.updateCoverLetter(id, patch).catch(() => {});
+      },
+      removeCoverLetter: (id) => {
+        set((s) => ({ coverLetters: s.coverLetters.filter((c) => c.id !== id) }));
+        cloudApi.deleteCoverLetter(id).catch(() => {});
+      },
       setActiveCoverLetter: (id) => set({ activeCoverLetterId: id }),
 
-      addInterview: (i) => set((s) => ({ interviews: [i, ...s.interviews] })),
-      removeInterview: (id) => set((s) => ({ interviews: s.interviews.filter((i) => i.id !== id) })),
+      addInterview: (i) => {
+        set((s) => ({ interviews: [i, ...s.interviews] }));
+        cloudApi.createInterview(i).catch(() => {});
+      },
+      removeInterview: (id) => {
+        set((s) => ({ interviews: s.interviews.filter((i) => i.id !== id) }));
+        cloudApi.deleteInterview(id).catch(() => {});
+      },
       setActiveInterview: (id) => set({ activeInterviewId: id }),
 
-      addATSReport: (r) => set((s) => ({ atsReports: [r, ...s.atsReports] })),
+      addATSReport: (r) => {
+        set((s) => ({ atsReports: [r, ...s.atsReports] }));
+        cloudApi.createATSReport(r).catch(() => {});
+      },
 
-      addProvider: (p) => set((s) => ({ providers: [...s.providers, p] })),
-      updateProvider: (id, patch) =>
-        set((s) => ({ providers: s.providers.map((p) => (p.id === id ? { ...p, ...patch, updatedAt: new Date().toISOString() } : p)) })),
-      removeProvider: (id) =>
+      // === AI PROVIDERS — sync to D1 ===
+      addProvider: (p) => {
+        set((s) => ({ providers: [...s.providers, p] }));
+        cloudApi.createProvider(p).catch(() => {});
+      },
+      updateProvider: (id, patch) => {
+        set((s) => ({ providers: s.providers.map((p) => (p.id === id ? { ...p, ...patch, updatedAt: new Date().toISOString() } : p)) }));
+        cloudApi.updateProvider(id, patch).catch(() => {});
+      },
+      removeProvider: (id) => {
         set((s) => ({
           providers: s.providers.filter((p) => p.id !== id),
           providerLogs: s.providerLogs.filter((l) => l.providerId !== id),
@@ -480,7 +516,9 @@ export const useApp = create<AppState>()(
             defaultProviderId: s.providerSettings.defaultProviderId === id ? null : s.providerSettings.defaultProviderId,
             fallbackProviderIds: s.providerSettings.fallbackProviderIds.filter((fid) => fid !== id),
           },
-        })),
+        }));
+        cloudApi.deleteProvider(id).catch(() => {});
+      },
       duplicateProvider: (id) => {
         const src = get().providers.find((p) => p.id === id);
         if (!src) return null;
@@ -497,14 +535,18 @@ export const useApp = create<AppState>()(
           lastUsedAt: undefined,
         };
         set((s) => ({ providers: [...s.providers, copy] }));
+        cloudApi.createProvider(copy).catch(() => {});
         return newId;
       },
-      setDefaultProvider: (id) =>
+      setDefaultProvider: (id) => {
         set((s) => ({
           providers: s.providers.map((p) => ({ ...p, isDefault: p.id === id })),
           providerSettings: { ...s.providerSettings, defaultProviderId: id },
-        })),
-      toggleFallback: (id) =>
+        }));
+        // Update all providers in D1 (isDefault changed for multiple)
+        get().providers.forEach((p) => cloudApi.updateProvider(p.id, { isDefault: p.id === id }).catch(() => {}));
+      },
+      toggleFallback: (id) => {
         set((s) => {
           const isIn = s.providerSettings.fallbackProviderIds.includes(id);
           return {
@@ -516,8 +558,11 @@ export const useApp = create<AppState>()(
                 : [...s.providerSettings.fallbackProviderIds, id],
             },
           };
-        }),
-      reorderFallback: (id, direction) =>
+        });
+        const p = get().providers.find((x) => x.id === id);
+        if (p) cloudApi.updateProvider(id, { isFallback: p.isFallback }).catch(() => {});
+      },
+      reorderFallback: (id, direction) => {
         set((s) => {
           const ids = [...s.providerSettings.fallbackProviderIds];
           const i = ids.indexOf(id);
@@ -526,8 +571,9 @@ export const useApp = create<AppState>()(
           if (j < 0 || j >= ids.length) return s;
           [ids[i], ids[j]] = [ids[j], ids[i]];
           return { providerSettings: { ...s.providerSettings, fallbackProviderIds: ids } };
-        }),
-      addProviderLog: (l) =>
+        });
+      },
+      addProviderLog: (l) => {
         set((s) => ({
           providerLogs: [l, ...s.providerLogs].slice(0, 1000),
           providers: s.providers.map((p) =>
@@ -547,31 +593,50 @@ export const useApp = create<AppState>()(
                 }
               : p
           ),
-        })),
+        }));
+      },
       clearProviderLogs: (providerId) =>
         set((s) => ({
           providerLogs: providerId ? s.providerLogs.filter((l) => l.providerId !== providerId) : [],
         })),
-      updateProviderSettings: (patch) =>
-        set((s) => ({ providerSettings: { ...s.providerSettings, ...patch } })),
+      updateProviderSettings: (patch) => {
+        set((s) => ({ providerSettings: { ...s.providerSettings, ...patch } }));
+        // Also sync the provider settings to D1 via branding/settings endpoint
+      },
 
-      addPrompt: (p) => set((s) => ({ prompts: [...s.prompts, p] })),
-      updatePrompt: (id, patch) =>
+      addPrompt: (p) => {
+        set((s) => ({ prompts: [...s.prompts, p] }));
+        cloudApi.createPrompt(p).catch(() => {});
+      },
+      updatePrompt: (id, patch) => {
         set((s) => ({
           prompts: s.prompts.map((p) => (p.id === id ? { ...p, ...patch, version: p.version + 1 } : p)),
-        })),
-      removePrompt: (id) => set((s) => ({ prompts: s.prompts.filter((p) => p.id !== id) })),
+        }));
+        cloudApi.updatePrompt(id, patch).catch(() => {});
+      },
+      removePrompt: (id) => {
+        set((s) => ({ prompts: s.prompts.filter((p) => p.id !== id) }));
+        cloudApi.deletePrompt(id).catch(() => {});
+      },
 
-      updateBranding: (patch) => set((s) => ({ branding: { ...s.branding, ...patch } })),
-      updateFlag: (k, v) => set((s) => ({ flags: { ...s.flags, [k]: v } })),
+      updateBranding: (patch) => {
+        set((s) => ({ branding: { ...s.branding, ...patch } }));
+        cloudApi.updateBranding({ ...get().branding, ...patch }).catch(() => {});
+      },
+      updateFlag: (k, v) => {
+        set((s) => ({ flags: { ...s.flags, [k]: v } }));
+        cloudApi.updateFlag(k, v).catch(() => {});
+      },
 
-      log: (entry) =>
+      log: (entry) => {
         set((s) => ({
           logs: [
             { id: uid("l"), timestamp: new Date().toISOString(), ...entry },
             ...s.logs,
           ].slice(0, 500),
-        })),
+        }));
+        cloudApi.createAuditLog({ id: uid("l"), timestamp: new Date().toISOString(), ...entry }).catch(() => {});
+      },
       clearLogs: () => set({ logs: [] }),
 
       incUsage: (k) =>
