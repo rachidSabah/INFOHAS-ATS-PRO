@@ -12,7 +12,7 @@
 // so it inherits the full failover chain. The "Gemini" name is preserved for compatibility
 // with the original spec — in practice any provider can serve it.
 
-import { callAI } from "./ai";
+import { callAI, extractJSON } from "./ai";
 import type { ResumeData } from "./types";
 
 // ============================================================================
@@ -230,8 +230,22 @@ export async function analyzeWithGemini(
       temperature: 0.4,
     });
 
-    let text = result.text.replace(/```json/gi, "").replace(/```/g, "").trim();
-    const data = JSON.parse(text) as AviationAtsResult;
+    // Robustly extract JSON — handles markdown fences, leading prose, trailing commentary.
+    // Falls back to a default-scored result on parse failure instead of crashing the UI.
+    let data: AviationAtsResult;
+    try {
+      data = extractJSON<AviationAtsResult>(result.text);
+    } catch (parseErr: any) {
+      console.warn("[analyzeWithGemini] JSON extraction failed, using fallback result:", parseErr?.message);
+      data = {
+        score: 0,
+        score_breakdown: { impact: 0, brevity: 0, keywords: 0 },
+        summary_critique: `Optimization incomplete — the AI returned non-JSON output (provider: ${result.provider}). The raw response started with: "${result.text.slice(0, 120)}${result.text.length > 120 ? "..." : ""}". Please try again, or configure a different default AI provider in AI Providers settings.`,
+        missing_keywords: [],
+        matched_keywords: [],
+        optimized_content: "",
+      } as AviationAtsResult;
+    }
 
     // Normalize markdown bold → <strong>
     if (data.optimized_content) {

@@ -10,7 +10,7 @@ import { Badge, Icon, ScoreRing } from "@/components/shared";
 import { useApp, uid } from "@/lib/store";
 import { parseResumeFile } from "@/lib/parser";
 import { scoreATS } from "@/lib/ats";
-import { callAI, OPTIMIZER_DIRECTIVE } from "@/lib/ai";
+import { callAI, OPTIMIZER_DIRECTIVE, extractJSON } from "@/lib/ai";
 import { exportResumePDF, exportResumeDOCX, exportResumeTXT, exportResumeDOC, exportHtmlAsDOC } from "@/lib/exporter";
 import { EditableA4Preview } from "@/components/resume/EditableA4Preview";
 import { analyzeWithGemini, resumeToPlainText, AIRLINE_ATS_PROFILES, AIRLINE_OPTIONS, DEFAULT_APP_SETTINGS, type AppSettings, type AviationAtsResult } from "@/lib/ats-directives";
@@ -82,7 +82,8 @@ export function Optimizer() {
         userPrompt: `Extract from this job description:\n\n${jdText}\n\nReturn JSON with keys: title, company, location, employmentType, salary, responsibilities (array), requiredSkills (array), preferredSkills (array), technologies (array), experienceYears, education, keywords (array of 8-15).`,
         maxTokens: 2000,
       });
-      const data = JSON.parse(result.text.replace(/```json|```/g, "").trim());
+      // Robustly extract JSON — handles prose preambles, markdown fences, etc.
+      const data = extractJSON<any>(result.text);
       parsed = {
         id: uid("jd"),
         title: data.title || "Untitled role",
@@ -175,20 +176,15 @@ export function Optimizer() {
       provider = result.provider;
       setAiLog((l) => [...l, `AI produced structured output via ${provider}.`]);
 
-      // Parse the JSON response — handle markdown fences, leading text, and non-JSON responses
-      let cleaned = result.text.replace(/```json|```/g, "").trim();
-      // If the response doesn't start with {, try to extract JSON from it
-      if (!cleaned.startsWith("{")) {
-        const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
-        if (jsonMatch) {
-          cleaned = jsonMatch[0];
-        }
-      }
-      let data;
+      // Parse the JSON response using the robust extractJSON helper — handles
+      // markdown fences, leading prose ("Here is your optimized resume:"),
+      // trailing commentary, and partial JSON. Throws only if no JSON object
+      // can be found anywhere in the response.
+      let data: any;
       try {
-        data = JSON.parse(cleaned);
-      } catch (parseError) {
-        throw new Error(`AI returned non-JSON response (provider: ${provider}). The response started with: "${cleaned.slice(0, 80)}...". Falling back to rule-based optimization.`);
+        data = extractJSON<any>(result.text);
+      } catch (parseError: any) {
+        throw new Error(`AI returned non-JSON response (provider: ${provider}). ${parseError?.message || ""} Falling back to rule-based optimization.`);
       }
 
       // Map the AI's InfoHAS Pro JSON shape to our ResumeData type

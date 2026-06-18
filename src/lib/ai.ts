@@ -1,8 +1,10 @@
 // ResumeAI Pro — client-side AI bridge.
 // Strategy:
+//   0. User-configured default provider (from AI Providers settings) — FIRST priority.
+//      Honors the user's chosen model, API key, base URL, and auth type.
 //   1. Puter.js (free, user authenticates with Google/GitHub/etc via Puter). Loaded from layout.
-//   2. Local rule-based fallback (deterministic, always works for the demo).
-//   3. Server-side /api/ai/chat (z-ai-web-dev-sdk) — used when explicitly requested.
+//   2. Server-side /api/ai/chat (Z.ai REST fallback) — used when Puter is unavailable.
+//   3. Local rule-based fallback (deterministic, always works for the demo).
 //
 // All AI calls are wrapped in failover with try/catch + provider rotation.
 
@@ -182,10 +184,265 @@ function withTimeout<T>(promise: Promise<T>, ms: number, label = "operation"): P
 }
 
 /**
- * Main AI entrypoint. Tries Puter → server (z-ai) → local rule-based fallback.
+ * Robustly extract a JSON object from an LLM response.
+ *
+ * LLMs frequently return JSON wrapped in markdown fences, preceded by prose
+ * ("Here is the optimized resume:"), or with trailing commentary. This helper
+ * handles all those cases and ONLY throws if no JSON object can be found.
+ *
+ * Strategy (in order):
+ *   1. Strip markdown fences ```json ... ``` or ``` ... ```.
+ *   2. Try to parse the cleaned text directly.
+ *   3. If that fails, find the first `{` and last `}` and try to parse the slice.
+ *   4. If that fails, find the first `[` and last `]` and try to parse the slice.
+ *   5. If all fail, throw an Error with a helpful message that includes the
+ *      first 80 chars of the input so the caller can log it.
+ *
+ * This is the SINGLE source of truth for parsing AI JSON in the app.
+ * Use it everywhere instead of `JSON.parse(text)` to prevent the
+ * "Unexpected token 'S', 'Senior Fro'..." class of crashes.
+ */
+export function extractJSON<T = any>(raw: string): T {
+  if (typeof raw !== "string") {
+    throw new Error("extractJSON: input is not a string");
+  }
+  if (!raw.trim()) {
+    throw new Error("extractJSON: input is empty");
+  }
+
+  // Step 1: strip markdown fences
+  let cleaned = raw.replace(/```json/gi, "").replace(/```/g, "").trim();
+
+  // Step 2: try direct parse
+  try {
+    return JSON.parse(cleaned) as T;
+  } catch {
+    // fall through
+  }
+
+  // Step 3: extract first { ... last }
+  const firstBrace = cleaned.indexOf("{");
+  const lastBrace = cleaned.lastIndexOf("}");
+  if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
+    const slice = cleaned.slice(firstBrace, lastBrace + 1);
+    try {
+      return JSON.parse(slice) as T;
+    } catch {
+      // fall through
+    }
+  }
+
+  // Step 4: extract first [ ... last ]
+  const firstBracket = cleaned.indexOf("[");
+  const lastBracket = cleaned.lastIndexOf("]");
+  if (firstBracket !== -1 && lastBracket !== -1 && lastBracket > firstBracket) {
+    const slice = cleaned.slice(firstBracket, lastBracket + 1);
+    try {
+      return JSON.parse(slice) as T;
+    } catch {
+      // fall through
+    }
+  }
+
+  // Step 5: nothing worked — throw with a helpful preview
+  const preview = cleaned.slice(0, 80).replace(/\n/g, " ");
+  throw new Error(
+    `AI did not return valid JSON. Response started with: "${preview}${cleaned.length > 80 ? "..." : ""}". ` +
+    `This usually means the AI returned prose instead of structured data. ` +
+    `Try again, or check that your default AI provider is correctly configured.`
+  );
+}
+
+/**
+ * Call a user-configured AI provider (from AI Providers settings).
+ *
+ * This is the FIRST priority in the callAI() chain — if the user has set a
+ * default provider with a valid API key and base URL, we use it directly.
+ * Supports OpenAI-compatible chat completions format (which covers OpenAI,
+ * Claude via proxy, Gemini via proxy, DeepSeek, Groq, Mistral, OpenRouter,
+ * Together, HuggingFace, Ollama, and custom OpenAI-compatible endpoints).
+ *
+ * Auth types:
+ *   - "bearer": Authorization: Bearer <key>  (default, OpenAI-style)
+ *   - "header": custom header from headersJson
+ *   - "query":  ?key=<key> query param
+ *   - "none":   no auth (e.g. local Ollama)
+ *
+ * Returns the extracted text from the response, or throws on error.
+ */
+async function callUserProvider(
+  provider: any,
+  opts: AICallOptions,
+): Promise<string> {
+  if (!provider) throw new Error("No provider");
+  if (!provider.isActive) throw new Error(`Provider "${provider.name}" is inactive`);
+
+  const baseUrl = (provider.apiUrl || provider.baseUrl || "").trim();
+  if (!baseUrl) throw new Error(`Provider "${provider.name}" has no base URL`);
+
+  // Build the chat-completions URL.
+  // Most providers use https://api.x.com/v1/chat/completions.
+  // If the user already included /chat/completions in the base URL, don't double it.
+  const url = baseUrl.endsWith("/chat/completions")
+    ? baseUrl
+    : `${baseUrl.replace(/\/$/, "")}/chat/completions`;
+
+  // Build headers
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  const authType = provider.authType || "bearer";
+  if (provider.apiKey && authType === "bearer") {
+    headers["Authorization"] = `Bearer ${provider.apiKey}`;
+  } else if (provider.apiKey && authType === "header") {
+    // Merge custom headers from headersJson
+    try {
+      const custom = provider.headersJson ? JSON.parse(provider.headersJson) : {};
+      Object.assign(headers, custom);
+    } catch {
+      // ignore malformed headersJson
+    }
+  } else if (provider.apiKey && authType === "query") {
+    // query param — append to URL
+    // handled below when constructing the fetch URL
+  }
+  // authType === "none" → no auth header
+
+  // Build body — OpenAI chat completions format
+  const messages: Array<{ role: string; content: string }> = [];
+  if (opts.systemPrompt) {
+    messages.push({ role: "system", content: opts.systemPrompt });
+  }
+  messages.push({ role: "user", content: opts.userPrompt });
+
+  const body: Record<string, any> = {
+    model: provider.modelName || "gpt-4o-mini",
+    messages,
+    max_tokens: opts.maxTokens ?? provider.maxTokens ?? 4096,
+    temperature: opts.temperature ?? provider.temperature ?? 0.7,
+    stream: false,
+  };
+
+  // Build final URL (with query param if authType === "query")
+  let finalUrl = url;
+  if (authType === "query" && provider.apiKey) {
+    const sep = finalUrl.includes("?") ? "&" : "?";
+    finalUrl = `${finalUrl}${sep}key=${encodeURIComponent(provider.apiKey)}`;
+  }
+
+  // Fetch with timeout
+  const timeoutMs = provider.timeout && provider.timeout > 0 ? provider.timeout * 1000 : 30000;
+  const res = await withTimeout(
+    fetch(finalUrl, {
+      method: "POST",
+      headers,
+      body: JSON.stringify(body),
+    }),
+    timeoutMs,
+    `Provider "${provider.name}" call`,
+  );
+
+  if (!res.ok) {
+    const errText = await res.text().catch(() => "");
+    throw new Error(`Provider "${provider.name}" returned HTTP ${res.status}: ${errText.slice(0, 200)}`);
+  }
+
+  const data = await res.json();
+
+  // Extract text from common response shapes:
+  //   OpenAI-style:    data.choices[0].message.content
+  //   Anthropic-style: data.content[0].text
+  //   Gemini-style:    data.candidates[0].content.parts[0].text
+  //   Custom:          use provider.responsePath
+  let text = "";
+  if (provider.responsePath) {
+    // Walk the path — e.g. "choices[0].message.content"
+    text = provider.responsePath
+      .split(".")
+      .reduce((acc: any, key: string) => {
+        const m = key.match(/^([^\[]+)(?:\[(\d+)\])?$/);
+        if (!m) return acc;
+        const v = acc?.[m[1]];
+        return m[2] !== undefined ? v?.[parseInt(m[2], 10)] : v;
+      }, data) ?? "";
+  } else if (data?.choices?.[0]?.message?.content) {
+    text = data.choices[0].message.content;
+  } else if (Array.isArray(data?.content) && data.content[0]?.text) {
+    text = data.content[0].text;
+  } else if (data?.candidates?.[0]?.content?.parts?.[0]?.text) {
+    text = data.candidates[0].content.parts[0].text;
+  } else if (typeof data?.text === "string") {
+    text = data.text;
+  } else if (typeof data?.content === "string") {
+    text = data.content;
+  } else {
+    // Last resort — stringify and hope for the best
+    text = JSON.stringify(data);
+  }
+
+  if (typeof text !== "string") text = String(text ?? "");
+  if (!text.trim()) {
+    throw new Error(`Provider "${provider.name}" returned an empty response`);
+  }
+  return text;
+}
+
+/**
+ * Main AI entrypoint. Tries user-default-provider → Puter → server (z-ai) → local fallback.
  */
 export async function callAI(opts: AICallOptions): Promise<AICallResult> {
   const t0 = performance.now();
+
+  // ============================================================
+  // 0) USER-CONFIGURED DEFAULT PROVIDER — FIRST PRIORITY
+  // ============================================================
+  // If the user has set a default AI provider in AI Providers settings
+  // (with a valid API key, base URL, and model name), use it directly.
+  // This takes precedence over Puter and the Z.ai fallback so the user's
+  // explicit choice is honored. Puter is only a free fallback when no
+  // provider is configured.
+  if (!opts.preferServer && typeof window !== "undefined") {
+    try {
+      const state: any = useApp.getState();
+      const providers: any[] = state?.providers || [];
+      const settings = state?.providerSettings || {};
+      // Find the default provider:
+      //   1. The provider whose id matches providerSettings.defaultProviderId
+      //   2. OR the first provider with isDefault === true
+      //   3. OR the first active provider (excluding built-in Puter/z-ai which we handle below)
+      let defaultProvider: any = null;
+      if (settings.defaultProviderId) {
+        defaultProvider = providers.find((p) => p.id === settings.defaultProviderId && p.isActive);
+      }
+      if (!defaultProvider) {
+        defaultProvider = providers.find((p) => p.isDefault && p.isActive);
+      }
+      if (!defaultProvider) {
+        // Skip built-in providers (Puter, z-ai) — they're handled by their own fallback paths below
+        defaultProvider = providers.find(
+          (p) => p.isActive
+            && !p.isBuiltIn
+            && p.type !== "puter"
+            && p.type !== "z-ai-fallback"
+            && (p.apiUrl || p.baseUrl)
+            && (p.apiKey || p.authType === "none"),
+        );
+      }
+
+      if (defaultProvider) {
+        const text = await callUserProvider(defaultProvider, opts);
+        if (text && text.trim().length > 0) {
+          console.info(`[AI] Using user-configured default provider: ${defaultProvider.name} (${defaultProvider.modelName || "default model"})`);
+          return {
+            text,
+            provider: defaultProvider.name,
+            latencyMs: Math.round(performance.now() - t0),
+            tokensEstimate: estTokens(opts.userPrompt + (opts.systemPrompt ?? "")),
+          };
+        }
+      }
+    } catch (e: any) {
+      console.warn(`[AI] User default provider failed, falling back to Puter:`, e?.message || e);
+    }
+  }
 
   if (!opts.preferServer) {
     // 1) Try Puter.js — the primary free AI provider
@@ -234,9 +491,15 @@ export async function callAI(opts: AICallOptions): Promise<AICallResult> {
           // endpoint doesn't make the UI spin forever. Cast to any because
           // Puter returns a variety of shapes (string, { message: { content } },
           // { text }, etc.) and we handle them all below.
+          //
+          // Model: use gpt-4o-mini as the default — it's free on Puter and
+          // reliably available. (claude-sonnet-4 returns 404 on Puter because
+          // Puter maps it to claude-sonnet-4-20250514 which Anthropic has
+          // deprecated. gpt-4o-mini is fast, cheap, and handles all our
+          // structured-output prompts well.)
           const resp: any = await withTimeout(
             window.puter.ai.chat(messages, {
-              model: "claude-sonnet-4",
+              model: "gpt-4o-mini",
               max_tokens: opts.maxTokens ?? 4096,
               temperature: opts.temperature ?? 0.7,
             }),
@@ -288,7 +551,7 @@ export async function callAI(opts: AICallOptions): Promise<AICallResult> {
           }
         }
       }
-    } catch (e) {
+    } catch (e: any) {
       console.warn("[AI] Puter.js failed, trying next provider:", e?.message || e);
     }
   }

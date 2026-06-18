@@ -6,7 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Button } from "@/components/ui/button";
 import { Badge, Icon } from "@/components/shared";
 import { useApp, uid } from "@/lib/store";
-import { callAI } from "@/lib/ai";
+import { callAI, extractJSON } from "@/lib/ai";
 import { exportInterviewPDF, exportInterviewDOCX } from "@/lib/exporter";
 import { toast } from "sonner";
 import type { InterviewPackage, InterviewQuestion } from "@/lib/types";
@@ -46,13 +46,15 @@ export function Interview() {
 
       let questions: InterviewQuestion[];
       try {
-        const cleaned = result.text.replace(/```json|```/g, "").trim();
-        const parsed = JSON.parse(cleaned);
+        // Use the robust extractJSON helper — handles prose preambles, fences,
+        // trailing commentary. The local fallback engine already returns valid
+        // JSON, so this will succeed for both AI and local-engine responses.
+        const parsed = extractJSON<{ questions: any[] }>(result.text);
         questions = (parsed.questions ?? []).map((q: any) => ({ id: uid("q"), ...q }));
-      } catch {
-        // fallback: synthesize from local engine output
-        const fallback = JSON.parse(result.text);
-        questions = (fallback.questions ?? []).map((q: any) => ({ id: uid("q"), ...q }));
+      } catch (parseErr: any) {
+        console.warn("[Interview] extractJSON failed:", parseErr?.message);
+        // Last resort: empty questions — the toast below will tell the user.
+        questions = [];
       }
 
       if (!questions.length) throw new Error("AI returned no questions.");

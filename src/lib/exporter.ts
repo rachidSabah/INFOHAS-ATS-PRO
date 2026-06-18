@@ -72,7 +72,7 @@ export function exportResumePDF(resume: ResumeData, opts: PDFOptions = {}): { ok
     const extraCompressed = compressSizes(compressSizes(currentSizes));
     renderResumeToPdf(doc, trimmed, extraCompressed, accentRgb);
     const pages = doc.getNumberOfPages();
-    const enforceOnePage = opts.enforceOnePage !== false;
+    const enforceOnePage: boolean = (opts.enforceOnePage as boolean | undefined) !== false;
     if (pages > 1 && enforceOnePage) {
       // Last resort: allow 2 pages rather than losing content
       result = { ok: true, pages };

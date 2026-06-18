@@ -8,7 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge, Icon } from "@/components/shared";
 import { useApp, uid } from "@/lib/store";
-import { callAI } from "@/lib/ai";
+import { callAI, extractJSON } from "@/lib/ai";
 import { toast } from "sonner";
 import type { JobDescription } from "@/lib/types";
 
@@ -94,7 +94,7 @@ export function JDScraper() {
         maxTokens: 2000,
       });
       const cleaned = result.text.replace(/```json|```/g, "").trim();
-      const data = JSON.parse(cleaned);
+      const data = extractJSON<any>(result.text);
       const jd: JobDescription = {
         id: uid("jd"),
         title: data.title || "Untitled role",
