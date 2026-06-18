@@ -62,24 +62,40 @@ export async function POST(req: NextRequest) {
 
     if (!html || html.trim().length < 50) {
       return NextResponse.json(
-        { error: "The page returned empty content. The site may require JavaScript rendering." },
+        { error: "The page returned empty content. The site may require JavaScript rendering. Please paste the job description text manually." },
         { status: 502 }
       );
     }
 
     const text = htmlToText(html);
 
-    if (text.trim().length < 30) {
+    // Extract meta description as fallback when body text is too short (JS-rendered pages)
+    let fullText = text;
+    const metaDesc = extractMetaDescription(html);
+    const ogDesc = extractMetaProperty(html, "og:description");
+
+    if (fullText.trim().length < 100) {
+      // Page is likely JS-rendered — use meta tags as fallback
+      const metaParts = [
+        metaDesc,
+        ogDesc,
+      ].filter(Boolean);
+      if (metaParts.length > 0) {
+        fullText = metaParts.join("\n\n") + "\n\nNote: This page uses JavaScript rendering. The full job description may not be available via URL scraping. Please paste the job description text manually for better extraction.";
+      }
+    }
+
+    if (fullText.trim().length < 30) {
       return NextResponse.json(
-        { error: "The page was fetched but no readable text was found. The site may use JavaScript rendering." },
+        { error: "The page was fetched but no readable text was found. The site uses JavaScript rendering (e.g., React/Angular SPA). Please copy the job description text from your browser and paste it manually — the AI extraction works the same." },
         { status: 502 }
       );
     }
 
     return NextResponse.json({
       url,
-      title: extractTitle(html),
-      text: text.slice(0, 20000),
+      title: extractTitle(html) || metaDesc?.slice(0, 60),
+      text: fullText.slice(0, 20000),
     });
   } catch (e: any) {
     const msg = e?.message || "Unknown error";
@@ -133,5 +149,16 @@ function htmlToText(html: string): string {
 
 function extractTitle(html: string): string | undefined {
   const m = html.match(/<title[^>]*>([^<]+)<\/title>/i);
+  return m?.[1]?.trim();
+}
+
+function extractMetaDescription(html: string): string | undefined {
+  const m = html.match(/<meta\s+name=["']description["']\s+content=["']([^"']+)["']/i);
+  return m?.[1]?.trim();
+}
+
+function extractMetaProperty(html: string, property: string): string | undefined {
+  const re = new RegExp(`<meta\\s+property=["']${property}["']\\s+content=["']([^"']+)["']`, "i");
+  const m = html.match(re);
   return m?.[1]?.trim();
 }

@@ -173,51 +173,92 @@ export async function callAI(opts: AICallOptions): Promise<AICallResult> {
   const t0 = performance.now();
 
   if (!opts.preferServer) {
-    // 1) Try Puter.js
+    // 1) Try Puter.js — the primary free AI provider
     try {
       if (typeof window !== "undefined" && window.puter?.ai?.chat) {
-        // Ensure user is signed in to Puter (free)
+        // Check if user is signed in to Puter
+        let puterReady = false;
         try {
-          if (window.puter.auth && typeof window.puter.auth.isSignedIn === "function") {
-            const signedIn = window.puter.auth.isSignedIn();
-            if (!signedIn) {
+          if (window.puter.auth) {
+            if (typeof window.puter.auth.isSignedIn === "function") {
+              puterReady = window.puter.auth.isSignedIn();
+            } else {
+              puterReady = true; // assume signed in if we can't check
+            }
+            if (!puterReady) {
+              // Try to sign in — this opens a popup
               await window.puter.auth.signIn();
+              puterReady = true;
+            }
+          } else {
+            puterReady = true; // auth not available, try anyway
+          }
+        } catch (signInError) {
+          console.warn("[AI] Puter sign-in failed or was cancelled:", signInError);
+          // Continue anyway — some Puter endpoints work without sign-in
+          puterReady = true;
+        }
+
+        if (puterReady) {
+          const messages = opts.systemPrompt
+            ? [
+                { role: "system", content: opts.systemPrompt },
+                { role: "user", content: opts.userPrompt },
+              ]
+            : [{ role: "user", content: opts.userPrompt }];
+
+          const resp = await window.puter.ai.chat(messages, {
+            model: "claude-sonnet-4",
+            max_tokens: opts.maxTokens ?? 4096,
+            temperature: opts.temperature ?? 0.7,
+          });
+
+          // Parse the response — Puter returns different shapes
+          let text = "";
+          if (typeof resp === "string") {
+            text = resp;
+          } else if (resp?.message?.content) {
+            text = Array.isArray(resp.message.content)
+              ? resp.message.content.map((c: any) => c?.text ?? "").join("")
+              : String(resp.message.content);
+          } else if (resp?.text) {
+            text = resp.text;
+          } else if (resp?.message?.role === "assistant" && typeof resp.message.content === "string") {
+            text = resp.message.content;
+          } else {
+            // Try to extract from any other shape
+            text = JSON.stringify(resp);
+            // If it looks like JSON wrapping actual content, try to extract
+            try {
+              const parsed = JSON.parse(text);
+              if (parsed?.text) text = parsed.text;
+              else if (parsed?.content) text = parsed.content;
+              else if (parsed?.message) text = typeof parsed.message === "string" ? parsed.message : JSON.stringify(parsed.message);
+            } catch {
+              // Keep the stringified version
             }
           }
-        } catch {
-          /* sign-in optional; some endpoints allow anonymous */
-        }
-        const messages = opts.systemPrompt
-          ? [
-              { role: "system", content: opts.systemPrompt },
-              { role: "user", content: opts.userPrompt },
-            ]
-          : [{ role: "user", content: opts.userPrompt }];
 
-        const resp = await window.puter.ai.chat(messages, {
-          model: "claude-sonnet-4",
-          max_tokens: opts.maxTokens ?? 4096,
-          temperature: opts.temperature ?? 0.7,
-        });
-        const text =
-          typeof resp === "string"
-            ? resp
-            : resp?.message?.content ??
-              resp?.text ??
-              (Array.isArray(resp?.message?.content)
-                ? resp.message.content.map((c: any) => c?.text ?? "").join("")
-                : JSON.stringify(resp));
-        if (text && text.trim().length > 0) {
-          return {
-            text: typeof text === "string" ? text : String(text),
-            provider: "Puter.js",
-            latencyMs: Math.round(performance.now() - t0),
-            tokensEstimate: estTokens(opts.userPrompt + (opts.systemPrompt ?? "")),
-          };
+          if (text && text.trim().length > 0 && !text.startsWith("{") && !text.startsWith("[")) {
+            return {
+              text,
+              provider: "Puter.js",
+              latencyMs: Math.round(performance.now() - t0),
+              tokensEstimate: estTokens(opts.userPrompt + (opts.systemPrompt ?? "")),
+            };
+          } else if (text && text.trim().length > 0) {
+            // Even JSON-like responses might be valid AI output (e.g., for JD extraction)
+            return {
+              text,
+              provider: "Puter.js",
+              latencyMs: Math.round(performance.now() - t0),
+              tokensEstimate: estTokens(opts.userPrompt + (opts.systemPrompt ?? "")),
+            };
+          }
         }
       }
     } catch (e) {
-      console.warn("[AI] Puter failed, trying next provider:", e);
+      console.warn("[AI] Puter.js failed, trying next provider:", e?.message || e);
     }
   }
 
@@ -440,16 +481,19 @@ function localJD(prompt: string): string {
 
   // Extract title — usually the first non-empty line that looks like a job title
   const lines = jdText.split(/\n/).map((l) => l.trim()).filter(Boolean);
-  let title = "Untitled Role";
+  let title = "";
   let company = "";
   let location = "";
 
-  for (const line of lines.slice(0, 10)) {
-    // Title: first line that has 2-8 words and no digits (heuristic)
-    if (!title || title === "Untitled Role") {
+  for (const line of lines.slice(0, 15)) {
+    // Title: first line that has 1-10 words, no "Note:" prefix, and is reasonable length
+    if (!title) {
       const words = line.split(/\s+/);
-      if (words.length >= 2 && words.length <= 10 && !/\d{3,}/.test(line) && line.length < 80) {
-        title = line.replace(/[^a-zA-Z0-9\s\-\/]/g, "").trim();
+      const isNote = line.toLowerCase().startsWith("note:");
+      const isJavaScript = line.toLowerCase().includes("javascript rendering");
+      const isInstruction = line.toLowerCase().includes("paste the job");
+      if (!isNote && !isJavaScript && !isInstruction && words.length >= 1 && words.length <= 12 && !/\d{3,}/.test(line) && line.length < 100) {
+        title = line.replace(/[^a-zA-Z0-9\s\-\/&]/g, "").trim();
       }
     }
     // Company: look for "at [Company]" or "Company: X" patterns
@@ -463,6 +507,13 @@ function localJD(prompt: string): string {
       if (locMatch) location = locMatch[1];
     }
   }
+
+  // Fallback: if no title found, try extracting from the full prompt context
+  if (!title) {
+    const titleMatch = prompt.match(/\btitle[:\s]+([a-zA-Z][a-zA-Z0-9\- ]{2,40})/i);
+    if (titleMatch) title = titleMatch[1].trim();
+  }
+  if (!title) title = "Job Posting";
 
   // Extract keywords from the JD text — look for skill-like terms
   const skillPatterns = [
