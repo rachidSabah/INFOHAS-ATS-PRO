@@ -229,44 +229,61 @@ export interface AIProvider {
   id: string;
   name: string;
   type: AIProviderType;
-  apiUrl?: string;          // base URL (alias of base_url)
-  baseUrl?: string;         // base URL (canonical name from spec)
-  apiKey?: string;          // encrypted at rest in production
-  headersJson?: string;     // custom headers (JSON)
-  parametersJson?: string;  // custom parameters (JSON)
-  requestTemplate?: string; // for custom providers: request body template (JSON with {{vars}})
-  responsePath?: string;    // for custom providers: JSON path to extract text (e.g. "choices[0].message.content")
+  // ============================================================
+  // PROVIDER CLASSIFICATION (Category A vs Category B)
+  // ============================================================
+  // Category A: "api" — uses API keys, can run server-side (OpenAI, DeepSeek, etc.)
+  // Category B: "browser_auth" — requires browser session (Puter.js)
+  providerCategory: "api" | "browser_auth";
+
+  // Capabilities (what the provider supports)
+  supportsServerSide: boolean;     // can execute from Worker/backend
+  supportsClientSide: boolean;     // can execute from browser
+  supportsStreaming: boolean;
+  supportsFunctionCalling: boolean;
+  supportsJsonMode: boolean;
+  requiresBrowserAuth: boolean;    // true for Puter (needs user session)
+  requiresApiKey: boolean;         // true for API providers
+
+  apiUrl?: string;
+  baseUrl?: string;
+  apiKey?: string;
+  headersJson?: string;
+  parametersJson?: string;
+  requestTemplate?: string;
+  responsePath?: string;
   streamingEnabled?: boolean;
   modelName?: string;
   priority: number;
   isActive: boolean;
-  isDefault?: boolean;      // default provider for new requests
-  isFallback?: boolean;     // included in fallback chain
+  isDefault?: boolean;
+  isFallback?: boolean;
   isBuiltIn?: boolean;
   timeout: number;
   maxTokens: number;
   temperature: number;
   retryAttempts?: number;
   rateLimitPerMinute?: number;
-  // Puter.js-specific fields
   applicationId?: string;
   clientId?: string;
   redirectUri?: string;
   enabledModels?: string[];
-  // Auth type for custom providers
   authType?: "bearer" | "header" | "query" | "none";
-  // Supports function calling
-  supportsFunctionCalling?: boolean;
-  // Whether regular (non-super-admin) users can use this provider.
-  // Super admins control this flag per-provider. When false, only super admins
-  // can route AI requests through this provider. Default: false (super-admin-only).
   allowedForRegularUsers?: boolean;
-  // Cost estimation (USD per 1K tokens)
   costPerInputToken?: number;
   costPerOutputToken?: number;
   status: "healthy" | "degraded" | "down" | "untested";
   usage: { requests: number; tokens: number; errors: number; avgLatencyMs: number; cost: number };
   lastUsedAt?: string;
+  // Health tracking (for Provider Health Dashboard)
+  health?: {
+    lastSuccessAt?: string;
+    lastFailureAt?: string;
+    lastError?: string;
+    consecutiveFailures: number;
+    consecutiveSuccesses: number;
+    rateLimitedUntil?: string;
+  };
 }
 
 export interface AIProviderLog {
