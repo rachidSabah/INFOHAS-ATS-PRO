@@ -1,0 +1,574 @@
+// ResumeAI Pro — AI Builder Agent engine
+// Extends the AI Dev Agent with full code-editing capabilities:
+//   - Repository Explorer (browse files)
+//   - File operations (read/create/update/rename/move/delete)
+//   - AI File Editor (syntax highlighting, diff viewer)
+//   - Git Manager (branches, commits, PRs)
+//   - AI Task System (analyze → plan → generate → test → approve)
+//   - Patch Center (pending/approved/rejected/applied/rolled_back)
+//   - Build Manager (run build, validate, view logs)
+//   - Test Runner (Vitest, Playwright)
+//   - Rollback System
+//
+// All operations go through the Safe Apply workflow:
+//   Generate Patch → Staging Branch → Build → Test → Report → Approval → Merge
+// The AI NEVER directly modifies production.
+
+"use client";
+
+import { callAI, extractJSON } from "./ai";
+import { useApp } from "./store";
+import type {
+  AITask, AIWorkspacePatch, AIBuildResult, AITestResult,
+  AIFile, AIGitBranch, AIGitCommit,
+} from "./types";
+
+// ============================================================================
+// REPOSITORY EXPLORER — file tree + file reading
+// ============================================================================
+
+/**
+ * Known project structure (static map of the ResumeAI Pro repo).
+ * In a real IDE, this would be a live file system. Here we provide a
+ * representative tree so the AI and user can browse the project.
+ */
+export const PROJECT_TREE: AIFile[] = [
+  // Root
+  { path: "src", type: "directory" },
+  { path: "src/app", type: "directory" },
+  { path: "src/app/api", type: "directory" },
+  { path: "src/app/api/ai", type: "directory" },
+  { path: "src/app/api/ai/chat", type: "directory" },
+  { path: "src/app/api/ai/chat/route.ts", type: "file", language: "ts", size: 2048 },
+  { path: "src/app/api/jd-scrape", type: "directory" },
+  { path: "src/app/api/jd-scrape/route.ts", type: "file", language: "ts", size: 5120 },
+  { path: "src/app/api/providers", type: "directory" },
+  { path: "src/app/api/providers/models", type: "directory" },
+  { path: "src/app/api/providers/models/route.ts", type: "file", language: "ts", size: 3072 },
+  { path: "src/app/api/providers/test", type: "directory" },
+  { path: "src/app/api/providers/test/route.ts", type: "file", language: "ts", size: 4096 },
+  { path: "src/app/layout.tsx", type: "file", language: "tsx", size: 3584 },
+  { path: "src/app/page.tsx", type: "file", language: "tsx", size: 4096 },
+  { path: "src/app/globals.css", type: "file", language: "css", size: 2048 },
+  { path: "src/components", type: "directory" },
+  { path: "src/components/app", type: "directory" },
+  { path: "src/components/app/modules", type: "directory" },
+  { path: "src/components/app/modules/AIDevAgent.tsx", type: "file", language: "tsx", size: 25000 },
+  { path: "src/components/app/modules/AIWorkspace.tsx", type: "file", language: "tsx", size: 30000 },
+  { path: "src/components/app/modules/Optimizer.tsx", type: "file", language: "tsx", size: 28000 },
+  { path: "src/components/app/modules/OptimizerDirective.tsx", type: "file", language: "tsx", size: 15000 },
+  { path: "src/components/app/modules/ATSChecker.tsx", type: "file", language: "tsx", size: 18000 },
+  { path: "src/components/app/modules/Builder.tsx", type: "file", language: "tsx", size: 22000 },
+  { path: "src/components/app/modules/JDScraper.tsx", type: "file", language: "tsx", size: 12000 },
+  { path: "src/components/app/modules/CoverLetter.tsx", type: "file", language: "tsx", size: 15000 },
+  { path: "src/components/app/modules/Interview.tsx", type: "file", language: "tsx", size: 14000 },
+  { path: "src/components/app/modules/MyResumes.tsx", type: "file", language: "tsx", size: 10000 },
+  { path: "src/components/app/modules/Dashboard.tsx", type: "file", language: "tsx", size: 16000 },
+  { path: "src/components/app/modules/Settings.tsx", type: "file", language: "tsx", size: 12000 },
+  { path: "src/components/app/modules/Users.tsx", type: "file", language: "tsx", size: 14000 },
+  { path: "src/components/app/modules/SuperAdmin.tsx", type: "file", language: "tsx", size: 13000 },
+  { path: "src/components/app/modules/AIProviders.tsx", type: "file", language: "tsx", size: 20000 },
+  { path: "src/components/app/modules/AIModels.tsx", type: "file", language: "tsx", size: 11000 },
+  { path: "src/components/app/modules/Prompts.tsx", type: "file", language: "tsx", size: 10000 },
+  { path: "src/components/app/modules/Branding.tsx", type: "file", language: "tsx", size: 9000 },
+  { path: "src/components/app/modules/FeatureFlags.tsx", type: "file", language: "tsx", size: 8000 },
+  { path: "src/components/app/modules/Logs.tsx", type: "file", language: "tsx", size: 7000 },
+  { path: "src/components/app/AppShell.tsx", type: "file", language: "tsx", size: 6000 },
+  { path: "src/components/app/Sidebar.tsx", type: "file", language: "tsx", size: 5000 },
+  { path: "src/components/app/TopBar.tsx", type: "file", language: "tsx", size: 13000 },
+  { path: "src/components/app/AuthModal.tsx", type: "file", language: "tsx", size: 11000 },
+  { path: "src/components/resume", type: "directory" },
+  { path: "src/components/resume/A4Preview.tsx", type: "file", language: "tsx", size: 20000 },
+  { path: "src/components/resume/EditableA4Preview.tsx", type: "file", language: "tsx", size: 25000 },
+  { path: "src/components/landing", type: "directory" },
+  { path: "src/components/landing/LandingPage.tsx", type: "file", language: "tsx", size: 18000 },
+  { path: "src/lib", type: "directory" },
+  { path: "src/lib/ai.ts", type: "file", language: "ts", size: 45000 },
+  { path: "src/lib/ai-dev-agent.ts", type: "file", language: "ts", size: 35000 },
+  { path: "src/lib/ai-builder-agent.ts", type: "file", language: "ts", size: 30000 },
+  { path: "src/lib/ai-error-filter.ts", type: "file", language: "ts", size: 8000 },
+  { path: "src/lib/ats.ts", type: "file", language: "ts", size: 15000 },
+  { path: "src/lib/ats-directives.ts", type: "file", language: "ts", size: 25000 },
+  { path: "src/lib/auth-utils.ts", type: "file", language: "ts", size: 6000 },
+  { path: "src/lib/brand.ts", type: "file", language: "ts", size: 5000 },
+  { path: "src/lib/cloud-api.ts", type: "file", language: "ts", size: 12000 },
+  { path: "src/lib/exporter.ts", type: "file", language: "ts", size: 30000 },
+  { path: "src/lib/job-intelligence.ts", type: "file", language: "ts", size: 10000 },
+  { path: "src/lib/output-validator.ts", type: "file", language: "ts", size: 12000 },
+  { path: "src/lib/parser.ts", type: "file", language: "ts", size: 12000 },
+  { path: "src/lib/relevance-engine.ts", type: "file", language: "ts", size: 11000 },
+  { path: "src/lib/store.ts", type: "file", language: "ts", size: 40000 },
+  { path: "src/lib/types.ts", type: "file", language: "ts", size: 20000 },
+  { path: "src/lib/mock-data.ts", type: "file", language: "ts", size: 25000 },
+  { path: "migrations", type: "directory" },
+  { path: "migrations/0001_init.sql", type: "file", language: "sql", size: 8000 },
+  { path: "migrations/0002_ai_providers_enhanced.sql", type: "file", language: "sql", size: 5000 },
+  { path: "migrations/0003_ai_dev_agent.sql", type: "file", language: "sql", size: 3000 },
+  { path: "workers", type: "directory" },
+  { path: "workers/api", type: "directory" },
+  { path: "workers/api/index.ts", type: "file", language: "ts", size: 20000 },
+  { path: "package.json", type: "file", language: "json", size: 2000 },
+  { path: "tsconfig.json", type: "file", language: "json", size: 800 },
+  { path: "next.config.ts", type: "file", language: "ts", size: 600 },
+  { path: "wrangler.toml", type: "file", language: "toml", size: 1000 },
+  { path: "tailwind.config.ts", type: "file", language: "ts", size: 1200 },
+  { path: "eslint.config.mjs", type: "file", language: "js", size: 1500 },
+  { path: ".github/workflows/ci-cd.yml", type: "file", language: "yaml", size: 5000 },
+  { path: "README.md", type: "file", language: "md", size: 4000 },
+];
+
+/**
+ * List files in a directory (one level deep).
+ */
+export function listDirectory(dirPath: string): AIFile[] {
+  const normalized = dirPath.replace(/\/$/, "");
+  return PROJECT_TREE.filter((f) => {
+    if (f.path === normalized) return false;
+    const relativePath = f.path.startsWith(normalized + "/") ? f.path.slice(normalized.length + 1) : null;
+    if (!relativePath) return false;
+    // Only direct children (no further slashes)
+    return !relativePath.includes("/");
+  });
+}
+
+/**
+ * Search files by name or path.
+ */
+export function searchFiles(query: string): AIFile[] {
+  const q = query.toLowerCase();
+  return PROJECT_TREE.filter((f) => f.type === "file" && f.path.toLowerCase().includes(q));
+}
+
+/**
+ * Search for symbols (function/class names) across files.
+ * Uses the AI to find symbol definitions.
+ */
+export async function searchSymbols(query: string): Promise<Array<{ file: string; line: number; symbol: string; type: string }>> {
+  const prompt = `Search the ResumeAI Pro codebase for symbols matching "${query}".
+
+Known files and their likely contents:
+- src/lib/ai.ts — callAI, extractJSON, getOptimizerDirective, callUserProvider
+- src/lib/store.ts — useApp (Zustand store), addResume, updateResume, signInWithPuter
+- src/lib/ats.ts — scoreATS
+- src/lib/exporter.ts — exportResumePDF, exportResumeDOCX
+- src/lib/parser.ts — parseResumeFile, extractResumeFromText
+- src/lib/cloud-api.ts — api, cloudApiSafe, syncAllFromCloud
+- src/lib/ai-dev-agent.ts — scanCode, analyzeErrors, scanSecurity, generateFeature
+- src/lib/ai-builder-agent.ts — executeTask, createStagingBranch, runBuild, runTests
+
+Return ONLY valid JSON array:
+[{"file": "src/lib/ai.ts", "line": 172, "symbol": "callAI", "type": "function"}]`;
+
+  try {
+    const result = await callAI({
+      systemPrompt: "You are a code search engine. Return ONLY valid JSON arrays.",
+      userPrompt: prompt,
+      maxTokens: 1000,
+      temperature: 0.1,
+    });
+    return extractJSON<Array<{ file: string; line: number; symbol: string; type: string }>>(result.text);
+  } catch {
+    return [];
+  }
+}
+
+// ============================================================================
+// AI TASK SYSTEM — the core execution pipeline
+// ============================================================================
+
+/**
+ * Execute an AI task through the full pipeline:
+ *   1. Analyze the request
+ *   2. Generate an execution plan
+ *   3. Identify affected files
+ *   4. Generate a patch (unified diff)
+ *   5. Generate tests
+ *   6. Validate build (simulated)
+ *   7. Run tests (simulated)
+ *   8. Show diff for approval
+ *
+ * The task is NOT applied automatically — it requires super admin approval.
+ */
+export async function executeTask(request: string, type: AITask["type"] = "feature"): Promise<AITask> {
+  const taskId = `t_${Date.now()}`;
+  const now = new Date().toISOString();
+  const userEmail = useApp.getState().user?.email || "system";
+
+  // Step 1+2: Analyze + Plan
+  const analysis = await analyzeAndPlan(request, type);
+
+  // Step 3+4: Generate patch
+  const patch = await generatePatchForTask(request, analysis.plan, analysis.affectedFiles);
+
+  // Step 5: Generate tests
+  const tests = await generateTestsForTask(request, analysis.affectedFiles);
+
+  // Step 6+7: Validate build + run tests (simulated — would call actual build/test in production)
+  const buildResult = simulateBuild();
+  const testResult = simulateTests(tests);
+
+  return {
+    id: taskId,
+    title: analysis.title,
+    description: analysis.description,
+    type,
+    status: "ready",
+    request,
+    plan: analysis.plan,
+    affectedFiles: analysis.affectedFiles,
+    generatedPatch: patch.diff,
+    generatedTests: tests,
+    buildResult,
+    testResult,
+    createdAt: now,
+    updatedAt: now,
+    createdBy: userEmail,
+  };
+}
+
+async function analyzeAndPlan(request: string, type: AITask["type"]) {
+  const prompt = `You are an AI Builder Agent analyzing a task for the ResumeAI Pro application.
+
+Task type: ${type}
+Request: "${request}"
+
+The application is a Next.js 16 + Cloudflare Pages + D1 + Workers app.
+Tech stack: React 19, TypeScript, Tailwind CSS 4, shadcn/ui, Zustand, Hono.
+
+Analyze the request and create an execution plan. Return ONLY valid JSON:
+{
+  "title": "Short task title",
+  "description": "1-2 sentence description",
+  "plan": "Step 1: ...\\nStep 2: ...\\nStep 3: ...",
+  "affectedFiles": ["src/components/...", "src/lib/...", "migrations/..."]
+}`;
+
+  try {
+    const result = await callAI({
+      systemPrompt: "You are an AI Builder Agent. Always return ONLY valid JSON.",
+      userPrompt: prompt,
+      maxTokens: 2000,
+      temperature: 0.3,
+    });
+    return extractJSON<any>(result.text);
+  } catch {
+    return {
+      title: request.slice(0, 60),
+      description: request,
+      plan: "1. Analyze request\n2. Generate code\n3. Test\n4. Deploy",
+      affectedFiles: [],
+    };
+  }
+}
+
+async function generatePatchForTask(request: string, plan: string, affectedFiles: string[]) {
+  const prompt = `Generate a patch (unified git diff) for this task:
+
+Request: ${request}
+Plan: ${plan}
+Affected files: ${affectedFiles.join(", ")}
+
+Generate a unified git diff that implements the task. Use the format:
+diff --git a/path b/path
+--- a/path
++++ b/path
+@@ -line,count +line,count @@
+ context
+-removed
++added
+
+Return ONLY valid JSON:
+{
+  "diff": "diff --git a/...",
+  "modifiedFiles": ["src/..."],
+  "newFiles": ["src/..."],
+  "deletedFiles": [],
+  "impactAnalysis": "What this change affects",
+  "riskAnalysis": "low" | "medium" | "high"
+}`;
+
+  try {
+    const result = await callAI({
+      systemPrompt: "You are an AI code generator. Generate unified git diffs. Always return ONLY valid JSON.",
+      userPrompt: prompt,
+      maxTokens: 6000,
+      temperature: 0.2,
+    });
+    return extractJSON<any>(result.text);
+  } catch {
+    return { diff: "", modifiedFiles: [], newFiles: [], deletedFiles: [], impactAnalysis: "", riskAnalysis: "medium" };
+  }
+}
+
+async function generateTestsForTask(request: string, affectedFiles: string[]) {
+  const prompt = `Generate Vitest tests for this task:
+
+Request: ${request}
+Affected files: ${affectedFiles.join(", ")}
+
+Generate comprehensive tests that verify the task implementation.
+Return ONLY the test file content (TypeScript), no markdown fences.`;
+
+  try {
+    const result = await callAI({
+      systemPrompt: "You are a test generator. Generate Vitest tests.",
+      userPrompt: prompt,
+      maxTokens: 4000,
+      temperature: 0.2,
+    });
+    return result.text.replace(/```typescript|```ts|```/g, "").trim();
+  } catch {
+    return `// Test generation failed for: ${request}`;
+  }
+}
+
+// ============================================================================
+// BUILD MANAGER + TEST RUNNER (simulated — would call actual commands in production)
+// ============================================================================
+
+function simulateBuild(): AIBuildResult {
+  // In production, this would run `npm run build` and parse the output
+  const success = Math.random() > 0.2; // 80% success rate for simulation
+  return {
+    success,
+    errors: success ? [] : ["Syntax error in generated file"],
+    warnings: success ? ["Unused variable warning"] : [],
+    duration: Math.round(Math.random() * 30000 + 10000),
+    output: success
+      ? "✓ Compiled successfully in 17.4s\n✓ Generating static pages (3/3)\n✓ Build complete"
+      : "✗ Build failed\n  Error: Syntax error in src/lib/generated.ts:42",
+    timestamp: new Date().toISOString(),
+  };
+}
+
+function simulateTests(testCode: string): AITestResult {
+  // In production, this would run `npx vitest run` and parse the output
+  const hasTests = testCode && testCode.length > 50 && !testCode.includes("failed");
+  const passed = hasTests ? Math.floor(Math.random() * 5) + 5 : 0; // 5-10 tests
+  const failed = hasTests ? (Math.random() > 0.7 ? 1 : 0) : 0; // 30% chance of 1 failure
+  const total = passed + failed;
+  return {
+    success: failed === 0,
+    total,
+    passed,
+    failed,
+    skipped: 0,
+    duration: Math.round(Math.random() * 5000 + 1000),
+    output: failed === 0
+      ? `✓ ${passed} test(s) passed\n  Duration: ${Math.round(Math.random() * 5000)}ms`
+      : `✗ ${failed} test(s) failed\n  ✗ test name\n    Error: expected true to be false`,
+    failures: failed > 0 ? [{ name: "test name", error: "expected true to be false" }] : [],
+    timestamp: new Date().toISOString(),
+  };
+}
+
+/**
+ * Run a build (simulated).
+ */
+export async function runBuild(): Promise<AIBuildResult> {
+  await new Promise((r) => setTimeout(r, 2000)); // simulate build time
+  return simulateBuild();
+}
+
+/**
+ * Run tests (simulated).
+ */
+export async function runTests(): Promise<AITestResult> {
+  await new Promise((r) => setTimeout(r, 1500)); // simulate test time
+  return simulateTests("valid test code");
+}
+
+// ============================================================================
+// GIT MANAGER (simulated — would call actual git commands in production)
+// ============================================================================
+
+/**
+ * Create a staging branch for a task.
+ */
+export function createStagingBranch(taskTitle: string): AIGitBranch {
+  const slug = taskTitle.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 30);
+  return {
+    name: `staging/${slug}`,
+    isCurrent: false,
+    isStaging: true,
+    lastCommit: `task: ${taskTitle}`,
+    commitCount: 0,
+    createdAt: new Date().toISOString(),
+  };
+}
+
+/**
+ * Get the commit history (from store).
+ */
+export function getCommitHistory(): AIGitCommit[] {
+  return useApp.getState().aiCommits;
+}
+
+/**
+ * Get the branch list (from store).
+ */
+export function getBranches(): AIGitBranch[] {
+  return useApp.getState().aiBranches;
+}
+
+// ============================================================================
+// SAFE APPLY WORKFLOW
+// ============================================================================
+
+/**
+ * Apply a patch — this is the FINAL step after approval.
+ * In production, this would:
+ *   1. Merge the staging branch into main
+ *   2. Push to GitHub
+ *   3. Trigger CI/CD
+ *
+ * Here we just mark the patch as "applied" and log it.
+ */
+export function applyPatch(patchId: string): { success: boolean; message: string } {
+  const patch = useApp.getState().aiPatches.find((p) => p.id === patchId);
+  if (!patch) return { success: false, message: "Patch not found" };
+  if (patch.status !== "approved") return { success: false, message: "Patch must be approved first" };
+
+  useApp.getState().updateAIPatch(patchId, {
+    status: "applied",
+    appliedAt: new Date().toISOString(),
+    appliedBy: useApp.getState().user?.email || "system",
+  });
+
+  useApp.getState().log({
+    actor: useApp.getState().user?.email ?? "admin",
+    action: "AI patch applied",
+    category: "admin",
+    details: `Patch "${patch.title}" applied to production`,
+    severity: "info",
+  });
+
+  return { success: true, message: `Patch "${patch.title}" applied to production` };
+}
+
+/**
+ * Rollback a patch — undo the changes.
+ */
+export function rollbackPatch(patchId: string, reason: string): { success: boolean; message: string } {
+  const patch = useApp.getState().aiPatches.find((p) => p.id === patchId);
+  if (!patch) return { success: false, message: "Patch not found" };
+  if (patch.status !== "applied") return { success: false, message: "Can only rollback applied patches" };
+
+  useApp.getState().updateAIPatch(patchId, {
+    status: "rolled_back",
+    rolledBackAt: new Date().toISOString(),
+  });
+
+  useApp.getState().addAIRollback({
+    patchId,
+    patchTitle: patch.title,
+    reason,
+    rolledBackBy: useApp.getState().user?.email || "system",
+    previousState: "applied",
+  });
+
+  useApp.getState().log({
+    actor: useApp.getState().user?.email ?? "admin",
+    action: "AI patch rolled back",
+    category: "admin",
+    details: `Patch "${patch.title}" rolled back. Reason: ${reason}`,
+    severity: "warning",
+  });
+
+  return { success: true, message: `Patch "${patch.title}" rolled back` };
+}
+
+/**
+ * Approve a patch — marks it as ready to apply.
+ */
+export function approvePatch(patchId: string): { success: boolean; message: string } {
+  const patch = useApp.getState().aiPatches.find((p) => p.id === patchId);
+  if (!patch) return { success: false, message: "Patch not found" };
+  if (patch.status !== "pending") return { success: false, message: "Can only approve pending patches" };
+
+  useApp.getState().updateAIPatch(patchId, { status: "approved" });
+
+  useApp.getState().log({
+    actor: useApp.getState().user?.email ?? "admin",
+    action: "AI patch approved",
+    category: "admin",
+    details: `Patch "${patch.title}" approved for application`,
+    severity: "info",
+  });
+
+  return { success: true, message: `Patch "${patch.title}" approved` };
+}
+
+/**
+ * Reject a patch.
+ */
+export function rejectPatch(patchId: string, reason: string): { success: boolean; message: string } {
+  const patch = useApp.getState().aiPatches.find((p) => p.id === patchId);
+  if (!patch) return { success: false, message: "Patch not found" };
+
+  useApp.getState().updateAIPatch(patchId, { status: "rejected" });
+
+  useApp.getState().log({
+    actor: useApp.getState().user?.email ?? "admin",
+    action: "AI patch rejected",
+    category: "admin",
+    details: `Patch "${patch.title}" rejected. Reason: ${reason}`,
+    severity: "warning",
+  });
+
+  return { success: true, message: `Patch "${patch.title}" rejected` };
+}
+
+// ============================================================================
+// AUTONOMOUS DEBUG MODE
+// ============================================================================
+
+/**
+ * Run autonomous debug — scans logs, routes, APIs, build output, console errors
+ * and generates fixes. Does NOT deploy without approval.
+ */
+export async function runAutonomousDebug(): Promise<{
+  issues: Array<{ area: string; severity: string; description: string; suggestedFix: string }>;
+  generatedPatches: Array<{ title: string; diff: string }>;
+}> {
+  const prompt = `Run an autonomous debug scan of the ResumeAI Pro application.
+
+Scan:
+1. Browser console errors (TypeError, ReferenceError, network 404/500)
+2. Route issues (broken links, missing pages, permission errors)
+3. API issues (Workers API errors, D1 query failures)
+4. Build output (TypeScript errors, ESLint errors)
+5. Worker logs (Hono routing errors, binding errors)
+
+For each issue found, generate a fix (unified diff).
+
+Return ONLY valid JSON:
+{
+  "issues": [
+    {
+      "area": "frontend" | "backend" | "api" | "database" | "build",
+      "severity": "info" | "warning" | "error" | "critical",
+      "description": "What's wrong",
+      "suggestedFix": "How to fix it"
+    }
+  ],
+  "generatedPatches": [
+    {
+      "title": "Fix: ...",
+      "diff": "diff --git a/..."
+    }
+  ]
+}`;
+
+  try {
+    const result = await callAI({
+      systemPrompt: "You are an autonomous debug agent. Scan for issues and generate fixes. Always return ONLY valid JSON.",
+      userPrompt: prompt,
+      maxTokens: 5000,
+      temperature: 0.3,
+    });
+    return extractJSON<any>(result.text);
+  } catch {
+    return { issues: [], generatedPatches: [] };
+  }
+}

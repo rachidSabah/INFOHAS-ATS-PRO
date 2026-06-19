@@ -30,6 +30,7 @@ import { FeatureFlags } from "./modules/FeatureFlags";
 import { Logs } from "./modules/Logs";
 import { OptimizerDirective } from "./modules/OptimizerDirective";
 import { AIDevAgent } from "./modules/AIDevAgent";
+import { AIWorkspace } from "./modules/AIWorkspace";
 import type { ViewKey } from "@/lib/types";
 
 const VIEW_COMPONENTS: Record<ViewKey, React.FC> = {
@@ -60,6 +61,7 @@ const VIEW_COMPONENTS: Record<ViewKey, React.FC> = {
   "feature-flags": FeatureFlags,
   "optimizer-directive": OptimizerDirective,
   "ai-dev-agent": AIDevAgent,
+  "ai-workspace": AIWorkspace,
   logs: Logs,
 };
 
@@ -85,6 +87,7 @@ const SUPER_ADMIN_VIEWS: ViewKey[] = [
   "feature-flags",
   "optimizer-directive",
   "ai-dev-agent",
+  "ai-workspace",
   "logs",
 ];
 

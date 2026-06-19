@@ -511,6 +511,114 @@ export interface AIDevReport {
   createdBy: string;
 }
 
+// ============================================================================
+// AI Workspace — full AI Builder Agent (OpenCode/Cursor-style)
+// ============================================================================
+
+/** A file in the repository explorer. */
+export interface AIFile {
+  path: string;          // e.g. "src/lib/ai.ts"
+  content?: string;      // file content (empty for directories)
+  type: "file" | "directory";
+  language?: string;     // ts, tsx, js, json, sql, css, md, etc.
+  size?: number;         // bytes
+  lastModified?: string;
+}
+
+/** An AI task — a unit of work the AI Builder Agent executes. */
+export interface AITask {
+  id: string;
+  title: string;
+  description: string;
+  type: "feature" | "fix" | "refactor" | "test" | "migration" | "route" | "api" | "docs";
+  status: "draft" | "analyzing" | "planning" | "generating" | "testing" | "ready" | "approved" | "applied" | "rejected" | "failed";
+  request: string;       // the original user request
+  plan?: string;         // the AI's execution plan
+  affectedFiles: string[]; // files that will be modified/created
+  generatedPatch?: string;  // unified diff
+  generatedTests?: string;  // test code
+  buildResult?: AIBuildResult;
+  testResult?: AITestResult;
+  createdAt: string;
+  updatedAt: string;
+  createdBy: string;
+}
+
+/** Build validation result. */
+export interface AIBuildResult {
+  success: boolean;
+  errors: string[];
+  warnings: string[];
+  duration: number;      // ms
+  output: string;        // build log (truncated)
+  timestamp: string;
+}
+
+/** Test run result. */
+export interface AITestResult {
+  success: boolean;
+  total: number;
+  passed: number;
+  failed: number;
+  skipped: number;
+  duration: number;      // ms
+  output: string;        // test output (truncated)
+  failures: Array<{ name: string; error: string }>;
+  timestamp: string;
+}
+
+/** A patch in the Patch Center. */
+export interface AIWorkspacePatch {
+  id: string;
+  taskId: string;
+  title: string;
+  description: string;
+  diff: string;          // unified git diff
+  modifiedFiles: string[];
+  newFiles: string[];
+  deletedFiles: string[];
+  impactAnalysis: string;
+  riskAnalysis: "low" | "medium" | "high";
+  status: "pending" | "approved" | "rejected" | "applied" | "rolled_back";
+  buildResult?: AIBuildResult;
+  testResult?: AITestResult;
+  appliedAt?: string;
+  appliedBy?: string;
+  rolledBackAt?: string;
+  createdAt: string;
+  createdBy: string;
+}
+
+/** A git branch in the staging system. */
+export interface AIGitBranch {
+  name: string;
+  isCurrent: boolean;
+  isStaging: boolean;    // true for staging branches created by the AI
+  lastCommit: string;
+  commitCount: number;
+  createdAt: string;
+}
+
+/** A commit in git history. */
+export interface AIGitCommit {
+  hash: string;
+  message: string;
+  author: string;
+  timestamp: string;
+  filesChanged: number;
+}
+
+/** Rollback entry — records what was rolled back. */
+export interface AIRollback {
+  id: string;
+  patchId: string;
+  patchTitle: string;
+  reason: string;
+  rolledBackBy: string;
+  rolledBackAt: string;
+  previousState: string;  // description of the state before rollback
+}
+
 export type ViewKey =
   | "landing"
   | "dashboard"
@@ -538,5 +646,6 @@ export type ViewKey =
   | "feature-flags"
   | "optimizer-directive"
   | "ai-dev-agent"
+  | "ai-workspace"
   | "downloads"
   | "settings";

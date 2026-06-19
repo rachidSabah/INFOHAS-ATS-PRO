@@ -4,6 +4,7 @@ import type {
   BrandingConfig, FeatureFlags, AuditLog, CoverLetter, InterviewPackage, ATSReport,
   OptimizerDirectiveConfig,
   AIDevAgentSettings, AIDevAgentHistory, AIDevReport,
+  AITask, AIWorkspacePatch, AIGitBranch, AIGitCommit, AIRollback,
 } from "./types";
 import { BRAND } from "./brand";
 
@@ -604,6 +605,59 @@ export const SEED_AI_DEV_HISTORY: AIDevAgentHistory[] = [
 ];
 
 export const SEED_AI_DEV_REPORTS: AIDevReport[] = [];
+
+// ============================================================================
+// AI Workspace seed data
+// ============================================================================
+
+export const SEED_AI_TASKS: AITask[] = [
+  {
+    id: "t_seed_001",
+    title: "Fix ATS Score Calculation",
+    description: "The ATS score calculation has a bug where missing keywords are counted twice, lowering the score unfairly.",
+    type: "fix",
+    status: "ready",
+    request: "Fix the ATS score calculation bug in src/lib/ats.ts where missing keywords are double-counted",
+    plan: "1. Analyze src/lib/ats.ts scoreATS() function\n2. Identify the double-counting bug in missingKeywords calculation\n3. Generate patch to fix the counting logic\n4. Add regression test\n5. Validate build + tests",
+    affectedFiles: ["src/lib/ats.ts", "src/lib/ats.test.ts"],
+    generatedPatch: "diff --git a/src/lib/ats.ts b/src/lib/ats.ts\n--- a/src/lib/ats.ts\n+++ b/src/lib/ats.ts\n@@ -45,7 +45,7 @@\n-    missingKeywords: keywords.filter(k => !resumeText.includes(k)).concat(keywords.filter(k => !resumeText.includes(k))),\n+    missingKeywords: [...new Set(keywords.filter(k => !resumeText.includes(k)))],",
+    generatedTests: "import { describe, it, expect } from 'vitest';\nimport { scoreATS } from './ats';\n\ndescribe('scoreATS', () => {\n  it('does not double-count missing keywords', () => {\n    const result = scoreATS(mockResume, mockJD);\n    const uniqueMissing = [...new Set(result.missingKeywords)];\n    expect(result.missingKeywords.length).toBe(uniqueMissing.length);\n  });\n});",
+    createdAt: new Date(Date.now() - 1000 * 60 * 30).toISOString(),
+    updatedAt: new Date(Date.now() - 1000 * 60 * 10).toISOString(),
+    createdBy: "relsabah@gmail.com",
+  },
+];
+
+export const SEED_AI_PATCHES: AIWorkspacePatch[] = [
+  {
+    id: "p_seed_001",
+    taskId: "t_seed_001",
+    title: "Fix: ATS score double-counting missing keywords",
+    description: "Deduplicates missingKeywords array to prevent double-counting, which was unfairly lowering ATS scores.",
+    diff: "diff --git a/src/lib/ats.ts b/src/lib/ats.ts\n--- a/src/lib/ats.ts\n+++ b/src/lib/ats.ts\n@@ -45,7 +45,7 @@\n-    missingKeywords: keywords.filter(k => !resumeText.includes(k)).concat(keywords.filter(k => !resumeText.includes(k))),\n+    missingKeywords: [...new Set(keywords.filter(k => !resumeText.includes(k)))],",
+    modifiedFiles: ["src/lib/ats.ts"],
+    newFiles: [],
+    deletedFiles: [],
+    impactAnalysis: "This change only affects the missingKeywords output of scoreATS(). No other code paths are affected. The fix ensures each missing keyword is counted exactly once.",
+    riskAnalysis: "low",
+    status: "pending",
+    createdAt: new Date(Date.now() - 1000 * 60 * 10).toISOString(),
+    createdBy: "relsabah@gmail.com",
+  },
+];
+
+export const SEED_AI_BRANCHES: AIGitBranch[] = [
+  { name: "main", isCurrent: true, isStaging: false, lastCommit: "feat: AI Builder Agent", commitCount: 245, createdAt: "2025-01-01T00:00:00Z" },
+  { name: "staging/fix-ats-score", isCurrent: false, isStaging: true, lastCommit: "fix: deduplicate missing keywords", commitCount: 1, createdAt: new Date(Date.now() - 1000 * 60 * 10).toISOString() },
+];
+
+export const SEED_AI_COMMITS: AIGitCommit[] = [
+  { hash: "e703789", message: "feat: Job Intelligence + Relevance Scoring + Output Validation + AI Error Leak Prevention", author: "Z User", timestamp: new Date(Date.now() - 1000 * 60 * 60 * 2).toISOString(), filesChanged: 7 },
+  { hash: "c416b38", message: "fix: AI Dev Agent — handle prose responses gracefully", author: "Z User", timestamp: new Date(Date.now() - 1000 * 60 * 60 * 4).toISOString(), filesChanged: 3 },
+  { hash: "4377867", message: "feat: AI Development Agent — production-grade autonomous engineering assistant", author: "Z User", timestamp: new Date(Date.now() - 1000 * 60 * 60 * 6).toISOString(), filesChanged: 8 },
+];
+
+export const SEED_AI_ROLLBACKS: AIRollback[] = [];
 
 export const SEED_LOGS: AuditLog[] = [
   { id: "l1", timestamp: new Date(Date.now() - 1000 * 60 * 4).toISOString(), actor: "alex.morgan@example.com", action: "ATS check completed", category: "resume", details: "Score 87/100 for resume r_seed_001", severity: "info" },

@@ -7,12 +7,14 @@ import type {
   BrandingConfig, FeatureFlags, AuditLog, ViewKey, CoverLetter, InterviewPackage, ATSReport,
   OptimizerDirectiveConfig,
   AIDevAgentSettings, AIDevAgentHistory, AIDevReport,
+  AITask, AIWorkspacePatch, AIGitBranch, AIGitCommit, AIRollback,
 } from "./types";
 import {
   SEED_USER, SEED_RESUMES, SEED_JDS, SEED_PROVIDERS, SEED_PROVIDER_LOGS, SEED_PROVIDER_SETTINGS,
   SEED_PROMPTS, SEED_BRANDING, SEED_FLAGS, SEED_LOGS, SEED_COVER_LETTERS, SEED_INTERVIEW, SEED_ATS_REPORTS,
   SEED_OPTIMIZER_DIRECTIVE,
   SEED_AI_DEV_SETTINGS, SEED_AI_DEV_HISTORY, SEED_AI_DEV_REPORTS,
+  SEED_AI_TASKS, SEED_AI_PATCHES, SEED_AI_BRANCHES, SEED_AI_COMMITS, SEED_AI_ROLLBACKS,
 } from "./mock-data";
 import { BRAND, getRoleForEmail } from "./brand";
 import { hashPassword, verifyPassword, SUPER_ADMIN_SEED, canSignIn, canAccessApp } from "./auth-utils";
@@ -80,6 +82,12 @@ interface AppState {
   aiDevSettings: AIDevAgentSettings;
   aiDevHistory: AIDevAgentHistory[];
   aiDevReports: AIDevReport[];
+  // AI Workspace (Builder Agent)
+  aiTasks: AITask[];
+  aiPatches: AIWorkspacePatch[];
+  aiBranches: AIGitBranch[];
+  aiCommits: AIGitCommit[];
+  aiRollbacks: AIRollback[];
   logs: AuditLog[];
 
   // ui
@@ -169,6 +177,13 @@ interface AppState {
   updateAIDevSettings: (patch: Partial<AIDevAgentSettings>) => void;
   addAIDevHistory: (entry: Omit<AIDevAgentHistory, "id" | "createdAt">) => void;
   addAIDevReport: (report: Omit<AIDevReport, "id" | "createdAt">) => void;
+  // AI Workspace (Builder Agent)
+  addAITask: (task: Omit<AITask, "id" | "createdAt" | "updatedAt">) => void;
+  updateAITask: (id: string, patch: Partial<AITask>) => void;
+  removeAITask: (id: string) => void;
+  addAIPatch: (patch: Omit<AIWorkspacePatch, "id" | "createdAt">) => void;
+  updateAIPatch: (id: string, patch: Partial<AIWorkspacePatch>) => void;
+  addAIRollback: (rollback: Omit<AIRollback, "id" | "rolledBackAt">) => void;
 
   // logs
   log: (entry: Omit<AuditLog, "id" | "timestamp">) => void;
@@ -229,6 +244,11 @@ export const useApp = create<AppState>()(
       aiDevSettings: SEED_AI_DEV_SETTINGS,
       aiDevHistory: SEED_AI_DEV_HISTORY,
       aiDevReports: SEED_AI_DEV_REPORTS,
+      aiTasks: SEED_AI_TASKS,
+      aiPatches: SEED_AI_PATCHES,
+      aiBranches: SEED_AI_BRANCHES,
+      aiCommits: SEED_AI_COMMITS,
+      aiRollbacks: SEED_AI_ROLLBACKS,
       logs: SEED_LOGS,
 
       theme: (typeof localStorage !== "undefined" && localStorage.getItem("resumeai-theme") === "dark") ? "dark" : "light",
@@ -740,6 +760,31 @@ export const useApp = create<AppState>()(
           createdAt: new Date().toISOString(),
         };
         set((s) => ({ aiDevReports: [full, ...s.aiDevReports].slice(0, 100) }));
+      },
+      // AI Workspace (Builder Agent) actions
+      addAITask: (task) => {
+        const now = new Date().toISOString();
+        const full: AITask = { ...task, id: uid("t"), createdAt: now, updatedAt: now };
+        set((s) => ({ aiTasks: [full, ...s.aiTasks].slice(0, 100) }));
+      },
+      updateAITask: (id, patch) => {
+        set((s) => ({
+          aiTasks: s.aiTasks.map((t) => (t.id === id ? { ...t, ...patch, updatedAt: new Date().toISOString() } : t)),
+        }));
+      },
+      removeAITask: (id) => {
+        set((s) => ({ aiTasks: s.aiTasks.filter((t) => t.id !== id) }));
+      },
+      addAIPatch: (patch) => {
+        const full: AIWorkspacePatch = { ...patch, id: uid("p"), createdAt: new Date().toISOString() };
+        set((s) => ({ aiPatches: [full, ...s.aiPatches].slice(0, 100) }));
+      },
+      updateAIPatch: (id, patch) => {
+        set((s) => ({ aiPatches: s.aiPatches.map((p) => (p.id === id ? { ...p, ...patch } : p)) }));
+      },
+      addAIRollback: (rollback) => {
+        const full: AIRollback = { ...rollback, id: uid("rb"), rolledBackAt: new Date().toISOString() };
+        set((s) => ({ aiRollbacks: [full, ...s.aiRollbacks].slice(0, 50) }));
       },
 
       log: (entry) => {

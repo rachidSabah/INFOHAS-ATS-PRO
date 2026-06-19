@@ -96,5 +96,6 @@ export const NAV_SUPER: { key: string; label: string; icon: string; group: strin
   { key: "feature-flags", label: "Feature Flags", icon: "Flag", group: "Super Admin" },
   { key: "optimizer-directive", label: "Optimizer Directive", icon: "SlidersHorizontal", group: "Super Admin" },
   { key: "ai-dev-agent", label: "AI Development Agent", icon: "Bot", group: "Super Admin" },
+  { key: "ai-workspace", label: "AI Workspace", icon: "Code2", group: "Super Admin" },
   { key: "logs", label: "Audit Logs", icon: "ScrollText", group: "Super Admin" },
 ];
