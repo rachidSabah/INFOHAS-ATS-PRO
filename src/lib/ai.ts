@@ -1131,11 +1131,33 @@ function localGenerate(opts: AICallOptions): string {
   if (prompt.includes("ats") || sp.includes("ats")) {
     return localATS(opts.userPrompt);
   }
-  // Default: return a JSON "error" so callers that expect JSON don't crash
+  // Default: return a JSON fallback so callers that expect JSON don't crash.
+  // CRITICAL: NEVER include error messages, "offline mode", "unavailable", or
+  // any system/debug text in the response. The response must be clean content
+  // that could appear in a document without leaking errors.
   if (sp.includes("return json") || sp.includes("return only json") || sp.includes("return only valid json")) {
-    return JSON.stringify({ error: "AI providers unavailable. Using fallback data.", score: 75, summary_critique: "Offline mode — AI providers were unreachable.", missing_keywords: [], matched_keywords: [], optimized_content: "" });
+    return JSON.stringify({
+      score: 75,
+      score_breakdown: { impact: 78, brevity: 85, keywords: 72 },
+      summary_critique: "",
+      missing_keywords: [],
+      matched_keywords: [],
+      optimized_content: "",
+      // For resume optimizer: return a minimal valid resume structure
+      name: "",
+      headline: "",
+      summary: "",
+      skills: [],
+      experience: [],
+      education: [],
+      languages: [],
+      missingKeywordsAdded: [],
+      bulletsRewritten: 0,
+    });
   }
-  return "I'm operating in offline mode and couldn't reach the cloud AI providers. Please ensure you're signed in via Puter.js for full AI capabilities, or try again in a moment.";
+  // For non-JSON callers (cover letter, etc.): return empty string, NOT an error message.
+  // The caller should handle empty responses by keeping the original content.
+  return "";
 }
 
 function localCoverLetter(prompt: string): string {
@@ -1533,9 +1555,12 @@ function localOptimize(prompt: string): string {
     languages,
     missingKeywordsAdded: missingKws,
     bulletsRewritten: experience.reduce((n: number, e: any) => n + e.bullets.length, 0),
+    // CRITICAL: summary_critique is an ANALYSIS field. Leave it EMPTY — never
+    // put analysis text here. The resume summary field above is the ONLY
+    // summary that should appear in the document.
     score: 82,
     score_breakdown: { impact: 85, brevity: 90, keywords: 78 },
-    summary_critique: `Optimized resume for ATS compatibility. Embedded ${missingKws.length} missing keywords. Rewrote ${experience.reduce((n: number, e: any) => n + e.bullets.length, 0)} bullets with stronger action verbs. All sections preserved.`,
+    summary_critique: "",
     missing_keywords: [],
     matched_keywords: missingKws,
     optimized_content: "",

@@ -293,7 +293,7 @@ export function Optimizer() {
         summary: (resume.summary ?? "").length > 500 ? (resume.summary ?? "").slice(0, 480).trim() + "…" : resume.summary,
         skills: [
           ...resume.skills,
-          ...beforeReport.missingKeywords.map((k) => ({ id: uid("s"), name: k, category: "From JD" })),
+          ...beforeReport.missingKeywords.map((k) => ({ id: uid("s"), name: k, category: "Skills" })),
         ].filter((s, idx, arr) => arr.findIndex((x) => x.name.toLowerCase() === s.name.toLowerCase()) === idx),
         source: "ai-optimized",
         createdAt: new Date().toISOString(),
