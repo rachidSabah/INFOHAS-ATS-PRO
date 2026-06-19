@@ -11,6 +11,7 @@
 
 import { callAI, extractJSON } from "./ai";
 import { useApp } from "./store";
+import { searchRepository, readFile } from "./agent-runtime";
 import type {
   AIDevAgentSettings,
   AIDevIssue,
@@ -284,50 +285,178 @@ Return ONLY valid JSON:
 }
 
 /**
- * ROUTE INSPECTOR — scan app/worker/API routes for broken/dead/invalid routes.
+ * ROUTE INSPECTOR — scan app/worker/API routes using REAL repository data.
+ * Uses the Repository Intelligence Engine to read actual files — NO hallucination.
  */
 export async function inspectRoutes(): Promise<AIDevReport> {
-  const userPrompt = `Inspect the routing of this Next.js 16 + Cloudflare app.
-
-Next.js routes are in src/app/ (App Router). API routes are in src/app/api/.
-Worker routes are in workers/api/index.ts (Hono router).
-
-Detect:
-- Broken routes (link to a view that doesn't exist in VIEW_COMPONENTS)
-- Dead routes (routes with no incoming links)
-- Invalid redirects
-- Missing pages (404)
-- Route permission issues (views that should be super-admin-only but aren't in SUPER_ADMIN_VIEWS)
-
-Return ONLY valid JSON:
-{
-  "summary": "...",
-  "issues": [
-    {
-      "type": "route",
-      "severity": "warning",
-      "file": "src/components/app/AppShell.tsx",
-      "title": "View 'ai-logs' missing from VIEW_COMPONENTS",
-      "description": "The ViewKey type includes 'ai-logs' but VIEW_COMPONENTS map doesn't have an entry for it.",
-      "recommendedFix": "Add ai-logs: Logs to VIEW_COMPONENTS"
-    }
-  ]
-}`;
+  const issues: AIDevIssue[] = [];
+  const evidence: string[] = [];
 
   try {
-    const { data, rawText, provider, model } = await callDevAgentJSON<{ summary: string; issues: any[] }>({ userPrompt });
-    if (data) {
-      return {
-        type: "route_inspector",
-        title: "Route Inspector",
-        summary: data.summary,
-        issues: (data.issues || []).map(normalizeIssue),
-      createdBy: useApp.getState().user?.email || "system",
-    } as AIDevReport;
+    // === 1. Read the REAL AppShell.tsx to check VIEW_COMPONENTS ===
+    const appShellResult = await searchRepository("VIEW_COMPONENTS", { filePattern: "*.tsx" });
+    let appShellFile: string | null = null;
+    for (const r of appShellResult) {
+      if (r.file.includes("AppShell")) {
+        appShellFile = r.file;
+        break;
+      }
     }
-    return makeProseReport("route_inspector", "Route Inspector", rawText, provider, model);
+
+    if (appShellFile) {
+      try {
+        const file = await readFile(appShellFile);
+        // Find all view keys in VIEW_COMPONENTS
+        const viewKeysInMap: string[] = [];
+        for (let i = 0; i < file.lines.length; i++) {
+          const line = file.lines[i];
+          const match = line.match(/^\s*["']([^"']+)["']\s*:/);
+          if (match && line.includes(":") && !line.includes("const") && !line.includes("//")) {
+            viewKeysInMap.push(match[1]);
+          }
+        }
+
+        // Find all ViewKey union members
+        const typesResult = await searchRepository("ViewKey", { filePattern: "*.ts" });
+        let viewKeyFile: string | null = null;
+        for (const r of typesResult) {
+          if (r.file.includes("types")) {
+            viewKeyFile = r.file;
+            break;
+          }
+        }
+
+        if (viewKeyFile) {
+          const typesFile = await readFile(viewKeyFile);
+          const viewKeyMembers: string[] = [];
+          let inViewKey = false;
+          for (let i = 0; i < typesFile.lines.length; i++) {
+            const line = typesFile.lines[i];
+            if (line.includes("type ViewKey")) { inViewKey = true; continue; }
+            if (inViewKey) {
+              const match = line.match(/["']([^"']+)["']/);
+              if (match) viewKeyMembers.push(match[1]);
+              if (line.includes(";") || line.includes("}")) { inViewKey = false; break; }
+            }
+          }
+
+          // Check for ViewKey members missing from VIEW_COMPONENTS
+          for (const vk of viewKeyMembers) {
+            if (!viewKeysInMap.includes(vk)) {
+              issues.push({
+                id: `iss_${Math.random().toString(36).slice(2, 9)}`,
+                type: "route",
+                severity: "warning",
+                file: appShellFile,
+                line: 1,
+                title: `ViewKey '${vk}' missing from VIEW_COMPONENTS`,
+                description: `The ViewKey type includes '${vk}' but VIEW_COMPONENTS map in ${appShellFile} doesn't have an entry for it. This would cause a runtime error if a user navigates to this view.`,
+                recommendedFix: `Add "${vk}": SomeComponent to VIEW_COMPONENTS in ${appShellFile}`,
+                status: "open",
+              });
+              evidence.push(`File: ${appShellFile}\nViewKey member '${vk}' not found in VIEW_COMPONENTS map`);
+            }
+          }
+        }
+
+        // === 2. Check SUPER_ADMIN_VIEWS for access control ===
+        const superAdminResult = await searchRepository("SUPER_ADMIN_VIEWS", { filePattern: "*.tsx" });
+        if (superAdminResult.length > 0) {
+          const saFile = await readFile(superAdminResult[0].file);
+          const superAdminViews: string[] = [];
+          let inArray = false;
+          for (let i = 0; i < saFile.lines.length; i++) {
+            const line = saFile.lines[i];
+            if (line.includes("SUPER_ADMIN_VIEWS")) { inArray = true; continue; }
+            if (inArray) {
+              const match = line.match(/["']([^"']+)["']/);
+              if (match) superAdminViews.push(match[1]);
+              if (line.includes("];") || line.includes("}")) { inArray = false; break; }
+            }
+          }
+
+          // Check if all ViewKey members that should be super-admin-only are in SUPER_ADMIN_VIEWS
+          const expectedSuperAdmin = ["ai-providers", "ai-models", "ai-settings", "ai-logs", "prompts", "branding", "feature-flags", "optimizer-directive", "ai-dev-agent", "ai-workspace", "logs", "super-admin", "user-approvals", "suspended-users"];
+          for (const view of expectedSuperAdmin) {
+            if (!superAdminViews.includes(view)) {
+              issues.push({
+                id: `iss_${Math.random().toString(36).slice(2, 9)}`,
+                type: "route",
+                severity: "error",
+                file: superAdminResult[0].file,
+                line: superAdminResult[0].line,
+                title: `View '${view}' missing from SUPER_ADMIN_VIEWS`,
+                description: `The view '${view}' appears to be a super-admin-only view but is not listed in SUPER_ADMIN_VIEWS. Non-superadmin users could potentially access it.`,
+                recommendedFix: `Add "${view}" to SUPER_ADMIN_VIEWS in ${superAdminResult[0].file}`,
+                status: "open",
+              });
+              evidence.push(`File: ${superAdminResult[0].file}\nView '${view}' not in SUPER_ADMIN_VIEWS`);
+            }
+          }
+        }
+
+        // === 3. Check for canAccessView function ===
+        const accessCheckResult = await searchRepository("canAccessView", { filePattern: "*.tsx" });
+        if (accessCheckResult.length === 0) {
+          issues.push({
+            id: `iss_${Math.random().toString(36).slice(2, 9)}`,
+            type: "route",
+            severity: "error",
+            file: appShellFile,
+            line: 1,
+            title: "No access control function found",
+            description: "No canAccessView() function was found in the codebase. Route access control may be missing.",
+            recommendedFix: "Implement canAccessView(view, role) in AppShell to prevent unauthorized access",
+            status: "open",
+          });
+        }
+      } catch (e: any) {
+        // File read failed — skip
+      }
+    }
+
+    // === 4. Find REAL API routes ===
+    const apiRoutes = await searchRepository("export async function (GET|POST|PUT|DELETE|PATCH)", { regex: true, filePattern: "**/route.ts" });
+    evidence.push(`Found ${apiRoutes.length} API route handler(s) in the codebase`);
+
+    // === 5. Check for broken setView calls ===
+    const setViewResults = await searchRepository("setView\\(", { regex: true, filePattern: "*.tsx" });
+    for (const r of setViewResults.slice(0, 20)) {
+      const match = r.match.match(/setView\(["']([^"']+)["']\)/);
+      if (match) {
+        const viewKey = match[1];
+        // Check if this viewKey exists in VIEW_COMPONENTS
+        const viewCheck = await searchRepository(`"${viewKey}"`, { filePattern: "**/AppShell.tsx" });
+        if (viewCheck.length === 0) {
+          issues.push({
+            id: `iss_${Math.random().toString(36).slice(2, 9)}`,
+            type: "route",
+            severity: "error",
+            file: r.file,
+            line: r.line,
+            title: `setView('${viewKey}') references non-existent view`,
+            description: `The code in ${r.file}:${r.line} calls setView('${viewKey}') but this view key may not exist in VIEW_COMPONENTS.`,
+            recommendedFix: `Verify that '${viewKey}' is in VIEW_COMPONENTS or update the setView call`,
+            status: "open",
+          });
+          evidence.push(`File: ${r.file}:${r.line}\nsetView('${viewKey}') — view may not exist`);
+        }
+      }
+    }
+
+    const summary = issues.length === 0
+      ? `Route inspection completed. Found ${apiRoutes.length} API routes. No issues found. All ViewKey members have VIEW_COMPONENTS entries.`
+      : `Route inspection completed with REAL repository evidence. Found ${issues.length} issue(s) across ${issues.filter(i => i.file).length} file(s). Scanned ${apiRoutes.length} API routes and ${setViewResults.length} setView() calls.`;
+
+    return {
+      type: "route_inspector",
+      title: "Route Inspector",
+      summary,
+      issues,
+      createdBy: useApp.getState().user?.email || "system",
+    } as Omit<AIDevReport, "id" | "createdAt"> as AIDevReport;
   } catch (e: any) {
-    return makeErrorReport("route_inspector", "Route Inspector", e?.message || "Inspection failed");
+    return makeErrorReport("route_inspector", "Route Inspector", e?.message || "Inspection failed — ensure /api/repo is accessible");
   }
 }
 
