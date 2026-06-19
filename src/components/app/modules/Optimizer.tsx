@@ -11,6 +11,10 @@ import { useApp, uid } from "@/lib/store";
 import { parseResumeFile } from "@/lib/parser";
 import { scoreATS } from "@/lib/ats";
 import { callAI, OPTIMIZER_DIRECTIVE, getOptimizerDirective, extractJSON } from "@/lib/ai";
+import { analyzeJobIntelligence, type JobIntelligence } from "@/lib/job-intelligence";
+import { computeRelevanceScore, type RelevanceScore } from "@/lib/relevance-engine";
+import { runValidationPipeline, type PipelineResult } from "@/lib/output-validator";
+import { validateResumeContent } from "@/lib/ai-error-filter";
 import { exportResumePDF, exportResumeDOCX, exportResumeTXT, exportResumeDOC, exportHtmlAsDOC } from "@/lib/exporter";
 import { EditableA4Preview } from "@/components/resume/EditableA4Preview";
 import { analyzeWithGemini, resumeToPlainText, AIRLINE_ATS_PROFILES, AIRLINE_OPTIONS, DEFAULT_APP_SETTINGS, type AppSettings, type AviationAtsResult } from "@/lib/ats-directives";
@@ -282,6 +286,65 @@ export function Optimizer() {
     }
 
     setAiLog((l) => [...l, "Rendering InfoHAS Pro template (Times New Roman, maroon name, blue underlines, right-side photo frame)…"]);
+
+    // ============================================================
+    // CONTENT VALIDATION — strip any AI error leaks before showing
+    // ============================================================
+    const contentCheck = validateResumeContent(optimized);
+    if (!contentCheck.valid && contentCheck.cleanedResume) {
+      setAiLog((l) => [...l, `⚠ Detected ${contentCheck.errors.length} AI error leak(s) — cleaning content...`]);
+      optimized = contentCheck.cleanedResume;
+    } else if (!contentCheck.valid) {
+      setAiLog((l) => [...l, `⚠ AI error leaks detected but content unsalvageable — using fallback...`]);
+      // Fallback: use the original resume with the infohas-pro template
+      optimized = {
+        ...resume,
+        id: uid("r"),
+        template: "infohas-pro",
+        accentColor: "#0563C1",
+        source: "ai-optimized",
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      };
+    }
+
+    // ============================================================
+    // JOB INTELLIGENCE + RELEVANCE SCORING
+    // ============================================================
+    setAiLog((l) => [...l, "Analyzing job intelligence for relevance scoring..."]);
+    let ji: JobIntelligence | null = null;
+    try {
+      ji = await analyzeJobIntelligence(jdParsed);
+      const relevance = computeRelevanceScore(optimized, ji);
+      setAiLog((l) => [...l, `Job relevance score: ${relevance.overall}/100 (skill=${relevance.skillMatch}, exp=${relevance.experienceMatch}, role=${relevance.roleMatch})`]);
+      if (relevance.details.missingPriorityKeywords.length > 0) {
+        setAiLog((l) => [...l, `Missing priority keywords: ${relevance.details.missingPriorityKeywords.slice(0, 5).join(", ")}`]);
+      }
+      if (relevance.details.avoidKeywordsFound.length > 0) {
+        setAiLog((l) => [...l, `⚠ Irrelevant keywords detected: ${relevance.details.avoidKeywordsFound.join(", ")}`]);
+      }
+    } catch (e: any) {
+      setAiLog((l) => [...l, `Job intelligence analysis skipped: ${e?.message || "error"}`]);
+    }
+
+    // ============================================================
+    // OUTPUT VALIDATION PIPELINE
+    // ============================================================
+    setAiLog((l) => [...l, "Running output validation pipeline..."]);
+    const pipeline = runValidationPipeline(optimized, jdParsed, ji);
+    for (const check of pipeline.checks) {
+      const icon = check.passed ? "✓" : "⚠";
+      const score = check.score !== undefined ? ` (${check.score}/100)` : "";
+      setAiLog((l) => [...l, `${icon} ${check.name}${score}: ${check.details}`]);
+    }
+
+    if (!pipeline.allPassed) {
+      setAiLog((l) => [...l, `⚠ Validation pipeline did not fully pass — relevance score may be below 90.`]);
+      if (pipeline.relevanceScore !== undefined && pipeline.relevanceScore < 90) {
+        setAiLog((l) => [...l, `⚠ Relevance score ${pipeline.relevanceScore} < 90 — consider regenerating with a different provider or lower temperature.`]);
+      }
+    }
+
     setAiLog((l) => [...l, "Validating one-page constraint: assert(pdf.pages === 1) ✓"]);
 
     setOptimizedResume(optimized);
@@ -290,10 +353,11 @@ export function Optimizer() {
     setAfterReport(after);
     addATS(after);
     incUsage("resumesGenerated");
-    log({ actor: "you", action: "Resume optimized (InfoHAS Pro)", category: "ai", details: `ATS ${beforeReport.scores.ats} → ${after.scores.ats} via ${provider}`, severity: "info" });
+    log({ actor: "you", action: "Resume optimized (InfoHAS Pro)", category: "ai", details: `ATS ${beforeReport.scores.ats} → ${after.scores.ats} via ${provider}${pipeline.relevanceScore !== undefined ? `, relevance=${pipeline.relevanceScore}` : ""}`, severity: "info" });
     setAiThinking(false);
     setStep("done");
-    toast.success(`Optimized in InfoHAS Pro layout! ATS: ${beforeReport.scores.ats} → ${after.scores.ats}`);
+    const relevanceMsg = pipeline.relevanceScore !== undefined ? ` · Relevance: ${pipeline.relevanceScore}/100` : "";
+    toast.success(`Optimized! ATS: ${beforeReport.scores.ats} → ${after.scores.ats}${relevanceMsg}`);
   };
 
   // ===== Aviation ATS optimization via analyzeWithGemini() =====

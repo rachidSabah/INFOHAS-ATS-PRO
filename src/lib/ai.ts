@@ -480,7 +480,79 @@ CONTENT RULES:
 - Truthful to the source resume. Never invent employers, dates, or metrics.
 - Embed target job-description keywords naturally.
 - Each bullet MUST fit on ONE line (≤ 90 characters) to avoid wrapping.
-- Trim EVERY word that doesn't earn its place.`;
+- Trim EVERY word that doesn't earn its place.
+
+═══════════════════════════════════════════════════════════════
+JOB RELEVANCE PRIORITIZATION (CRITICAL)
+═══════════════════════════════════════════════════════════════
+When optimizing, PRIORITIZE:
+1. Job Requirements (from the job description)
+2. Role Requirements
+3. Recruiter Intent
+4. Business Function
+5. Industry Context
+
+DO NOT prioritize:
+- Original resume keywords (only keep transferable ones)
+- ATS keyword density
+- Blind keyword stuffing
+
+If the job is a "Customer Contact Centre Agent", emphasize:
+- Customer Service, Call Handling, Communication, Active Listening
+- Problem Solving, CRM, Customer Satisfaction, Sales
+- Cross Selling, Upselling, Reservations, Customer Support
+- Multilingual Communication, Complaint Resolution
+- Fast Paced Environment, Shift Flexibility
+
+DO NOT emphasize irrelevant keywords like:
+- Airport Security, Passenger Profiling, STEB, Security Procedures
+- Restricted Items (unless directly relevant to the target role)
+
+EXPERIENCE REWRITER:
+For each previous job, analyze transferable skills and rewrite to align with the target role.
+Example: "Airport Customer Service" → emphasize "Customer Support, Customer Enquiries, Passenger Assistance, Problem Resolution, International Customer Communication, Service Recovery, Customer Satisfaction".
+
+PROFESSIONAL SUMMARY:
+- Generate based on: Target Position, Industry, Job Description, Transferable Skills
+- Must sound HUMAN, recruiter-friendly, professional
+- AVOID generic AI language ("dynamic professional", "results-driven", "passionate")
+- AVOID keyword stuffing
+
+═══════════════════════════════════════════════════════════════
+AI ERROR LEAK PREVENTION (ABSOLUTE RULE)
+═══════════════════════════════════════════════════════════════
+NEVER include in the resume content:
+- Provider errors ("AI returned non-JSON output", "Optimization incomplete")
+- JSON errors, parsing errors, fallback messages
+- Debug messages, raw AI responses, system messages
+- Retry messages, "please try again" messages
+- ATS scores, keyword match percentages, optimization notes
+- Section names like "Requirements Match", "ATS Analysis", "AI Notes"
+
+The resume content must be CLEAN, PROFESSIONAL text only.
+If you cannot generate proper content, return the original resume unchanged.
+NEVER leak error messages into the resume.
+
+═══════════════════════════════════════════════════════════════
+FORBIDDEN SECTIONS
+═══════════════════════════════════════════════════════════════
+Only these sections are allowed (in this order):
+1. PROFESSIONAL SUMMARY
+2. CORE COMPETENCIES & SKILLS
+3. PROFESSIONAL EXPERIENCE
+4. EDUCATION
+5. LANGUAGES
+
+NEVER generate additional sections like:
+- Requirements Match
+- ATS Analysis
+- Keyword Match
+- Additional Information
+- AI Notes
+- Optimization Notes
+- Provider Errors
+- System Messages
+- Debug Information`;
   } catch {
     // If anything goes wrong reading the store, use the hardcoded default
     return OPTIMIZER_DIRECTIVE;
