@@ -133,10 +133,13 @@
   }
   html {
     scroll-behavior: smooth;
+    overflow-x: hidden; /* prevent horizontal page scroll on mobile */
   }
   body {
     @apply bg-background text-foreground antialiased;
     font-feature-settings: "rlig" 1, "calt" 1;
+    overflow-x: hidden; /* safety net: prevent horizontal page scroll on mobile */
+    width: 100%;
   }
   ::selection {
     background-color: color-mix(in srgb, var(--brand) 22%, transparent);

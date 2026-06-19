@@ -13,6 +13,15 @@ interface A4PreviewProps {
  * Pixel-accurate A4 preview rendered as a div sized 210mm × 297mm.
  * Used in the Builder, Optimizer, and Downloads modules.
  * Real PDF export uses jsPDF — this is the visual representation.
+ *
+ * IMPORTANT — mobile responsiveness:
+ * CSS `transform: scale()` only affects visual rendering, NOT the layout box.
+ * So a 210mm (794px) wide A4 page scaled to 0.4 still occupies 794px of layout
+ * space, causing horizontal overflow on mobile screens. To fix this, we wrap
+ * the scaled A4 page in an outer container whose width matches the SCALED
+ * width (210mm × scale) and whose height matches the SCALED height (297mm × scale).
+ * The inner div is then scaled with transformOrigin: 'top left' so it fills
+ * the wrapper exactly. This way the parent layout sees a correctly-sized box.
  */
 export const A4Preview = forwardRef<HTMLDivElement, A4PreviewProps>(function A4Preview(
   { resume, scale = 1, className },
@@ -21,16 +30,35 @@ export const A4Preview = forwardRef<HTMLDivElement, A4PreviewProps>(function A4P
   const accent = resume.accentColor || "#1154A3";
   const Template = TEMPLATE_MAP[resume.template] ?? ATSProfessionalTemplate;
 
+  // Compute the scaled dimensions in mm so the wrapper occupies the correct
+  // layout space (prevents horizontal overflow on mobile).
+  const scaledWidthMm = 210 * scale;
+  const scaledHeightMm = 297 * scale;
+
   return (
     <div
-      ref={ref}
-      className={`a4-page origin-top ${className ?? ""}`}
+      // Outer wrapper — occupies the SCALED layout space so the parent
+      // container sees a correctly-sized box (no horizontal overflow).
       style={{
-        transform: `scale(${scale})`,
-        transformOrigin: "top center",
+        width: `${scaledWidthMm}mm`,
+        height: `${scaledHeightMm}mm`,
+        position: "relative",
+        overflow: "hidden",
       }}
     >
-      <Template resume={resume} accent={accent} />
+      <div
+        ref={ref}
+        className={`a4-page origin-top-left ${className ?? ""}`}
+        style={{
+          transform: `scale(${scale})`,
+          transformOrigin: "top left",
+          position: "absolute",
+          top: 0,
+          left: 0,
+        }}
+      >
+        <Template resume={resume} accent={accent} />
+      </div>
     </div>
   );
 });

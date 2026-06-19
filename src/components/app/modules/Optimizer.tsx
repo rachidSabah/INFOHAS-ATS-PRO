@@ -50,6 +50,24 @@ export function Optimizer() {
   const [aviationResult, setAviationResult] = useState<AviationOptimizeResult | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
+  // Responsive preview scale — recomputed on window resize so the A4 preview
+  // never overflows the viewport on mobile. The A4Preview component now wraps
+  // the scaled page in a container with the correct scaled dimensions, so this
+  // scale value directly controls the layout width (no horizontal overflow).
+  const [previewScale, setPreviewScale] = useState(0.7);
+  useEffect(() => {
+    const onResize = () => {
+      const w = window.innerWidth;
+      if (w < 480) setPreviewScale(0.38);       // small phones
+      else if (w < 768) setPreviewScale(0.45);  // large phones / small tablets
+      else if (w < 1280) setPreviewScale(0.55); // tablets
+      else setPreviewScale(0.7);                // desktop
+    };
+    onResize();
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, []);
+
   const uploadResume = async (files: FileList | null) => {
     if (!files?.[0]) return;
     try {
@@ -882,7 +900,7 @@ export function Optimizer() {
                   </div>
                   <Badge variant="brand"><Icon name="Lock" className="w-3 h-3" /> One A4 page · validated</Badge>
                 </div>
-                <div className="rounded-xl bg-secondary/60 p-4 overflow-auto" style={{ maxHeight: "calc(100vh - 240px)" }}>
+                <div className="rounded-xl bg-secondary/60 p-2 sm:p-4 overflow-auto" style={{ maxHeight: "calc(100vh - 240px)" }}>
                   <div className="flex justify-center">
                     <EditableA4Preview
                       resume={optimizedResume}
@@ -891,7 +909,7 @@ export function Optimizer() {
                         setOptimizedResume(next);
                         updateResume(next.id, p);
                       }}
-                      scale={typeof window !== "undefined" && window.innerWidth < 768 ? 0.45 : typeof window !== "undefined" && window.innerWidth < 1280 ? 0.55 : 0.7}
+                      scale={previewScale}
                     />
                   </div>
                 </div>

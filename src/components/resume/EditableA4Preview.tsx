@@ -96,21 +96,39 @@ export function EditableA4Preview({ resume, onChange, scale = 0.7, className }: 
     <div className={className}>
       <input ref={fileRef} type="file" accept="image/png,image/jpeg,image/webp" className="hidden" onChange={(e) => onPhotoUpload(e.target.files)} />
 
+      {/* Outer wrapper — occupies the SCALED layout space (210mm × scale × 297mm × scale)
+          so the parent container sees a correctly-sized box. Without this, CSS transform: scale()
+          only affects visual rendering, not layout, causing horizontal overflow on mobile. */}
       <div
-        className="a4-page origin-top relative"
-        style={{ transform: `scale(${scale})`, transformOrigin: "top center" }}
+        style={{
+          width: `${210 * scale}mm`,
+          height: `${297 * scale}mm`,
+          position: "relative",
+          overflow: "hidden",
+          margin: "0 auto",
+        }}
       >
         <div
-          className="relative"
+          className="a4-page origin-top-left relative"
           style={{
-            fontFamily: "'Times New Roman', 'Georgia', 'Cambria', serif",
-            fontSize: "10.5pt", // body 10-11pt per master layout
-            lineHeight: 1.2, // compact single-spacing
-            padding: "6.35mm 8.89mm", // 0.25" top/bottom, 0.35" left/right — per master layout
-            minHeight: "297mm",
-            color: BLACK,
+            transform: `scale(${scale})`,
+            transformOrigin: "top left",
+            position: "absolute",
+            top: 0,
+            left: 0,
           }}
         >
+          <div
+            className="relative"
+            style={{
+              fontFamily: "'Times New Roman', 'Georgia', 'Cambria', serif",
+              fontSize: "10.5pt", // body 10-11pt per master layout
+              lineHeight: 1.2, // compact single-spacing
+              padding: "6.35mm 8.89mm", // 0.25" top/bottom, 0.35" left/right — per master layout
+              minHeight: "297mm",
+              color: BLACK,
+            }}
+          >
           {/* ============ HEADER (editable) — two-column: 70% left, 30% right photo ============ */}
           <EditableBlock isEditing={editing === "header"} onEdit={() => setEditing("header")} label="Edit header" isTouch={isTouch}>
             <header className="relative" style={{ paddingRight: resume.photoUrl ? "36mm" : 0, minHeight: resume.photoUrl ? "42mm" : "auto" }}>
@@ -303,6 +321,7 @@ export function EditableA4Preview({ resume, onChange, scale = 0.7, className }: 
               </EditableBlock>
             )}
           </div>
+        </div>
         </div>
       </div>
 
