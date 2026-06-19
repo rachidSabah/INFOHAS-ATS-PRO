@@ -36,13 +36,14 @@ export function Builder() {
   const previewRef = useRef<HTMLDivElement>(null);
   const importFileRef = useRef<HTMLInputElement>(null);
 
-  // Responsive scaling
+  // Responsive scaling — tuned for mobile readability
   useEffect(() => {
     const onResize = () => {
       const w = window.innerWidth;
-      if (w < 768) setScale(0.45);
-      else if (w < 1280) setScale(0.55);
-      else setScale(0.7);
+      if (w < 480) setScale(0.38);       // small phones
+      else if (w < 768) setScale(0.45);  // large phones / small tablets
+      else if (w < 1280) setScale(0.55); // tablets
+      else setScale(0.7);                // desktop
     };
     onResize();
     window.addEventListener("resize", onResize);
@@ -172,17 +173,18 @@ export function Builder() {
     <div className="space-y-4">
       {/* Header */}
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
+        <div className="min-w-0 flex-1">
           <h1 className="font-display text-2xl font-bold flex items-center gap-2">
             <Icon name="FilePlus2" className="w-6 h-6 text-brand" /> Resume Builder
           </h1>
-          <p className="text-sm text-muted-foreground mt-1">Edit on the left, see the live A4 preview on the right. Always one page.</p>
+          <p className="text-sm text-muted-foreground mt-1 hidden sm:block">Edit on the left, see the live A4 preview on the right. Always one page.</p>
         </div>
-        <div className="flex gap-2 flex-wrap">
+        {/* Export buttons — compact on mobile, full labels on desktop */}
+        <div className="flex gap-1.5 flex-wrap items-center">
           <select
             value={resume.id}
             onChange={(e) => setActiveResume(e.target.value)}
-            className="h-9 px-3 rounded-md border border-input bg-background text-sm"
+            className="h-8 px-2 rounded-md border border-input bg-background text-xs sm:text-sm max-w-[140px] sm:max-w-none"
           >
             {resumes.map((r) => (
               <option key={r.id} value={r.id}>{r.name}</option>
@@ -190,20 +192,22 @@ export function Builder() {
           </select>
           {/* Import button — accepts PDF/DOCX/DOC/TXT, parses into all fields */}
           <input ref={importFileRef} type="file" accept=".pdf,.docx,.doc,.txt" className="hidden" onChange={(e) => onImport(e.target.files)} />
-          <Button variant="outline" size="sm" onClick={() => importFileRef.current?.click()} disabled={importing} className="gap-1.5 border-brand text-brand hover:bg-brand-light" title="Import a resume from PDF, DOCX, or TXT — extracts all fields automatically">
-            {importing ? <Icon name="Loader2" className="w-3.5 h-3.5 animate-spin" /> : <Icon name="Upload" className="w-3.5 h-3.5" />} Import
+          <Button variant="outline" size="sm" onClick={() => importFileRef.current?.click()} disabled={importing} className="gap-1.5 border-brand text-brand hover:bg-brand-light h-8" title="Import a resume from PDF, DOCX, or TXT — extracts all fields automatically">
+            {importing ? <Icon name="Loader2" className="w-3.5 h-3.5 animate-spin" /> : <Icon name="Upload" className="w-3.5 h-3.5" />}
+            <span className="hidden sm:inline">Import</span>
           </Button>
-          <Button variant="outline" size="sm" onClick={onExportTXT} className="gap-1.5">
-            <Icon name="FileText" className="w-3.5 h-3.5" /> TXT
+          <Button variant="outline" size="sm" onClick={onExportTXT} className="gap-1.5 h-8" title="Export as plain text">
+            <Icon name="FileText" className="w-3.5 h-3.5" /> <span className="hidden sm:inline">TXT</span>
           </Button>
-          <Button variant="outline" size="sm" onClick={onExportDOC} className="gap-1.5" title="Strict A4 one-page Word document (Times New Roman 12pt)">
-            <Icon name="FileText" className="w-3.5 h-3.5" /> DOC
+          <Button variant="outline" size="sm" onClick={onExportDOC} className="gap-1.5 h-8" title="Strict A4 one-page Word document (Times New Roman 12pt)">
+            <Icon name="FileText" className="w-3.5 h-3.5" /> <span className="hidden sm:inline">DOC</span>
           </Button>
-          <Button variant="outline" size="sm" onClick={onExportDOCX} disabled={exporting} className="gap-1.5">
-            <Icon name="FileType" className="w-3.5 h-3.5" /> DOCX
+          <Button variant="outline" size="sm" onClick={onExportDOCX} disabled={exporting} className="gap-1.5 h-8">
+            <Icon name="FileType" className="w-3.5 h-3.5" /> <span className="hidden sm:inline">DOCX</span>
           </Button>
-          <Button size="sm" onClick={onExportPDF} disabled={exporting} className="bg-brand hover:bg-brand-dark text-white gap-1.5">
-            {exporting ? <Icon name="Loader2" className="w-3.5 h-3.5 animate-spin" /> : <Icon name="Download" className="w-3.5 h-3.5" />} PDF
+          <Button size="sm" onClick={onExportPDF} disabled={exporting} className="bg-brand hover:bg-brand-dark text-white gap-1.5 h-8">
+            {exporting ? <Icon name="Loader2" className="w-3.5 h-3.5 animate-spin" /> : <Icon name="Download" className="w-3.5 h-3.5" />}
+            <span className="hidden sm:inline">PDF</span>
           </Button>
         </div>
       </div>
@@ -211,8 +215,8 @@ export function Builder() {
       <div className="grid lg:grid-cols-12 gap-4">
         {/* Editor */}
         <div className="lg:col-span-7 space-y-4">
-          {/* Tab nav */}
-          <div className="flex flex-wrap gap-1 p-1 bg-secondary rounded-lg">
+          {/* Tab nav — horizontal scroll on mobile, full width on desktop */}
+          <div className="flex gap-1 p-1 bg-secondary rounded-lg overflow-x-auto scrollbar-thin">
             {[
               ["basics", "Basics", "User"],
               ["experience", "Experience", "Briefcase"],
@@ -224,7 +228,7 @@ export function Builder() {
               <button
                 key={k}
                 onClick={() => setTab(k as any)}
-                className={`flex-1 min-w-[80px] flex items-center justify-center gap-1.5 px-3 py-2 rounded-md text-xs font-medium transition ${tab === k ? "bg-card shadow-sm text-brand" : "text-muted-foreground hover:text-foreground"}`}
+                className={`flex items-center justify-center gap-1.5 px-3 py-2 rounded-md text-xs font-medium transition whitespace-nowrap shrink-0 ${tab === k ? "bg-card shadow-sm text-brand" : "text-muted-foreground hover:text-foreground"}`}
               >
                 <Icon name={icon} className="w-3.5 h-3.5" /> {label}
               </button>
@@ -435,7 +439,7 @@ export function Builder() {
 
         {/* Preview */}
         <div className="lg:col-span-5">
-          <div className="sticky top-20 space-y-3">
+          <div className="lg:sticky lg:top-20 space-y-3">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <Icon name="Eye" className="w-4 h-4 text-brand" />
@@ -443,17 +447,19 @@ export function Builder() {
               </div>
               <Badge variant={onePageStatus.ok ? "success" : "warning"} className="text-[10px]">
                 <Icon name={onePageStatus.ok ? "CheckCircle2" : "AlertTriangle"} className="w-3 h-3" />
-                {onePageStatus.msg}
+                <span className="hidden sm:inline">{onePageStatus.msg}</span>
+                <span className="sm:hidden">{onePageStatus.ok ? "OK" : "Tight"}</span>
               </Badge>
             </div>
-            <div className="rounded-xl bg-secondary/60 p-4 overflow-auto" style={{ maxHeight: "calc(100vh - 160px)" }}>
+            <div className="rounded-xl bg-secondary/60 p-2 sm:p-4 overflow-auto" style={{ maxHeight: "calc(100vh - 160px)" }}>
               <div className="flex justify-center">
                 <A4Preview resume={resume} scale={scale} ref={previewRef} />
               </div>
             </div>
             <div className="flex items-center justify-center gap-2 text-xs text-muted-foreground">
               <Icon name="Lock" className="w-3 h-3" />
-              Export enforces <code className="px-1 rounded bg-muted">maxPages = 1</code> — auto-compresses if needed.
+              <span className="hidden sm:inline">Export enforces <code className="px-1 rounded bg-muted">maxPages = 1</code> — auto-compresses if needed.</span>
+              <span className="sm:hidden">1-page enforced on export</span>
             </div>
           </div>
         </div>

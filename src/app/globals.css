@@ -160,6 +160,20 @@
     background-clip: padding-box;
     border: 2px solid transparent;
   }
+  /* Thin scrollbar variant for horizontal tab strips on mobile */
+  .scrollbar-thin::-webkit-scrollbar {
+    width: 4px;
+    height: 4px;
+  }
+  .scrollbar-thin::-webkit-scrollbar-thumb {
+    background: color-mix(in srgb, var(--muted-foreground) 25%, transparent);
+    border: none;
+    border-radius: 9999px;
+  }
+  .scrollbar-thin {
+    scrollbar-width: thin;
+    scrollbar-color: color-mix(in srgb, var(--muted-foreground) 25%, transparent) transparent;
+  }
 }
 
 /* Utilities */

@@ -3,6 +3,7 @@ import { Inter, Sora, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import { Toaster } from "@/components/ui/toaster";
 import { Toaster as SonnerToaster } from "@/components/ui/sonner";
+import { PWAInstaller } from "@/components/pwa/PWAInstaller";
 
 const inter = Inter({
   variable: "--font-inter",
@@ -88,6 +89,11 @@ export default function RootLayout({
   return (
     <html lang="en" suppressHydrationWarning>
       <head>
+        {/* PWA — iOS Safari standalone mode + status bar styling */}
+        <meta name="apple-mobile-web-app-capable" content="yes" />
+        <meta name="mobile-web-app-capable" content="yes" />
+        <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+        <meta name="apple-mobile-web-app-title" content="ResumeAI Pro" />
         {/* Puter.js — free, keyless, user-authenticated AI provider.
             Loaded from the official CDN per https://docs.puter.com/getting-started/.
             `async` so it doesn't block page render; Puter attaches to window.puter
@@ -140,6 +146,8 @@ export default function RootLayout({
         {children}
         <Toaster />
         <SonnerToaster position="top-right" richColors closeButton />
+        {/* PWA: service worker registration + install prompt */}
+        <PWAInstaller />
       </body>
     </html>
   );
