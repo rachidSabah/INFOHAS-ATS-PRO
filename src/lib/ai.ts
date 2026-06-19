@@ -336,6 +336,14 @@ CONTENT RULES:
 - Embed target job-description keywords naturally.
 - Each bullet MUST fit on ONE line (≤ 90 characters) to avoid wrapping.
 - Trim EVERY word that doesn't earn its place.
+- EXPAND weak bullet points with more detail and context.
+- QUANTIFY achievements whenever possible (%, $, counts, time saved).
+- Use strong action verbs (Led, Built, Increased, Reduced, Delivered, Executed, Managed, Designed, Implemented, Achieved).
+- Improve readability and recruiter impact.
+- Increase keyword relevance naturally — avoid keyword stuffing.
+- Ensure the page is FULLY UTILIZED — no half-empty pages, no excessive whitespace.
+- If content is too short: expand bullets, add more detail, include more skills.
+- If content is too long: condense older roles, merge similar skills, tighten bullets.
 
 ONE-PAGE CONSTRAINT: The output MUST fit on exactly one A4 page. Apply the CONTENT COMPRESSION ENGINE (above) if needed. NEVER create page two. assert(pdf.pages === 1).`;
 
@@ -377,12 +385,16 @@ export function getOptimizerDirective(): string {
     return `You are the ResumeAI Pro Optimizer. You MUST preserve the EXACT layout framework described below. Only modify CONTENT — never modify LAYOUT, section order, content density, photo position, or the compact recruiter-friendly structure.
 
 ═══════════════════════════════════════════════════════════════
-PAGE FORMAT
+PAGE FORMAT & CONTENT DENSITY
 ═══════════════════════════════════════════════════════════════
 - Document size: ${c.pageSize}
 - Maximum pages: 1
 - Required pages: EXACTLY 1
 - NEVER generate a second page.
+- NEVER produce a half-empty page.
+- Target: 2,500–3,000 characters of content (aim for ~2,900).
+- Fully utilize the A4 page — no excessive whitespace.
+- Dynamic adjustment: if the candidate has less experience, expand bullets with more detail. If more experience, condense older roles.
 ${c.enforceOnePage ? "- Validation: assert(pdf.pages === 1)" : ""}
 
 ═══════════════════════════════════════════════════════════════
@@ -487,6 +499,26 @@ CONTENT RULES:
 - Embed target job-description keywords naturally.
 - Each bullet MUST fit on ONE line (≤ 90 characters) to avoid wrapping.
 - Trim EVERY word that doesn't earn its place.
+- EXPAND weak bullet points with more detail and context.
+- QUANTIFY achievements whenever possible (%, $, counts, time saved).
+- Use strong action verbs (Led, Built, Increased, Reduced, Delivered, Executed, Managed, Designed, Implemented, Achieved).
+- Improve readability and recruiter impact.
+- Increase keyword relevance naturally — avoid keyword stuffing.
+- Ensure the page is FULLY UTILIZED — no half-empty pages, no excessive whitespace.
+- If content is too short: expand bullets, add more detail, include more skills.
+- If content is too long: condense older roles, merge similar skills, tighten bullets.
+
+═══════════════════════════════════════════════════════════════
+DIRECTIVE HIERARCHY (MUST FOLLOW THIS ORDER)
+═══════════════════════════════════════════════════════════════
+When optimizing, follow this priority order:
+1. USER OVERRIDE INSTRUCTIONS (from the Optimizer Directive settings page)
+2. JOB DESCRIPTION REQUIREMENTS (required skills, responsibilities, keywords)
+3. ORIGINAL RESUME CONTENT (preserve factual information — never invent)
+4. ATS ENHANCEMENT RULES (keyword integration, formatting, section completeness)
+
+If the user's override directive says "Focus on leadership", prioritize
+leadership content above all else — even above JD requirements.
 
 ═══════════════════════════════════════════════════════════════
 JOB RELEVANCE PRIORITIZATION (CRITICAL)
