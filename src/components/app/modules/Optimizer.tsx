@@ -871,7 +871,13 @@ export function Optimizer() {
                       <Icon name="FileText" className="w-4 h-4 text-brand" /> Optimized resume — InfoHAS Pro layout
                     </h3>
                     <p className="text-xs text-muted-foreground mt-0.5">
-                      Hover any section to see a <Icon name="Pencil" className="w-3 h-3 inline text-brand" /> pencil — click to edit live. Click the photo frame to upload your photo. Final step before export.
+                      <span className="inline-flex items-center">
+                        <Icon name="Pencil" className="w-3 h-3 inline text-brand" />
+                        {/* Mobile instruction */}
+                        <span className="md:hidden"> Tap any section (or the pencil badge) to edit live. Tap the photo frame to upload your photo. Final step before export.</span>
+                        {/* Desktop instruction */}
+                        <span className="hidden md:inline"> Hover any section to see a pencil — click to edit live. Click the photo frame to upload your photo. Final step before export.</span>
+                      </span>
                     </p>
                   </div>
                   <Badge variant="brand"><Icon name="Lock" className="w-3 h-3" /> One A4 page · validated</Badge>

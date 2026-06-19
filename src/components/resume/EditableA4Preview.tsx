@@ -1,16 +1,40 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useRef, useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Icon } from "@/components/shared";
 import type { ResumeData, ResumeLanguage } from "@/lib/types";
 import { uid } from "@/lib/store";
 
 /**
+ * Detect whether the current device is a touch-only device (mobile/tablet without
+ * a fine pointer). On touch devices we cannot rely on `:hover` to reveal the
+ * edit pencil, so we show it persistently and also enable tap-anywhere-on-section
+ * to open the editor.
+ */
+function useIsTouchDevice(): boolean {
+  const [isTouch, setIsTouch] = useState(false);
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    // Primary signal: the CSS media query `(hover: none) and (pointer: coarse)`
+    // matches phones and tablets that lack a hover-capable pointer.
+    const mql = window.matchMedia("(hover: none) and (pointer: coarse)");
+    const update = () => setIsTouch(mql.matches || "ontouchstart" in window);
+    update();
+    mql.addEventListener?.("change", update);
+    return () => mql.removeEventListener?.("change", update);
+  }, []);
+  return isTouch;
+}
+
+/**
  * EditableA4Preview — InfoHAS Pro template with live inline editing.
  *
  * Every section has a pencil icon that, on click, opens an editor for that section.
  * Photo frame is also clickable — opens file picker to upload a profile photo.
+ *
+ * On touch devices (mobile/tablet), the pencil is always visible and the entire
+ * section is tappable to open the editor (since `:hover` does not work on touch).
  *
  * Used in the Optimizer "done" step so users can refine the AI-optimized resume
  * in place before exporting.
@@ -39,6 +63,7 @@ const BLACK = "#000000";
 export function EditableA4Preview({ resume, onChange, scale = 0.7, className }: EditableA4PreviewProps) {
   const [editing, setEditing] = useState<EditTarget>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+  const isTouch = useIsTouchDevice();
 
   // No local draft — the parent owns the state. Edits call onChange() directly,
   // which updates the parent's `resume` prop, which re-renders this component.
@@ -87,10 +112,16 @@ export function EditableA4Preview({ resume, onChange, scale = 0.7, className }: 
           }}
         >
           {/* ============ HEADER (editable) — two-column: 70% left, 30% right photo ============ */}
-          <EditableBlock isEditing={editing === "header"} onEdit={() => setEditing("header")} label="Edit header">
+          <EditableBlock isEditing={editing === "header"} onEdit={() => setEditing("header")} label="Edit header" isTouch={isTouch}>
             <header className="relative" style={{ paddingRight: resume.photoUrl ? "36mm" : 0, minHeight: resume.photoUrl ? "42mm" : "auto" }}>
-              {/* Photo — top-right, 30×40mm. Only render if photoUrl exists (no placeholder per master layout). */}
-              {resume.photoUrl && (
+              {/* Photo — top-right, 30×40mm.
+                  - If a photo exists: render it, tappable to replace.
+                  - If NO photo exists: render a visible "Upload Photo" placeholder button
+                    so mobile users have a clear tap target (the strict layout directive
+                    forbids placeholder boxes in the final PDF, but this is the live editing
+                    preview — the placeholder is hidden on export).
+                  - On touch devices, the photo pencil is always visible; on desktop, hover-reveal. */}
+              {resume.photoUrl ? (
                 <button
                   onClick={() => fileRef.current?.click()}
                   className="group"
@@ -110,15 +141,43 @@ export function EditableA4Preview({ resume, onChange, scale = 0.7, className }: 
                     boxSizing: "border-box",
                     padding: 0,
                   }}
-                  title="Click to change photo"
+                  title="Tap to change photo"
                 >
                   <img src={resume.photoUrl} alt={resume.name} style={{ width: "100%", height: "100%", objectFit: "cover", objectPosition: "center top" }} />
                   <div
-                    className="absolute top-0.5 right-0.5 w-5 h-5 rounded-full bg-brand text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition"
+                    className={"absolute top-0.5 right-0.5 w-5 h-5 rounded-full bg-brand text-white flex items-center justify-center transition " + (isTouch ? "opacity-100" : "opacity-0 group-hover:opacity-100")}
                     style={{ pointerEvents: "none" }}
                   >
                     <Icon name="Pencil" className="w-2.5 h-2.5" />
                   </div>
+                </button>
+              ) : (
+                <button
+                  onClick={() => fileRef.current?.click()}
+                  type="button"
+                  className="group"
+                  style={{
+                    position: "absolute",
+                    top: 0,
+                    right: 0,
+                    width: "30mm",
+                    height: "40mm",
+                    border: "1pt dashed #999",
+                    background: "#f5f5f5",
+                    display: "flex",
+                    flexDirection: "column",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    overflow: "hidden",
+                    cursor: "pointer",
+                    boxSizing: "border-box",
+                    padding: "2mm",
+                    gap: "1mm",
+                  }}
+                  title="Tap to upload photo"
+                >
+                  <Icon name="User" className="w-5 h-5 text-muted-foreground" />
+                  <span style={{ fontSize: "7pt", color: "#666", textAlign: "center", lineHeight: 1.1 }}>Upload Photo</span>
                 </button>
               )}
 
@@ -140,7 +199,7 @@ export function EditableA4Preview({ resume, onChange, scale = 0.7, className }: 
           <div style={{ marginTop: "3mm" }}>
             {/* SUMMARY */}
             {resume.summary && (
-              <EditableBlock isEditing={editing === "summary"} onEdit={() => setEditing("summary")} label="Edit summary">
+              <EditableBlock isEditing={editing === "summary"} onEdit={() => setEditing("summary")} label="Edit summary" isTouch={isTouch}>
                 <InfohasSection title="PROFESSIONAL SUMMARY">
                   <p style={{ margin: 0, textAlign: "justify", color: BLACK, lineHeight: 1.2 }}>{resume.summary}</p>
                 </InfohasSection>
@@ -149,7 +208,7 @@ export function EditableA4Preview({ resume, onChange, scale = 0.7, className }: 
 
             {/* SKILLS */}
             {resume.skills.length > 0 && (
-              <EditableBlock isEditing={editing === "skills"} onEdit={() => setEditing("skills")} label="Edit skills">
+              <EditableBlock isEditing={editing === "skills"} onEdit={() => setEditing("skills")} label="Edit skills" isTouch={isTouch}>
                 <InfohasSection title="CORE COMPETENCIES & SKILLS">
                   <ul style={{ margin: 0, paddingLeft: "4mm", listStyleType: "•", lineHeight: 1.2 }}>
                     {groupSkillsByCategory(resume.skills).slice(0, 4).map((g, i) => (
@@ -172,6 +231,7 @@ export function EditableA4Preview({ resume, onChange, scale = 0.7, className }: 
                     isEditing={editing === `experience:${e.id}`}
                     onEdit={() => setEditing(`experience:${e.id}`)}
                     label="Edit experience"
+                    isTouch={isTouch}
                   >
                     <div style={{ marginBottom: "1.5mm" }}>
                       <div style={{ marginBottom: "0.3mm", lineHeight: 1.2 }}>
@@ -202,6 +262,7 @@ export function EditableA4Preview({ resume, onChange, scale = 0.7, className }: 
                     isEditing={editing === `education:${ed.id}`}
                     onEdit={() => setEditing(`education:${ed.id}`)}
                     label="Edit education"
+                    isTouch={isTouch}
                   >
                     <div style={{ marginBottom: "1mm", lineHeight: 1.2 }}>
                       <div style={{ lineHeight: 1.2 }}>
@@ -229,7 +290,7 @@ export function EditableA4Preview({ resume, onChange, scale = 0.7, className }: 
 
             {/* LANGUAGES */}
             {resume.languages.length > 0 && (
-              <EditableBlock isEditing={editing === "languages"} onEdit={() => setEditing("languages")} label="Edit languages">
+              <EditableBlock isEditing={editing === "languages"} onEdit={() => setEditing("languages")} label="Edit languages" isTouch={isTouch}>
                 <div style={{ display: "flex", flexDirection: "column", gap: 0, lineHeight: 1.2 }}>
                   {resume.languages.map((l) => (
                     <div key={l.id} style={{ color: BLACK, lineHeight: 1.2 }}>
@@ -261,24 +322,58 @@ export function EditableA4Preview({ resume, onChange, scale = 0.7, className }: 
   );
 }
 
-/** Wrapper that shows a pencil on hover and toggles editing */
-function EditableBlock({ isEditing, onEdit, label, children }: { isEditing: boolean; onEdit: () => void; label: string; children: React.ReactNode }) {
+/** Wrapper that shows a pencil on hover (desktop) or persistently (touch) and toggles editing.
+ *  On touch devices, tapping anywhere inside the section also opens the editor. */
+function EditableBlock({
+  isEditing,
+  onEdit,
+  label,
+  children,
+  isTouch = false,
+}: {
+  isEditing: boolean;
+  onEdit: () => void;
+  label: string;
+  children: React.ReactNode;
+  isTouch?: boolean;
+}) {
   return (
     <div
       className="group relative"
-      style={{ outline: isEditing ? "1pt dashed #0563C1" : "none", outlineOffset: "1mm", transition: "outline 0.15s" }}
+      style={{
+        outline: isEditing ? "1pt dashed #0563C1" : isTouch ? "1pt dashed transparent" : "none",
+        outlineOffset: "1mm",
+        transition: "outline 0.15s",
+        cursor: isTouch ? "pointer" : "default",
+      }}
+      // On touch devices, tapping anywhere in the block opens the editor.
+      // On desktop, we keep the click target limited to the pencil FAB so users
+      // can still select/copy text from the resume body.
+      onClick={isTouch && !isEditing ? onEdit : undefined}
     >
       {children}
-      {/* Pencil FAB */}
-      <button
-        onClick={onEdit}
-        title={label}
-        aria-label={label}
-        className="absolute top-0 right-0 w-7 h-7 rounded-full bg-brand text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition shadow-glow hover:scale-110 z-10"
-        style={{ transform: "translate(35%, -35%)" }}
-      >
-        <Icon name="Pencil" className="w-3.5 h-3.5" />
-      </button>
+      {/* Pencil FAB — hidden only while editing (the editor modal takes over).
+          On touch devices it is always visible; on desktop it appears on hover. */}
+      {!isEditing && (
+        <button
+          onClick={(e) => {
+            // Stop propagation so the touch-mode parent onClick doesn't fire twice.
+            e.stopPropagation();
+            onEdit();
+          }}
+          title={label}
+          aria-label={label}
+          className={
+            "absolute top-0 right-0 w-7 h-7 rounded-full bg-brand text-white flex items-center justify-center transition shadow-glow hover:scale-110 z-10 " +
+            (isTouch
+              ? "opacity-100" // always visible on mobile
+              : "opacity-0 group-hover:opacity-100") // hover-reveal on desktop
+          }
+          style={{ transform: "translate(35%, -35%)" }}
+        >
+          <Icon name="Pencil" className="w-3.5 h-3.5" />
+        </button>
+      )}
     </div>
   );
 }
