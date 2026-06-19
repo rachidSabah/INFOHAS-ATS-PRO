@@ -417,22 +417,36 @@ export function Optimizer() {
       setAiLog((l) => [...l, `Matched ${result.matched_keywords.length} keywords · missing ${result.missing_keywords.length}`]);
 
       // Build a ResumeData from the optimized HTML — parse the directive-format HTML back into structured data
-      // For the optimizer flow, we keep the original resume but mark it as aviation-optimized and store the HTML separately
-      const optimized: ResumeData = {
+      // For the optimizer flow, we keep the original resume but mark it as aviation-optimized.
+      // CRITICAL: summary_critique is an ANALYSIS field — it must NEVER be used as the resume summary.
+      // The resume summary must be a professional description of the candidate, not an ATS critique.
+      let optimized: ResumeData = {
         ...resume, // preserves education, skills, projects, certifications, languages, contact, etc.
         id: uid("r"),
         template: "infohas-pro",
         accentColor: "#0563C1",
         source: "ai-optimized",
-        summary: result.summary_critique || resume.summary,
-        // Add missing keywords to skills
+        summary: resume.summary, // ALWAYS use the original resume summary — never the critique
+        // Add missing keywords as skills — but DON'T label them "From JD" (that's an analysis artifact)
         skills: [
           ...resume.skills,
-          ...result.missing_keywords.map((k) => ({ id: uid("s"), name: k, category: "From JD" })),
+          ...result.missing_keywords.map((k) => ({ id: uid("s"), name: k, category: "Skills" })),
         ].filter((s, idx, arr) => arr.findIndex((x) => x.name.toLowerCase() === s.name.toLowerCase()) === idx),
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
       };
+
+      // QUALITY GATE — verify the resume is professional, not an analysis report
+      const qualityCheck = isProfessionalResume(optimized);
+      if (!qualityCheck.professional) {
+        setAiLog((l) => [...l, `⚠ Quality gate: ${qualityCheck.issues.join("; ")}`]);
+        // The aviation flow preserves the original resume's summary, so this should
+        // always pass. But if somehow analysis text got in, clean it.
+        const exportCheck = validateResumeForExport(optimized);
+        if (exportCheck.cleanedResume) {
+          optimized = exportCheck.cleanedResume;
+        }
+      }
 
       setAviationResult(result);
       setOptimizedResume(optimized);

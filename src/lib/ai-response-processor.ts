@@ -470,8 +470,10 @@ export function isProfessionalResume(resume: ResumeData): {
   // Skills must not contain JD references
   for (const skill of resume.skills) {
     const skillLower = skill.name.toLowerCase();
-    if (skillLower.includes("from jd") || skillLower.includes("missing skill") || skillLower.includes("keyword identified")) {
-      issues.push(`Skill "${skill.name}" contains JD reference`);
+    const catLower = (skill.category || "").toLowerCase();
+    if (skillLower.includes("from jd") || skillLower.includes("missing skill") || skillLower.includes("keyword identified") ||
+        catLower.includes("from jd") || catLower.includes("missing") || catLower.includes("keyword")) {
+      issues.push(`Skill "${skill.name}" (category: ${skill.category || "none"}) contains JD/analysis reference`);
       break;
     }
   }

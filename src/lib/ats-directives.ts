@@ -237,10 +237,12 @@ export async function analyzeWithGemini(
       data = extractJSON<AviationAtsResult>(result.text);
     } catch (parseErr: any) {
       console.warn("[analyzeWithGemini] JSON extraction failed, using fallback result:", parseErr?.message);
+      // CRITICAL: summary_critique is an ANALYSIS field shown in the UI's analysis panel,
+      // NOT in the resume. But we still must not leak provider errors here.
       data = {
         score: 0,
         score_breakdown: { impact: 0, brevity: 0, keywords: 0 },
-        summary_critique: `Optimization incomplete — the AI returned non-JSON output (provider: ${result.provider}). The raw response started with: "${result.text.slice(0, 120)}${result.text.length > 120 ? "..." : ""}". Please try again, or configure a different default AI provider in AI Providers settings.`,
+        summary_critique: "Analysis could not be completed. Please try again with a different AI provider.",
         missing_keywords: [],
         matched_keywords: [],
         optimized_content: "",
