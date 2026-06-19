@@ -462,40 +462,126 @@ function TasksTab() {
           ) : (
             <div className="space-y-2">
               {tasks.map((t) => (
-                <div key={t.id} className="rounded-lg border border-border p-3">
-                  <div className="flex items-start justify-between gap-2 mb-1">
-                    <div className="min-w-0">
-                      <div className="font-medium text-sm truncate">{t.title}</div>
-                      <div className="text-xs text-muted-foreground">{t.description}</div>
-                    </div>
-                    <Badge variant={t.status === "applied" ? "success" : t.status === "ready" ? "brand" : "outline"} className="text-[10px] capitalize shrink-0">{t.status}</Badge>
-                  </div>
-                  {t.affectedFiles.length > 0 && (
-                    <div className="flex flex-wrap gap-1 mt-2">
-                      {t.affectedFiles.map((f) => (
-                        <Badge key={f} variant="outline" className="text-[9px] font-mono">{f}</Badge>
-                      ))}
-                    </div>
-                  )}
-                  {t.buildResult && (
-                    <div className="text-xs mt-2 flex items-center gap-2">
-                      <Icon name={t.buildResult.success ? "CheckCircle2" : "XCircle"} className={`w-3 h-3 ${t.buildResult.success ? "text-emerald-500" : "text-red-500"}`} />
-                      Build: {t.buildResult.success ? "passed" : "failed"}
-                      {t.testResult && (
-                        <>
-                          <span className="mx-1">·</span>
-                          <Icon name={t.testResult.success ? "CheckCircle2" : "XCircle"} className={`w-3 h-3 ${t.testResult.success ? "text-emerald-500" : "text-red-500"}`} />
-                          Tests: {t.testResult.passed}/{t.testResult.total} passed
-                        </>
-                      )}
-                    </div>
-                  )}
-                </div>
+                <TaskCard key={t.id} task={t} />
               ))}
             </div>
           )}
         </CardContent>
       </Card>
+    </div>
+  );
+}
+
+// ============================================================================
+// Task Card — shows task with honest status + generated code
+// ============================================================================
+
+function TaskCard({ task }: { task: AITask }) {
+  const [expanded, setExpanded] = useState(false);
+  const [showCode, setShowCode] = useState(false);
+
+  // Parse the generated patch to extract individual files
+  const generatedFiles = task.generatedPatch
+    ? task.generatedPatch.split(/diff --git a\//).slice(1).map((block) => {
+        const pathMatch = block.match(/^([^ ]+)/);
+        const path = pathMatch ? pathMatch[1].trim() : "unknown";
+        const contentMatch = block.match(/^\+\+\+ b\/[^\n]+\n@@[^\n]+\n([\s\S]*?)(?:diff --git|$)/m);
+        let content = "";
+        if (contentMatch) {
+          content = contentMatch[1].split("\n").map((l) => l.startsWith("+") ? l.slice(1) : "").join("\n").trim();
+        }
+        return { path, content };
+      })
+    : [];
+
+  const copyFile = (path: string, content: string) => {
+    navigator.clipboard.writeText(content);
+    toast.success(`Copied ${path}`);
+  };
+
+  const downloadAll = () => {
+    const blob = new Blob([task.generatedPatch || ""], { type: "text/plain" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${task.title.replace(/\s+/g, "_")}.patch`;
+    a.click();
+    URL.revokeObjectURL(url);
+    toast.success("Patch file downloaded");
+  };
+
+  return (
+    <div className="rounded-lg border border-border p-3">
+      <div className="flex items-start justify-between gap-2 mb-1">
+        <div className="min-w-0">
+          <div className="font-medium text-sm truncate">{task.title}</div>
+          <div className="text-xs text-muted-foreground">{task.description}</div>
+        </div>
+        <Badge variant={task.status === "applied" ? "success" : task.status === "ready" ? "brand" : "outline"} className="text-[10px] capitalize shrink-0">{task.status}</Badge>
+      </div>
+
+      {task.affectedFiles.length > 0 && (
+        <div className="flex flex-wrap gap-1 mt-2">
+          {task.affectedFiles.map((f) => (
+            <Badge key={f} variant="outline" className="text-[9px] font-mono">{f}</Badge>
+          ))}
+        </div>
+      )}
+
+      {/* HONEST build/test status */}
+      {task.buildResult && (
+        <div className="mt-2 rounded-md bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 p-2">
+          <div className="text-xs flex items-center gap-2 mb-1">
+            <Icon name="AlertTriangle" className="w-3 h-3 text-amber-600 shrink-0" />
+            <span className="font-medium text-amber-800 dark:text-amber-200">Code generated — NOT deployed</span>
+          </div>
+          <p className="text-[11px] text-amber-700 dark:text-amber-300">
+            This feature is <strong>not visible in the app</strong>. The AI generated code but cannot create files or run builds (browser-based app).
+            To make this feature live: copy the generated files to your project, run <code className="font-mono">npm run build</code>, commit and push.
+          </p>
+        </div>
+      )}
+
+      {/* Action buttons */}
+      <div className="flex items-center gap-2 mt-2 flex-wrap">
+        <Button size="sm" variant="ghost" onClick={() => setExpanded(!expanded)} className="gap-1 h-7">
+          <Icon name={expanded ? "ChevronUp" : "ChevronDown"} className="w-3 h-3" />
+          {expanded ? "Hide" : "Show"} plan
+        </Button>
+        {generatedFiles.length > 0 && (
+          <Button size="sm" variant="ghost" onClick={() => setShowCode(!showCode)} className="gap-1 h-7">
+            <Icon name="FileCode" className="w-3 h-3" />
+            {showCode ? "Hide" : "Show"} generated code ({generatedFiles.length} files)
+          </Button>
+        )}
+        {task.generatedPatch && (
+          <Button size="sm" variant="ghost" onClick={downloadAll} className="gap-1 h-7">
+            <Icon name="Download" className="w-3 h-3" /> Download .patch
+          </Button>
+        )}
+      </div>
+
+      {/* Plan */}
+      {expanded && task.plan && (
+        <pre className="text-xs p-2 mt-2 rounded-md bg-secondary/40 overflow-auto max-h-40 font-mono whitespace-pre-wrap">{task.plan}</pre>
+      )}
+
+      {/* Generated code files */}
+      {showCode && generatedFiles.length > 0 && (
+        <div className="mt-3 space-y-2">
+          {generatedFiles.map((file, i) => (
+            <div key={i} className="rounded-lg border border-border overflow-hidden">
+              <div className="flex items-center justify-between bg-secondary/50 px-3 py-1.5">
+                <span className="text-xs font-mono truncate">{file.path}</span>
+                <Button size="sm" variant="ghost" onClick={() => copyFile(file.path, file.content)} className="h-6 gap-1 shrink-0">
+                  <Icon name="Copy" className="w-3 h-3" /> Copy
+                </Button>
+              </div>
+              <pre className="text-xs p-2 overflow-auto max-h-60 font-mono bg-secondary/20">{file.content || "(empty)"}</pre>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

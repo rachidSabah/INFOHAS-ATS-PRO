@@ -206,24 +206,32 @@ export async function executeTask(request: string, type: AITask["type"] = "featu
   // Step 4: Generate tests
   const tests = await generateTestsForTask(request, analysis.affectedFiles, projectStructure);
 
-  // Step 5: Build/test validation — HONEST status (not simulated)
-  // We can't run actual builds/tests in the browser, so we mark as "pending manual validation"
+  // Step 5: Build/test validation — COMPLETELY HONEST status
+  // This is a browser-based app. It CANNOT run builds, run tests, or create files.
+  // The generated code must be manually copied to the project by the user.
   const buildResult: AIBuildResult = {
-    success: true, // code generated successfully (not build-tested)
+    success: false, // NOT built — code is generated but not validated
     errors: [],
-    warnings: ["Build not executed — this is a browser-based app. Copy the generated files to your project and run 'npm run build' to validate."],
+    warnings: [
+      "CODE GENERATED — NOT BUILT. This is a browser-based app and cannot run 'npm run build'.",
+      "To make this feature visible in the app:",
+      "1. Copy each generated file below to the corresponding path in your local project",
+      "2. Run 'npm run build' to validate",
+      "3. Commit and push to deploy to Cloudflare Pages",
+      "The feature will NOT appear in the app until you do this manually.",
+    ],
     duration: 0,
-    output: "Code generated successfully. Build validation pending manual execution.",
+    output: "Code generated but NOT built. Manual file creation + build required.",
     timestamp: now,
   };
   const testResult: AITestResult = {
-    success: true, // tests generated (not executed)
+    success: false, // NOT tested
     total: 0,
     passed: 0,
     failed: 0,
     skipped: 0,
     duration: 0,
-    output: "Tests generated. Test execution pending manual validation.",
+    output: "Tests generated but NOT executed. Manual test run required.",
     failures: [],
     timestamp: now,
   };
