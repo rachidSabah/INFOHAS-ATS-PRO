@@ -59,20 +59,145 @@ export interface ExecutionTrace {
 }
 
 // ============================================================================
-// API CALLS — read real files from the project via /api/repo
+// REPO INDEX — loaded from /public/repo-index.json (build-time generated)
+// This works on Cloudflare Pages (Edge runtime) because the file is static.
 // ============================================================================
 
+let repoIndex: Record<string, string> | null = null;
+let repoIndexLoading: Promise<Record<string, string>> | null = null;
+
+async function loadRepoIndex(): Promise<Record<string, string>> {
+  if (repoIndex) return repoIndex;
+  if (repoIndexLoading) return repoIndexLoading;
+
+  repoIndexLoading = fetch("/repo-index.json")
+    .then((res) => {
+      if (!res.ok) throw new Error(`Failed to load repo-index.json: ${res.status}`);
+      return res.json();
+    })
+    .then((data) => {
+      repoIndex = data as Record<string, string>;
+      return repoIndex;
+    })
+    .catch((e) => {
+      console.warn("[agent-runtime] Failed to load repo-index.json:", e);
+      repoIndex = {};
+      return repoIndex;
+    });
+
+  return repoIndexLoading;
+}
+
+// Old API call function — kept as fallback but not used on Cloudflare Pages
 async function repoApi(action: string, params: Record<string, any>): Promise<any> {
-  const res = await fetch("/api/repo", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ action, ...params }),
-  });
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({ error: res.statusText }));
-    throw new Error(err.error || `API ${res.status}`);
+  // Try the static index first
+  const index = await loadRepoIndex();
+
+  if (action === "read") {
+    const content = index[params.path];
+    if (!content) throw new Error(`File not found: ${params.path}`);
+    return { path: params.path, content, size: content.length };
   }
-  return res.json();
+
+  if (action === "search") {
+    return { results: searchInIndex(index, params.query, params.regex, params.filePattern) };
+  }
+
+  if (action === "list") {
+    const dir = params.path || "src";
+    const entries: any[] = [];
+    const seen = new Set<string>();
+    for (const filePath of Object.keys(index)) {
+      if (filePath.startsWith(dir + "/")) {
+        const rest = filePath.slice(dir.length + 1);
+        const firstPart = rest.split("/")[0];
+        if (!seen.has(firstPart)) {
+          seen.add(firstPart);
+          const isDir = rest.includes("/");
+          entries.push({
+            name: firstPart,
+            path: dir + "/" + firstPart,
+            type: isDir ? "directory" : "file",
+            size: isDir ? undefined : index[filePath].length,
+          });
+        }
+      }
+    }
+    return { path: dir, entries };
+  }
+
+  throw new Error(`Unknown action: ${action}`);
+}
+
+function searchInIndex(
+  index: Record<string, string>,
+  query: string,
+  regex?: boolean,
+  filePattern?: string,
+): SearchResult[] {
+  const results: SearchResult[] = [];
+  const maxResults = 100;
+
+  // Build regex
+  let searchRe: RegExp;
+  try {
+    searchRe = regex
+      ? new RegExp(query, "i")
+      : new RegExp(query.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i");
+  } catch {
+    return results;
+  }
+
+  // Build file pattern filter
+  let fileFilter: RegExp | null = null;
+  if (filePattern) {
+    const pattern = filePattern
+      .replace(/\*\*/g, ".*")
+      .replace(/\*/g, "[^/]*")
+      .replace(/\{([^}]+)\}/, (_, exts) => `(${exts.replace(/,/g, "|")})`);
+    try {
+      fileFilter = new RegExp(pattern + "$");
+    } catch {
+      fileFilter = null;
+    }
+  }
+
+  for (const filePath of Object.keys(index)) {
+    if (results.length >= maxResults) break;
+    if (fileFilter && !fileFilter.test(filePath)) continue;
+
+    const content = index[filePath];
+    const lines = content.split("\n");
+
+    for (let i = 0; i < lines.length; i++) {
+      if (results.length >= maxResults) break;
+      if (searchRe.test(lines[i])) {
+        const context: string[] = [];
+        for (let j = Math.max(0, i - 2); j <= Math.min(lines.length - 1, i + 2); j++) {
+          context.push(`${j + 1}: ${lines[j]}`);
+        }
+
+        // Find enclosing function
+        let funcName: string | undefined;
+        for (let j = i; j >= 0; j--) {
+          const funcMatch = lines[j].match(/(?:export\s+)?(?:async\s+)?function\s+(\w+)/);
+          if (funcMatch) { funcName = funcMatch[1]; break; }
+          const constMatch = lines[j].match(/(?:export\s+)?(?:const|let)\s+(\w+)\s*=\s*(?:async\s*)?\(?/);
+          if (constMatch && !["if", "for", "while"].includes(constMatch[1])) { funcName = constMatch[1]; break; }
+        }
+
+        results.push({
+          file: filePath,
+          line: i + 1,
+          match: lines[i].trim(),
+          context,
+          function: funcName,
+        });
+      }
+    }
+  }
+
+  return results;
 }
 
 // ============================================================================

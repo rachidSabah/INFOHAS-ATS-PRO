@@ -58,3 +58,6 @@ server.log
 /skills/.wrangler/
 upload/
 tool-results/
+
+# Build-time generated repo index (regenerated on each build)
+public/repo-index.json
