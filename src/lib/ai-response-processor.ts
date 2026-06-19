@@ -41,7 +41,7 @@ export interface ProcessedAIResponse<T = any> {
  * repaired (stripped) or rejected entirely.
  */
 const LEAK_PATTERNS: RegExp[] = [
-  // Explicit error messages
+  // === Explicit error messages ===
   /optimization incomplete/i,
   /ai did not return/i,
   /ai returned non-?json/i,
@@ -62,7 +62,8 @@ const LEAK_PATTERNS: RegExp[] = [
   /syntaxerror/i,
   /referenceerror/i,
   /typeerror/i,
-  // HTTP error codes
+
+  // === HTTP error codes ===
   /\b429\b/i,
   /\b401\b/i,
   /\b403\b/i,
@@ -81,25 +82,74 @@ const LEAK_PATTERNS: RegExp[] = [
   /connection.?(refused|timeout|failed)/i,
   /ECONNREFUSED/i,
   /ETIMEDOUT/i,
-  // Provider names leaking
+
+  // === Provider names leaking ===
   /provider:\s*local\s*engine/i,
   /provider:\s*puter/i,
   /provider:\s*deepseek/i,
   /provider:\s*opencode/i,
   /local engine/i,
-  // Code-like patterns
+
+  // === Code-like patterns ===
   /\bundefined\b/i,
   /\[object object\]/i,
   /```json/i,
   /```\s*$/m,
-  // ATS/optimization metadata
+
+  // === ATS/optimization metadata that should never appear in a resume ===
   /\b(ats score|keyword match|requirements match|optimization notes|ai notes)\b/i,
-  // Stack traces
+
+  // === Stack traces ===
   /at\s+\w+\s+\([^)]+\):\d+:\d+/i,
   /at\s+Object\./i,
   /at\s+async/i,
-  // Forbidden section titles
+
+  // === Forbidden section titles ===
   /\b(requirements match|ats analysis|keyword match|additional information|ai notes|optimization notes|provider errors|system messages|debug information)\b/i,
+
+  // === ANALYSIS ARTIFACTS — the AI is outputting analysis instead of resume content ===
+  // These patterns indicate the AI is describing the resume rather than writing it
+  /the original resume\b/i,
+  /the (candidate'?s? )?resume (lacks|is missing|could be|would benefit|needs)/i,
+  /missing keywords?\s*:/i,
+  /keyword gap/i,
+  /from jd\s*:/i,
+  /ats analysis/i,
+  /optimization notes/i,
+  /recommendations?\s*:/i,
+  /suggested improvement/i,
+  /score explanation/i,
+  /reasoning\s*:/i,
+  /thought process/i,
+  /the resume (does not|doesn'?t|fails to|could)/i,
+  /this (resume|candidate) (would|should|could|needs|lacks)/i,
+  /areas? (for|of) improvement/i,
+  /identified gaps/i,
+  /found \d+ missing/i,
+  /the following keywords?\s*(are|were) (missing|absent|not)/i,
+  /to improve the (resume|ats score)/i,
+  /recommended changes?\s*:/i,
+  /changes? made\s*:/i,
+  /what was changed\s*:/i,
+  /summary of (changes|optimization|improvements)/i,
+  /analysis of the (resume|job|jd)/i,
+  /the ai (has|identified|found|determined)/i,
+  /based on the (job description|analysis|ats)/i,
+  /required skills?\s*:/i,
+  /missing skills?\s*:/i,
+  /keywords? identified\s*:/i,
+  /keyword density/i,
+  /the summary should/i,
+  /the experience section/i,
+  /the skills section/i,
+  /the education section/i,
+  /the languages section/i,
+  /this section (needs|should|could|lacks)/i,
+  /here (is|are) the (optimized|improved|generated)/i,
+  /here (is|are) your (resume|analysis|report)/i,
+  /i have (optimized|improved|updated|rewritten|generated)/i,
+  /i (added|removed|included|embedded|modified|changed)/i,
+  /the (above )?changes (will|should|improve)/i,
 ];
 
 /**
@@ -368,3 +418,67 @@ function stripLeaksFromResume(resume: ResumeData): ResumeData | null {
 
   return cleaned;
 }
+
+/**
+ * QUALITY GATE — check if a resume reads like a professional resume
+ * and NOT like an ATS report, AI analysis, or keyword gap report.
+ *
+ * A document may only be exported if:
+ * - It reads like a professional resume
+ * - It does not read like an ATS audit report
+ * - It does not read like an AI analysis report
+ * - It does not read like a keyword gap report
+ */
+export function isProfessionalResume(resume: ResumeData): {
+  professional: boolean;
+  issues: string[];
+} {
+  const issues: string[] = [];
+  const allText = [
+    resume.summary || "",
+    ...resume.experience.flatMap((e) => [e.title, e.company, ...e.bullets]),
+    ...resume.skills.map((s) => s.name),
+    ...resume.education.flatMap((ed) => [ed.degree, ed.institution, ...(ed.highlights || [])]),
+  ].join(" ");
+
+  // Check for analysis artifacts
+  const leaks = detectLeaks(allText);
+  if (leaks.length > 0) {
+    issues.push(`Contains ${leaks.length} analysis/error artifact(s)`);
+  }
+
+  // Summary must describe the candidate, not the resume
+  if (resume.summary) {
+    const summaryLower = resume.summary.toLowerCase();
+    const analysisPhrases = [
+      "the original resume", "missing keywords", "keyword gap", "from jd:",
+      "ats analysis", "optimization notes", "recommendations:", "suggested improvement",
+      "score explanation", "reasoning:", "thought process", "the resume does not",
+      "this candidate would", "areas for improvement", "identified gaps",
+      "required skills:", "missing skills:", "keywords identified:",
+      "here is the optimized", "i have improved", "i added the following",
+      "based on the job description", "the ai has identified",
+    ];
+    for (const phrase of analysisPhrases) {
+      if (summaryLower.includes(phrase)) {
+        issues.push(`Summary contains analysis phrase: "${phrase}"`);
+        break;
+      }
+    }
+  }
+
+  // Skills must not contain JD references
+  for (const skill of resume.skills) {
+    const skillLower = skill.name.toLowerCase();
+    if (skillLower.includes("from jd") || skillLower.includes("missing skill") || skillLower.includes("keyword identified")) {
+      issues.push(`Skill "${skill.name}" contains JD reference`);
+      break;
+    }
+  }
+
+  return {
+    professional: issues.length === 0,
+    issues,
+  };
+}
+

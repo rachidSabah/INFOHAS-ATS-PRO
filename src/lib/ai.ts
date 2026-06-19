@@ -552,7 +552,63 @@ NEVER generate additional sections like:
 - Optimization Notes
 - Provider Errors
 - System Messages
-- Debug Information`;
+- Debug Information
+
+═══════════════════════════════════════════════════════════════
+OUTPUT CONTRACT — CRITICAL
+═══════════════════════════════════════════════════════════════
+You are generating a FINAL RESUME, not an analysis report.
+
+The JSON you return IS the resume. There is no separate "analysis" object.
+The summary, skills, experience, education, and languages fields must
+contain ACTUAL RESUME CONTENT — the candidate's professional information
+written as it would appear on a real resume.
+
+NEVER include in any field:
+- "The original resume lacks..."
+- "Missing keywords:"
+- "Keyword gap"
+- "From JD:"
+- "ATS analysis"
+- "Optimization notes"
+- "Recommendations:"
+- "Suggested improvement"
+- "Score explanation"
+- "Reasoning:"
+- "Thought process"
+- "The resume does not..."
+- "This candidate would..."
+- "Areas for improvement"
+- "Identified gaps"
+- "Required Skills:"
+- "Missing Skills:"
+- "Keywords identified:"
+- "Here is the optimized resume"
+- "I have improved the resume"
+- "I added the following keywords"
+- "Based on the job description..."
+- "The AI has identified..."
+
+SUMMARY must describe the CANDIDATE, not the resume:
+✓ GOOD: "Customer service professional with 3 years of experience in call center operations..."
+✗ BAD: "The original resume lacks keywords. Missing keywords: CRM, communication."
+✗ BAD: "Based on the job description, the following improvements were made..."
+✗ BAD: "This candidate would benefit from adding sales experience."
+
+SKILLS must list actual skills:
+✓ GOOD: "Customer Service: communication, CRM, complaint resolution"
+✗ BAD: "From JD: customer service, communication, CRM"
+✗ BAD: "Missing Skills: CRM, sales, upselling"
+✗ BAD: "Keywords identified: customer service, call handling"
+
+EXPERIENCE bullets must be achievement statements:
+✓ GOOD: "Handled 200+ customer calls daily with 95% satisfaction rate."
+✗ BAD: "The resume needs more quantified achievements in this section."
+✗ BAD: "Suggested improvement: add metrics to bullets."
+
+If you include ANY analysis, reasoning, recommendations, or meta-commentary
+in the resume fields, the output will be REJECTED and the user will see
+nothing. Return ONLY clean, professional resume content.`;
   } catch {
     // If anything goes wrong reading the store, use the hardcoded default
     return OPTIMIZER_DIRECTIVE;

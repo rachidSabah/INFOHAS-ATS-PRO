@@ -11,7 +11,7 @@ import { useApp, uid } from "@/lib/store";
 import { parseResumeFile } from "@/lib/parser";
 import { scoreATS } from "@/lib/ats";
 import { callAI, OPTIMIZER_DIRECTIVE, getOptimizerDirective, extractJSON } from "@/lib/ai";
-import { processAIResponse, validateResumeForExport } from "@/lib/ai-response-processor";
+import { processAIResponse, validateResumeForExport, isProfessionalResume } from "@/lib/ai-response-processor";
 import { analyzeJobIntelligence, type JobIntelligence } from "@/lib/job-intelligence";
 import { computeRelevanceScore, type RelevanceScore } from "@/lib/relevance-engine";
 import { runValidationPipeline, type PipelineResult } from "@/lib/output-validator";
@@ -304,7 +304,7 @@ export function Optimizer() {
     setAiLog((l) => [...l, "Rendering InfoHAS Pro template (Times New Roman, maroon name, blue underlines, right-side photo frame)…"]);
 
     // ============================================================
-    // CONTENT VALIDATION — strip any AI error leaks before showing
+    // CONTENT VALIDATION — strip AI error leaks + analysis artifacts
     // ============================================================
     const contentCheck = validateResumeContent(optimized);
     if (!contentCheck.valid && contentCheck.cleanedResume) {
@@ -312,7 +312,6 @@ export function Optimizer() {
       optimized = contentCheck.cleanedResume;
     } else if (!contentCheck.valid) {
       setAiLog((l) => [...l, `⚠ AI error leaks detected but content unsalvageable — using fallback...`]);
-      // Fallback: use the original resume with the infohas-pro template
       optimized = {
         ...resume,
         id: uid("r"),
@@ -322,6 +321,30 @@ export function Optimizer() {
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
       };
+    }
+
+    // QUALITY GATE — reject analysis/report content, only allow professional resume content
+    const qualityCheck = isProfessionalResume(optimized);
+    if (!qualityCheck.professional) {
+      setAiLog((l) => [...l, `⚠ Quality gate: resume contains analysis artifacts — ${qualityCheck.issues.join("; ")}`]);
+      // Try to clean analysis artifacts from the resume
+      const exportCheck = validateResumeForExport(optimized);
+      if (exportCheck.cleanedResume) {
+        setAiLog((l) => [...l, `✓ Cleaned analysis artifacts from resume content.`]);
+        optimized = exportCheck.cleanedResume;
+      } else {
+        // Unsalvageable — fall back to original resume with infohas-pro template
+        setAiLog((l) => [...l, `⚠ Analysis artifacts could not be cleaned — using original resume.`]);
+        optimized = {
+          ...resume,
+          id: uid("r"),
+          template: "infohas-pro",
+          accentColor: "#0563C1",
+          source: "ai-optimized",
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        };
+      }
     }
 
     // ============================================================
