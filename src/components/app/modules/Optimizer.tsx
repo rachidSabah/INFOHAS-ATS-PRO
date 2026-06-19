@@ -10,7 +10,7 @@ import { Badge, Icon, ScoreRing } from "@/components/shared";
 import { useApp, uid } from "@/lib/store";
 import { parseResumeFile } from "@/lib/parser";
 import { scoreATS } from "@/lib/ats";
-import { callAI, OPTIMIZER_DIRECTIVE, getOptimizerDirective, extractJSON } from "@/lib/ai";
+import { callAI, getOptimizerDirective, extractJSON } from "@/lib/ai";
 import { processAIResponse, validateResumeForExport, isProfessionalResume } from "@/lib/ai-response-processor";
 import { analyzeJobIntelligence, type JobIntelligence } from "@/lib/job-intelligence";
 import { computeRelevanceScore, type RelevanceScore } from "@/lib/relevance-engine";
@@ -168,7 +168,7 @@ export function Optimizer() {
     setAiLog((l) => [...l, `Directive length: ${directive.length} chars`]);
 
     let optimized: ResumeData;
-    let provider = "Local Engine";
+    let provider = "AI Provider";
     try {
       const result = await callAI({
         systemPrompt: directive,

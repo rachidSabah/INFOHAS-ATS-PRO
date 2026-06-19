@@ -494,44 +494,10 @@ Return ONLY the test file content (TypeScript), no markdown fences.`;
 }
 
 // ============================================================================
-// BUILD MANAGER + TEST RUNNER (simulated — would call actual commands in production)
+// BUILD MANAGER + TEST RUNNER
+// Browser-based app — cannot run shell commands. These functions return honest
+// "not available" messages instead of fake simulated results.
 // ============================================================================
-
-function simulateBuild(): AIBuildResult {
-  // In production, this would run `npm run build` and parse the output
-  const success = Math.random() > 0.2; // 80% success rate for simulation
-  return {
-    success,
-    errors: success ? [] : ["Syntax error in generated file"],
-    warnings: success ? ["Unused variable warning"] : [],
-    duration: Math.round(Math.random() * 30000 + 10000),
-    output: success
-      ? "✓ Compiled successfully in 17.4s\n✓ Generating static pages (3/3)\n✓ Build complete"
-      : "✗ Build failed\n  Error: Syntax error in src/lib/generated.ts:42",
-    timestamp: new Date().toISOString(),
-  };
-}
-
-function simulateTests(testCode: string): AITestResult {
-  // In production, this would run `npx vitest run` and parse the output
-  const hasTests = testCode && testCode.length > 50 && !testCode.includes("failed");
-  const passed = hasTests ? Math.floor(Math.random() * 5) + 5 : 0; // 5-10 tests
-  const failed = hasTests ? (Math.random() > 0.7 ? 1 : 0) : 0; // 30% chance of 1 failure
-  const total = passed + failed;
-  return {
-    success: failed === 0,
-    total,
-    passed,
-    failed,
-    skipped: 0,
-    duration: Math.round(Math.random() * 5000 + 1000),
-    output: failed === 0
-      ? `✓ ${passed} test(s) passed\n  Duration: ${Math.round(Math.random() * 5000)}ms`
-      : `✗ ${failed} test(s) failed\n  ✗ test name\n    Error: expected true to be false`,
-    failures: failed > 0 ? [{ name: "test name", error: "expected true to be false" }] : [],
-    timestamp: new Date().toISOString(),
-  };
-}
 
 /**
  * Run a build — HONEST: cannot run actual builds in browser.
