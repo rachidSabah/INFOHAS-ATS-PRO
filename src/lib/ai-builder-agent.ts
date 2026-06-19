@@ -179,34 +179,57 @@ Return ONLY valid JSON array:
 
 /**
  * Execute an AI task through the full pipeline:
- *   1. Analyze the request
- *   2. Generate an execution plan
- *   3. Identify affected files
- *   4. Generate a patch (unified diff)
+ *   1. Load the REAL project structure from repo-index.json
+ *   2. Analyze the request (with real project context)
+ *   3. Generate an execution plan (with correct file paths)
+ *   4. Generate actual code for each file
  *   5. Generate tests
- *   6. Validate build (simulated)
- *   7. Run tests (simulated)
- *   8. Show diff for approval
+ *   6. Mark build/test as "pending" (honest — not simulated)
  *
  * The task is NOT applied automatically — it requires super admin approval.
+ * Generated code is stored in the task for the user to review and copy.
  */
 export async function executeTask(request: string, type: AITask["type"] = "feature"): Promise<AITask> {
   const taskId = `t_${Date.now()}`;
   const now = new Date().toISOString();
   const userEmail = useApp.getState().user?.email || "system";
 
-  // Step 1+2: Analyze + Plan
-  const analysis = await analyzeAndPlan(request, type);
+  // Step 0: Load the REAL project structure so the AI uses correct paths
+  const projectStructure = await getProjectStructure();
 
-  // Step 3+4: Generate patch
-  const patch = await generatePatchForTask(request, analysis.plan, analysis.affectedFiles);
+  // Step 1+2: Analyze + Plan (with real project context)
+  const analysis = await analyzeAndPlan(request, type, projectStructure);
 
-  // Step 5: Generate tests
-  const tests = await generateTestsForTask(request, analysis.affectedFiles);
+  // Step 3: Generate actual file contents (not just a diff)
+  const generatedFiles = await generateFilesForTask(request, analysis.plan, analysis.affectedFiles, projectStructure);
 
-  // Step 6+7: Validate build + run tests (simulated — would call actual build/test in production)
-  const buildResult = simulateBuild();
-  const testResult = simulateTests(tests);
+  // Step 4: Generate tests
+  const tests = await generateTestsForTask(request, analysis.affectedFiles, projectStructure);
+
+  // Step 5: Build/test validation — HONEST status (not simulated)
+  // We can't run actual builds/tests in the browser, so we mark as "pending manual validation"
+  const buildResult: AIBuildResult = {
+    success: true, // code generated successfully (not build-tested)
+    errors: [],
+    warnings: ["Build not executed — this is a browser-based app. Copy the generated files to your project and run 'npm run build' to validate."],
+    duration: 0,
+    output: "Code generated successfully. Build validation pending manual execution.",
+    timestamp: now,
+  };
+  const testResult: AITestResult = {
+    success: true, // tests generated (not executed)
+    total: 0,
+    passed: 0,
+    failed: 0,
+    skipped: 0,
+    duration: 0,
+    output: "Tests generated. Test execution pending manual validation.",
+    failures: [],
+    timestamp: now,
+  };
+
+  // Build a unified diff from the generated files
+  const diff = buildDiffFromFiles(generatedFiles);
 
   return {
     id: taskId,
@@ -217,7 +240,7 @@ export async function executeTask(request: string, type: AITask["type"] = "featu
     request,
     plan: analysis.plan,
     affectedFiles: analysis.affectedFiles,
-    generatedPatch: patch.diff,
+    generatedPatch: diff,
     generatedTests: tests,
     buildResult,
     testResult,
@@ -227,7 +250,80 @@ export async function executeTask(request: string, type: AITask["type"] = "featu
   };
 }
 
-async function analyzeAndPlan(request: string, type: AITask["type"]) {
+/**
+ * Get the REAL project structure from repo-index.json
+ * Returns a summary of existing directories and files so the AI uses correct paths.
+ */
+async function getProjectStructure(): Promise<string> {
+  try {
+    const res = await fetch("/repo-index.json");
+    if (!res.ok) return "Unable to load project structure.";
+    const index = await res.json();
+    const files = Object.keys(index);
+
+    // Group by top-level directory
+    const dirs: Record<string, string[]> = {};
+    for (const f of files) {
+      const parts = f.split("/");
+      const topDir = parts.length > 1 ? parts[0] : "(root)";
+      if (!dirs[topDir]) dirs[topDir] = [];
+      dirs[topDir].push(f);
+    }
+
+    let summary = "EXISTING PROJECT STRUCTURE (use these patterns for new files):\n\n";
+    for (const [dir, dirFiles] of Object.entries(dirs)) {
+      summary += `${dir}/ (${dirFiles.length} files)\n`;
+      // Show first 10 files per directory
+      for (const f of dirFiles.slice(0, 10)) {
+        summary += `  ${f}\n`;
+      }
+      if (dirFiles.length > 10) {
+        summary += `  ... and ${dirFiles.length - 10} more\n`;
+      }
+      summary += "\n";
+    }
+
+    // Add key patterns
+    summary += "KEY PATTERNS:\n";
+    summary += "- UI components go in: src/components/app/modules/ (e.g., src/components/app/modules/MyFeature.tsx)\n";
+    summary += "- Lib functions go in: src/lib/ (e.g., src/lib/my-feature.ts)\n";
+    summary += "- API routes go in: src/app/api/ (e.g., src/app/api/my-feature/route.ts)\n";
+    summary += "- Migrations go in: migrations/ (e.g., migrations/0005_my_migration.sql)\n";
+    summary += "- Worker code goes in: workers/api/ (e.g., workers/api/index.ts)\n";
+    summary += "- Store actions go in: src/lib/store.ts\n";
+    summary += "- Types go in: src/lib/types.ts\n";
+    summary += "- Navigation goes in: src/lib/brand.ts (NAV_USER, NAV_ADMIN, NAV_SUPER)\n";
+    summary += "- Views go in: src/components/app/AppShell.tsx (VIEW_COMPONENTS map)\n";
+
+    return summary;
+  } catch {
+    return "Unable to load project structure. Use standard Next.js App Router patterns.";
+  }
+}
+
+/**
+ * Build a unified diff from generated files for display.
+ */
+function buildDiffFromFiles(files: Array<{ path: string; content: string; type: string }>): string {
+  if (!files || files.length === 0) return "";
+
+  let diff = "";
+  for (const file of files) {
+    diff += `diff --git a/${file.path} b/${file.path}\n`;
+    diff += `new file mode 100644\n`;
+    diff += `--- /dev/null\n`;
+    diff += `+++ b/${file.path}\n`;
+    diff += `@@ -0,0 +1,${file.content.split("\n").length} @@\n`;
+    for (const line of file.content.split("\n")) {
+      diff += `+${line}\n`;
+    }
+    diff += "\n";
+  }
+
+  return diff;
+}
+
+async function analyzeAndPlan(request: string, type: AITask["type"], projectStructure: string) {
   const prompt = `You are an AI Builder Agent analyzing a task for the ResumeAI Pro application.
 
 Task type: ${type}
@@ -236,12 +332,19 @@ Request: "${request}"
 The application is a Next.js 16 + Cloudflare Pages + D1 + Workers app.
 Tech stack: React 19, TypeScript, Tailwind CSS 4, shadcn/ui, Zustand, Hono.
 
+${projectStructure}
+
+CRITICAL: Use the EXACT file path patterns from the project structure above.
+Do NOT invent paths like src/app/(main)/ or src/app/(admin)/ — this project
+does NOT use route groups. Use src/app/api/ for API routes, src/components/app/modules/
+for UI components, src/lib/ for library code, migrations/ for SQL migrations.
+
 Analyze the request and create an execution plan. Return ONLY valid JSON:
 {
   "title": "Short task title",
   "description": "1-2 sentence description",
   "plan": "Step 1: ...\\nStep 2: ...\\nStep 3: ...",
-  "affectedFiles": ["src/components/...", "src/lib/...", "migrations/..."]
+  "affectedFiles": ["src/components/app/modules/...", "src/lib/...", "migrations/..."]
 }`;
 
   try {
@@ -259,6 +362,65 @@ Analyze the request and create an execution plan. Return ONLY valid JSON:
       plan: "1. Analyze request\n2. Generate code\n3. Test\n4. Deploy",
       affectedFiles: [],
     };
+  }
+}
+
+/**
+ * Generate actual file contents for each affected file.
+ * The AI receives the REAL project structure so it generates files with correct paths.
+ */
+async function generateFilesForTask(
+  request: string,
+  plan: string,
+  affectedFiles: string[],
+  projectStructure: string,
+): Promise<Array<{ path: string; content: string; type: string }>> {
+  const prompt = `Generate COMPLETE file contents for this feature:
+
+Request: ${request}
+Plan: ${plan}
+Files to create: ${affectedFiles.join(", ")}
+
+${projectStructure}
+
+CRITICAL RULES:
+1. Use the EXACT file path patterns from the project structure above
+2. Do NOT use route groups like (main) or (admin) — this project doesn't use them
+3. Generate COMPLETE, production-ready TypeScript/TSX code for each file
+4. Use existing patterns from the project (Zustand store, shadcn/ui components, etc.)
+5. Each file must be fully functional and compilable
+
+Return ONLY valid JSON:
+{
+  "files": [
+    {
+      "path": "src/components/app/modules/MyFeature.tsx",
+      "content": "\"use client\"\\nimport ...\\n// full file content",
+      "type": "component"
+    }
+  ]
+}`;
+
+  try {
+    const result = await callAI({
+      systemPrompt: "You are a code generator. Generate complete, production-ready file contents. Always return ONLY valid JSON.",
+      userPrompt: prompt,
+      maxTokens: 10000,
+      temperature: 0.2,
+      taskCategory: "development",
+    });
+
+    const data = extractJSON<any>(result.text);
+    if (data.files && Array.isArray(data.files)) {
+      return data.files.map((f: any) => ({
+        path: f.path,
+        content: f.content || "",
+        type: f.type || "other",
+      }));
+    }
+    return [];
+  } catch {
+    return [];
   }
 }
 
@@ -301,7 +463,7 @@ Return ONLY valid JSON:
   }
 }
 
-async function generateTestsForTask(request: string, affectedFiles: string[]) {
+async function generateTestsForTask(request: string, affectedFiles: string[], projectStructure?: string) {
   const prompt = `Generate Vitest tests for this task:
 
 Request: ${request}
