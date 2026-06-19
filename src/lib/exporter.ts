@@ -210,17 +210,26 @@ function exportInfohasProPDF(resume: ResumeData, opts: PDFOptions = {}): { ok: b
     return doc.splitTextToSize(text, width);
   };
 
-  // Helper: draw a bullet line with hanging indent
+  // Helper: draw a bullet line with hanging indent + JUSTIFIED text.
+  // jsPDF's align:'justify' stretches words to fill maxWidth — produces straight
+  // right edges on multi-line bullets. The last line of each bullet is left-aligned
+  // (standard typographic practice — justifying the last line creates huge gaps).
   const drawBullet = (text: string, width: number) => {
     const bulletIndent = 6.4; // mm — matches model's 18pt indent
     const textIndent = bulletIndent + 3; // continuation lines indent
-    const lines = wrapText(text, width - textIndent);
+    const textWidth = width - textIndent;
+    const lines = wrapText(text, textWidth);
+    const textYOffset = INFOHAS_FONT_SIZE * 0.352778 * 0.7;
     for (let i = 0; i < lines.length; i++) {
+      const isLastLine = i === lines.length - 1;
       if (i === 0) {
-        doc.text("•", left, y + INFOHAS_FONT_SIZE * 0.352778 * 0.7);
-        doc.text(lines[i], left + textIndent, y + INFOHAS_FONT_SIZE * 0.352778 * 0.7);
+        doc.text("•", left, y + textYOffset);
+      }
+      // Justify all lines EXCEPT the last line of each bullet (avoids huge gaps on short final lines).
+      if (isLastLine) {
+        doc.text(lines[i], left + textIndent, y + textYOffset);
       } else {
-        doc.text(lines[i], left + textIndent, y + INFOHAS_FONT_SIZE * 0.352778 * 0.7);
+        doc.text(lines[i], left + textIndent, y + textYOffset, { align: "justify", maxWidth: textWidth });
       }
       y += INFOHAS_LINE_HEIGHT_MM;
     }
@@ -228,6 +237,7 @@ function exportInfohasProPDF(resume: ResumeData, opts: PDFOptions = {}): { ok: b
 
   // ===== PROFESSIONAL SUMMARY =====
   // Summary text wraps LEFT of the photo frame (70% width) until photoBottom, then full width.
+  // Text is JUSTIFIED — straight edges on both left and right margins (per user directive).
   if (resume.summary) {
     sectionHeader("PROFESSIONAL SUMMARY");
     doc.setFont("times", "normal");
@@ -235,11 +245,18 @@ function exportInfohasProPDF(resume: ResumeData, opts: PDFOptions = {}): { ok: b
 
     // Split summary into lines — narrow width if photo exists, full width otherwise
     const narrowW = hasPhoto ? photoLeft - left - 2 : contentW;
-    const fullW = contentW;
     const summaryLines = wrapText(resume.summary, narrowW);
+    const textYOffset = INFOHAS_FONT_SIZE * 0.352778 * 0.7;
 
-    for (const line of summaryLines) {
-      doc.text(line, left, y + INFOHAS_FONT_SIZE * 0.352778 * 0.7);
+    for (let i = 0; i < summaryLines.length; i++) {
+      const isLastLine = i === summaryLines.length - 1;
+      if (isLastLine) {
+        // Last line left-aligned (standard typographic practice)
+        doc.text(summaryLines[i], left, y + textYOffset);
+      } else {
+        // Justify intermediate lines to produce straight right edge
+        doc.text(summaryLines[i], left, y + textYOffset, { align: "justify", maxWidth: narrowW });
+      }
       y += INFOHAS_LINE_HEIGHT_MM;
     }
     y += INFOHAS_SECTION_GAP_MM;
@@ -695,7 +712,7 @@ export async function exportResumeDOCX(resume: ResumeData) {
 
   if (resume.summary) {
     children.push(sectionPara("PROFESSIONAL SUMMARY", accentHex));
-    children.push(new Paragraph({ spacing: { after: 120 }, children: [new TextRun({ text: resume.summary, size: 20, color: "334155" })] }));
+    children.push(new Paragraph({ alignment: AlignmentType.JUSTIFIED, spacing: { after: 120 }, children: [new TextRun({ text: resume.summary, size: 20, color: "334155" })] }));
   }
 
   if (resume.experience.length) {
@@ -714,6 +731,7 @@ export async function exportResumeDOCX(resume: ResumeData) {
       for (const b of e.bullets) {
         children.push(new Paragraph({
           bullet: { level: 0 },
+          alignment: AlignmentType.JUSTIFIED,
           spacing: { after: 30 },
           children: [new TextRun({ text: b, size: 20, color: "334155" })],
         }));

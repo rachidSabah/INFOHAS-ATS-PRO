@@ -334,7 +334,7 @@ Return ONLY valid JSON with this exact shape:
 CONTENT RULES:
 - Truthful to the source resume. Never invent employers, dates, or metrics.
 - Embed target job-description keywords naturally.
-- Each bullet MUST fit on ONE line (≤ 90 characters) to avoid wrapping.
+- Each bullet should be 110-180 characters — long enough to wrap onto 2 lines (which lets the justified text alignment produce a clean straight right edge), but not so long it becomes a paragraph. NEVER produce one-line bullets under 80 characters (they leave the right margin ragged and waste page space).
 - Trim EVERY word that doesn't earn its place.
 - EXPAND weak bullet points with more detail and context.
 - QUANTIFY achievements whenever possible (%, $, counts, time saved).
@@ -342,6 +342,7 @@ CONTENT RULES:
 - Improve readability and recruiter impact.
 - Increase keyword relevance naturally — avoid keyword stuffing.
 - Ensure the page is FULLY UTILIZED — no half-empty pages, no excessive whitespace.
+- The summary paragraph should be 4-6 lines (~60-90 words) so the justified alignment produces a clean right edge on every line except the last.
 - If content is too short: expand bullets, add more detail, include more skills.
 - If content is too long: condense older roles, merge similar skills, tighten bullets.
 
@@ -497,7 +498,7 @@ Return ONLY valid JSON with this exact shape:
 CONTENT RULES:
 - Truthful to the source resume. Never invent employers, dates, or metrics.
 - Embed target job-description keywords naturally.
-- Each bullet MUST fit on ONE line (≤ 90 characters) to avoid wrapping.
+- Each bullet should be 110-180 characters — long enough to wrap onto 2 lines (which lets the justified text alignment produce a clean straight right edge), but not so long it becomes a paragraph. NEVER produce one-line bullets under 80 characters (they leave the right margin ragged and waste page space).
 - Trim EVERY word that doesn't earn its place.
 - EXPAND weak bullet points with more detail and context.
 - QUANTIFY achievements whenever possible (%, $, counts, time saved).
@@ -505,6 +506,7 @@ CONTENT RULES:
 - Improve readability and recruiter impact.
 - Increase keyword relevance naturally — avoid keyword stuffing.
 - Ensure the page is FULLY UTILIZED — no half-empty pages, no excessive whitespace.
+- The summary paragraph should be 4-6 lines (~60-90 words) so the justified alignment produces a clean right edge on every line except the last.
 - If content is too short: expand bullets, add more detail, include more skills.
 - If content is too long: condense older roles, merge similar skills, tighten bullets.
 

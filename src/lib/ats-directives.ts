@@ -395,12 +395,15 @@ Acceptable range: 2,700 – 3,100 characters.
 - 2,100 chars = TOO SHORT — expand bullets, add measurable achievements, deepen technical context.
 - 3,200+ chars = TOO LONG — condense older roles, tighten bullets, merge similar skills.
 HOW TO HIT THE TARGET INTELLIGENTLY:
-1. PROFESSIONAL SUMMARY: 4-6 lines (~60-90 words). Embed 2-3 priority keywords naturally.
+1. PROFESSIONAL SUMMARY: 4-6 lines (~60-90 words). Embed 2-3 priority keywords naturally. The summary MUST be long enough that every line except the last wraps to the full content width — this lets the JUSTIFIED text alignment produce a clean straight right edge.
 2. EXPERIENCE: For the 2 most recent roles, write 5-7 detailed bullets each. Older roles can have 3 bullets.
 3. Each bullet must START with a strong action verb and QUANTIFY where possible (%, $, counts, time saved, team size, customer volume).
-4. EXPAND weak bullets — never leave a one-line bullet that just says "Responsible for X". Rewrite as "Led X to achieve Y, resulting in Z% improvement".
-5. SKILLS: Group into 3-4 categories with 4-6 items each. Embed priority keywords as skill items where natural.
-6. Never produce a half-empty page — fully utilize the A4 layout.
+4. Each bullet should be 110-180 characters — long enough to wrap onto 2 lines (so the JUSTIFIED text alignment produces a clean straight right edge), but not so long it becomes a paragraph. NEVER produce one-line bullets under 80 characters (they leave the right margin ragged and waste page space).
+5. EXPAND weak bullets — never leave a one-line bullet that just says "Responsible for X". Rewrite as "Led X to achieve Y, resulting in Z% improvement".
+6. SKILLS: Group into 3-4 categories with 4-6 items each. Embed priority keywords as skill items where natural.
+7. Never produce a half-empty page — fully utilize the A4 layout.
+
+LAYOUT NOTE: Body text and bullets are rendered with text-align: JUSTIFY — meaning words are spaced so the right edge is straight on every line except the last line of each paragraph/bullet. To make this look good, write content that wraps to the full content width. Avoid very short bullets (under 80 chars) — they produce visible gaps on the right.
 
 ═══════════════════════════════════════════════════════════════
 AIRLINE-SPECIFIC WRITING GUIDANCE
@@ -813,6 +816,7 @@ export function getDocxHtml(content: string, template: "professional" | "modern"
           li {
             margin-bottom: 2pt;
             padding-left: 0;
+            text-align: justify; /* straight right edge on multi-line bullets */
           }
           /* Clean Bold */
           strong, b {

@@ -212,7 +212,7 @@ export function EditableA4Preview({ resume, onChange, scale = 0.7, className }: 
                 <InfohasSection title="CORE COMPETENCIES & SKILLS">
                   <ul style={{ margin: 0, paddingLeft: "4mm", listStyleType: "•", lineHeight: 1.2 }}>
                     {groupSkillsByCategory(resume.skills).slice(0, 4).map((g, i) => (
-                      <li key={i} style={{ marginBottom: 0, color: BLACK, lineHeight: 1.2 }}>
+                      <li key={i} style={{ marginBottom: 0, color: BLACK, lineHeight: 1.2, textAlign: "justify" }}>
                         <span style={{ fontWeight: 700 }}>{g.category}:</span> <span>{g.items.join(", ")}.</span>
                       </li>
                     ))}
@@ -278,7 +278,7 @@ export function EditableA4Preview({ resume, onChange, scale = 0.7, className }: 
                   {ed.highlights && ed.highlights.length > 0 && (
                     <ul style={{ margin: "0.3mm 0 0 0", paddingLeft: "4mm", listStyleType: "•", lineHeight: 1.2 }}>
                       {ed.highlights.map((h, i) => (
-                        <li key={i} style={{ color: BLACK, lineHeight: 1.2 }}>{h}</li>
+                        <li key={i} style={{ color: BLACK, lineHeight: 1.2, textAlign: "justify" }}>{h}</li>
                       ))}
                     </ul>
                   )}
