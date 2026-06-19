@@ -31,6 +31,13 @@ import { Logs } from "./modules/Logs";
 import { OptimizerDirective } from "./modules/OptimizerDirective";
 import { AIDevAgent } from "./modules/AIDevAgent";
 import { AIWorkspace } from "./modules/AIWorkspace";
+import {
+  LinkedinImport, ResumeVersioning, MultiLanguage, ResumeSharing, AbTesting,
+  BulkGenerator, ResumeAnalytics, AppTracker, SalaryInsights, SkillGap,
+  CareerPath, CompanyResearch, JobAlerts, CertTracker, Networking,
+  AiCoach, AiMockInterview, AiSalaryCoach, AiEmailWriter, AiResumeReview,
+  AiJobMatch, AiAchievement, Integrations,
+} from "./modules/CareerTools";
 import type { ViewKey } from "@/lib/types";
 
 const VIEW_COMPONENTS: Record<ViewKey, React.FC> = {
@@ -62,6 +69,29 @@ const VIEW_COMPONENTS: Record<ViewKey, React.FC> = {
   "optimizer-directive": OptimizerDirective,
   "ai-dev-agent": AIDevAgent,
   "ai-workspace": AIWorkspace,
+  "linkedin-import": LinkedinImport,
+  "resume-versioning": ResumeVersioning,
+  "multi-language": MultiLanguage,
+  "resume-sharing": ResumeSharing,
+  "ab-testing": AbTesting,
+  "bulk-generator": BulkGenerator,
+  "resume-analytics": ResumeAnalytics,
+  "app-tracker": AppTracker,
+  "salary-insights": SalaryInsights,
+  "skill-gap": SkillGap,
+  "career-path": CareerPath,
+  "company-research": CompanyResearch,
+  "job-alerts": JobAlerts,
+  "cert-tracker": CertTracker,
+  "networking": Networking,
+  "ai-coach": AiCoach,
+  "ai-mock-interview": AiMockInterview,
+  "ai-salary-coach": AiSalaryCoach,
+  "ai-email-writer": AiEmailWriter,
+  "ai-resume-review": AiResumeReview,
+  "ai-job-match": AiJobMatch,
+  "ai-achievement": AiAchievement,
+  "integrations": Integrations,
   logs: Logs,
 };
 
