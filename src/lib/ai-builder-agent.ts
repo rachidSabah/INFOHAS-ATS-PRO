@@ -534,19 +534,39 @@ function simulateTests(testCode: string): AITestResult {
 }
 
 /**
- * Run a build (simulated).
+ * Run a build — HONEST: cannot run actual builds in browser.
+ * Returns a clear message explaining this is not possible.
  */
 export async function runBuild(): Promise<AIBuildResult> {
-  await new Promise((r) => setTimeout(r, 2000)); // simulate build time
-  return simulateBuild();
+  return {
+    success: false,
+    errors: ["Cannot run 'npm run build' from a browser-based app."],
+    warnings: [
+      "This is a browser-based app running on Cloudflare Pages (Edge runtime).",
+      "It cannot execute shell commands like 'npm run build'.",
+      "To validate a build: copy the generated files to your local project and run 'npm run build' manually.",
+    ],
+    duration: 0,
+    output: "Build not executed — browser-based app cannot run shell commands.",
+    timestamp: new Date().toISOString(),
+  };
 }
 
 /**
- * Run tests (simulated).
+ * Run tests — HONEST: cannot run actual tests in browser.
  */
 export async function runTests(): Promise<AITestResult> {
-  await new Promise((r) => setTimeout(r, 1500)); // simulate test time
-  return simulateTests("valid test code");
+  return {
+    success: false,
+    total: 0,
+    passed: 0,
+    failed: 0,
+    skipped: 0,
+    duration: 0,
+    output: "Tests not executed — browser-based app cannot run 'npx vitest'. Copy generated test files to your project and run 'npx vitest' manually.",
+    failures: [],
+    timestamp: new Date().toISOString(),
+  };
 }
 
 // ============================================================================

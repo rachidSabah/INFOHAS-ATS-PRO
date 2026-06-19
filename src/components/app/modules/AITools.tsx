@@ -56,7 +56,7 @@ export function AITools() {
       } else if (active === "rewrite") {
         user = `Rewrite this resume section to be ATS-friendly and impactful:\n${input}`;
       }
-      const result = await callAI({ systemPrompt: sys, userPrompt: user, maxTokens: 1500 });
+      const result = await callAI({ systemPrompt: sys, userPrompt: user, maxTokens: 1500, taskCategory: "document" });
       setOutput(result.text);
       incUsage("resumesGenerated");
       log({ actor: "you", action: `AI tool: ${active}`, category: "ai", details: `via ${result.provider}`, severity: "info" });

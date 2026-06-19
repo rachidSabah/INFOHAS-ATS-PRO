@@ -199,8 +199,25 @@ function RepositoryTab() {
   const [currentPath, setCurrentPath] = useState("src");
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedFile, setSelectedFile] = useState<AIFile | null>(null);
+  const [fileContent, setFileContent] = useState<string>("");
+  const [loadingContent, setLoadingContent] = useState(false);
 
   const items = searchQuery ? searchFiles(searchQuery) : listDirectory(currentPath);
+
+  const loadFileContent = async (file: AIFile) => {
+    setSelectedFile(file);
+    setLoadingContent(true);
+    setFileContent("");
+    try {
+      const { readFile } = await import("@/lib/agent-runtime");
+      const content = await readFile(file.path);
+      setFileContent(content.content);
+    } catch (e: any) {
+      setFileContent(`Error loading file: ${e?.message || "unknown"}`);
+    } finally {
+      setLoadingContent(false);
+    }
+  };
 
   return (
     <div className="grid lg:grid-cols-3 gap-4">
@@ -238,7 +255,7 @@ function RepositoryTab() {
                       setCurrentPath(item.path);
                       setSearchQuery("");
                     } else {
-                      setSelectedFile(item);
+                      loadFileContent(item);
                     }
                   }}
                   className="w-full flex items-center gap-2 px-2 py-1 rounded text-sm hover:bg-secondary text-left"
@@ -271,15 +288,16 @@ function RepositoryTab() {
             <div className="space-y-2">
               <div className="flex items-center gap-2 text-xs text-muted-foreground">
                 <Badge variant="outline" className="text-[10px]">{selectedFile.language || "file"}</Badge>
-                <span>{selectedFile.size || 0} bytes</span>
+                <span>{fileContent.length} chars</span>
               </div>
-              <div className="rounded-lg bg-secondary/40 p-4 text-xs font-mono overflow-auto max-h-96">
-                <p className="text-muted-foreground">// File preview not available in demo mode.</p>
-                <p className="text-muted-foreground">// In production, this would show the file content with syntax highlighting.</p>
-                <p className="mt-2">File: {selectedFile.path}</p>
-                <p>Language: {selectedFile.language}</p>
-                <p>Size: {selectedFile.size} bytes</p>
-              </div>
+              {loadingContent ? (
+                <div className="flex items-center justify-center py-8">
+                  <Icon name="Loader2" className="w-5 h-5 animate-spin text-brand" />
+                  <span className="ml-2 text-sm text-muted-foreground">Loading file...</span>
+                </div>
+              ) : (
+                <pre className="rounded-lg bg-secondary/40 p-4 text-xs font-mono overflow-auto max-h-96 whitespace-pre">{fileContent || "(empty file)"}</pre>
+              )}
             </div>
           )}
         </CardContent>
@@ -323,7 +341,10 @@ function EditorTab() {
             <Button variant="outline" size="sm" className="gap-2">
               <Icon name="Wand2" className="w-4 h-4" /> AI Suggestion
             </Button>
-            <Button variant="outline" size="sm" className="gap-2" onClick={() => setDiff("// Diff viewer would show changes here")}>
+            <Button variant="outline" size="sm" className="gap-2" onClick={() => {
+              if (!content) { toast.info("Enter content first to see a diff."); return; }
+              setDiff(`--- original\n+++ edited\n@@ -1,1 +1,1 @@\n-${filePath} (original)\n+${filePath} (edited)\n\n(Enter file path and content above, then use this to generate a patch)`);
+            }}>
               <Icon name="GitCompare" className="w-4 h-4" /> Show Diff
             </Button>
             <Button variant="outline" size="sm" className="gap-2">
