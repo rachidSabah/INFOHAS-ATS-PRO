@@ -185,14 +185,26 @@ export async function syncAllFromCloud(store: any): Promise<void> {
     if (prompts.length) store.setState({ prompts });
     if (logs.length) store.setState({ logs });
     if (brandingRes.branding && Object.keys(brandingRes.branding).length > 0) {
-      store.setState({ branding: brandingRes.branding });
-      // Also restore optimizerDirective if it was stored as part of branding settings
       const bd: any = brandingRes.branding;
+      // Only restore branding fields that are actually branding (not nested settings)
+      const brandingFields = ["appName", "tagline", "primaryColor", "accentColor", "logoUrl", "emailFromName", "emailFromAddress", "pdfFooterText"];
+      const cleanBranding: any = {};
+      for (const key of brandingFields) {
+        if (bd[key] !== undefined) cleanBranding[key] = bd[key];
+      }
+      if (Object.keys(cleanBranding).length > 0) store.setState({ branding: { ...store.getState().branding, ...cleanBranding } });
+
+      // Restore optimizerDirective if it was stored as part of branding settings
       if (bd.optimizerDirective && typeof bd.optimizerDirective === "object") {
-        store.setState({ optimizerDirective: bd.optimizerDirective });
+        // Only overwrite if the stored version has meaningful data (not all defaults)
+        const stored = bd.optimizerDirective;
+        if (stored.customDirectiveOverride?.trim() || stored.bodyFontSizePt !== 10.5) {
+          console.info("[syncAllFromCloud] Restoring optimizerDirective from D1");
+          store.setState({ optimizerDirective: stored });
+        }
       }
       if (bd.aiDevSettings && typeof bd.aiDevSettings === "object") {
-        store.setState({ aiDevSettings: bd.aiDevSettings });
+        store.setState({ aiDevSettings: { ...store.getState().aiDevSettings, ...bd.aiDevSettings } });
       }
     }
     if (flagsRes.flags) store.setState({ flags: flagsRes.flags });

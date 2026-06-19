@@ -161,11 +161,17 @@ export function Optimizer() {
     // Use the dynamic optimizer directive — reads from the super admin's
     // configured parameters (Optimizer Directive settings page). Falls back
     // to the hardcoded OPTIMIZER_DIRECTIVE if the store isn't available.
+    const directive = getOptimizerDirective();
+    const directiveConfig = useApp.getState().optimizerDirective;
+    const usingOverride = !!directiveConfig?.customDirectiveOverride?.trim();
+    setAiLog((l) => [...l, `Directive source: ${usingOverride ? "CUSTOM OVERRIDE (from Optimizer Directive settings)" : "GENERATED (from structured config fields)"}`]);
+    setAiLog((l) => [...l, `Directive length: ${directive.length} chars`]);
+
     let optimized: ResumeData;
     let provider = "Local Engine";
     try {
       const result = await callAI({
-        systemPrompt: getOptimizerDirective(),
+        systemPrompt: directive,
         userPrompt: `SOURCE RESUME (be truthful to this — never invent employers, dates, or metrics):\n${JSON.stringify({
           name: resume.name,
           headline: resume.headline,
