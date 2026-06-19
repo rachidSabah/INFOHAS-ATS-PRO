@@ -6,7 +6,115 @@ import { Button } from "@/components/ui/button";
 import { SectionTitle, Icon, ScoreRing } from "@/components/shared";
 import { useApp } from "@/lib/store";
 import { scoreATS, scoreLabel } from "@/lib/ats";
-import { SEED_RESUMES, SEED_JDS } from "@/lib/mock-data";
+import type { ResumeData, JobDescription } from "@/lib/types";
+
+// ============================================================================
+// LOCAL DEMO DATA — used ONLY for the public landing-page ATS demo.
+// This is a marketing illustration, not user data. The global SEED_RESUMES
+// is intentionally empty in production (users create their own resumes),
+// so we keep a small local sample here to power the live demo on the homepage.
+// ============================================================================
+
+const DEMO_RESUME: ResumeData = {
+  id: "demo-resume",
+  name: "Alex Morgan",
+  headline: "Senior Customer Experience Specialist",
+  contact: {
+    email: "alex.morgan@example.com",
+    phone: "+1 (415) 555-0182",
+    location: "San Francisco, CA",
+    website: "",
+    linkedin: "linkedin.com/in/alexmorgan",
+    github: "",
+  },
+  summary:
+    "Customer-focused professional with 7+ years of experience delivering exceptional service in high-pressure, multicultural environments. Proven ability to handle 40M+ monthly interactions with a focus on accountability, communication, and problem resolution. Skilled in teamwork, first-response coordination, and maintaining safety standards while enhancing passenger experience.",
+  experience: [
+    {
+      id: "e1",
+      title: "Customer Experience Specialist",
+      company: "Vercel",
+      location: "Remote",
+      startDate: "Mar 2022",
+      endDate: "Present",
+      bullets: [
+        "Led cross-functional team to improve user experience for 40M+ monthly users, reducing service issues by 23%.",
+        "Trained 4 team members in customer-centric problem solving; 3 promoted within a year.",
+        "Optimized response protocols cutting resolution time by 62% while maintaining 98% satisfaction scores.",
+        "Coordinated emergency response for platform outages, ensuring minimal user impact.",
+      ],
+    },
+    {
+      id: "e2",
+      title: "Customer Support & Accessibility Specialist",
+      company: "Airbnb",
+      location: "San Francisco, CA",
+      startDate: "Jun 2019",
+      endDate: "Feb 2022",
+      bullets: [
+        "Enhanced passenger experience for 40M+ users, increasing booking conversion by 6.4%.",
+        "Conducted accessibility audit achieving WCAG 2.1 AA compliance for host dashboard.",
+        "Resolved 200+ daily customer inquiries with 95% satisfaction rate in fast-paced environment.",
+        "Collaborated with multicultural teams to improve service standards across 191 countries.",
+      ],
+    },
+  ],
+  education: [
+    {
+      id: "ed1",
+      degree: "B.Sc. Computer Science",
+      field: "Computer Science",
+      institution: "University of California, Berkeley",
+      location: "Berkeley, CA",
+      startDate: "2014",
+      endDate: "2018",
+      highlights: ["Modules: Human-Computer Interaction, Team Project Management, Communication Studies"],
+    },
+  ],
+  skills: [
+    { id: "s1", name: "Customer Service", category: "Soft Skills" },
+    { id: "s2", name: "CRM Systems", category: "Technical" },
+    { id: "s3", name: "Conflict Resolution", category: "Soft Skills" },
+    { id: "s4", name: "Performance Optimization", category: "Technical" },
+    { id: "s5", name: "Accessibility Standards", category: "Technical" },
+    { id: "s6", name: "Team Coordination", category: "Soft Skills" },
+  ],
+  languages: [
+    { id: "l1", name: "English", proficiency: "fluent" },
+    { id: "l2", name: "Spanish", proficiency: "conversational" },
+  ],
+  projects: [],
+  certifications: [],
+  template: "infohas-pro",
+  accentColor: "#0563C1",
+  createdAt: new Date().toISOString(),
+  updatedAt: new Date().toISOString(),
+  source: "manual",
+};
+
+const DEMO_JD: JobDescription = {
+  id: "demo-jd",
+  title: "Senior Customer Experience Specialist",
+  company: "Vercel",
+  location: "Remote",
+  employmentType: "Full-time",
+  salary: "",
+  responsibilities: [
+    "Lead cross-functional initiatives to improve user experience",
+    "Train and mentor team members in customer-centric problem solving",
+    "Optimize response protocols and resolution workflows",
+    "Coordinate emergency response for platform incidents",
+  ],
+  requiredSkills: ["Customer Service", "CRM", "Conflict Resolution", "Performance Optimization"],
+  preferredSkills: ["Accessibility", "Team Coordination"],
+  technologies: ["CRM Systems", "WCAG 2.1"],
+  experienceYears: "5+",
+  education: "Bachelor's degree",
+  keywords: ["Customer Service", "CRM", "Conflict Resolution", "Performance Optimization", "Accessibility", "Team Coordination", "Cross-functional", "Mentor", "Satisfaction", "Resolution Time"],
+  rawText: "",
+  source: "text",
+  createdAt: new Date().toISOString(),
+};
 
 export function ATSDemo() {
   const resumes = useApp((s) => s.resumes);
@@ -15,8 +123,10 @@ export function ATSDemo() {
   const setView = useApp((s) => s.setView);
   const isAuthed = useApp((s) => s.isAuthed);
 
-  const resume = resumes[0] || SEED_RESUMES[0];
-  const jd = jds[0] || SEED_JDS[0];
+  // Prefer the user's first resume if they have one (signed-in users);
+  // otherwise fall back to the local DEMO_RESUME for the public landing page.
+  const resume: ResumeData = resumes[0] ?? DEMO_RESUME;
+  const jd: JobDescription = jds[0] ?? DEMO_JD;
 
   const [optimized, setOptimized] = useState(false);
   const report = scoreATS(resume, jd);
