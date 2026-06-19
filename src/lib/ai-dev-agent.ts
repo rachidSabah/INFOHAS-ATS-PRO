@@ -84,6 +84,93 @@ export async function callDevAgent(opts: {
   };
 }
 
+/**
+ * Call the AI and extract JSON from the response. If the AI returns prose
+ * instead of JSON, retry ONCE with a stricter prompt that prepends
+ * "Return ONLY valid JSON. No prose, no markdown fences, no explanations."
+ *
+ * If the retry also fails, returns null (caller should handle the fallback).
+ */
+export async function callDevAgentJSON<T = any>(opts: {
+  userPrompt: string;
+  systemPromptOverride?: string;
+  maxTokens?: number;
+  temperature?: number;
+}): Promise<{ data: T | null; rawText: string; provider: string; model: string }> {
+  const settings = getAIDevSettings();
+
+  // First attempt
+  let result = await callDevAgent(opts);
+
+  // Try to extract JSON
+  try {
+    const data = extractJSON<T>(result.text);
+    return { data, rawText: result.text, provider: result.provider, model: result.model };
+  } catch {
+    // JSON extraction failed — retry with a stricter prompt
+    console.warn("[AI Dev Agent] First call returned non-JSON, retrying with stricter prompt...");
+  }
+
+  // Retry with a much more forceful JSON-only instruction
+  const stricterSystemPrompt = (opts.systemPromptOverride || settings.systemPrompt) +
+    "\n\nCRITICAL REQUIREMENT: You MUST respond with ONLY valid JSON. No prose, no markdown fences, no explanations, no preamble. The very first character of your response must be '{' or '['. If you include any text before the JSON, the system will reject your response.";
+
+  const stricterUserPrompt = opts.userPrompt +
+    "\n\nREMINDER: Return ONLY valid JSON. Start your response with '{'. Do not include any text before or after the JSON object.";
+
+  try {
+    result = await callDevAgent({
+      ...opts,
+      userPrompt: stricterUserPrompt,
+      systemPromptOverride: stricterSystemPrompt,
+      temperature: 0.1, // lower temperature for more deterministic output
+    });
+    const data = extractJSON<T>(result.text);
+    return { data, rawText: result.text, provider: result.provider, model: result.model };
+  } catch {
+    // Still failed — return null and let the caller handle it
+    return { data: null, rawText: result.text, provider: result.provider, model: result.model };
+  }
+}
+
+/**
+ * Create a report from a prose (non-JSON) AI response.
+ * This is a fallback when the AI doesn't return structured JSON.
+ * We extract whatever useful info we can from the prose.
+ */
+function makeProseReport(
+  type: AIDevReport["type"],
+  title: string,
+  proseResponse: string,
+  provider: string,
+  model: string,
+): AIDevReport {
+  // Truncate the prose for the summary
+  const summary = `AI returned a prose response instead of structured JSON (provider: ${provider}/${model}). ` +
+    `The response started with: "${proseResponse.slice(0, 150)}${proseResponse.length > 150 ? "..." : ""}". ` +
+    `This usually means the AI provider doesn't follow JSON-only instructions well. ` +
+    `Try a different provider (e.g. GPT-4o, Claude) or lower the temperature in Settings.`;
+
+  return {
+    id: `rpt_${Date.now()}`,
+    type,
+    title,
+    summary,
+    issues: [{
+      id: `iss_${Math.random().toString(36).slice(2, 9)}`,
+      type: type.split("_")[0] as AIDevIssue["type"],
+      severity: "warning",
+      title: "AI returned prose instead of JSON",
+      description: `The AI provider (${provider}/${model}) returned a prose response instead of the requested JSON structure. This is a provider capability issue, not a code issue. The raw response was:\n\n${proseResponse.slice(0, 500)}${proseResponse.length > 500 ? "..." : ""}`,
+      recommendedFix: `Try one of:\n1. Switch to a more capable model (GPT-4o, Claude Sonnet) in Settings\n2. Lower the temperature to 0.1\n3. Use a provider that better follows JSON-only instructions`,
+      status: "open",
+    }],
+    score: undefined,
+    createdBy: useApp.getState().user?.email || "system",
+    createdAt: new Date().toISOString(),
+  };
+}
+
 // ============================================================================
 // SCAN FUNCTIONS — each returns a structured report
 // ============================================================================
@@ -126,16 +213,19 @@ Return ONLY valid JSON:
 }`;
 
   try {
-    const result = await callDevAgent({ userPrompt });
-    const data = extractJSON<{ summary: string; issues: any[] }>(result.text);
-    return {
-      type: "code_audit",
-      title: "Code Audit",
-      summary: data.summary || "Code audit completed",
-      issues: (data.issues || []).map(normalizeIssue),
-      score: undefined,
-      createdBy: useApp.getState().user?.email || "system",
-    } as Omit<AIDevReport, "id" | "createdAt"> as AIDevReport;
+    const { data, rawText, provider, model } = await callDevAgentJSON<{ summary: string; issues: any[] }>({ userPrompt });
+    if (data) {
+      return {
+        type: "code_audit",
+        title: "Code Audit",
+        summary: data.summary || "Code audit completed",
+        issues: (data.issues || []).map(normalizeIssue),
+        score: undefined,
+        createdBy: useApp.getState().user?.email || "system",
+      } as Omit<AIDevReport, "id" | "createdAt"> as AIDevReport;
+    }
+    // AI returned prose instead of JSON — create a fallback report
+    return makeProseReport("code_audit", "Code Audit", rawText, provider, model);
   } catch (e: any) {
     return makeErrorReport("code_audit", "Code Audit", e?.message || "Scan failed");
   }
@@ -177,15 +267,17 @@ Return ONLY valid JSON:
 }`;
 
   try {
-    const result = await callDevAgent({ userPrompt });
-    const data = extractJSON<{ summary: string; issues: any[] }>(result.text);
-    return {
-      type: "error_analysis",
-      title: "Error Analysis",
-      summary: data.summary,
-      issues: (data.issues || []).map(normalizeIssue),
+    const { data, rawText, provider, model } = await callDevAgentJSON<{ summary: string; issues: any[] }>({ userPrompt });
+    if (data) {
+      return {
+        type: "error_analysis",
+        title: "Error Analysis",
+        summary: data.summary,
+        issues: (data.issues || []).map(normalizeIssue),
       createdBy: useApp.getState().user?.email || "system",
     } as AIDevReport;
+    }
+    return makeProseReport("error_analysis", "Error Analysis", rawText, provider, model);
   } catch (e: any) {
     return makeErrorReport("error_analysis", "Error Analysis", e?.message || "Analysis failed");
   }
@@ -223,15 +315,17 @@ Return ONLY valid JSON:
 }`;
 
   try {
-    const result = await callDevAgent({ userPrompt });
-    const data = extractJSON<{ summary: string; issues: any[] }>(result.text);
-    return {
-      type: "route_inspector",
-      title: "Route Inspector",
-      summary: data.summary,
-      issues: (data.issues || []).map(normalizeIssue),
+    const { data, rawText, provider, model } = await callDevAgentJSON<{ summary: string; issues: any[] }>({ userPrompt });
+    if (data) {
+      return {
+        type: "route_inspector",
+        title: "Route Inspector",
+        summary: data.summary,
+        issues: (data.issues || []).map(normalizeIssue),
       createdBy: useApp.getState().user?.email || "system",
     } as AIDevReport;
+    }
+    return makeProseReport("route_inspector", "Route Inspector", rawText, provider, model);
   } catch (e: any) {
     return makeErrorReport("route_inspector", "Route Inspector", e?.message || "Inspection failed");
   }
@@ -269,15 +363,17 @@ Return ONLY valid JSON:
 }`;
 
   try {
-    const result = await callDevAgent({ userPrompt });
-    const data = extractJSON<{ summary: string; issues: any[] }>(result.text);
-    return {
-      type: "database_inspector",
-      title: "Database Inspector",
-      summary: data.summary,
-      issues: (data.issues || []).map(normalizeIssue),
+    const { data, rawText, provider, model } = await callDevAgentJSON<{ summary: string; issues: any[] }>({ userPrompt });
+    if (data) {
+      return {
+        type: "database_inspector",
+        title: "Database Inspector",
+        summary: data.summary,
+        issues: (data.issues || []).map(normalizeIssue),
       createdBy: useApp.getState().user?.email || "system",
     } as AIDevReport;
+    }
+    return makeProseReport("database_inspector", "Database Inspector", rawText, provider, model);
   } catch (e: any) {
     return makeErrorReport("database_inspector", "Database Inspector", e?.message || "Inspection failed");
   }
@@ -315,16 +411,18 @@ Return ONLY valid JSON:
 }`;
 
   try {
-    const result = await callDevAgent({ userPrompt });
-    const data = extractJSON<{ summary: string; issues: any[] }>(result.text);
-    return {
-      type: "security_scan",
-      title: "Security Scan",
-      summary: data.summary,
-      issues: (data.issues || []).map(normalizeIssue),
+    const { data, rawText, provider, model } = await callDevAgentJSON<{ summary: string; issues: any[] }>({ userPrompt });
+    if (data) {
+      return {
+        type: "security_scan",
+        title: "Security Scan",
+        summary: data.summary,
+        issues: (data.issues || []).map(normalizeIssue),
       score: undefined,
       createdBy: useApp.getState().user?.email || "system",
     } as AIDevReport;
+    }
+    return makeProseReport("security_scan", "Security Scan", rawText, provider, model);
   } catch (e: any) {
     return makeErrorReport("security_scan", "Security Scan", e?.message || "Scan failed");
   }
@@ -367,15 +465,17 @@ Return ONLY valid JSON:
 }`;
 
   try {
-    const result = await callDevAgent({ userPrompt });
-    const data = extractJSON<{ summary: string; issues: any[] }>(result.text);
-    return {
-      type: "performance",
-      title: "Performance Analysis",
-      summary: data.summary,
-      issues: (data.issues || []).map(normalizeIssue),
+    const { data, rawText, provider, model } = await callDevAgentJSON<{ summary: string; issues: any[] }>({ userPrompt });
+    if (data) {
+      return {
+        type: "performance",
+        title: "Performance Analysis",
+        summary: data.summary,
+        issues: (data.issues || []).map(normalizeIssue),
       createdBy: useApp.getState().user?.email || "system",
     } as AIDevReport;
+    }
+    return makeProseReport("performance", "Performance Analysis", rawText, provider, model);
   } catch (e: any) {
     return makeErrorReport("performance", "Performance Analysis", e?.message || "Analysis failed");
   }
@@ -414,15 +514,17 @@ Return ONLY valid JSON:
 }`;
 
   try {
-    const result = await callDevAgent({ userPrompt });
-    const data = extractJSON<{ summary: string; issues: any[] }>(result.text);
-    return {
-      type: "deployment_validation",
-      title: "Deployment Validation",
-      summary: data.summary,
-      issues: (data.issues || []).map(normalizeIssue),
+    const { data, rawText, provider, model } = await callDevAgentJSON<{ summary: string; issues: any[] }>({ userPrompt });
+    if (data) {
+      return {
+        type: "deployment_validation",
+        title: "Deployment Validation",
+        summary: data.summary,
+        issues: (data.issues || []).map(normalizeIssue),
       createdBy: useApp.getState().user?.email || "system",
     } as AIDevReport;
+    }
+    return makeProseReport("deployment_validation", "Deployment Validation", rawText, provider, model);
   } catch (e: any) {
     return makeErrorReport("deployment_validation", "Deployment Validation", e?.message || "Validation failed");
   }
@@ -474,18 +576,33 @@ Return ONLY valid JSON:
 }`;
 
   try {
-    const result = await callDevAgent({ userPrompt, maxTokens: 10000 });
-    const data = extractJSON<any>(result.text);
+    const { data, rawText, provider, model } = await callDevAgentJSON<any>({ userPrompt, maxTokens: 10000 });
+    if (data) {
+      return {
+        id: `feat_${Date.now()}`,
+        title: data.title || "Generated Feature",
+        description: data.description || "",
+        request,
+        files: (data.files || []).map((f: any) => ({
+          path: f.path,
+          content: f.content,
+          type: f.type || "other",
+        })),
+        status: "draft",
+        createdAt: new Date().toISOString(),
+      };
+    }
+    // AI returned prose — return a fallback feature with the raw text
     return {
       id: `feat_${Date.now()}`,
-      title: data.title || "Generated Feature",
-      description: data.description || "",
+      title: "Feature Generation (prose response)",
+      description: `AI returned a prose response instead of structured JSON (provider: ${provider}/${model}). The raw response is stored in the first file. Try a different provider or lower the temperature.`,
       request,
-      files: (data.files || []).map((f: any) => ({
-        path: f.path,
-        content: f.content,
-        type: f.type || "other",
-      })),
+      files: [{
+        path: "AI_RESPONSE.txt",
+        content: rawText,
+        type: "other",
+      }],
       status: "draft",
       createdAt: new Date().toISOString(),
     };
@@ -537,19 +654,34 @@ Return ONLY valid JSON:
 }`;
 
   try {
-    const result = await callDevAgent({ userPrompt, maxTokens: 8000 });
-    const data = extractJSON<any>(result.text);
+    const { data, rawText, provider, model } = await callDevAgentJSON<any>({ userPrompt, maxTokens: 8000 });
+    if (data) {
+      return {
+        id: `patch_${Date.now()}`,
+        title: data.title || "Generated Patch",
+        description: data.description || "",
+        diff: data.diff || "",
+        modifiedFiles: data.modifiedFiles || [],
+        newFiles: data.newFiles || [],
+        deletedFiles: data.deletedFiles || [],
+        impactAnalysis: data.impactAnalysis || "",
+        riskAnalysis: data.riskAnalysis || "medium",
+        generatedTests: data.generatedTests || "",
+        status: "draft",
+        createdAt: new Date().toISOString(),
+      };
+    }
+    // AI returned prose — return a fallback patch with the raw text as the diff
     return {
       id: `patch_${Date.now()}`,
-      title: data.title || "Generated Patch",
-      description: data.description || "",
-      diff: data.diff || "",
-      modifiedFiles: data.modifiedFiles || [],
-      newFiles: data.newFiles || [],
-      deletedFiles: data.deletedFiles || [],
-      impactAnalysis: data.impactAnalysis || "",
-      riskAnalysis: data.riskAnalysis || "medium",
-      generatedTests: data.generatedTests || "",
+      title: "Patch Generation (prose response)",
+      description: `AI returned a prose response instead of structured JSON (provider: ${provider}/${model}). The raw response is stored in the diff field. Try a different provider or lower the temperature.`,
+      diff: `// AI returned prose instead of a unified diff.\n// Provider: ${provider}/${model}\n// Raw response:\n\n${rawText}`,
+      modifiedFiles: [],
+      newFiles: [],
+      deletedFiles: [],
+      impactAnalysis: "Unable to determine — AI returned prose instead of structured patch data.",
+      riskAnalysis: "high",
       status: "draft",
       createdAt: new Date().toISOString(),
     };
