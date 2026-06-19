@@ -107,7 +107,7 @@ export interface ResumeData {
   dateOfBirth?: string; // optional DOB line shown under contact (infohas-pro)
   createdAt: string;
   updatedAt: string;
-  source?: "upload" | "manual" | "ai-optimized" | "template";
+  source?: "upload" | "manual" | "ai-optimized" | "ai-optimized-aviation" | "template";
   fileName?: string;
 }
 

@@ -16,9 +16,9 @@ import { analyzeJobIntelligence, type JobIntelligence } from "@/lib/job-intellig
 import { computeRelevanceScore, type RelevanceScore } from "@/lib/relevance-engine";
 import { runValidationPipeline, type PipelineResult } from "@/lib/output-validator";
 import { validateResumeContent } from "@/lib/ai-error-filter";
-import { exportResumePDF, exportResumeDOCX, exportResumeTXT, exportResumeDOC, exportHtmlAsDOC } from "@/lib/exporter";
+import { exportResumePDF, exportResumeDOCX, exportResumeTXT, exportResumeDOC } from "@/lib/exporter";
 import { EditableA4Preview } from "@/components/resume/EditableA4Preview";
-import { analyzeWithGemini, resumeToPlainText, AIRLINE_ATS_PROFILES, AIRLINE_OPTIONS, DEFAULT_APP_SETTINGS, type AppSettings, type AviationAtsResult } from "@/lib/ats-directives";
+import { AIRLINE_ATS_PROFILES, AIRLINE_OPTIONS, DEFAULT_APP_SETTINGS, type AppSettings, aviationOptimize, type AviationOptimizeResult } from "@/lib/ats-directives";
 import { toast } from "sonner";
 import type { ResumeData, JobDescription, ResumeSkill } from "@/lib/types";
 
@@ -43,11 +43,11 @@ export function Optimizer() {
   const [afterReport, setAfterReport] = useState<ReturnType<typeof scoreATS> | null>(null);
   const [aiThinking, setAiThinking] = useState(false);
   const [aiLog, setAiLog] = useState<string[]>([]);
-  // Aviation ATS mode (uses analyzeWithGemini with airline-specific directive)
+  // Aviation ATS mode (uses aviationOptimize with airline-specific directive + super-admin config)
   const [aviationMode, setAviationMode] = useState(false);
   const [airlineProfile, setAirlineProfile] = useState<string>("generic");
   const [aviationSettings, setAviationSettings] = useState<AppSettings>(DEFAULT_APP_SETTINGS);
-  const [aviationResult, setAviationResult] = useState<AviationAtsResult | null>(null);
+  const [aviationResult, setAviationResult] = useState<AviationOptimizeResult | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
   const uploadResume = async (files: FileList | null) => {
@@ -150,7 +150,7 @@ export function Optimizer() {
     setAiLog([]);
     setAviationResult(null);
 
-    // ===== AVIATION ATS MODE — uses analyzeWithGemini() with airline-specific directive =====
+    // ===== AVIATION ATS MODE — uses aviationOptimize() with unified directive =====
     if (aviationMode) {
       return optimizeAviation();
     }
@@ -405,51 +405,139 @@ export function Optimizer() {
     toast.success(`Optimized! ATS: ${beforeReport.scores.ats} → ${after.scores.ats}${relevanceMsg}`);
   };
 
-  // ===== Aviation ATS optimization via analyzeWithGemini() =====
+  // ===== Aviation ATS optimization via aviationOptimize() =====
+  // Uses the unified aviation directive that merges:
+  //   1. Super-admin's optimizer directive config (with custom override support)
+  //   2. Aviation keyword bank (cabin crew + broad aviation)
+  //   3. Airline-specific ATS profile (Emirates/Qatar/Etihad/…)
+  //   4. Tone / format / strictness settings
+  //
+  // CRITICAL FIX (previous bug):
+  //   The old code called analyzeWithGemini() which returns an HTML string,
+  //   but then DISCARDED the optimized_content and just kept the original
+  //   resume with keywords added as skills. This caused the resume to stay
+  //   SHORT and the aviation directives to have NO effect on the actual content.
+  //
+  //   The new code uses aviationOptimize() which returns a structured JSON
+  //   resume object (same shape as OPTIMIZER_DIRECTIVE) that we map directly
+  //   to ResumeData — same as the standard optimize() flow.
   const optimizeAviation = async () => {
     if (!resume || !jdParsed || !beforeReport) return;
     const profile = AIRLINE_ATS_PROFILES[airlineProfile] || AIRLINE_ATS_PROFILES.generic;
+
+    // === Log directive synchronization status ===
+    const directiveConfig = useApp.getState().optimizerDirective;
+    const usingOverride = !!directiveConfig?.customDirectiveOverride?.trim();
     setAiLog((l) => [...l, `Aviation ATS mode → ${profile.system}`]);
     setAiLog((l) => [...l, `Airline focus: ${profile.focus}`]);
+    setAiLog((l) => [...l, `Priority keywords: ${profile.priorityKeywords?.join(", ") || "(none)"}`]);
     setAiLog((l) => [...l, `Tone: ${aviationSettings.tone} · Format: ${aviationSettings.format} · Strictness: ${aviationSettings.strictness}`]);
-    setAiLog((l) => [...l, "Calling analyzeWithGemini() with 2,800-char one-A4-page directive…"]);
+    setAiLog((l) => [...l, `Directive source: ${usingOverride ? "CUSTOM OVERRIDE (from Optimizer Directive settings) + aviation augmentation" : "GENERATED (from structured config) + aviation augmentation"}`]);
+    setAiLog((l) => [...l, "Calling aviationOptimize() with unified directive (super-admin config + aviation keywords + airline profile)…"]);
 
     try {
-      const resumeText = resumeToPlainText(resume);
       const jdTextFull = jdParsed.rawText ?? jdParsed.keywords.join(", ");
-      const result = await analyzeWithGemini(resumeText, jdTextFull, aviationSettings, airlineProfile);
+      const result = await aviationOptimize(resume, jdTextFull, airlineProfile, aviationSettings);
 
+      setAiLog((l) => [...l, `✓ AI produced structured resume via ${result.charCount} chars (target ~2,900)`]);
       setAiLog((l) => [...l, `✓ ATS score: ${result.score}/100 (impact ${result.score_breakdown.impact}, brevity ${result.score_breakdown.brevity}, keywords ${result.score_breakdown.keywords})`]);
       setAiLog((l) => [...l, `Matched ${result.matched_keywords.length} keywords · missing ${result.missing_keywords.length}`]);
 
-      // Build a ResumeData from the optimized HTML — parse the directive-format HTML back into structured data
-      // For the optimizer flow, we keep the original resume but mark it as aviation-optimized.
-      // CRITICAL: summary_critique is an ANALYSIS field — it must NEVER be used as the resume summary.
-      // The resume summary must be a professional description of the candidate, not an ATS critique.
+      if (result.resume.bulletsRewritten) {
+        setAiLog((l) => [...l, `Bullets rewritten: ${result.resume.bulletsRewritten}`]);
+      }
+      if (result.resume.missingKeywordsAdded?.length) {
+        setAiLog((l) => [...l, `Embedded ${result.resume.missingKeywordsAdded.length} keywords: ${result.resume.missingKeywordsAdded.slice(0, 5).join(", ")}${result.resume.missingKeywordsAdded.length > 5 ? "…" : ""}`]);
+      }
+
+      // === Map the AI's structured JSON to ResumeData (same logic as standard optimize() flow) ===
+      const aiSkills: ResumeSkill[] = (result.resume.skills ?? []).flatMap((g: any) =>
+        (g.items ?? []).map((name: string) => ({ id: uid("s"), name, category: g.category || "General" }))
+      );
+      const skills: ResumeSkill[] = aiSkills.length > 0
+        ? aiSkills
+        : [
+            ...resume.skills,
+            ...result.missing_keywords.map((k) => ({ id: uid("s"), name: k, category: "Skills" })),
+          ].filter((s, idx, arr) => arr.findIndex((x) => x.name.toLowerCase() === s.name.toLowerCase()) === idx);
+
       let optimized: ResumeData = {
-        ...resume, // preserves education, skills, projects, certifications, languages, contact, etc.
         id: uid("r"),
+        name: result.resume.name || resume.name,
+        headline: result.resume.headline || resume.headline,
+        contact: {
+          email: result.resume.email || resume.contact.email,
+          phone: result.resume.phone || resume.contact.phone,
+          location: result.resume.location || resume.contact.location,
+          website: resume.contact.website,
+          linkedin: resume.contact.linkedin,
+          github: resume.contact.github,
+        },
+        dateOfBirth: result.resume.dateOfBirth || resume.dateOfBirth,
+        summary: result.resume.summary, // AI-written, aviation-tailored summary
+        experience: (result.resume.experience ?? []).length > 0
+          ? (result.resume.experience ?? []).map((e: any) => ({
+              id: uid("e"),
+              title: e.title || "",
+              company: e.company || "",
+              location: e.location || "",
+              startDate: e.startDate || "",
+              endDate: e.endDate || "Present",
+              bullets: e.bullets ?? [],
+            }))
+          : resume.experience,
+        education: (result.resume.education ?? []).length > 0
+          ? (result.resume.education ?? []).map((ed: any) => ({
+              id: uid("ed"),
+              degree: ed.degree || "",
+              institution: ed.institution || "",
+              field: ed.field || "",
+              location: ed.location || "",
+              startDate: ed.startDate || "",
+              endDate: ed.endDate || "",
+              highlights: ed.modules ? [`Modules: ${ed.modules}`] : ed.highlights || [],
+            }))
+          : resume.education,
+        skills,
+        projects: resume.projects, // preserve original projects
+        certifications: resume.certifications, // preserve original certifications
+        languages: (result.resume.languages ?? []).length > 0
+          ? (result.resume.languages ?? []).map((l: any) => ({
+              id: uid("l"),
+              name: l.name || "",
+              proficiency: (l.proficiency || "fluent").toLowerCase() as any,
+              ...(l.note ? { note: l.note } : {}),
+            })) as any
+          : resume.languages,
         template: "infohas-pro",
         accentColor: "#0563C1",
-        source: "ai-optimized",
-        summary: resume.summary, // ALWAYS use the original resume summary — never the critique
-        // Add missing keywords as skills — but DON'T label them "From JD" (that's an analysis artifact)
-        skills: [
-          ...resume.skills,
-          ...result.missing_keywords.map((k) => ({ id: uid("s"), name: k, category: "Skills" })),
-        ].filter((s, idx, arr) => arr.findIndex((x) => x.name.toLowerCase() === s.name.toLowerCase()) === idx),
+        photoUrl: resume.photoUrl, // preserve if user already uploaded one
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
+        source: "ai-optimized-aviation",
+        fileName: resume.fileName,
       };
 
-      // QUALITY GATE — verify the resume is professional, not an analysis report
+      setAiLog((l) => [...l, `Mapped ${optimized.experience.length} experiences, ${optimized.skills.length} skills, ${optimized.languages.length} languages.`]);
+      const summaryLen = optimized.summary?.length ?? 0;
+      setAiLog((l) => [...l, `Summary: ${summaryLen} chars · ${optimized.experience.reduce((n, e) => n + e.bullets.length, 0)} total bullets`]);
+
+      // ============================================================
+      // CONTENT VALIDATION — strip AI error leaks + analysis artifacts
+      // ============================================================
+      const contentCheck = validateResumeContent(optimized);
+      if (!contentCheck.valid && contentCheck.cleanedResume) {
+        setAiLog((l) => [...l, `⚠ Detected ${contentCheck.errors.length} AI error leak(s) — cleaning content...`]);
+        optimized = contentCheck.cleanedResume;
+      }
+
+      // QUALITY GATE — reject analysis/report content, only allow professional resume content
       const qualityCheck = isProfessionalResume(optimized);
       if (!qualityCheck.professional) {
         setAiLog((l) => [...l, `⚠ Quality gate: ${qualityCheck.issues.join("; ")}`]);
-        // The aviation flow preserves the original resume's summary, so this should
-        // always pass. But if somehow analysis text got in, clean it.
         const exportCheck = validateResumeForExport(optimized);
         if (exportCheck.cleanedResume) {
+          setAiLog((l) => [...l, `✓ Cleaned analysis artifacts from resume content.`]);
           optimized = exportCheck.cleanedResume;
         }
       }
@@ -462,7 +550,7 @@ export function Optimizer() {
         actor: "you",
         action: "Resume optimized (Aviation ATS)",
         category: "ai",
-        details: `${profile.system} → score ${result.score}/100 · ${result.matched_keywords.length} keywords matched`,
+        details: `${profile.system} → score ${result.score}/100 · ${result.matched_keywords.length} keywords matched · ${result.charCount} chars`,
         severity: "info",
       });
 
@@ -482,7 +570,7 @@ export function Optimizer() {
 
       setAiThinking(false);
       setStep("done");
-      toast.success(`Aviation ATS optimization complete — score ${result.score}/100`);
+      toast.success(`Aviation ATS optimization complete — score ${result.score}/100 · ${result.charCount} chars`);
     } catch (e: any) {
       setAiLog((l) => [...l, `⚠ ${e?.message || "Aviation optimization failed"}`]);
       setAiThinking(false);
@@ -836,7 +924,14 @@ export function Optimizer() {
                       }
                     }} className="bg-brand hover:bg-brand-dark text-white gap-2"><Icon name="Download" className="w-4 h-4" /> optimized_resume.pdf</Button>
                     {aviationResult ? (
-                      <Button variant="outline" onClick={() => { exportHtmlAsDOC(aviationResult.optimized_content, "optimized_resume", "professional"); incUsage("downloads"); log({ actor: "you", action: "Exported aviation resume (DOC)", category: "export", details: "Times New Roman 12pt · @page A4 · 2,800 chars", severity: "info" }); toast.success("DOC exported — strict A4 one-page layout."); }} className="gap-2" title="Strict A4 one-page Word document (Times New Roman 12pt, @page A4)">
+                      <Button variant="outline" onClick={() => {
+                        // Aviation mode: use the structured optimizedResume (which now contains the AI-rewritten content)
+                        // and export it via the strict A4 one-page DOC pipeline.
+                        exportResumeDOC(optimizedResume);
+                        incUsage("downloads");
+                        log({ actor: "you", action: "Exported aviation resume (DOC)", category: "export", details: `Times New Roman 12pt · @page A4 · ${aviationResult.charCount} chars`, severity: "info" });
+                        toast.success("DOC exported — strict A4 one-page layout.");
+                      }} className="gap-2" title="Strict A4 one-page Word document (Times New Roman 12pt, @page A4)">
                         <Icon name="FileText" className="w-4 h-4" /> optimized_resume.doc
                       </Button>
                     ) : (
@@ -865,7 +960,7 @@ export function Optimizer() {
               <Card>
                 <CardHeader>
                   <CardTitle className="text-base flex items-center gap-2"><Icon name="Plane" className="w-4 h-4 text-amber-600" /> Aviation ATS Score Breakdown</CardTitle>
-                  <CardDescription>From analyzeWithGemini() — {AIRLINE_ATS_PROFILES[airlineProfile]?.system}</CardDescription>
+                  <CardDescription>Aviation ATS optimization — {AIRLINE_ATS_PROFILES[airlineProfile]?.system} · {aviationResult.charCount} chars generated</CardDescription>
                 </CardHeader>
                 <CardContent>
                   <div className="grid sm:grid-cols-4 gap-4 mb-4">

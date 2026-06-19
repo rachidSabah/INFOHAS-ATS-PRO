@@ -6,14 +6,18 @@
 //   3. AIRLINE_ATS_PROFILES — per-airline ATS system configs (Emirates, Qatar, Etihad, …)
 //   4. AppSettings          — tone / format / strictness settings for the optimizer
 //   5. analyzeWithGemini()  — AI function that produces a scored, optimized HTML resume
-//   6. getDocxHtml()        — strict A4 one-page HTML wrapper for .doc/.docx export
+//   6. getAviationOptimizerDirective() — unified directive that merges super-admin
+//      optimizer config with aviation keyword bank + airline profile (returns JSON)
+//   7. aviationOptimize()   — AI call using the unified directive (returns structured JSON)
+//   8. getDocxHtml()        — strict A4 one-page HTML wrapper for .doc/.docx export
 //
 // analyzeWithGemini() routes through our existing callAI() gateway (Puter → server → local),
 // so it inherits the full failover chain. The "Gemini" name is preserved for compatibility
 // with the original spec — in practice any provider can serve it.
 
-import { callAI, extractJSON } from "./ai";
-import type { ResumeData } from "./types";
+import { callAI, extractJSON, getOptimizerDirective } from "./ai";
+import type { OptimizerDirectiveConfig, ResumeData } from "./types";
+import { useApp } from "./store";
 
 // ============================================================================
 // 1. KEYWORD BANKS
@@ -261,6 +265,409 @@ export async function analyzeWithGemini(
     console.error("[analyzeWithGemini] AI Error:", error);
     throw new Error(error.message || "Optimization failed. Please check the text and try again.");
   }
+}
+
+// ============================================================================
+// 4b. UNIFIED AVIATION OPTIMIZER DIRECTIVE
+// ============================================================================
+//
+// This is the production path for Aviation ATS Mode. Unlike analyzeWithGemini()
+// (which returns HTML only), this generator produces a directive that asks the
+// AI for the SAME structured JSON shape as the standard OPTIMIZER_DIRECTIVE,
+// so the Optimizer.tsx mapping pipeline can build a proper ResumeData object
+// (fixing the "short content" bug where aviation mode just kept the original
+// resume content unchanged).
+//
+// It also HONORS the super-admin's Optimizer Directive settings:
+//   - If customDirectiveOverride is set → that becomes the BASE of the directive
+//     (the aviation keyword bank + airline profile are appended).
+//   - Otherwise → the generated directive from the structured config fields is used
+//     as the base, again with aviation context appended.
+// This ensures aviation mode is SYNCHRONIZED with the optimizer directive page.
+
+export interface AviationOptimizeResult {
+  // Structured resume JSON — same shape as OPTIMIZER_DIRECTIVE output
+  resume: {
+    name: string;
+    headline: string;
+    location: string;
+    phone: string;
+    email: string;
+    dateOfBirth: string;
+    summary: string;
+    skills: Array<{ category: string; items: string[] }>;
+    experience: Array<{
+      title: string;
+      company: string;
+      location: string;
+      startDate: string;
+      endDate: string;
+      bullets: string[];
+    }>;
+    education: Array<{
+      degree: string;
+      institution: string;
+      location: string;
+      startDate: string;
+      endDate: string;
+      modules: string;
+    }>;
+    languages: Array<{ name: string; proficiency: string; note: string }>;
+    missingKeywordsAdded: string[];
+    bulletsRewritten: number;
+  };
+  // ATS scoring metadata (kept for backward compat with the old analyzeWithGemini UI panel)
+  score: number;
+  score_breakdown: { impact: number; brevity: number; keywords: number };
+  matched_keywords: string[];
+  missing_keywords: string[];
+  summary_critique: string;
+  // The actual character count of the generated resume content (for the UI badge)
+  charCount: number;
+}
+
+/**
+ * Build the unified aviation directive. Merges:
+ *   1. Super-admin's optimizer directive config (from store, with custom override support)
+ *   2. Aviation keyword bank (cabin crew + broad aviation)
+ *   3. Airline-specific ATS profile (Emirates/Qatar/Etihad/…)
+ *   4. Tone / format / strictness settings
+ *
+ * The directive asks the AI for the SAME JSON shape as OPTIMIZER_DIRECTIVE so the
+ * Optimizer's existing JSON → ResumeData mapping works without changes.
+ */
+export function getAviationOptimizerDirective(
+  airlineProfile: string,
+  settings: AppSettings
+): string {
+  // --- 1. Read super-admin's optimizer config from store ---
+  let baseConfig: OptimizerDirectiveConfig | undefined;
+  try {
+    const state: any = useApp.getState();
+    baseConfig = state?.optimizerDirective;
+  } catch {
+    baseConfig = undefined;
+  }
+
+  const profile = AIRLINE_ATS_PROFILES[airlineProfile] || AIRLINE_ATS_PROFILES.generic;
+  const toneInstruction = settings?.tone || "Balanced";
+  const formatInstruction = settings?.format || "Chronological";
+  const strictnessInstruction =
+    settings?.strictness === "Aggressive"
+      ? "MAXIMUM keyword density — embed every priority keyword naturally."
+      : settings?.strictness === "Conservative"
+        ? "Conservative — embed only the most relevant priority keywords."
+        : "Balanced — embed priority keywords naturally without stuffing.";
+
+  // --- 2. If the super-admin has set a customDirectiveOverride, use it as the BASE ---
+  // This is the synchronization point: aviation mode respects the override.
+  const customOverride = baseConfig?.customDirectiveOverride?.trim();
+  const baseDirective = customOverride
+    ? customOverride
+    : getOptimizerDirective(); // generates from structured config OR falls back to hardcoded
+
+  // --- 3. Build the aviation augmentation layer ---
+  const aviationAugmentation = `
+═══════════════════════════════════════════════════════════════
+AVIATION ATS MODE — ACTIVE (overrides standard flow)
+═══════════════════════════════════════════════════════════════
+TARGET AIRLINE: ${profile.system}
+AIRLINE FOCUS: ${profile.focus}
+AIRLINE PRIORITY KEYWORDS (embed these naturally throughout the resume): ${profile.priorityKeywords?.join(", ") || "(none — use general aviation keywords)"}
+AIRLINE TONE PREFERENCE: ${profile.tone || "Balanced"}
+
+USER-SELECTED TONE: ${toneInstruction}
+USER-SELECTED FORMAT: ${formatInstruction}
+USER-SELECTED STRICTNESS: ${strictnessInstruction}
+
+═══════════════════════════════════════════════════════════════
+AVIATION KEYWORD BANK (weave relevant keywords naturally into summary, skills, and bullets)
+═══════════════════════════════════════════════════════════════
+${CABIN_CREW_KEYWORDS}
+
+${AVIATION_KEYWORDS}
+
+═══════════════════════════════════════════════════════════════
+CONTENT TARGET — STRICT ENFORCEMENT (NON-NEGOTIABLE)
+═══════════════════════════════════════════════════════════════
+Target character count: ~2,900 characters of resume body content (excluding JSON keys/structure).
+Acceptable range: 2,700 – 3,100 characters.
+- 2,100 chars = TOO SHORT — expand bullets, add measurable achievements, deepen technical context.
+- 3,200+ chars = TOO LONG — condense older roles, tighten bullets, merge similar skills.
+HOW TO HIT THE TARGET INTELLIGENTLY:
+1. PROFESSIONAL SUMMARY: 4-6 lines (~60-90 words). Embed 2-3 priority keywords naturally.
+2. EXPERIENCE: For the 2 most recent roles, write 5-7 detailed bullets each. Older roles can have 3 bullets.
+3. Each bullet must START with a strong action verb and QUANTIFY where possible (%, $, counts, time saved, team size, customer volume).
+4. EXPAND weak bullets — never leave a one-line bullet that just says "Responsible for X". Rewrite as "Led X to achieve Y, resulting in Z% improvement".
+5. SKILLS: Group into 3-4 categories with 4-6 items each. Embed priority keywords as skill items where natural.
+6. Never produce a half-empty page — fully utilize the A4 layout.
+
+═══════════════════════════════════════════════════════════════
+AIRLINE-SPECIFIC WRITING GUIDANCE
+═══════════════════════════════════════════════════════════════
+${airlineSpecificWritingGuidance(airlineProfile)}
+
+═══════════════════════════════════════════════════════════════
+DIRECTIVE HIERARCHY (MUST FOLLOW THIS ORDER)
+═══════════════════════════════════════════════════════════════
+1. SUPER-ADMIN OPTIMIZER DIRECTIVE (the base directive above — including any custom override)
+2. AIRLINE ATS PROFILE (priority keywords, tone preference, system-specific requirements)
+3. JOB DESCRIPTION REQUIREMENTS (required skills, responsibilities, keywords)
+4. ORIGINAL RESUME CONTENT (preserve factual information — never invent employers, dates, or metrics)
+5. AVIATION KEYWORD BANK (use relevant terms only — never stuff)
+
+If the super-admin's override directive conflicts with aviation defaults, THE OVERRIDE WINS.
+If the airline priority keywords conflict with the JD, PRIORITIZE THE JD's required skills.
+
+═══════════════════════════════════════════════════════════════
+OUTPUT FORMAT — STRICT JSON
+═══════════════════════════════════════════════════════════════
+Return ONLY valid JSON with this exact shape (no markdown fences, no prose, no HTML):
+{
+  "resume": {
+    "name": "FULL NAME",
+    "headline": "Target Role Title (e.g. Cabin Crew — Emirates Group)",
+    "location": "City, Country",
+    "phone": "+X ...",
+    "email": "...",
+    "dateOfBirth": "DD/MM/YYYY" | "",
+    "summary": "4-6 line professional summary paragraph (~60-90 words) with 2-3 priority keywords embedded naturally...",
+    "skills": [
+      { "category": "Cabin Safety & Emergency Procedures", "items": ["SEP", "Emergency Evacuation", "First Aid", "CPR/AED"] },
+      { "category": "Customer Service Excellence", "items": ["Premium Service", "Conflict Resolution", "Cultural Awareness"] },
+      { "category": "Aviation Operations", "items": ["CRM", "Galley Management", "Turnaround Operations"] },
+      { "category": "Languages", "items": ["English (Fluent)", "Arabic (Conversational)"] }
+    ],
+    "experience": [
+      {
+        "title": "Job Title",
+        "company": "Company",
+        "location": "City, Country",
+        "startDate": "Mon YYYY",
+        "endDate": "Mon YYYY" | "Present",
+        "bullets": [
+          "Strong action verb + measurable achievement + relevant priority keyword...",
+          "..."
+        ]
+      }
+    ],
+    "education": [
+      {
+        "degree": "Degree Name",
+        "institution": "Institution",
+        "location": "City, Country" | "",
+        "startDate": "YYYY",
+        "endDate": "YYYY",
+        "modules": "Module 1, Module 2, ..." | ""
+      }
+    ],
+    "languages": [
+      { "name": "English", "proficiency": "Fluent", "note": "ICAO Level 5" },
+      { "name": "Arabic", "proficiency": "Conversational", "note": "" }
+    ],
+    "missingKeywordsAdded": ["keyword1", "keyword2", ...],
+    "bulletsRewritten": 7
+  },
+  "score": 92,
+  "score_breakdown": { "impact": 90, "brevity": 95, "keywords": 92 },
+  "matched_keywords": ["Multicultural", "Premium Service", ...],
+  "missing_keywords": ["...", "..."],
+  "summary_critique": "Brief internal critique (NOT shown in the resume — analysis only). Max 2 sentences."
+}
+
+CRITICAL RULES:
+- The "resume" object MUST be a complete, professionally written resume — NOT an analysis report.
+- "summary" must be a professional paragraph ABOUT the candidate, never a critique like "The original resume lacks...".
+- "summary_critique" is a separate analysis field — it must NEVER appear in the resume output.
+- Every bullet must quantify impact where possible (%, $, counts, time saved, team size, customer volume).
+- NEVER include provider errors, JSON parse errors, debug messages, or system text in the resume content.
+- NEVER include analysis artifacts ("ATS score", "Matched keywords", "AI Notes", "Optimization applied").
+- The output character count of "resume" (serialized) MUST be ~2,900 chars (±200).
+- ALL priority keywords from the airline profile MUST appear naturally in the resume content.
+`;
+
+  // If using custom override, mark it clearly so the user sees it in logs
+  if (customOverride) {
+    return `${baseDirective}
+
+${aviationAugmentation}
+
+═══════════════════════════════════════════════════════════════
+NOTE: Super-admin's CUSTOM DIRECTIVE OVERRIDE is active. The above aviation
+augmentation is appended to the override. The override takes priority on conflicts.
+═══════════════════════════════════════════════════════════════`;
+  }
+
+  return `${baseDirective}
+
+${aviationAugmentation}`;
+}
+
+/**
+ * Per-airline writing guidance — tells the AI how to frame the content for each carrier's
+ * specific ATS and culture. This goes beyond just keywords — it shapes tone and emphasis.
+ */
+function airlineSpecificWritingGuidance(airline: string): string {
+  const guide: Record<string, string> = {
+    emirates: `Emirates (Workday ATS):
+- Emphasize MULTICULTURAL exposure — Dubai-based global operations, 160+ nationalities served daily.
+- Premium cabin experience is critical — mention luxury service, fine dining, first-class standards.
+- "Diversity" and "Global Mindset" must appear naturally in summary AND skills.
+- Highlight any Arabic language ability or willingness to learn.
+- Tone: Premium, confident, world-class. Avoid casual language.`,
+    qatar: `Qatar Airways (SuccessFactors ATS):
+- Emphasize FIVE-STAR service — award-winning standards, Skytrax ratings.
+- Fast-paced hub operations — Doha connectivity, rapid turnarounds.
+- "Service Excellence" and "Award-Winning" should appear in summary or first bullets.
+- Mention willingness to relocate to Doha if not already there.
+- Tone: Formal, disciplined, premium.`,
+    etihad: `Etihad Aviation Group (Taleo ATS):
+- Abu Dhabi flagship carrier — "Choose Well" brand ethos.
+- Innovation focus — cabin crew inflight innovation, new product launches.
+- "Innovation" and "Service Excellence" priority keywords.
+- Tone: Balanced, modern, aspirational.`,
+    lufthansa: `Lufthansa Group (SAP SuccessFactors):
+- German engineering precision — punctuality, reliability, safety-first.
+- Star Alliance integration — mention multi-airline cooperation if relevant.
+- "Precision", "Safety-First", "Reliability" priority keywords.
+- Tone: Formal, precise, structured. No casual language.`,
+    ryanair: `Ryanair Careers ATS:
+- Low-cost carrier efficiency — fast turnarounds, high-volume operations.
+- "Efficiency", "Punctuality", "On-Time Performance" priority keywords.
+- Sales ability matters — duty-free, ancillary revenue, on-board sales.
+- Tone: Balanced, direct, efficiency-focused.`,
+    singapore: `Singapore Airlines (Workday ATS):
+- "Singapore Girl" service standard — Asian hospitality, refinement, grace.
+- Ultra-long-haul operations — endurance, time-zone management.
+- "Asian Hospitality", "Refinement", "Service Excellence" priority keywords.
+- Tone: Premium, gracious, attentive to detail.`,
+    airfrance: `Air France-KLM ATS:
+- French service elegance — bilingual capability is a plus.
+- Dual-hub (CDG/AMS) — SkyTeam integration.
+- "Elegance", "Bilingual", "Hospitality" priority keywords.
+- Tone: Premium, elegant, warm.`,
+    british: `British Airways (Workday ATS):
+- British heritage service — traditional standards of excellence.
+- London hub (LHR/LGW) — oneworld alliance integration.
+- "Heritage", "Premium", "Service Excellence" priority keywords.
+- Tone: Formal, professional, classic British polish.`,
+    generic: `Generic ATS (Workday / SuccessFactors / Taleo compatible):
+- Use general aviation keywords relevant to the role.
+- Standard cabin crew competency framework.
+- Tone: Balanced, professional.`,
+  };
+  return guide[airline] || guide.generic;
+}
+
+/**
+ * Run the unified aviation optimization. Calls the AI with the unified directive
+ * (which merges super-admin config + aviation keywords + airline profile) and
+ * returns the structured JSON result.
+ *
+ * Unlike analyzeWithGemini() (which returns HTML only), this returns a proper
+ * structured "resume" object that the Optimizer can map directly to ResumeData.
+ */
+export async function aviationOptimize(
+  resume: ResumeData,
+  jobDescription: string,
+  airlineProfile: string,
+  settings: AppSettings
+): Promise<AviationOptimizeResult> {
+  const directive = getAviationOptimizerDirective(airlineProfile, settings);
+  const profile = AIRLINE_ATS_PROFILES[airlineProfile] || AIRLINE_ATS_PROFILES.generic;
+
+  const userPrompt = `SOURCE RESUME (be truthful to this — never invent employers, dates, or metrics):
+${JSON.stringify({
+  name: resume.name,
+  headline: resume.headline,
+  contact: resume.contact,
+  dateOfBirth: resume.dateOfBirth,
+  summary: resume.summary,
+  experience: resume.experience.map((e) => ({
+    title: e.title,
+    company: e.company,
+    location: e.location,
+    startDate: e.startDate,
+    endDate: e.endDate,
+    bullets: e.bullets,
+  })),
+  education: resume.education.map((ed) => ({
+    degree: ed.degree,
+    field: ed.field,
+    institution: ed.institution,
+    location: ed.location,
+    startDate: ed.startDate,
+    endDate: ed.endDate,
+    highlights: ed.highlights,
+  })),
+  skills: resume.skills.map((s) => ({ name: s.name, category: s.category })),
+  languages: resume.languages,
+  certifications: resume.certifications,
+})}
+
+TARGET JOB DESCRIPTION:
+${jobDescription}
+
+TARGET AIRLINE: ${profile.system} (${profile.focus})
+PRIORITY KEYWORDS TO EMBED NATURALLY: ${profile.priorityKeywords?.join(", ") || "(use general aviation keywords)"}
+
+INSTRUCTIONS:
+1. Rewrite the resume to FULLY UTILIZE one A4 page (~2,900 characters of body content).
+2. Embed the airline's priority keywords naturally throughout summary, skills, and bullets.
+3. Expand weak bullets — quantify achievements with %, $, counts, time saved, team size, customer volume.
+4. For the 2 most recent roles: 5-7 detailed bullets each. Older roles: 3 bullets.
+5. Group skills into 3-4 categories with 4-6 items each.
+6. Match the tone preference (${profile.tone || "Balanced"}) of the target airline.
+7. NEVER invent employers, dates, or metrics — only rephrase and expand real content.
+
+Return ONLY the JSON object described in the directive. No prose, no markdown fences.`;
+
+  const result = await callAI({
+    systemPrompt: directive,
+    userPrompt,
+    maxTokens: 5000,
+    temperature: 0.45,
+    taskCategory: "document",
+  });
+
+  // Parse JSON — robustly handle markdown fences, prose preambles, trailing commentary
+  let data: AviationOptimizeResult;
+  try {
+    data = extractJSON<AviationOptimizeResult>(result.text);
+  } catch (parseErr: any) {
+    console.error("[aviationOptimize] JSON extraction failed:", parseErr?.message);
+    console.error("[aviationOptimize] Raw AI response (first 1000 chars):", result.text.slice(0, 1000));
+    throw new Error(`Aviation optimization failed: AI returned non-JSON response. Provider: ${result.provider}. Please try again or switch providers.`);
+  }
+
+  // Validate the resume object exists
+  if (!data.resume || typeof data.resume !== "object") {
+    throw new Error("Aviation optimization failed: AI response missing 'resume' object.");
+  }
+
+  // Validate minimal content
+  if (!data.resume.summary || data.resume.summary.length < 50) {
+    console.warn("[aviationOptimize] Summary is too short or missing — AI may have returned an analysis instead of a resume.");
+  }
+
+  // Compute character count of the serialized resume content (for the UI badge)
+  const charCount = JSON.stringify(data.resume).length;
+  data.charCount = charCount;
+
+  // Normalize score breakdown
+  if (!data.score_breakdown) {
+    data.score_breakdown = { impact: 85, brevity: 90, keywords: data.score || 85 };
+  }
+  if (typeof data.score !== "number") {
+    data.score = Math.round(
+      (data.score_breakdown.impact + data.score_breakdown.brevity + data.score_breakdown.keywords) / 3
+    );
+  }
+  if (!Array.isArray(data.matched_keywords)) data.matched_keywords = [];
+  if (!Array.isArray(data.missing_keywords)) data.missing_keywords = [];
+  if (typeof data.summary_critique !== "string") data.summary_critique = "";
+
+  return data;
 }
 
 /**

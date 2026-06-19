@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, beforeEach } from "vitest";
 import {
   CABIN_CREW_KEYWORDS,
   AVIATION_KEYWORDS,
@@ -7,7 +7,10 @@ import {
   DEFAULT_APP_SETTINGS,
   getDocxHtml,
   resumeToDirectiveHtml,
+  getAviationOptimizerDirective,
 } from "@/lib/ats-directives";
+import { useApp } from "@/lib/store";
+import { SEED_OPTIMIZER_DIRECTIVE } from "@/lib/mock-data";
 import type { ResumeData } from "@/lib/types";
 
 function makeResume(): ResumeData {
@@ -166,5 +169,114 @@ describe("resumeToDirectiveHtml", () => {
     expect(html).not.toContain("<script>");
     expect(html).not.toContain("<SCRIPT>");
     expect(html.toLowerCase()).toContain("&lt;script&gt;");
+  });
+});
+
+// ============================================================================
+// UNIFIED AVIATION OPTIMIZER DIRECTIVE — synchronization tests
+// ============================================================================
+
+describe("getAviationOptimizerDirective", () => {
+  beforeEach(() => {
+    // Reset store to defaults before each test
+    useApp.setState({ optimizerDirective: { ...SEED_OPTIMIZER_DIRECTIVE } });
+  });
+
+  it("returns a non-empty directive string", () => {
+    const d = getAviationOptimizerDirective("emirates", DEFAULT_APP_SETTINGS);
+    expect(typeof d).toBe("string");
+    expect(d.length).toBeGreaterThan(2000);
+  });
+
+  it("includes the airline system name", () => {
+    const d = getAviationOptimizerDirective("emirates", DEFAULT_APP_SETTINGS);
+    expect(d).toContain("Emirates Group Talent ATS (Workday)");
+  });
+
+  it("includes the airline priority keywords", () => {
+    const d = getAviationOptimizerDirective("emirates", DEFAULT_APP_SETTINGS);
+    expect(d).toContain("Multicultural");
+    expect(d).toContain("Premium Service");
+    expect(d).toContain("Diversity");
+    expect(d).toContain("Global Mindset");
+  });
+
+  it("includes the aviation keyword bank", () => {
+    const d = getAviationOptimizerDirective("emirates", DEFAULT_APP_SETTINGS);
+    expect(d).toContain("Cabin Crew Attestation");
+    expect(d).toContain("SEP (Safety and Emergency Procedures)");
+    expect(d).toContain("CRM (Crew Resource Management)");
+  });
+
+  it("includes the ~2,900 character target", () => {
+    const d = getAviationOptimizerDirective("emirates", DEFAULT_APP_SETTINGS);
+    expect(d).toContain("2,900");
+    expect(d).toContain("EXPAND weak bullets");
+  });
+
+  it("requests structured JSON output (not HTML)", () => {
+    const d = getAviationOptimizerDirective("emirates", DEFAULT_APP_SETTINGS);
+    expect(d).toContain('"resume"');
+    expect(d).toContain('"summary"');
+    expect(d).toContain('"experience"');
+    expect(d).toContain('"missingKeywordsAdded"');
+  });
+
+  it("synchronizes with super-admin custom override (takes priority)", () => {
+    useApp.setState({
+      optimizerDirective: {
+        ...SEED_OPTIMIZER_DIRECTIVE,
+        customDirectiveOverride: "MY CUSTOM OVERRIDE — FOCUS ON LEADERSHIP ONLY.",
+      },
+    });
+    const d = getAviationOptimizerDirective("emirates", DEFAULT_APP_SETTINGS);
+    expect(d).toContain("MY CUSTOM OVERRIDE — FOCUS ON LEADERSHIP ONLY.");
+    expect(d).toContain("CUSTOM DIRECTIVE OVERRIDE is active");
+  });
+
+  it("synchronizes with super-admin content limits (summaryMinWords etc.)", () => {
+    useApp.setState({
+      optimizerDirective: {
+        ...SEED_OPTIMIZER_DIRECTIVE,
+        summaryMinWords: 80,
+        summaryMaxWords: 120,
+        experienceBulletsPerEntry: 7,
+        customDirectiveOverride: "",
+      },
+    });
+    const d = getAviationOptimizerDirective("emirates", DEFAULT_APP_SETTINGS);
+    // The base directive (from getOptimizerDirective) should reflect these values
+    expect(d).toContain("80");
+    expect(d).toContain("120");
+    expect(d).toContain("7 bullets");
+  });
+
+  it("adapts tone instruction based on strictness setting", () => {
+    const aggressive = getAviationOptimizerDirective("emirates", {
+      ...DEFAULT_APP_SETTINGS,
+      strictness: "Aggressive",
+    });
+    expect(aggressive).toContain("MAXIMUM keyword density");
+
+    const conservative = getAviationOptimizerDirective("emirates", {
+      ...DEFAULT_APP_SETTINGS,
+      strictness: "Conservative",
+    });
+    expect(conservative).toContain("Conservative");
+  });
+
+  it("falls back gracefully when store is unavailable (uses hardcoded directive)", () => {
+    // Temporarily unset optimizerDirective to simulate SSR / missing config
+    const original = useApp.getState().optimizerDirective;
+    useApp.setState({ optimizerDirective: undefined as any });
+    try {
+      const d = getAviationOptimizerDirective("emirates", DEFAULT_APP_SETTINGS);
+      // Should still return a usable directive (from OPTIMIZER_DIRECTIVE hardcoded fallback)
+      expect(typeof d).toBe("string");
+      expect(d.length).toBeGreaterThan(1000);
+      expect(d).toContain("Emirates Group Talent ATS");
+    } finally {
+      useApp.setState({ optimizerDirective: original });
+    }
   });
 });
