@@ -2,7 +2,7 @@
 
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Badge, Icon, ScoreRing } from "@/components/shared";
+import { Badge, Icon } from "@/components/shared";
 import { useApp } from "@/lib/store";
 import {
   AreaChart, Area, BarChart, Bar, PieChart, Pie, Cell,

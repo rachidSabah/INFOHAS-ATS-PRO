@@ -66,7 +66,7 @@ export function Hero() {
               <a href="#ats-demo">
                 <Button size="lg" variant="outline" className="gap-2">
                   <Icon name="ScanText" className="w-4 h-4" />
-                  Try the ATS demo
+                  Try the ATS checker
                 </Button>
               </a>
             </motion.div>

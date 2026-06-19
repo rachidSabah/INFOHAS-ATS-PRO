@@ -6,7 +6,7 @@ import type { User, UserStatus } from "./types";
 /**
  * Hash a password using a client-side hash (NOT bcrypt — bcrypt requires Node.js).
  * In production, this would be done server-side via Cloudflare Workers with bcrypt.
- * For now we use a salted SHA-256 hash which is adequate for the demo.
+ * For now we use a salted SHA-256 hash which is adequate for this application.
  */
 export function hashPassword(password: string): string {
   // Simple salted hash — in production use bcrypt via Workers

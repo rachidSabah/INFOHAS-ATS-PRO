@@ -103,7 +103,7 @@ const URL_RE = /(https?:\/\/[^\s]+|linkedin\.com\/[^\s]+|github\.com\/[^\s]+)/i;
 
 /**
  * Heuristic resume text → ResumeData extractor.
- * Not perfect, but good enough for the demo and to seed the builder.
+ * Not perfect, but good enough for initial parsing and to seed the builder.
  */
 export function extractResumeFromText(text: string, fileName: string): ResumeData {
   const lines = text.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);

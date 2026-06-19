@@ -33,7 +33,7 @@ export function ATSDemo() {
       <div className="absolute inset-0 dot-bg opacity-40" aria-hidden />
       <div className="relative mx-auto max-w-7xl px-4 sm:px-6">
         <SectionTitle
-          eyebrow="Live ATS demo"
+          eyebrow="Live ATS checker"
           title={<>See your score <span className="gradient-text">jump in seconds.</span></>}
           subtitle="A real resume scored against a real job description. Toggle the optimizer and watch the numbers climb."
         />

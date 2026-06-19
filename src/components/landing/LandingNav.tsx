@@ -10,7 +10,7 @@ import { BRAND } from "@/lib/brand";
 
 const NAV = [
   { href: "#features", label: "Features" },
-  { href: "#ats-demo", label: "ATS Demo" },
+  { href: "#ats-demo", label: "ATS Checker" },
   { href: "#templates", label: "Templates" },
   { href: "#testimonials", label: "Testimonials" },
   { href: "#faq", label: "FAQ" },

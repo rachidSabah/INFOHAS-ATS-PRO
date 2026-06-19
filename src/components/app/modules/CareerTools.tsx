@@ -12,7 +12,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge, Icon } from "@/components/shared";
 import { useApp, uid } from "@/lib/store";
-import { callAI } from "@/lib/ai";
+import { callAI, extractJSON } from "@/lib/ai";
 import { toast } from "sonner";
 import type { ResumeData } from "@/lib/types";
 
@@ -62,7 +62,7 @@ export function LinkedinImport() {
         maxTokens: 3000,
         taskCategory: "document",
       });
-      const data = JSON.parse(result.text.replace(/```json|```/g, "").trim());
+      const data = extractJSON<any>(result.text);
       const resume: ResumeData = {
         id: uid("r"), name: data.name || "Imported", headline: data.headline || "",
         contact: data.contact || { linkedin: url }, summary: data.summary || "",
@@ -164,7 +164,7 @@ export function MultiLanguage() {
         userPrompt: `Translate this resume to ${lang}:\n\n${JSON.stringify({ name: resume.name, headline: resume.headline, summary: resume.summary, experience: resume.experience, education: resume.education, skills: resume.skills, languages: resume.languages })}\n\nReturn the translated resume as JSON with the same structure.`,
         maxTokens: 3000, taskCategory: "document",
       });
-      const data = JSON.parse(result.text.replace(/```json|```/g, "").trim());
+      const data = extractJSON<any>(result.text);
       const translated: ResumeData = { ...resume, id: uid("r"), name: data.name, headline: data.headline, summary: data.summary, experience: data.experience, education: data.education, skills: data.skills, languages: data.languages, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
       addResume(translated);
       toast.success(`Resume translated to ${lang}`);
@@ -284,7 +284,7 @@ export function BulkGenerator() {
           userPrompt: `Resume: ${JSON.stringify({ name: resume.name, headline: resume.headline, summary: resume.summary, experience: resume.experience, skills: resume.skills })}\n\nJob ${i + 1}: ${jdList[i].slice(0, 500)}`,
           maxTokens: 2000, taskCategory: "document",
         });
-        const data = JSON.parse(result.text.replace(/```json|```/g, "").trim());
+        const data = extractJSON<any>(result.text);
         const optimized: ResumeData = { ...resume, id: uid("r"), headline: data.headline, summary: data.summary, skills: data.skills, experience: data.experience, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
         addResume(optimized);
         setResults((r) => [...r, `✓ Resume ${i + 1} generated for: ${jdList[i].slice(0, 40)}...`]);

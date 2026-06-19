@@ -4,7 +4,7 @@
 //      Honors the user's chosen model, API key, base URL, and auth type.
 //   1. Puter.js (free, user authenticates with Google/GitHub/etc via Puter). Loaded from layout.
 //   2. Server-side /api/ai/chat (Z.ai REST fallback) — used when Puter is unavailable.
-//   3. Local rule-based fallback (deterministic, always works for the demo).
+//   3. Local rule-based fallback (deterministic, always works as offline mode).
 //
 // All AI calls are wrapped in failover with try/catch + provider rotation.
 
@@ -631,7 +631,7 @@ export interface AICallOptions {
   userPrompt: string;
   maxTokens?: number;
   temperature?: number;
-  // If true, prefer the local generator (no network). Used for instant demo.
+  // If true, prefer the local generator (no network). Used for offline mode.
   preferLocal?: boolean;
   // If true, force the server route.
   preferServer?: boolean;
@@ -1103,7 +1103,7 @@ export async function callAI(opts: AICallOptions): Promise<AICallResult> {
 }
 
 /**
- * Deterministic local generator — produces useful, structured output for the demo.
+ * Deterministic local generator — produces useful, structured output for offline mode.
  * Inspects the prompt for keywords (cover letter, interview, summary, bullets, jd, ats)
  * and returns a templated but tailored response.
  */
