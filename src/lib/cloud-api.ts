@@ -184,7 +184,17 @@ export async function syncAllFromCloud(store: any): Promise<void> {
     if (providers.length) store.setState({ providers });
     if (prompts.length) store.setState({ prompts });
     if (logs.length) store.setState({ logs });
-    if (brandingRes.branding && Object.keys(brandingRes.branding).length > 0) store.setState({ branding: brandingRes.branding });
+    if (brandingRes.branding && Object.keys(brandingRes.branding).length > 0) {
+      store.setState({ branding: brandingRes.branding });
+      // Also restore optimizerDirective if it was stored as part of branding settings
+      const bd: any = brandingRes.branding;
+      if (bd.optimizerDirective && typeof bd.optimizerDirective === "object") {
+        store.setState({ optimizerDirective: bd.optimizerDirective });
+      }
+      if (bd.aiDevSettings && typeof bd.aiDevSettings === "object") {
+        store.setState({ aiDevSettings: bd.aiDevSettings });
+      }
+    }
     if (flagsRes.flags) store.setState({ flags: flagsRes.flags });
   } catch (e) {
     console.error("[syncAllFromCloud] Error:", e);

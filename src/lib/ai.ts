@@ -360,12 +360,18 @@ export function getOptimizerDirective(): string {
     const c: OptimizerDirectiveConfig | undefined = state?.optimizerDirective;
 
     // If no config in store, use the hardcoded default
-    if (!c) return OPTIMIZER_DIRECTIVE;
+    if (!c) {
+      console.info("[getOptimizerDirective] No config in store, using hardcoded default");
+      return OPTIMIZER_DIRECTIVE;
+    }
 
     // If custom override is set, use it completely
     if (c.customDirectiveOverride?.trim()) {
+      console.info("[getOptimizerDirective] Using custom override from super admin settings");
       return c.customDirectiveOverride.trim();
     }
+
+    console.info("[getOptimizerDirective] Using generated directive from structured config (no override set)");
 
     // Otherwise, generate from the structured config
     return `You are the ResumeAI Pro Optimizer. You MUST preserve the EXACT layout framework described below. Only modify CONTENT — never modify LAYOUT, section order, content density, photo position, or the compact recruiter-friendly structure.
@@ -1105,8 +1111,22 @@ function localGenerate(opts: AICallOptions): string {
   const prompt = (opts.userPrompt || "").toLowerCase();
   const sp = (opts.systemPrompt || "").toLowerCase();
 
-  // Check for the OPTIMIZER_DIRECTIVE first — it needs JSON output
-  if (sp.includes("resumeai pro optimizer") || sp.includes("infohas pro template") || (sp.includes("return json format only") && prompt.includes("source resume"))) {
+  // Check for the OPTIMIZER_DIRECTIVE — it needs JSON output.
+  // Match ANY of these patterns so both the default directive and custom
+  // overrides are detected:
+  //   - "resumeai pro optimizer" (default directive)
+  //   - "infohas pro template" (default directive)
+  //   - "source resume" in the prompt + "return json" in the system prompt
+  //   - "optimize" in the prompt + "json" in the system prompt
+  //   - any system prompt > 500 chars that asks for JSON output with a resume
+  const isOptimizerTask =
+    sp.includes("resumeai pro optimizer") ||
+    sp.includes("infohas pro template") ||
+    sp.includes("output contract") ||
+    (sp.includes("return json") && prompt.includes("source resume")) ||
+    (sp.includes("json") && prompt.includes("source resume") && prompt.includes("target job description"));
+
+  if (isOptimizerTask) {
     return localOptimize(opts.userPrompt);
   }
   // Check for the aviation directive
