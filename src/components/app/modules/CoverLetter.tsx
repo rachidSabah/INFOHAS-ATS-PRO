@@ -45,6 +45,7 @@ export function CoverLetter() {
         systemPrompt: `You are an expert cover letter writer. Write a ${template === "email" ? "short email-style cover letter (~180 words)" : template === "executive" ? "executive cover letter (~300 words, strategic and outcomes-led)" : template === "traditional" ? "traditional, formal cover letter (~280 words)" : "modern, conversational cover letter (~280 words)"} for the candidate. Open with a specific, non-generic hook. Close with a confident CTA. Plain text only — no Markdown.`,
         userPrompt: `Candidate resume:\n${resume ? JSON.stringify({ name: resume.name, headline: resume.headline, summary: resume.summary, experience: resume.experience.map(e => ({ title: e.title, company: e.company, bullets: e.bullets })) }) : "(no resume)"}\n\nJob description:\n${jd ? jd.rawText ?? JSON.stringify({ title: jd.title, company: jd.company, responsibilities: jd.responsibilities }) : "(no JD — use the candidate's resume to suggest a generic role)"}\n\nWrite the cover letter now.`,
         maxTokens: 1200,
+        taskCategory: "document",
       });
 
       const cl: CoverLetter = {

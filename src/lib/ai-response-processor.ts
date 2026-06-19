@@ -1,0 +1,370 @@
+// ResumeAI Pro — AI Response Processing Layer
+// This layer sits BETWEEN the AI provider response and the resume builder.
+// It detects response type, validates, normalizes, and prevents ANY error
+// from leaking into the generated document.
+//
+// Pipeline:
+//   Provider Response → Response Type Detection → Validation → Normalization → Resume Builder
+//
+// If JSON parsing fails:
+//   JSON Repair → Retry → Fallback Provider → User Notification
+//   NEVER render errors inside PDF or DOCX.
+
+"use client";
+
+import { extractJSON } from "./ai";
+import type { ResumeData } from "./types";
+
+export type ResponseType = "json" | "markdown" | "plain_text" | "streaming" | "tool_call" | "error";
+
+export interface ProcessedAIResponse<T = any> {
+  success: boolean;
+  type: ResponseType;
+  data: T | null;
+  rawText: string;
+  normalizedText: string;
+  errors: string[];
+  warnings: string[];
+  provider: string;
+  // If true, the response is safe to use in a document
+  safeForDocument: boolean;
+  // If the response was repaired (JSON fixed, errors stripped, etc.)
+  repaired: boolean;
+  repairActions: string[];
+}
+
+/**
+ * ERROR LEAK PATTERNS — comprehensive list of patterns that MUST NEVER
+ * appear in a generated resume, cover letter, interview, or PDF.
+ *
+ * If ANY of these are found in the AI response, the response is either
+ * repaired (stripped) or rejected entirely.
+ */
+const LEAK_PATTERNS: RegExp[] = [
+  // Explicit error messages
+  /optimization incomplete/i,
+  /ai did not return/i,
+  /ai returned non-?json/i,
+  /failed to (generate|parse|optimize|produce)/i,
+  /fallback (to|result|mode)/i,
+  /provider (error|failed|unavailable)/i,
+  /json (error|parse error|extraction failed)/i,
+  /system (error|message|response)/i,
+  /debug (info|message|output)/i,
+  /retry (failed|attempt|message)/i,
+  /raw ai response/i,
+  /raw response/i,
+  /please try again/i,
+  /check that your (default )?ai provider/i,
+  /prose response/i,
+  /non-?json output/i,
+  /unexpected token/i,
+  /syntaxerror/i,
+  /referenceerror/i,
+  /typeerror/i,
+  // HTTP error codes
+  /\b429\b/i,
+  /\b401\b/i,
+  /\b403\b/i,
+  /\b404\b/i,
+  /\b500\b/i,
+  /rate.?limit/i,
+  /too.?many.?requests/i,
+  /quota.?exceeded/i,
+  /api.?key.?invalid/i,
+  /authentication.?failed/i,
+  /model.?not.?found/i,
+  /not_found_error/i,
+  /insufficient.?quota/i,
+  /service.?unavailable/i,
+  /internal.?server.?error/i,
+  /connection.?(refused|timeout|failed)/i,
+  /ECONNREFUSED/i,
+  /ETIMEDOUT/i,
+  // Provider names leaking
+  /provider:\s*local\s*engine/i,
+  /provider:\s*puter/i,
+  /provider:\s*deepseek/i,
+  /provider:\s*opencode/i,
+  /local engine/i,
+  // Code-like patterns
+  /\bundefined\b/i,
+  /\[object object\]/i,
+  /```json/i,
+  /```\s*$/m,
+  // ATS/optimization metadata
+  /\b(ats score|keyword match|requirements match|optimization notes|ai notes)\b/i,
+  // Stack traces
+  /at\s+\w+\s+\([^)]+\):\d+:\d+/i,
+  /at\s+Object\./i,
+  /at\s+async/i,
+  // Forbidden section titles
+  /\b(requirements match|ats analysis|keyword match|additional information|ai notes|optimization notes|provider errors|system messages|debug information)\b/i,
+];
+
+/**
+ * Detect the type of AI response.
+ */
+export function detectResponseType(text: string): ResponseType {
+  if (!text || !text.trim()) return "error";
+  const trimmed = text.trim();
+
+  // Check for JSON
+  if (trimmed.startsWith("{") || trimmed.startsWith("[")) return "json";
+  if (/```json/i.test(trimmed)) return "json";
+
+  // Check for markdown
+  if (/^#{1,6}\s/m.test(trimmed) || /\*\*[^*]+\*\*/m.test(trimmed)) return "markdown";
+
+  // Check for tool/function call
+  if (/tool_call|function_call/i.test(trimmed)) return "tool_call";
+
+  // Check for error patterns
+  if (LEAK_PATTERNS.some((p) => p.test(trimmed))) return "error";
+
+  return "plain_text";
+}
+
+/**
+ * Check if text contains any error leak patterns.
+ * Returns the list of matched patterns.
+ */
+export function detectLeaks(text: string): string[] {
+  const leaks: string[] = [];
+  for (const pattern of LEAK_PATTERNS) {
+    if (pattern.test(text)) {
+      leaks.push(pattern.source);
+    }
+  }
+  return leaks;
+}
+
+/**
+ * Strip error leak patterns from text.
+ * Returns the cleaned text and the list of repairs made.
+ */
+export function stripLeaks(text: string): { cleaned: string; repairs: string[] } {
+  const repairs: string[] = [];
+  let cleaned = text;
+
+  for (const pattern of LEAK_PATTERNS) {
+    if (pattern.test(cleaned)) {
+      cleaned = cleaned.replace(pattern, "");
+      repairs.push(`Stripped pattern: ${pattern.source.slice(0, 40)}`);
+    }
+  }
+
+  // Clean up extra whitespace
+  cleaned = cleaned.replace(/\n{3,}/g, "\n\n").replace(/\s{2,}/g, " ").trim();
+
+  return { cleaned, repairs };
+}
+
+/**
+ * Attempt to repair malformed JSON.
+ * Common issues: trailing commas, unquoted keys, single quotes, comments.
+ */
+export function repairJSON(text: string): { json: any | null; repaired: boolean; repairs: string[] } {
+  const repairs: string[] = [];
+  let cleaned = text.trim();
+
+  // Strip markdown fences
+  cleaned = cleaned.replace(/```json/gi, "").replace(/```/g, "").trim();
+
+  // Try direct parse first
+  try {
+    return { json: JSON.parse(cleaned), repaired: false, repairs: [] };
+  } catch {
+    // Continue to repair
+  }
+
+  // Fix 1: Remove trailing commas
+  const noTrailingCommas = cleaned.replace(/,\s*([}\]])/g, "$1");
+  if (noTrailingCommas !== cleaned) {
+    repairs.push("Removed trailing commas");
+    cleaned = noTrailingCommas;
+  }
+
+  // Fix 2: Quote unquoted keys
+  const quotedKeys = cleaned.replace(/([{,]\s*)(\w+)(\s*:)/g, '$1"$2"$3');
+  if (quotedKeys !== cleaned) {
+    repairs.push("Quoted unquoted keys");
+    cleaned = quotedKeys;
+  }
+
+  // Fix 3: Replace single quotes with double quotes
+  const doubleQuotes = cleaned.replace(/'/g, '"');
+  if (doubleQuotes !== cleaned) {
+    repairs.push("Replaced single quotes with double quotes");
+    cleaned = doubleQuotes;
+  }
+
+  // Fix 4: Extract JSON object from prose
+  const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
+  if (jsonMatch && jsonMatch[0] !== cleaned) {
+    repairs.push("Extracted JSON from prose preamble");
+    cleaned = jsonMatch[0];
+  }
+
+  // Try to parse the repaired JSON
+  try {
+    return { json: JSON.parse(cleaned), repaired: true, repairs };
+  } catch {
+    // Still failed
+    return { json: null, repaired: false, repairs };
+  }
+}
+
+/**
+ * Process an AI response through the full pipeline:
+ *   1. Detect response type
+ *   2. Check for error leaks
+ *   3. If JSON: repair if needed
+ *   4. Strip any remaining leaks
+ *   5. Validate safety for document rendering
+ *
+ * Returns a ProcessedAIResponse that tells the caller whether the response
+ * is safe to use in a document.
+ */
+export function processAIResponse<T = any>(
+  rawText: string,
+  provider: string,
+  options?: { expectJson?: boolean },
+): ProcessedAIResponse<T> {
+  const repairActions: string[] = [];
+  const errors: string[] = [];
+  const warnings: string[] = [];
+
+  // Step 1: Detect response type
+  const type = detectResponseType(rawText);
+
+  // Step 2: Check for error leaks
+  const leaks = detectLeaks(rawText);
+  if (leaks.length > 0) {
+    warnings.push(`Detected ${leaks.length} error leak pattern(s)`);
+  }
+
+  // Step 3: If JSON expected, try to parse + repair
+  let data: T | null = null;
+  let normalizedText = rawText;
+
+  if (options?.expectJson || type === "json") {
+    // Try extractJSON first (handles prose preambles, markdown fences)
+    try {
+      data = extractJSON<T>(rawText);
+    } catch {
+      // extractJSON failed — try repair
+      const repair = repairJSON(rawText);
+      if (repair.json) {
+        data = repair.json as T;
+        repairActions.push(...repair.repairs);
+        repairActions.push("JSON repaired successfully");
+      } else {
+        errors.push("JSON parsing failed even after repair");
+      }
+    }
+  }
+
+  // Step 4: Strip leaks from the text
+  if (leaks.length > 0) {
+    const stripped = stripLeaks(rawText);
+    normalizedText = stripped.cleaned;
+    repairActions.push(...stripped.repairs);
+  }
+
+  // Step 5: Validate safety for document rendering
+  const remainingLeaks = detectLeaks(normalizedText);
+  const safeForDocument = remainingLeaks.length === 0 && type !== "error";
+
+  if (remainingLeaks.length > 0) {
+    errors.push(`${remainingLeaks.length} error leak(s) could not be stripped — response is NOT safe for documents`);
+  }
+
+  return {
+    success: data !== null || (type !== "error" && safeForDocument),
+    type,
+    data,
+    rawText,
+    normalizedText,
+    errors,
+    warnings,
+    provider,
+    safeForDocument,
+    repaired: repairActions.length > 0,
+    repairActions,
+  };
+}
+
+/**
+ * Validate a resume for document safety.
+ * This is the FINAL check before rendering to PDF/DOCX.
+ * If this returns false, the resume MUST NOT be rendered.
+ */
+export function validateResumeForExport(resume: ResumeData): {
+  valid: boolean;
+  errors: string[];
+  cleanedResume: ResumeData | null;
+} {
+  const errors: string[] = [];
+  const allText = [
+    resume.name,
+    resume.headline,
+    resume.summary,
+    ...resume.experience.flatMap((e) => [e.title, e.company, ...e.bullets]),
+    ...resume.skills.map((s) => s.name),
+    ...resume.education.flatMap((ed) => [ed.degree, ed.institution, ...(ed.highlights || [])]),
+    ...resume.languages.map((l) => `${l.name} ${l.proficiency}`),
+  ].filter(Boolean).join(" ");
+
+  const leaks = detectLeaks(allText);
+  if (leaks.length > 0) {
+    errors.push(`Found ${leaks.length} error leak(s) in resume content`);
+  }
+
+  if (errors.length > 0) {
+    // Try to clean the resume
+    const cleaned = stripLeaksFromResume(resume);
+    return { valid: false, errors, cleanedResume: cleaned };
+  }
+
+  return { valid: true, errors: [], cleanedResume: resume };
+}
+
+/**
+ * Strip error leaks from all text fields in a resume.
+ * Returns null if the resume is unsalvageable (too many leaks).
+ */
+function stripLeaksFromResume(resume: ResumeData): ResumeData | null {
+  const clean = (text: string): string => {
+    let cleaned = text;
+    for (const pattern of LEAK_PATTERNS) {
+      cleaned = cleaned.replace(pattern, "");
+    }
+    return cleaned.replace(/\s+/g, " ").trim();
+  };
+
+  const cleaned: ResumeData = {
+    ...resume,
+    summary: clean(resume.summary || ""),
+    experience: resume.experience.map((e) => ({
+      ...e,
+      title: clean(e.title),
+      company: clean(e.company),
+      bullets: e.bullets.map(clean).filter((b) => b.length > 0),
+    })),
+    skills: resume.skills.filter((s) => detectLeaks(s.name).length === 0),
+    education: resume.education.map((ed) => ({
+      ...ed,
+      degree: clean(ed.degree),
+      institution: clean(ed.institution),
+      highlights: ed.highlights?.map(clean).filter((h) => h.length > 0),
+    })),
+    languages: resume.languages.filter((l) => detectLeaks(`${l.name} ${l.proficiency}`).length === 0),
+  };
+
+  // If summary is too short after cleaning, the resume is unsalvageable
+  if (!cleaned.summary || cleaned.summary.length < 30) return null;
+  if (cleaned.experience.length === 0) return null;
+
+  return cleaned;
+}

@@ -9,6 +9,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Badge, Icon } from "@/components/shared";
 import { useApp, uid } from "@/lib/store";
 import { callAI, extractJSON } from "@/lib/ai";
+import { processAIResponse } from "@/lib/ai-response-processor";
 import { toast } from "sonner";
 import type { JobDescription } from "@/lib/types";
 
@@ -92,9 +93,40 @@ export function JDScraper() {
         systemPrompt: "You are a job description parser. Extract structured data. Return ONLY valid JSON.",
         userPrompt: `Extract from this job description:\n\n${rawText}\n\nReturn JSON with keys: title, company, location, employmentType, salary, responsibilities (array of strings), requiredSkills (array), preferredSkills (array), technologies (array), experienceYears, education, keywords (array of 8-15 most important).`,
         maxTokens: 2000,
+        taskCategory: "document", // Use API providers only (never Puter)
       });
-      const cleaned = result.text.replace(/```json|```/g, "").trim();
-      const data = extractJSON<any>(result.text);
+
+      // Process through the AI Response Processing Layer — this catches
+      // errors, repairs JSON, strips leaks, and validates safety
+      const processed = processAIResponse<any>(result.text, result.provider, { expectJson: true });
+
+      if (!processed.data) {
+        // JSON parsing failed even after repair — use heuristic fallback
+        setLogLines((l) => [...l, "⚠ AI did not return valid JSON — using heuristic fallback extraction."]);
+        const words = rawText.toLowerCase().match(/\b[a-z][a-z0-9+#.]+\b/g) ?? [];
+        const freq: Record<string, number> = {};
+        for (const w of words) if (w.length > 2) freq[w] = (freq[w] || 0) + 1;
+        const keywords = Object.entries(freq).sort((a, b) => b[1] - a[1]).slice(0, 12).map(([k]) => k);
+        const jd: JobDescription = {
+          id: uid("jd"),
+          title: "Parsed role",
+          keywords,
+          responsibilities: [],
+          requiredSkills: [],
+          preferredSkills: [],
+          technologies: [],
+          rawText,
+          source: url ? "url" : "text",
+          url: url || undefined,
+          createdAt: new Date().toISOString(),
+        };
+        addJD(jd);
+        toast.success(`Extracted ${keywords.length} keywords (heuristic fallback).`);
+        setExtracting(false);
+        return;
+      }
+
+      const data = processed.data;
       const jd: JobDescription = {
         id: uid("jd"),
         title: data.title || "Untitled role",

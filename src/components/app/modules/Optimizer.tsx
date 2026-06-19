@@ -11,6 +11,7 @@ import { useApp, uid } from "@/lib/store";
 import { parseResumeFile } from "@/lib/parser";
 import { scoreATS } from "@/lib/ats";
 import { callAI, OPTIMIZER_DIRECTIVE, getOptimizerDirective, extractJSON } from "@/lib/ai";
+import { processAIResponse, validateResumeForExport } from "@/lib/ai-response-processor";
 import { analyzeJobIntelligence, type JobIntelligence } from "@/lib/job-intelligence";
 import { computeRelevanceScore, type RelevanceScore } from "@/lib/relevance-engine";
 import { runValidationPipeline, type PipelineResult } from "@/lib/output-validator";
@@ -85,6 +86,7 @@ export function Optimizer() {
         systemPrompt: "You are a job description parser. Extract structured data from the job description text. Return ONLY valid JSON.",
         userPrompt: `Extract from this job description:\n\n${jdText}\n\nReturn JSON with keys: title, company, location, employmentType, salary, responsibilities (array), requiredSkills (array), preferredSkills (array), technologies (array), experienceYears, education, keywords (array of 8-15).`,
         maxTokens: 2000,
+        taskCategory: "document",
       });
       // Robustly extract JSON — handles prose preambles, markdown fences, etc.
       const data = extractJSON<any>(result.text);
@@ -178,19 +180,33 @@ export function Optimizer() {
         })}\n\nTARGET JOB DESCRIPTION:\n${jdParsed.rawText ?? JSON.stringify({ title: jdParsed.title, company: jdParsed.company, responsibilities: jdParsed.responsibilities, requiredSkills: jdParsed.requiredSkills, keywords: jdParsed.keywords })}\n\nMISSING KEYWORDS TO EMBED NATURALLY: ${beforeReport.missingKeywords.join(", ") || "(none — focus on rewriting for impact)"}\n\nReturn ONLY the JSON object described in the directive. No prose, no markdown fences.`,
         maxTokens: 4000,
         temperature: 0.4,
+        taskCategory: "document",
       });
       provider = result.provider;
       setAiLog((l) => [...l, `AI produced structured output via ${provider}.`]);
 
-      // Parse the JSON response using the robust extractJSON helper — handles
-      // markdown fences, leading prose ("Here is your optimized resume:"),
-      // trailing commentary, and partial JSON. Throws only if no JSON object
-      // can be found anywhere in the response.
+      // ============================================================
+      // AI RESPONSE PROCESSING LAYER
+      // Process the AI response through the full pipeline:
+      //   detect type → validate → repair JSON → strip leaks → normalize
+      // This ensures NO error messages, provider names, or debug info
+      // ever leak into the generated resume.
+      // ============================================================
+      const processed = processAIResponse<any>(result.text, provider, { expectJson: true });
+
+      if (processed.repaired) {
+        setAiLog((l) => [...l, `Response repaired: ${processed.repairActions.join(", ")}`]);
+      }
+      if (processed.warnings.length > 0) {
+        setAiLog((l) => [...l, `Warnings: ${processed.warnings.join("; ")}`]);
+      }
+
       let data: any;
-      try {
-        data = extractJSON<any>(result.text);
-      } catch (parseError: any) {
-        throw new Error(`AI returned non-JSON response (provider: ${provider}). ${parseError?.message || ""} Falling back to rule-based optimization.`);
+      if (processed.data) {
+        data = processed.data;
+      } else {
+        // JSON parsing failed even after repair — fall back to rule-based
+        throw new Error(`AI returned non-JSON response after repair attempts. Falling back to rule-based optimization.`);
       }
 
       // Map the AI's InfoHAS Pro JSON shape to our ResumeData type
@@ -762,7 +778,20 @@ export function Optimizer() {
                 <CardHeader><CardTitle className="text-base">Download your optimized resume</CardTitle></CardHeader>
                 <CardContent>
                   <div className="flex flex-wrap gap-2">
-                    <Button onClick={() => { const r = exportResumePDF(optimizedResume, { enforceOnePage: true }); if (r.ok) { incUsage("downloads"); toast.success("PDF exported — 1 A4 page."); } else toast.error(r.error || "Export failed."); }} className="bg-brand hover:bg-brand-dark text-white gap-2"><Icon name="Download" className="w-4 h-4" /> optimized_resume.pdf</Button>
+                    <Button onClick={() => {
+                      // FINAL validation before PDF export — no error leaks allowed
+                      const exportCheck = validateResumeForExport(optimizedResume);
+                      if (!exportCheck.valid && exportCheck.cleanedResume) {
+                        toast.warning("Cleaned error leaks from resume before export.");
+                        const r = exportResumePDF(exportCheck.cleanedResume, { enforceOnePage: true });
+                        if (r.ok) { incUsage("downloads"); toast.success("PDF exported — 1 A4 page."); } else toast.error(r.error || "Export failed.");
+                      } else if (!exportCheck.valid) {
+                        toast.error("Resume contains errors and cannot be exported. Please regenerate.");
+                      } else {
+                        const r = exportResumePDF(optimizedResume, { enforceOnePage: true });
+                        if (r.ok) { incUsage("downloads"); toast.success("PDF exported — 1 A4 page."); } else toast.error(r.error || "Export failed.");
+                      }
+                    }} className="bg-brand hover:bg-brand-dark text-white gap-2"><Icon name="Download" className="w-4 h-4" /> optimized_resume.pdf</Button>
                     {aviationResult ? (
                       <Button variant="outline" onClick={() => { exportHtmlAsDOC(aviationResult.optimized_content, "optimized_resume", "professional"); incUsage("downloads"); log({ actor: "you", action: "Exported aviation resume (DOC)", category: "export", details: "Times New Roman 12pt · @page A4 · 2,800 chars", severity: "info" }); toast.success("DOC exported — strict A4 one-page layout."); }} className="gap-2" title="Strict A4 one-page Word document (Times New Roman 12pt, @page A4)">
                         <Icon name="FileText" className="w-4 h-4" /> optimized_resume.doc

@@ -42,6 +42,7 @@ export function Interview() {
         systemPrompt: "You are an expert interview coach. Generate a balanced interview prep package. Return ONLY valid JSON.",
         userPrompt: `Generate an interview prep package for ${jd?.title ?? "the role"}${jd?.company ? ` at ${jd.company}` : ""}.\n\nCandidate resume:\n${resume ? JSON.stringify({ name: resume.name, headline: resume.headline, summary: resume.summary, experience: resume.experience.map(e => ({ title: e.title, company: e.company, bullets: e.bullets })), skills: resume.skills.map(s => s.name) }) : "(no resume)"}\n\nJob description:\n${jd ? (jd.rawText ?? JSON.stringify({ title: jd.title, company: jd.company, responsibilities: jd.responsibilities, requiredSkills: jd.requiredSkills })) : "(no JD)"}\n\nReturn JSON: { "questions": [ { "category": "technical|behavioral|situational|hr|company", "question": "...", "difficulty": "easy|medium|hard", "recommendedAnswer": "...", "talkingPoints": ["...","...","..."], "starExample": { "situation": "...", "task": "...", "action": "...", "result": "..." }, "followUps": ["...","..."] } ] }\n\nInclude 3 technical, 3 behavioral, 2 situational, 2 HR, and 2 company-specific questions.`,
         maxTokens: 4000,
+        taskCategory: "document",
       });
 
       let questions: InterviewQuestion[];

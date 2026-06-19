@@ -71,33 +71,77 @@ export async function POST(req: NextRequest) {
 
     const text = htmlToText(html);
 
-    // Extract meta description as fallback when body text is too short (JS-rendered pages)
-    let fullText = text;
+    // Extract structured data as fallbacks for JS-rendered pages
     const metaDesc = extractMetaDescription(html);
     const ogDesc = extractMetaProperty(html, "og:description");
+    const ogTitle = extractMetaProperty(html, "og:title");
+    const ogSiteName = extractMetaProperty(html, "og:site_name");
+    const jsonLdData = extractJsonLd(html);
+    const pageTitle = extractTitle(html);
 
+    // Diagnostics — returned to the frontend for the diagnostics panel
+    const diagnostics = {
+      urlReachable: true,
+      httpStatus: res.status,
+      htmlRetrieved: html.length > 0,
+      htmlSize: html.length,
+      contentExtracted: text.trim().length > 30,
+      contentLength: text.trim().length,
+      hasMetaDescription: !!metaDesc,
+      hasOpenGraph: !!ogDesc || !!ogTitle,
+      hasJsonLd: jsonLdData.length > 0,
+      jsonLdCount: jsonLdData.length,
+      title: pageTitle || ogTitle || "",
+      metaDescription: metaDesc || "",
+      ogTitle: ogTitle || "",
+      ogDescription: ogDesc || "",
+      ogSiteName: ogSiteName || "",
+      jsonLd: jsonLdData.slice(0, 3), // first 3 JSON-LD blocks
+    };
+
+    let fullText = text;
+
+    // If body text is too short, use structured data fallbacks
     if (fullText.trim().length < 100) {
-      // Page is likely JS-rendered — use meta tags as fallback
-      const metaParts = [
-        metaDesc,
-        ogDesc,
-      ].filter(Boolean);
-      if (metaParts.length > 0) {
-        fullText = metaParts.join("\n\n") + "\n\nNote: This page uses JavaScript rendering. The full job description may not be available via URL scraping. Please paste the job description text manually for better extraction.";
+      const parts: string[] = [];
+      if (jsonLdData.length > 0) {
+        // Try to extract job posting data from JSON-LD
+        for (const ld of jsonLdData) {
+          if (ld.title) parts.push(`Title: ${ld.title}`);
+          if (ld.description) parts.push(`Description: ${ld.description}`);
+          if (ld.hiringOrganization?.name) parts.push(`Company: ${ld.hiringOrganization.name}`);
+          if (ld.jobLocation?.address?.addressLocality) parts.push(`Location: ${ld.jobLocation.address.addressLocality}`);
+          if (ld.employmentType) parts.push(`Employment Type: ${Array.isArray(ld.employmentType) ? ld.employmentType.join(", ") : ld.employmentType}`);
+          if (ld.skills) parts.push(`Skills: ${Array.isArray(ld.skills) ? ld.skills.join(", ") : ld.skills}`);
+          if (ld.qualifications) parts.push(`Qualifications: ${Array.isArray(ld.qualifications) ? ld.qualifications.join(", ") : ld.qualifications}`);
+          if (ld.responsibilities) parts.push(`Responsibilities: ${Array.isArray(ld.responsibilities) ? ld.responsibilities.join(", ") : ld.responsibilities}`);
+        }
+      }
+      if (ogTitle) parts.push(`Title: ${ogTitle}`);
+      if (ogDesc) parts.push(`Description: ${ogDesc}`);
+      if (metaDesc && !ogDesc) parts.push(`Description: ${metaDesc}`);
+      if (ogSiteName) parts.push(`Company: ${ogSiteName}`);
+
+      if (parts.length > 0) {
+        fullText = parts.join("\n\n") + "\n\nNote: This page uses JavaScript rendering. Extracted data from structured metadata (JSON-LD, OpenGraph, meta tags). For full extraction, paste the JD text manually.";
       }
     }
 
     if (fullText.trim().length < 30) {
       return NextResponse.json(
-        { error: "The page was fetched but no readable text was found. The site uses JavaScript rendering (e.g., React/Angular SPA). Please copy the job description text from your browser and paste it manually — the AI extraction works the same." },
+        {
+          error: "The page was fetched but no readable text was found. The site uses JavaScript rendering (e.g., React/Angular SPA). Please copy the job description text from your browser and paste it manually — the AI extraction works the same.",
+          diagnostics,
+        },
         { status: 502 }
       );
     }
 
     return NextResponse.json({
       url,
-      title: extractTitle(html) || metaDesc?.slice(0, 60),
+      title: pageTitle || ogTitle || metaDesc?.slice(0, 60),
       text: fullText.slice(0, 20000),
+      diagnostics,
     });
   } catch (e: any) {
     const msg = e?.message || "Unknown error";
@@ -160,7 +204,39 @@ function extractMetaDescription(html: string): string | undefined {
 }
 
 function extractMetaProperty(html: string, property: string): string | undefined {
-  const re = new RegExp(`<meta\\s+property=["']${property}["']\\s+content=["']([^"']+)["']`, "i");
-  const m = html.match(re);
-  return m?.[1]?.trim();
+  // Try property="..." format
+  const re1 = new RegExp(`<meta\\s+property=["']${property}["']\\s+content=["']([^"']+)["']`, "i");
+  const m1 = html.match(re1);
+  if (m1) return m1[1].trim();
+  // Try content="..." property="..." format (reversed order)
+  const re2 = new RegExp(`<meta\\s+content=["']([^"']+)["']\\s+property=["']${property}["']`, "i");
+  const m2 = html.match(re2);
+  if (m2) return m2[1].trim();
+  return undefined;
+}
+
+/**
+ * Extract JSON-LD structured data from HTML.
+ * Returns an array of parsed JSON-LD objects (JobPosting, Organization, etc.)
+ */
+function extractJsonLd(html: string): any[] {
+  const results: any[] = [];
+  // Match all <script type="application/ld+json"> blocks
+  const regex = /<script\s+type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi;
+  let match;
+  while ((match = regex.exec(html)) !== null) {
+    try {
+      const json = JSON.parse(match[1].trim());
+      if (Array.isArray(json)) {
+        results.push(...json);
+      } else if (json["@graph"] && Array.isArray(json["@graph"])) {
+        results.push(...json["@graph"]);
+      } else {
+        results.push(json);
+      }
+    } catch {
+      // JSON-LD is malformed — skip
+    }
+  }
+  return results;
 }
