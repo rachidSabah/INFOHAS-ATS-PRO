@@ -535,7 +535,15 @@ export const useApp = create<AppState>()(
 
       addResume: (r) => {
         set((s) => ({ resumes: [r, ...s.resumes] }));
+        // Persist to cloud (D1 via Worker)
         cloudApiSafe(createResume)(r).catch(() => {});
+        // Also backup to localStorage as a safety net (in case cloud API is unreachable)
+        if (typeof localStorage !== "undefined") {
+          try {
+            const existing = JSON.parse(localStorage.getItem("resumeai-resumes-backup") || "[]");
+            localStorage.setItem("resumeai-resumes-backup", JSON.stringify([r, ...existing.filter((x: any) => x.id !== r.id)].slice(0, 50)));
+          } catch {}
+        }
       },
       updateResume: (id, patch) => {
         set((s) => ({
@@ -544,6 +552,14 @@ export const useApp = create<AppState>()(
           ),
         }));
         cloudApiSafe(updateResume)(id, patch).catch(() => {});
+        // Also update localStorage backup
+        if (typeof localStorage !== "undefined") {
+          try {
+            const existing = JSON.parse(localStorage.getItem("resumeai-resumes-backup") || "[]");
+            const updated = existing.map((r: any) => r.id === id ? { ...r, ...patch, updatedAt: new Date().toISOString() } : r);
+            localStorage.setItem("resumeai-resumes-backup", JSON.stringify(updated));
+          } catch {}
+        }
       },
       removeResume: (id) => {
         set((s) => ({

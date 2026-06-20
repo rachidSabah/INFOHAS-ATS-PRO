@@ -176,7 +176,19 @@ export async function syncAllFromCloud(store: any): Promise<void> {
     const logs = logsRes.logs || [];
 
     // Only override if we got data from the cloud — otherwise keep seed data
-    if (resumes.length) store.setState({ resumes });
+    if (resumes.length) {
+      store.setState({ resumes });
+    } else {
+      // Fallback: restore from localStorage backup (in case cloud API was unreachable on previous session)
+      if (typeof localStorage !== "undefined") {
+        try {
+          const backup = JSON.parse(localStorage.getItem("resumeai-resumes-backup") || "[]");
+          if (backup.length > 0) {
+            store.setState({ resumes: backup });
+          }
+        } catch {}
+      }
+    }
     if (coverLetters.length) store.setState({ coverLetters });
     if (jobDescriptions.length) store.setState({ jobDescriptions });
     if (interviews.length) store.setState({ interviews });

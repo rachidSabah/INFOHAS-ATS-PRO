@@ -15,6 +15,7 @@ import { validateResumeForExport } from "@/lib/ai-response-processor";
 import { exportResumePDF, exportResumeDOCX, exportResumeTXT, exportResumeDOC } from "@/lib/exporter";
 import { EditableA4Preview } from "@/components/resume/EditableA4Preview";
 import { AIRLINE_ATS_PROFILES, AIRLINE_OPTIONS, DEFAULT_APP_SETTINGS, type AppSettings } from "@/lib/ats-directives";
+import { INDUSTRY_PROFILES, INDUSTRY_OPTIONS, detectIndustry, type IndustryAtsProfile } from "@/lib/industry-ats";
 import { runOptimizationPipeline, type PipelineResult as AgentPipelineResult, type PipelineProgress } from "@/lib/agents";
 import { PipelineProgressView } from "@/components/optimizer/PipelineProgressView";
 import { PipelineResults } from "@/components/optimizer/PipelineResults";
@@ -43,10 +44,12 @@ export function Optimizer() {
   const [afterReport, setAfterReport] = useState<ReturnType<typeof scoreATS> | null>(null);
   const [aiThinking, setAiThinking] = useState(false);
   const [aiLog, setAiLog] = useState<string[]>([]);
-  // Aviation ATS mode (uses aviationOptimize with airline-specific directive + super-admin config)
-  const [aviationMode, setAviationMode] = useState(false);
-  const [airlineProfile, setAirlineProfile] = useState<string>("generic");
-  const [aviationSettings, setAviationSettings] = useState<AppSettings>(DEFAULT_APP_SETTINGS);
+  // Industry ATS mode (replaces hardcoded Aviation ATS — dynamic, supports all industries)
+  const [industryMode, setIndustryMode] = useState(false);
+  const [industryId, setIndustryId] = useState<string>("generic");
+  const [employer, setEmployer] = useState<string>("");
+  const [industrySettings, setIndustrySettings] = useState<AppSettings>(DEFAULT_APP_SETTINGS);
+  const [industryDetection, setIndustryDetection] = useState<{ industryId: string; confidence: number; detectedRole: string; detectedAts: string } | null>(null);
   // Pipeline state — the orchestrator's real-time progress + final result
   const [pipelineProgress, setPipelineProgress] = useState<PipelineProgress | null>(null);
   const [pipelineResult, setPipelineResult] = useState<AgentPipelineResult | null>(null);
@@ -163,6 +166,20 @@ export function Optimizer() {
     const r = scoreATS(resume, jdParsed);
     setBeforeReport(r);
     addATS(r);
+
+    // === Auto-detect industry from JD + resume ===
+    const jdText = jdParsed.rawText ?? jdParsed.keywords.join(" ");
+    const resumeText = `${resume.name} ${resume.headline ?? ""} ${resume.summary ?? ""} ${resume.experience.map((e) => e.title + " " + e.company).join(" ")}`;
+    const detection = detectIndustry(jdText, resumeText);
+    setIndustryDetection(detection);
+    setIndustryId(detection.industryId);
+    // Auto-populate employer from JD company
+    if (jdParsed.company) setEmployer(jdParsed.company);
+    // Auto-enable industry mode if confidence is high enough
+    if (detection.confidence >= 20) {
+      setIndustryMode(true);
+    }
+
     setStep("optimize");
   };
 
@@ -206,7 +223,7 @@ export function Optimizer() {
     const usingOverride = !!directiveConfig?.customDirectiveOverride?.trim();
 
     setAiLog((l) => [...l, `Directive source: ${usingOverride ? "CUSTOM OVERRIDE (from Optimizer Directive settings)" : "GENERATED (from structured config)"}`]);
-    setAiLog((l) => [...l, `Mode: ${aviationMode ? `Aviation ATS (${airlineProfile})` : "Standard"}`]);
+    setAiLog((l) => [...l, `Mode: ${industryMode ? `Industry ATS (${INDUSTRY_PROFILES[industryId]?.label ?? "Generic"})` : "Standard"}`]);
     setAiLog((l) => [...l, "Starting 5-agent pipeline…"]);
 
     try {
@@ -214,8 +231,8 @@ export function Optimizer() {
         resume,
         jd: jdParsed,
         userDirectives: directiveConfig?.customDirectiveOverride?.trim() || undefined,
-        aviationMode: aviationMode
-          ? { airlineProfile, settings: aviationSettings }
+        aviationMode: industryMode
+          ? { airlineProfile: industryId, settings: industrySettings }
           : undefined,
         enableReflection: true,
         checkExport: false,
@@ -267,7 +284,7 @@ export function Optimizer() {
       incUsage("resumesGenerated");
       log({
         actor: "you",
-        action: `Resume optimized (${aviationMode ? "Aviation ATS" : "Standard"} — 5-agent pipeline)`,
+        action: `Resume optimized (${industryMode ? `Industry ATS (${INDUSTRY_PROFILES[industryId]?.label ?? "Generic"})` : "Standard"} — 5-agent pipeline)`,
         category: "ai",
         details: `ATS ${result.beforeATS?.scores.ats ?? "?"} → ${result.afterATS?.scores.ats ?? "?"} via ${result.provider}${result.qa ? `, confidence=${result.qa.confidence}` : ""}${result.reflection?.triggered ? ", reflection triggered" : ""}`,
         severity: "info",
@@ -288,7 +305,7 @@ export function Optimizer() {
       setAiThinking(false);
       toast.error(errMsg);
     }
-  }, [resume, jdParsed, beforeReport, aviationMode, airlineProfile, aviationSettings, addResume, addATS, incUsage, log]);
+  }, [resume, jdParsed, beforeReport, industryMode, industryId, industrySettings, addResume, addATS, incUsage, log]);
 
   // Legacy alias — the "Optimize" button still calls optimize().
   // Now it delegates to runPipeline().
@@ -487,34 +504,68 @@ export function Optimizer() {
                   <li className="flex gap-2"><Icon name="FileCheck2" className="w-4 h-4 text-brand shrink-0 mt-0.5" /> Validate one A4 page — assert(pdf.pages === 1)</li>
                 </ul>
 
-                {/* Aviation ATS Mode toggle */}
-                <div className="mt-5 rounded-lg border-2 border-amber-300/60 bg-amber-100/40 dark:bg-amber-400/5 p-4">
+                {/* Industry ATS Mode toggle (replaces hardcoded Aviation ATS Mode) */}
+                <div className="mt-5 rounded-lg border-2 border-brand/30 bg-brand/5 dark:bg-brand/10 p-4">
                   <div className="flex items-center justify-between gap-3">
                     <div className="flex items-center gap-2">
-                      <Icon name="Plane" className="w-5 h-5 text-amber-600" />
+                      <Icon name="Building2" className="w-5 h-5 text-brand" />
                       <div>
                         <div className="font-semibold text-sm flex items-center gap-2">
-                          Aviation ATS Mode
-                          <Badge variant="gold" className="text-[10px]">CABIN CREW</Badge>
+                          Industry ATS Mode
+                          {industryDetection && industryDetection.confidence >= 20 && (
+                            <Badge variant="brand" className="text-[10px]">{INDUSTRY_PROFILES[industryDetection.industryId]?.label ?? "Detected"}</Badge>
+                          )}
                         </div>
-                        <div className="text-xs text-muted-foreground">Use the airline-specific ATS directive (2,800-char one-A4-page, Times New Roman 12pt, aviation keyword bank)</div>
+                        <div className="text-xs text-muted-foreground">Auto-detects your industry and applies the optimal ATS keyword bank, writing guidance, and section priorities</div>
                       </div>
                     </div>
-                    <Switch checked={aviationMode} onCheckedChange={setAviationMode} />
+                    <Switch checked={industryMode} onCheckedChange={setIndustryMode} />
                   </div>
 
-                  {aviationMode && (
-                    <div className="mt-4 space-y-3 pt-3 border-t border-amber-300/40">
+                  {industryMode && (
+                    <div className="mt-4 space-y-3 pt-3 border-t border-brand/20">
+                      {/* Auto-detected info */}
+                      {industryDetection && (
+                        <div className="grid sm:grid-cols-2 gap-2 text-xs">
+                          <div className="rounded-lg bg-secondary/40 p-2 flex items-center justify-between">
+                            <span className="text-muted-foreground">Detected Role:</span>
+                            <span className="font-semibold">{industryDetection.detectedRole}</span>
+                          </div>
+                          <div className="rounded-lg bg-secondary/40 p-2 flex items-center justify-between">
+                            <span className="text-muted-foreground">Detected Industry:</span>
+                            <span className="font-semibold">{INDUSTRY_PROFILES[industryDetection.industryId]?.label ?? "Generic"}</span>
+                          </div>
+                          <div className="rounded-lg bg-secondary/40 p-2 flex items-center justify-between">
+                            <span className="text-muted-foreground">Optimization Profile:</span>
+                            <span className="font-semibold">{INDUSTRY_PROFILES[industryId]?.label ?? "Generic"}</span>
+                          </div>
+                          <div className="rounded-lg bg-secondary/40 p-2 flex items-center justify-between">
+                            <span className="text-muted-foreground">Detected ATS:</span>
+                            <span className="font-semibold">{industryDetection.detectedAts}</span>
+                          </div>
+                        </div>
+                      )}
+
                       <div className="grid sm:grid-cols-3 gap-3">
                         <div className="space-y-1.5">
-                          <label className="text-[10px] uppercase tracking-wide text-muted-foreground font-semibold">Target airline</label>
-                          <select value={airlineProfile} onChange={(e) => setAirlineProfile(e.target.value)} className="w-full h-9 px-2 rounded-md border border-input bg-background text-sm">
-                            {AIRLINE_OPTIONS.map((a) => <option key={a.id} value={a.id}>{a.label}</option>)}
+                          <label className="text-[10px] uppercase tracking-wide text-muted-foreground font-semibold">Industry Profile</label>
+                          <select value={industryId} onChange={(e) => setIndustryId(e.target.value)} className="w-full h-9 px-2 rounded-md border border-input bg-background text-sm">
+                            {INDUSTRY_OPTIONS.map((i) => <option key={i.id} value={i.id}>{i.label}</option>)}
                           </select>
                         </div>
                         <div className="space-y-1.5">
+                          <label className="text-[10px] uppercase tracking-wide text-muted-foreground font-semibold">Target Employer</label>
+                          <input
+                            type="text"
+                            value={employer}
+                            onChange={(e) => setEmployer(e.target.value)}
+                            placeholder="e.g. Emirates, Google, Amazon"
+                            className="w-full h-9 px-2 rounded-md border border-input bg-background text-sm"
+                          />
+                        </div>
+                        <div className="space-y-1.5">
                           <label className="text-[10px] uppercase tracking-wide text-muted-foreground font-semibold">Tone</label>
-                          <select value={aviationSettings.tone} onChange={(e) => setAviationSettings({ ...aviationSettings, tone: e.target.value as any })} className="w-full h-9 px-2 rounded-md border border-input bg-background text-sm">
+                          <select value={industrySettings.tone} onChange={(e) => setIndustrySettings({ ...industrySettings, tone: e.target.value as any })} className="w-full h-9 px-2 rounded-md border border-input bg-background text-sm">
                             <option value="Formal">Formal</option>
                             <option value="Balanced">Balanced</option>
                             <option value="Warm">Warm</option>
@@ -522,31 +573,34 @@ export function Optimizer() {
                             <option value="Aggressive">Aggressive</option>
                           </select>
                         </div>
+                      </div>
+                      <div className="grid sm:grid-cols-2 gap-3">
                         <div className="space-y-1.5">
                           <label className="text-[10px] uppercase tracking-wide text-muted-foreground font-semibold">Format</label>
-                          <select value={aviationSettings.format} onChange={(e) => setAviationSettings({ ...aviationSettings, format: e.target.value as any })} className="w-full h-9 px-2 rounded-md border border-input bg-background text-sm">
+                          <select value={industrySettings.format} onChange={(e) => setIndustrySettings({ ...industrySettings, format: e.target.value as any })} className="w-full h-9 px-2 rounded-md border border-input bg-background text-sm">
                             <option value="Chronological">Chronological</option>
                             <option value="Functional">Functional</option>
                             <option value="Hybrid">Hybrid</option>
                             <option value="Combination">Combination</option>
                           </select>
                         </div>
+                        <div className="space-y-1.5">
+                          <label className="text-[10px] uppercase tracking-wide text-muted-foreground font-semibold">Strictness</label>
+                          <select value={industrySettings.strictness} onChange={(e) => setIndustrySettings({ ...industrySettings, strictness: e.target.value as any })} className="w-full h-9 px-2 rounded-md border border-input bg-background text-sm">
+                            <option value="Conservative">Conservative — light keyword weaving</option>
+                            <option value="Balanced">Balanced — natural optimization</option>
+                            <option value="Aggressive">Aggressive — MAXIMUM keyword stuffing</option>
+                          </select>
+                        </div>
                       </div>
-                      <div className="space-y-1.5">
-                        <label className="text-[10px] uppercase tracking-wide text-muted-foreground font-semibold">Strictness</label>
-                        <select value={aviationSettings.strictness} onChange={(e) => setAviationSettings({ ...aviationSettings, strictness: e.target.value as any })} className="w-full h-9 px-2 rounded-md border border-input bg-background text-sm">
-                          <option value="Conservative">Conservative — light keyword weaving</option>
-                          <option value="Balanced">Balanced — natural optimization</option>
-                          <option value="Aggressive">Aggressive — MAXIMUM keyword stuffing</option>
-                        </select>
-                      </div>
-                      <div className="text-xs text-amber-800 dark:text-amber-300 flex items-start gap-1.5">
+                      <div className="text-xs text-brand flex items-start gap-1.5">
                         <Icon name="Info" className="w-3.5 h-3.5 shrink-0 mt-0.5" />
                         <div>
-                          <strong>{AIRLINE_ATS_PROFILES[airlineProfile]?.system}</strong> — {AIRLINE_ATS_PROFILES[airlineProfile]?.focus}
-                          {AIRLINE_ATS_PROFILES[airlineProfile]?.priorityKeywords?.length ? (
-                            <div className="mt-1">Priority keywords: {AIRLINE_ATS_PROFILES[airlineProfile]?.priorityKeywords?.slice(0, 6).join(", ")}</div>
-                          ) : null}
+                          <strong>{INDUSTRY_PROFILES[industryId]?.label}</strong> — {INDUSTRY_PROFILES[industryId]?.description}
+                          {INDUSTRY_PROFILES[industryId]?.priorityKeywords.length > 0 && (
+                            <div className="mt-1">Priority keywords: {INDUSTRY_PROFILES[industryId]?.priorityKeywords.slice(0, 6).join(", ")}</div>
+                          )}
+                          <div className="mt-1">ATS systems: {INDUSTRY_PROFILES[industryId]?.commonAtsSystems.join(", ")}</div>
                         </div>
                       </div>
                     </div>
@@ -556,8 +610,8 @@ export function Optimizer() {
                 <div className="mt-5 flex gap-2">
                   <Button variant="outline" onClick={() => setStep("analyze")} className="gap-1.5"><Icon name="ArrowLeft" className="w-4 h-4" /> Back</Button>
                   <Button onClick={optimize} disabled={aiThinking} className="bg-brand hover:bg-brand-dark text-white gap-2 flex-1">
-                    {aiThinking ? <Icon name="Loader2" className="w-4 h-4 animate-spin" /> : aviationMode ? <Icon name="Plane" className="w-4 h-4" /> : <Icon name="Wand2" className="w-4 h-4" />}
-                    {aiThinking ? "Optimizing…" : aviationMode ? "Run aviation ATS optimizer" : "Run AI optimizer"}
+                    {aiThinking ? <Icon name="Loader2" className="w-4 h-4 animate-spin" /> : industryMode ? <Icon name="Building2" className="w-4 h-4" /> : <Icon name="Wand2" className="w-4 h-4" />}
+                    {aiThinking ? "Optimizing…" : industryMode ? `Run ${INDUSTRY_PROFILES[industryId]?.label ?? "Industry"} ATS optimizer` : "Run AI optimizer"}
                   </Button>
                 </div>
 
@@ -693,7 +747,7 @@ export function Optimizer() {
                   <div className="flex justify-between"><span className="text-muted-foreground">Matched keywords</span><span className="font-semibold">{(pipelineResult?.beforeATS?.matchedKeywords.length ?? beforeReport.matchedKeywords.length)} → {(pipelineResult?.afterATS?.matchedKeywords.length ?? afterReport.matchedKeywords.length)}</span></div>
                   <div className="flex justify-between"><span className="text-muted-foreground">Keyword score</span><span className="font-semibold">{(pipelineResult?.beforeATS?.scores.keywordMatch ?? beforeReport.scores.keywords)} → {(pipelineResult?.afterATS?.scores.keywordMatch ?? afterReport.scores.keywords)}</span></div>
                   <div className="flex justify-between"><span className="text-muted-foreground">Content score</span><span className="font-semibold">{(pipelineResult?.beforeATS?.scores.content ?? beforeReport.scores.content)} → {(pipelineResult?.afterATS?.scores.content ?? afterReport.scores.content)}</span></div>
-                  <div className="flex justify-between"><span className="text-muted-foreground">Template</span><span className="font-semibold">{aviationMode ? "Aviation ATS" : "InfoHAS Pro"}</span></div>
+                  <div className="flex justify-between"><span className="text-muted-foreground">Template</span><span className="font-semibold">{industryMode ? `${INDUSTRY_PROFILES[industryId]?.label ?? "Industry"} ATS` : "InfoHAS Pro"}</span></div>
                   <div className="flex justify-between"><span className="text-muted-foreground">One A4 page</span><span className="font-semibold text-emerald-600">✓ Validated</span></div>
                 </CardContent>
               </Card>
