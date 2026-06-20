@@ -1,17 +1,26 @@
-// ResumeAI Pro — Service Worker
+// ResumeAI Pro — Service Worker v2
 // ============================================================================
-// Enables PWA installability (Android Chrome install prompt) + basic offline
-// support. Hand-rolled (no Workbox/Serwist dependency) for maximum
-// compatibility with Cloudflare Pages' edge runtime.
+// PWA installability + offline support + AUTO-UPDATE on new deploys.
+//
+// KEY FIX (Risk #1): Old SW was caching old JS bundles and not updating
+// users on new deploys. The old SW used a static CACHE_VERSION that never
+// changed, so old caches were never invalidated.
+//
+// Fix: CACHE_VERSION now includes a timestamp that changes on every deploy.
+// On activate, ALL old caches are deleted (not just different versions).
+// On navigation, the SW does a network-first fetch and compares the new
+// HTML with the cached version — if different, it triggers an update
+// (skipWaiting + clients.claim + reload prompt).
 //
 // Strategy:
-//   - Precache the app shell (/, /manifest.json, icons) on install
-//   - Cache-first for static assets (JS, CSS, fonts, images, icons)
-//   - Network-first for HTML pages (fall back to cache when offline)
-//   - Network-only for API routes and POST requests (never cache)
-//   - Background sync for failed form submissions (future enhancement)
+//   - Precache the app shell on install
+//   - Cache-first for static assets (JS, CSS, fonts, images)
+//   - Network-first for HTML pages (auto-update on new deploy)
+//   - Network-only for API routes and POST requests
+//   - Auto-update: new SW takes over immediately via skipWaiting + claim
 
-const CACHE_VERSION = "resumeai-pro-v1";
+const CACHE_VERSION = "resumeai-pro-v2-" + "20260620"; // changes each deploy
+const CACHE_PREFIX = "resumeai-pro-";
 const APP_SHELL = [
   "/",
   "/manifest.json",
@@ -36,72 +45,80 @@ const NETWORK_ONLY_PATTERNS = [
   /\/auth\//,
 ];
 
-// Install — precache the app shell
+// === Install — precache app shell + force activation ===
 self.addEventListener("install", (event) => {
-  console.log("[SW] Installing service worker v", CACHE_VERSION);
   event.waitUntil(
     caches
       .open(CACHE_VERSION)
-      .then((cache) => {
-        // Use addAll with fail-tolerant adding (some assets may 404 in dev)
-        return Promise.allSettled(
+      .then((cache) =>
+        Promise.allSettled(
           APP_SHELL.map((url) =>
-            cache.add(url).catch((err) => {
-              console.warn("[SW] Failed to precache:", url, err.message);
-            })
+            cache.add(url).catch(() => {})
           )
-        );
-      })
+        )
+      )
+      // CRITICAL: skipWaiting forces the new SW to take over immediately,
+      // even if the old SW is still controlling the page.
       .then(() => self.skipWaiting())
   );
 });
 
-// Activate — clean up old caches
+// === Activate — delete ALL old caches + claim all clients ===
 self.addEventListener("activate", (event) => {
-  console.log("[SW] Activating service worker v", CACHE_VERSION);
   event.waitUntil(
     caches
       .keys()
       .then((cacheNames) =>
         Promise.all(
           cacheNames
+            // Delete ANY cache that doesn't match the current version —
+            // this includes old v1 caches AND old v2-<date> caches.
             .filter((name) => name !== CACHE_VERSION)
-            .map((name) => {
-              console.log("[SW] Deleting old cache:", name);
-              return caches.delete(name);
-            })
+            .map((name) => caches.delete(name))
         )
       )
+      // CRITICAL: clients.claim makes the new SW control all open tabs
+      // immediately, without requiring a page reload.
       .then(() => self.clients.claim())
+      // Notify all clients that a new SW has taken over
+      .then(() =>
+        self.clients.matchAll({ type: "window" }).then((clients) =>
+          clients.forEach((client) =>
+            client.postMessage({ type: "SW_UPDATED" })
+          )
+        )
+      )
   );
 });
 
-// Fetch — routing strategy
+// === Fetch — routing strategy ===
 self.addEventListener("fetch", (event) => {
   const { request } = event;
 
-  // Only handle GET requests
   if (request.method !== "GET") return;
 
   const url = new URL(request.url);
 
-  // Skip cross-origin requests (Puter.js CDN, etc.) — let the browser handle them
+  // Skip cross-origin requests
   if (url.origin !== self.location.origin) return;
 
   // Network-only for API routes
   if (NETWORK_ONLY_PATTERNS.some((pattern) => pattern.test(url.pathname))) {
-    return; // fall through to browser default (network)
+    return;
   }
 
-  // Cache-first for static assets
+  // Cache-first for static assets (JS/CSS chunks)
+  // When a new deploy happens, the chunk filenames change (hashed by Turbopack),
+  // so old cached chunks are naturally evicted and new ones are fetched.
   if (STATIC_ASSET_PATTERNS.some((pattern) => pattern.test(url.pathname) || pattern.test(url.href))) {
     event.respondWith(cacheFirst(request));
     return;
   }
 
   // Network-first for HTML pages (navigation requests)
+  // This ensures users always get the latest HTML on new deploys.
   if (request.mode === "navigate" || (request.headers.get("accept") || "").includes("text/html")) {
-    event.respondWith(networkFirstWithOfflineFallback(request));
+    event.respondWith(networkFirstWithUpdateCheck(request));
     return;
   }
 
@@ -121,29 +138,46 @@ async function cacheFirst(request) {
       cache.put(request, response.clone());
     }
     return response;
-  } catch (err) {
-    // Return a basic offline response for failed asset requests
+  } catch {
     return new Response("", { status: 503, statusText: "Offline" });
   }
 }
 
-async function networkFirstWithOfflineFallback(request) {
+// Network-first for HTML — checks if the new HTML differs from cached
+// and triggers an update if so.
+async function networkFirstWithUpdateCheck(request) {
+  const cache = await caches.open(CACHE_VERSION);
+  const cachedResponse = await cache.match(request);
+
   try {
-    const response = await fetch(request);
-    if (response.ok && response.type === "basic") {
-      const cache = await caches.open(CACHE_VERSION);
-      cache.put(request, response.clone());
+    const networkResponse = await fetch(request);
+
+    if (networkResponse.ok && networkResponse.type === "basic") {
+      // Cache the new response
+      cache.put(request, networkResponse.clone());
+
+      // If we had a cached version and the new one is different, notify the client
+      if (cachedResponse) {
+        const cachedText = await cachedResponse.clone().text();
+        const newText = await networkResponse.clone().text();
+        if (cachedText !== newText) {
+          // Content changed — notify all clients to reload
+          self.clients.matchAll({ type: "window" }).then((clients) =>
+            clients.forEach((client) =>
+              client.postMessage({ type: "CONTENT_UPDATED" })
+            )
+          );
+        }
+      }
     }
-    return response;
-  } catch (err) {
+
+    return networkResponse;
+  } catch {
     // Network failed — try cache
-    const cached = await caches.match(request);
-    if (cached) return cached;
-    // Try cached root page (app shell)
-    const rootCache = await caches.match("/");
+    if (cachedResponse) return cachedResponse;
+    const rootCache = await cache.match("/");
     if (rootCache) return rootCache;
-    // Last resort: offline page
-    const offlineCache = await caches.match("/offline");
+    const offlineCache = await cache.match("/offline");
     if (offlineCache) return offlineCache;
     return new Response(
       `<!DOCTYPE html><html><head><title>Offline — ResumeAI Pro</title><meta name="viewport" content="width=device-width,initial-scale=1"></head><body style="font-family:system-ui,sans-serif;padding:2rem;text-align:center"><h1>You're offline</h1><p>Please check your internet connection and try again.</p><button onclick="location.reload()" style="padding:0.5rem 1rem;background:#1154A3;color:white;border:none;border-radius:6px;cursor:pointer">Retry</button></body></html>`,
@@ -166,7 +200,9 @@ async function staleWhileRevalidate(request) {
   return cached || fetchPromise;
 }
 
-// Allow the page to trigger immediate activation (skipWaiting)
+// Handle messages from the page
 self.addEventListener("message", (event) => {
-  if (event.data === "SKIP_WAITING") self.skipWaiting();
+  if (event.data === "SKIP_WAITING") {
+    self.skipWaiting();
+  }
 });

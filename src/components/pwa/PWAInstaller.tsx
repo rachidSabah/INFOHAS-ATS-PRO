@@ -33,11 +33,45 @@ export function PWAInstaller() {
       navigator.serviceWorker
         .register("/sw.js", { scope: "/" })
         .then((registration) => {
-          console.info("[PWA] Service worker registered:", registration.scope);
+          // Check for updates every 60 seconds
+          setInterval(() => {
+            registration.update().catch(() => {});
+          }, 60000);
         })
-        .catch((err) => {
-          console.warn("[PWA] Service worker registration failed:", err.message);
-        });
+        .catch(() => {});
+
+      // === Listen for SW update messages ===
+      navigator.serviceWorker.addEventListener("message", (event) => {
+        if (event.data?.type === "SW_UPDATED" || event.data?.type === "CONTENT_UPDATED") {
+          // New content available — show a toast with a reload action
+          toast.info("Update available", {
+            duration: 10000,
+            description: "A new version of ResumeAI Pro is available.",
+            action: {
+              label: "Reload",
+              onClick: () => {
+                // Clear all caches before reload
+                if ("caches" in window) {
+                  caches.keys().then((names) => {
+                    names.forEach((name) => caches.delete(name));
+                  });
+                }
+                window.location.reload();
+              },
+            },
+          });
+        }
+      });
+
+      // === Listen for controller change (new SW took over) ===
+      navigator.serviceWorker.addEventListener("controllerchange", () => {
+        // The new SW has taken control — if we haven't shown a toast yet,
+        // reload the page to get the new content
+        if (!sessionStorage.getItem("sw-reloaded")) {
+          sessionStorage.setItem("sw-reloaded", "1");
+          window.location.reload();
+        }
+      });
     }
 
     // === Detect if already installed (standalone mode) ===

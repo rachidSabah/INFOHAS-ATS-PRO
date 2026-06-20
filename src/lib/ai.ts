@@ -1126,11 +1126,11 @@ export async function callAI(opts: AICallOptions): Promise<AICallResult> {
     }
   }
 
-  // 3) Local deterministic fallback
+  // 3) Local deterministic fallback — always works, even offline
   const text = localGenerate(opts);
   return {
     text,
-    provider: "Local Engine",
+    provider: "Local Engine (offline mode)",
     latencyMs: Math.round(performance.now() - t0),
     tokensEstimate: estTokens(opts.userPrompt),
   };

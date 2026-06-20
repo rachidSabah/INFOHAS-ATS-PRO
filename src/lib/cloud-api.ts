@@ -22,26 +22,64 @@ export function clearUserId() {
   }
 }
 
+/**
+ * Retry wrapper — retries network requests with exponential backoff.
+ * Used for all cloud API calls to handle transient network failures.
+ */
+async function fetchWithRetry(
+  url: string,
+  options: RequestInit,
+  maxRetries = 2,
+): Promise<Response> {
+  let lastError: Error | null = null;
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 15000);
+    try {
+      const res = await fetch(url, {
+        ...options,
+        headers: {
+          "Content-Type": "application/json",
+          "X-User-Id": getUserId(),
+          ...options.headers,
+        },
+        signal: controller.signal,
+      });
+      clearTimeout(timeout);
+      // Retry on 5xx server errors (transient)
+      if (res.status >= 500 && attempt < maxRetries) {
+        await new Promise((r) => setTimeout(r, 1000 * Math.pow(2, attempt)));
+        continue;
+      }
+      return res;
+    } catch (err: any) {
+      clearTimeout(timeout);
+      lastError = err;
+      // Retry on network errors (timeout, DNS, connection reset)
+      if (attempt < maxRetries) {
+        await new Promise((r) => setTimeout(r, 1000 * Math.pow(2, attempt)));
+        continue;
+      }
+    }
+  }
+  throw lastError ?? new Error("fetchWithRetry exhausted retries");
+}
+
 async function apiFetch<T = any>(path: string, options: RequestInit = {}): Promise<T> {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 15000);
   try {
-    const res = await fetch(`${API_BASE}${path}`, {
-      ...options,
-      headers: {
-        "Content-Type": "application/json",
-        "X-User-Id": getUserId(),
-        ...options.headers,
-      },
-      signal: controller.signal,
-    });
+    const res = await fetchWithRetry(`${API_BASE}${path}`, options, 2);
     if (!res.ok) {
       const err = await res.json().catch(() => ({ error: res.statusText }));
       throw new Error(err.error || `API ${res.status}`);
     }
     return res.json();
-  } finally {
-    clearTimeout(timeout);
+  } catch (e: any) {
+    // If the error is a network failure (not an API error), throw a
+    // user-friendly message that the cloud is unreachable.
+    if (e?.name === "AbortError" || e?.message?.includes("fetch")) {
+      throw new Error("Cloud sync unavailable — data saved locally as backup.");
+    }
+    throw e;
   }
 }
 
