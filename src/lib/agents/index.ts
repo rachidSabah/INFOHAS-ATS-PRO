@@ -15,7 +15,7 @@
 
 export { analyzeATS, type ATSAnalysisResult, type ATSRecommendation, type ATSScoreBreakdown } from "./ats-analysis";
 export { runQA, type QAResult, type FactualConsistencyResult, type ExportQualityResult, type ProfessionalToneResult } from "./qa-agent";
-export { runOptimizationPipeline, runReflectionAgent, type PipelineInput, type PipelineResult, type PipelineStep, type ReflectionResult } from "./orchestrator";
+export { runOptimizationPipeline, runReflectionAgent, type PipelineInput, type PipelineResult, type PipelineStep, type PipelineProgress, type ReflectionResult } from "./orchestrator";
 
 // Re-export existing agents for convenience
 export { parseResumeFile, extractResumeFromText, blankResume } from "../parser";

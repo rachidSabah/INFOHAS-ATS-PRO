@@ -51,8 +51,27 @@ export interface PipelineInput {
   };
   /** Optional: run the export quality check (slow, renders a PDF). Default: false. */
   checkExport?: boolean;
-  /** Optional: enable the Reflection Agent (triggers when QA confidence < 80). Default: true. */
+  /** Optional: enable the Reflection Agent (triggers when QA confidence < 75 or ATS improvement < 5). Default: true. */
   enableReflection?: boolean;
+  /** Optional: real-time progress callback. Fired after each step completes. */
+  onProgress?: (progress: PipelineProgress) => void;
+}
+
+export interface PipelineProgress {
+  /** 0-based index of the current step */
+  stepIndex: number;
+  /** Total number of steps (5) */
+  totalSteps: number;
+  /** 1-based step number (for display) */
+  stepNumber: number;
+  /** Human-readable step name */
+  stepName: string;
+  /** Completion percentage (0-100) */
+  percent: number;
+  /** Estimated time remaining in seconds (based on elapsed time) */
+  etaSeconds: number;
+  /** Latest log line */
+  log: string;
 }
 
 export interface PipelineStep {
@@ -153,6 +172,29 @@ export async function runOptimizationPipeline(input: PipelineInput): Promise<Pip
     if (step) step.log = message;
   };
 
+  // === Progress emitter ===
+  const pipelineStartTime = Date.now();
+  const emitProgress = (stepIndex: number, message: string) => {
+    if (!input.onProgress) return;
+    const step = steps[stepIndex];
+    const elapsedMs = Date.now() - pipelineStartTime;
+    const percent = Math.round(((stepIndex) / steps.length) * 100);
+    // ETA: extrapolate based on elapsed time per completed step
+    const completedSteps = steps.filter((s) => s.status === "completed").length;
+    const avgPerStep = completedSteps > 0 ? elapsedMs / completedSteps : 8000;
+    const remainingSteps = steps.length - completedSteps;
+    const etaSeconds = Math.round((avgPerStep * remainingSteps) / 1000);
+    input.onProgress({
+      stepIndex,
+      totalSteps: steps.length,
+      stepNumber: stepIndex + 1,
+      stepName: step?.name ?? `Step ${stepIndex + 1}`,
+      percent,
+      etaSeconds,
+      log: message,
+    });
+  };
+
   // ========================================================================
   // Step 1: Job Intelligence Agent
   // ========================================================================
@@ -161,17 +203,21 @@ export async function runOptimizationPipeline(input: PipelineInput): Promise<Pip
     step.status = "running";
     step.startedAt = new Date().toISOString();
     log("Job Intelligence", "Analyzing job description for skills, keywords, and industry context…");
+    emitProgress(0, "Analyzing job description…");
 
     result.jobIntelligence = await analyzeJobIntelligence(jd);
 
     step.completedAt = new Date().toISOString();
     step.durationMs = Date.now() - new Date(step.startedAt).getTime();
     step.status = "completed";
-    log("Job Intelligence", `Extracted ${result.jobIntelligence.priorityKeywords.length} priority keywords, ${result.jobIntelligence.requiredSkills.length} required skills. Industry: ${result.jobIntelligence.industry ?? "unknown"}.`);
+    const jiLog = `Extracted ${result.jobIntelligence.priorityKeywords.length} priority keywords, ${result.jobIntelligence.requiredSkills.length} required skills. Industry: ${result.jobIntelligence.industry ?? "unknown"}.`;
+    log("Job Intelligence", jiLog);
+    emitProgress(0, jiLog);
   } catch (e: any) {
     steps[0].status = "failed";
     steps[0].error = e?.message ?? "Job Intelligence failed";
     log("Job Intelligence", `⚠ Job Intelligence failed: ${e?.message}. Continuing without JI.`);
+    emitProgress(0, `Job Intelligence failed: ${e?.message}. Continuing…`);
     // Non-fatal — continue without JI
   }
 
@@ -183,17 +229,21 @@ export async function runOptimizationPipeline(input: PipelineInput): Promise<Pip
     step.status = "running";
     step.startedAt = new Date().toISOString();
     log("ATS Analysis (Before)", "Scoring original resume against job description…");
+    emitProgress(1, "Calculating ATS match score…");
 
     result.beforeATS = analyzeATS(resume, jd);
 
     step.completedAt = new Date().toISOString();
     step.durationMs = Date.now() - new Date(step.startedAt).getTime();
     step.status = "completed";
-    log("ATS Analysis (Before)", `ATS score: ${result.beforeATS.scores.ats}/100 (keyword: ${result.beforeATS.scores.keywordMatch}, semantic: ${result.beforeATS.scores.semanticSimilarity}, readability: ${result.beforeATS.scores.readability}). Missing ${result.beforeATS.missingKeywords.length} keywords.`);
+    const atsLog = `ATS score: ${result.beforeATS.scores.ats}/100 (keyword: ${result.beforeATS.scores.keywordMatch}, semantic: ${result.beforeATS.scores.semanticSimilarity}, readability: ${result.beforeATS.scores.readability}). Missing ${result.beforeATS.missingKeywords.length} keywords.`;
+    log("ATS Analysis (Before)", atsLog);
+    emitProgress(1, atsLog);
   } catch (e: any) {
     steps[1].status = "failed";
     steps[1].error = e?.message ?? "ATS Analysis failed";
     log("ATS Analysis (Before)", `⚠ ATS Analysis failed: ${e?.message}.`);
+    emitProgress(1, `ATS Analysis failed: ${e?.message}`);
     // Fatal — can't optimize without a baseline score
     result.status = "failed";
     return result;
@@ -206,6 +256,7 @@ export async function runOptimizationPipeline(input: PipelineInput): Promise<Pip
     const step = steps[2];
     step.status = "running";
     step.startedAt = new Date().toISOString();
+    emitProgress(2, aviationMode ? `Optimizing for ${aviationMode.airlineProfile}…` : "Optimizing resume…");
 
     if (aviationMode) {
       log("Resume Optimizer", `Aviation ATS mode → ${aviationMode.airlineProfile}. Calling aviationOptimize() with unified directive…`);
@@ -213,7 +264,9 @@ export async function runOptimizationPipeline(input: PipelineInput): Promise<Pip
       result.optimizedResume = mapAviationResultToResumeData(aviationResult, resume);
       result.provider = "aviation-ats";
       result.charCount = aviationResult.charCount;
-      log("Resume Optimizer", `✓ Generated ${aviationResult.charCount} chars (target ~2900). ATS score: ${aviationResult.score}/100. ${aviationResult.matched_keywords.length} keywords matched.`);
+      const optLog = `✓ Generated ${aviationResult.charCount} chars (target ~2900). ATS score: ${aviationResult.score}/100. ${aviationResult.matched_keywords.length} keywords matched.`;
+      log("Resume Optimizer", optLog);
+      emitProgress(2, optLog);
     } else {
       log("Resume Optimizer", "Standard optimization mode. Building directive from super-admin config + JD context…");
       const directive = userDirectives?.trim() || getOptimizerDirective();
@@ -221,7 +274,9 @@ export async function runOptimizationPipeline(input: PipelineInput): Promise<Pip
       result.optimizedResume = optimizeResult.resume;
       result.provider = optimizeResult.provider;
       result.charCount = optimizeResult.charCount;
-      log("Resume Optimizer", `✓ Generated ${optimizeResult.charCount} chars (target ~2900) via ${optimizeResult.provider}. Embedded ${optimizeResult.keywordsAdded} keywords.`);
+      const optLog = `✓ Generated ${optimizeResult.charCount} chars (target ~2900) via ${optimizeResult.provider}. Embedded ${optimizeResult.keywordsAdded} keywords.`;
+      log("Resume Optimizer", optLog);
+      emitProgress(2, optLog);
     }
 
     result.metCharTarget = result.charCount >= 2500 && result.charCount <= 3100;
@@ -233,6 +288,7 @@ export async function runOptimizationPipeline(input: PipelineInput): Promise<Pip
     steps[2].status = "failed";
     steps[2].error = e?.message ?? "Optimizer failed";
     log("Resume Optimizer", `✗ Optimizer failed: ${e?.message}`);
+    emitProgress(2, `Optimizer failed: ${e?.message}`);
     result.status = "failed";
     return result;
   }
@@ -245,6 +301,7 @@ export async function runOptimizationPipeline(input: PipelineInput): Promise<Pip
     step.status = "running";
     step.startedAt = new Date().toISOString();
     log("Quality Assurance", "Validating optimized resume: factual consistency, professional tone, ATS compatibility, export quality…");
+    emitProgress(3, "Verifying quality and consistency…");
 
     result.qa = await runQA(
       result.optimizedResume!,
@@ -260,29 +317,47 @@ export async function runOptimizationPipeline(input: PipelineInput): Promise<Pip
 
     const passedChecks = result.qa.checks.filter((c) => c.passed).length;
     const totalChecks = result.qa.checks.length;
-    log("Quality Assurance", `${passedChecks}/${totalChecks} checks passed. Confidence: ${result.qa.confidence}/100. ${result.qa.factualConsistency?.passed ? "No fabrication detected." : `⚠ ${result.qa.factualConsistency?.issueCount} factual issues.`}`);
+    const qaLog = `${passedChecks}/${totalChecks} checks passed. Confidence: ${result.qa.confidence}/100. ${result.qa.factualConsistency?.passed ? "No fabrication detected." : `⚠ ${result.qa.factualConsistency?.issueCount} factual issues.`}`;
+    log("Quality Assurance", qaLog);
+    emitProgress(3, qaLog);
 
     // === ATS Analysis (After) ===
     result.afterATS = analyzeATS(result.optimizedResume!, jd);
     const beforeScore = result.beforeATS.scores.ats;
     const afterScore = result.afterATS.scores.ats;
-    log("Quality Assurance", `After-optimization ATS score: ${afterScore}/100 (was ${beforeScore}, +${afterScore - beforeScore} pts).`);
+    const afterLog = `After-optimization ATS score: ${afterScore}/100 (was ${beforeScore}, +${afterScore - beforeScore} pts).`;
+    log("Quality Assurance", afterLog);
+    emitProgress(3, afterLog);
   } catch (e: any) {
     steps[3].status = "failed";
     steps[3].error = e?.message ?? "QA failed";
     log("Quality Assurance", `⚠ QA failed: ${e?.message}. Optimized resume may still be usable.`);
+    emitProgress(3, `QA failed: ${e?.message}. Continuing…`);
     // Non-fatal — return the optimized resume even if QA failed
   }
 
   // ========================================================================
-  // Step 5: Reflection Agent (optional — triggers when confidence < 80)
+  // Step 5: Reflection Agent (optional — triggers when confidence < 75
+  //         OR ATS score improvement < 5 points)
   // ========================================================================
   const reflectionStep = steps[4];
-  if (enableReflection && result.qa && result.qa.shouldReflect) {
+  const atsImprovement = result.beforeATS && result.afterATS
+    ? result.afterATS.scores.ats - result.beforeATS.scores.ats
+    : 0;
+  const shouldTriggerReflection = enableReflection && result.qa && (
+    result.qa.shouldReflect || // confidence < 75 OR critical check failed
+    atsImprovement < 5 // optimization didn't meaningfully improve ATS score
+  );
+
+  if (shouldTriggerReflection && result.qa) {
     try {
       reflectionStep.status = "running";
       reflectionStep.startedAt = new Date().toISOString();
-      log("Reflection", `QA confidence is ${result.qa.confidence}/100 — triggering Reflection Agent…`);
+      const reason = result.qa.shouldReflect
+        ? `QA confidence is ${result.qa.confidence}/100 (below 75 threshold)`
+        : `ATS score improvement was only ${atsImprovement} pts (below 5-pt threshold)`;
+      log("Reflection", `${reason} — triggering Reflection Agent…`);
+      emitProgress(4, "Reflecting on optimization quality…");
 
       result.reflection = await runReflectionAgent(
         resume,
@@ -294,20 +369,35 @@ export async function runOptimizationPipeline(input: PipelineInput): Promise<Pip
       reflectionStep.completedAt = new Date().toISOString();
       reflectionStep.durationMs = Date.now() - new Date(reflectionStep.startedAt).getTime();
       reflectionStep.status = "completed";
-      log("Reflection", `Reflection complete: ${result.reflection.issues.length} issues identified, ${result.reflection.suggestions.length} suggestions. Confidence: ${result.reflection.confidence}/100.`);
+      const reflLog = `Reflection complete: ${result.reflection.issues.length} issues identified, ${result.reflection.suggestions.length} suggestions. Confidence: ${result.reflection.confidence}/100.`;
+      log("Reflection", reflLog);
+      emitProgress(4, reflLog);
     } catch (e: any) {
       reflectionStep.status = "failed";
       reflectionStep.error = e?.message ?? "Reflection failed";
       log("Reflection", `⚠ Reflection failed: ${e?.message}`);
+      emitProgress(4, `Reflection failed: ${e?.message}`);
     }
   } else {
     reflectionStep.status = "skipped";
     log("Reflection", enableReflection
-      ? `Skipped — QA confidence is ${result.qa?.confidence ?? "?"}/100 (threshold: 80).`
+      ? `Skipped — QA confidence ${result.qa?.confidence ?? "?"}/100 ≥ 75 and ATS improved ${atsImprovement} pts ≥ 5. No reflection needed.`
       : "Skipped — Reflection Agent disabled.");
   }
 
   result.status = "completed";
+  // Final 100% progress emission
+  if (input.onProgress) {
+    input.onProgress({
+      stepIndex: steps.length,
+      totalSteps: steps.length,
+      stepNumber: steps.length,
+      stepName: "Complete",
+      percent: 100,
+      etaSeconds: 0,
+      log: "Pipeline complete.",
+    });
+  }
   return result;
 }
 
@@ -529,8 +619,8 @@ export async function runReflectionAgent(
   jd: JobDescription,
   qa: QAResult
 ): Promise<ReflectionResult> {
-  const reason = qa.confidence < 80
-    ? `QA confidence is ${qa.confidence}/100 (below 80 threshold)`
+  const reason = qa.confidence < 75
+    ? `QA confidence is ${qa.confidence}/100 (below 75 threshold)`
     : `${qa.checks.filter((c) => !c.passed).length} QA checks failed`;
 
   const prompt = `You are a Reflection Agent reviewing an AI-optimized resume. Your job is to identify issues and suggest improvements.

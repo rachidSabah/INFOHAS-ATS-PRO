@@ -183,9 +183,11 @@ export async function runQA(
   const confidence = totalWeight > 0 ? Math.round(weightedScore / totalWeight) : 0;
 
   // === Determine if Reflection Agent should trigger ===
-  // Trigger if confidence < 80 OR any critical check failed
+  // Trigger if confidence < 75 OR any critical check failed.
+  // (Threshold lowered from 80 to 75 per spec — Reflection should only run
+  // when there's a real quality concern, not on every request.)
   const criticalFailures = checks.filter((c) => !c.passed && (weights[c.name] ?? 1) >= 2);
-  const shouldReflect = confidence < 80 || criticalFailures.length > 0;
+  const shouldReflect = confidence < 75 || criticalFailures.length > 0;
 
   const allPassed = checks.every((c) => c.passed);
 

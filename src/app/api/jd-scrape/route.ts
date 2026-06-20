@@ -1,7 +1,83 @@
 // Server-side job-description scraper — Edge Runtime compatible for Cloudflare Pages
+// Features:
+//   - Retry mechanism (2 retries with exponential backoff for transient failures)
+//   - In-memory cache (5-minute TTL — avoids re-fetching the same URL on rapid retries)
+//   - Graceful failure handling (never blocks optimization — returns clear error messages)
+//   - JSON-LD / OpenGraph / meta description fallbacks for JS-rendered pages
 import { NextRequest, NextResponse } from "next/server";
 
 export const runtime = "edge";
+
+// === In-memory cache (per-worker, 5-minute TTL) ===
+// Note: Edge workers are stateless across requests, but this cache helps when
+// the same worker handles rapid retries (e.g. user clicks "scrape" twice).
+interface CacheEntry {
+  data: any;
+  expiresAt: number;
+}
+const scrapeCache = new Map<string, CacheEntry>();
+const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
+
+function getCached(url: string): any | null {
+  const entry = scrapeCache.get(url);
+  if (!entry) return null;
+  if (Date.now() > entry.expiresAt) {
+    scrapeCache.delete(url);
+    return null;
+  }
+  return entry.data;
+}
+
+function setCached(url: string, data: any): void {
+  // Prevent unbounded cache growth
+  if (scrapeCache.size > 50) {
+    const oldestKey = scrapeCache.keys().next().value;
+    if (oldestKey) scrapeCache.delete(oldestKey);
+  }
+  scrapeCache.set(url, { data, expiresAt: Date.now() + CACHE_TTL_MS });
+}
+
+/**
+ * Fetch with retry — tries up to 3 times (initial + 2 retries) with
+ * exponential backoff (1s, 2s). Only retries on network errors and 5xx
+ * responses (4xx errors are not retried — they're the client's fault).
+ */
+async function fetchWithRetry(url: string, maxRetries = 2): Promise<Response> {
+  let lastError: Error | null = null;
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      const res = await fetch(url, {
+        headers: {
+          "User-Agent":
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+          Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+          "Accept-Language": "en-US,en;q=0.9",
+          "Accept-Encoding": "gzip, deflate, br",
+          Connection: "keep-alive",
+          "Upgrade-Insecure-Requests": "1",
+        },
+        redirect: "follow",
+        signal: AbortSignal.timeout(15000),
+      });
+
+      // Retry on 5xx server errors (transient)
+      if (res.status >= 500 && attempt < maxRetries) {
+        await new Promise((r) => setTimeout(r, 1000 * Math.pow(2, attempt)));
+        continue;
+      }
+      return res;
+    } catch (err: any) {
+      lastError = err;
+      // Retry on network errors (timeout, DNS, connection reset)
+      if (attempt < maxRetries) {
+        await new Promise((r) => setTimeout(r, 1000 * Math.pow(2, attempt)));
+        continue;
+      }
+      throw err;
+    }
+  }
+  throw lastError ?? new Error("fetchWithRetry exhausted retries");
+}
 
 export async function POST(req: NextRequest) {
   try {
@@ -29,21 +105,27 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Only http/https URLs are supported" }, { status: 400 });
     }
 
-    // Fetch with a realistic User-Agent to avoid being blocked.
-    // Abort after 15s so a slow/hanging target site can't make our API hang forever.
-    const res = await fetch(url, {
-      headers: {
-        "User-Agent":
-          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-        Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-        "Accept-Language": "en-US,en;q=0.9",
-        "Accept-Encoding": "gzip, deflate, br",
-        Connection: "keep-alive",
-        "Upgrade-Insecure-Requests": "1",
-      },
-      redirect: "follow",
-      signal: AbortSignal.timeout(15000),
-    });
+    // === Check cache first ===
+    const cached = getCached(url);
+    if (cached) {
+      return NextResponse.json({ ...cached, cached: true });
+    }
+
+    // === Fetch with retry ===
+    let res: Response;
+    try {
+      res = await fetchWithRetry(url, 2);
+    } catch (fetchErr: any) {
+      // Graceful failure — return a clear error so the UI can fall back to manual input
+      return NextResponse.json(
+        {
+          error: `Could not fetch the URL after 3 attempts: ${fetchErr?.message ?? "network error"}. The site may be blocking automated requests, or it may be temporarily unavailable. You can still paste the job description manually.`,
+          url,
+          diagnostics: { fetchError: fetchErr?.message },
+        },
+        { status: 502 }
+      );
+    }
 
     if (!res.ok) {
       return NextResponse.json(
@@ -137,12 +219,17 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    return NextResponse.json({
+    const responseData = {
       url,
       title: pageTitle || ogTitle || metaDesc?.slice(0, 60),
       text: fullText.slice(0, 20000),
       diagnostics,
-    });
+    };
+
+    // Cache the successful result for 5 minutes
+    setCached(url, responseData);
+
+    return NextResponse.json(responseData);
   } catch (e: any) {
     const msg = e?.message || "Unknown error";
     // Provide user-friendly error messages

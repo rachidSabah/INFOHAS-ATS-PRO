@@ -10,15 +10,14 @@ import { Badge, Icon, ScoreRing } from "@/components/shared";
 import { useApp, uid } from "@/lib/store";
 import { parseResumeFile } from "@/lib/parser";
 import { scoreATS } from "@/lib/ats";
-import { callAI, getOptimizerDirective, extractJSON } from "@/lib/ai";
-import { processAIResponse, validateResumeForExport, isProfessionalResume } from "@/lib/ai-response-processor";
-import { analyzeJobIntelligence, type JobIntelligence } from "@/lib/job-intelligence";
-import { computeRelevanceScore, type RelevanceScore } from "@/lib/relevance-engine";
-import { runValidationPipeline, type PipelineResult } from "@/lib/output-validator";
-import { validateResumeContent } from "@/lib/ai-error-filter";
+import { callAI, extractJSON } from "@/lib/ai";
+import { validateResumeForExport } from "@/lib/ai-response-processor";
 import { exportResumePDF, exportResumeDOCX, exportResumeTXT, exportResumeDOC } from "@/lib/exporter";
 import { EditableA4Preview } from "@/components/resume/EditableA4Preview";
-import { AIRLINE_ATS_PROFILES, AIRLINE_OPTIONS, DEFAULT_APP_SETTINGS, type AppSettings, aviationOptimize, type AviationOptimizeResult } from "@/lib/ats-directives";
+import { AIRLINE_ATS_PROFILES, AIRLINE_OPTIONS, DEFAULT_APP_SETTINGS, type AppSettings } from "@/lib/ats-directives";
+import { runOptimizationPipeline, type PipelineResult as AgentPipelineResult, type PipelineProgress } from "@/lib/agents";
+import { PipelineProgressView } from "@/components/optimizer/PipelineProgressView";
+import { PipelineResults } from "@/components/optimizer/PipelineResults";
 import { toast } from "sonner";
 import type { ResumeData, JobDescription, ResumeSkill } from "@/lib/types";
 
@@ -47,7 +46,9 @@ export function Optimizer() {
   const [aviationMode, setAviationMode] = useState(false);
   const [airlineProfile, setAirlineProfile] = useState<string>("generic");
   const [aviationSettings, setAviationSettings] = useState<AppSettings>(DEFAULT_APP_SETTINGS);
-  const [aviationResult, setAviationResult] = useState<AviationOptimizeResult | null>(null);
+  // Pipeline state — the orchestrator's real-time progress + final result
+  const [pipelineProgress, setPipelineProgress] = useState<PipelineProgress | null>(null);
+  const [pipelineResult, setPipelineResult] = useState<AgentPipelineResult | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
   // Responsive preview scale — recomputed on window resize so the A4 preview
@@ -162,442 +163,114 @@ export function Optimizer() {
     setStep("optimize");
   };
 
-  const optimize = async () => {
+  // ============================================================================
+  // runPipeline() — the SINGLE ENTRY POINT for resume optimization.
+  //
+  // This replaces the legacy inline optimize() + optimizeAviation() functions.
+  // All optimization now flows through the 5-agent orchestrator:
+  //   1. Job Intelligence Agent
+  //   2. ATS Analysis Agent (before)
+  //   3. Resume Optimizer Agent
+  //   4. Quality Assurance Agent
+  //   5. Reflection Agent (optional — triggers when confidence < 75 or ATS improvement < 5)
+  //
+  // The orchestrator handles:
+  //   - AI call + JSON mapping (standard + aviation modes)
+  //   - Content validation + leak prevention
+  //   - Factual consistency check (compares optimized vs original)
+  //   - Professional tone check
+  //   - ATS scoring (before + after) with semantic similarity + readability
+  //   - Reflection (when needed)
+  //
+  // Real-time progress is streamed via the onProgress callback.
+  // ============================================================================
+  const runPipeline = async () => {
     if (!resume || !jdParsed || !beforeReport) return;
     setAiThinking(true);
     setAiLog([]);
-    setAviationResult(null);
+    setPipelineProgress(null);
+    setPipelineResult(null);
+    setOptimizedResume(null);
+    setAfterReport(null);
 
-    // ===== AVIATION ATS MODE — uses aviationOptimize() with unified directive =====
-    if (aviationMode) {
-      return optimizeAviation();
-    }
-
-    setAiLog((l) => [...l, `Identified ${beforeReport.missingKeywords.length} missing keywords.`]);
-    setAiLog((l) => [...l, "Generating optimized resume in InfoHAS Pro layout…"]);
-
-    // Use the dynamic optimizer directive — reads from the super admin's
-    // configured parameters (Optimizer Directive settings page). Falls back
-    // to the hardcoded OPTIMIZER_DIRECTIVE if the store isn't available.
-    const directive = getOptimizerDirective();
     const directiveConfig = useApp.getState().optimizerDirective;
     const usingOverride = !!directiveConfig?.customDirectiveOverride?.trim();
-    setAiLog((l) => [...l, `Directive source: ${usingOverride ? "CUSTOM OVERRIDE (from Optimizer Directive settings)" : "GENERATED (from structured config fields)"}`]);
-    setAiLog((l) => [...l, `Directive length: ${directive.length} chars`]);
 
-    let optimized: ResumeData;
-    let provider = "AI Provider";
+    setAiLog((l) => [...l, `Directive source: ${usingOverride ? "CUSTOM OVERRIDE (from Optimizer Directive settings)" : "GENERATED (from structured config)"}`]);
+    setAiLog((l) => [...l, `Mode: ${aviationMode ? `Aviation ATS (${airlineProfile})` : "Standard"}`]);
+    setAiLog((l) => [...l, "Starting 5-agent pipeline…"]);
+
     try {
-      const result = await callAI({
-        systemPrompt: directive,
-        userPrompt: `SOURCE RESUME (be truthful to this — never invent employers, dates, or metrics):\n${JSON.stringify({
-          name: resume.name,
-          headline: resume.headline,
-          contact: resume.contact,
-          dateOfBirth: resume.dateOfBirth,
-          summary: resume.summary,
-          experience: resume.experience.map((e) => ({ title: e.title, company: e.company, location: e.location, startDate: e.startDate, endDate: e.endDate, bullets: e.bullets })),
-          education: resume.education.map((ed) => ({ degree: ed.degree, field: ed.field, institution: ed.institution, location: ed.location, startDate: ed.startDate, endDate: ed.endDate, highlights: ed.highlights })),
-          skills: resume.skills.map((s) => ({ name: s.name, category: s.category })),
-          languages: resume.languages,
-          certifications: resume.certifications,
-        })}\n\nTARGET JOB DESCRIPTION:\n${jdParsed.rawText ?? JSON.stringify({ title: jdParsed.title, company: jdParsed.company, responsibilities: jdParsed.responsibilities, requiredSkills: jdParsed.requiredSkills, keywords: jdParsed.keywords })}\n\nMISSING KEYWORDS TO EMBED NATURALLY: ${beforeReport.missingKeywords.join(", ") || "(none — focus on rewriting for impact)"}\n\nReturn ONLY the JSON object described in the directive. No prose, no markdown fences.`,
-        maxTokens: 4000,
-        temperature: 0.4,
-        taskCategory: "document",
+      const result = await runOptimizationPipeline({
+        resume,
+        jd: jdParsed,
+        userDirectives: directiveConfig?.customDirectiveOverride?.trim() || undefined,
+        aviationMode: aviationMode
+          ? { airlineProfile, settings: aviationSettings }
+          : undefined,
+        enableReflection: true,
+        checkExport: false,
+        onProgress: (progress) => {
+          setPipelineProgress(progress);
+          if (progress.log) {
+            setAiLog((l) => [...l, `[Step ${progress.stepNumber}/${progress.totalSteps}] ${progress.log}`]);
+          }
+        },
       });
-      provider = result.provider;
-      setAiLog((l) => [...l, `AI produced structured output via ${provider}.`]);
 
-      // ============================================================
-      // AI RESPONSE PROCESSING LAYER
-      // Process the AI response through the full pipeline:
-      //   detect type → validate → repair JSON → strip leaks → normalize
-      // This ensures NO error messages, provider names, or debug info
-      // ever leak into the generated resume.
-      // ============================================================
-      const processed = processAIResponse<any>(result.text, provider, { expectJson: true });
+      setPipelineResult(result);
 
-      if (processed.repaired) {
-        setAiLog((l) => [...l, `Response repaired: ${processed.repairActions.join(", ")}`]);
-      }
-      if (processed.warnings.length > 0) {
-        setAiLog((l) => [...l, `Warnings: ${processed.warnings.join("; ")}`]);
+      // Map pipeline result → local state
+      if (result.optimizedResume) {
+        setOptimizedResume(result.optimizedResume);
+        addResume(result.optimizedResume);
       }
 
-      let data: any;
-      if (processed.data) {
-        data = processed.data;
-      } else {
-        // JSON parsing failed even after repair — fall back to rule-based
-        throw new Error(`AI returned non-JSON response after repair attempts. Falling back to rule-based optimization.`);
+      // Map the richer ATSAnalysisResult back to the legacy ATSReport shape
+      if (result.afterATS && result.optimizedResume) {
+        const after = scoreATS(result.optimizedResume, jdParsed);
+        after.scores.ats = result.afterATS.scores.ats;
+        after.scores.content = result.afterATS.scores.content;
+        after.scores.completeness = result.afterATS.scores.completeness;
+        after.scores.keywords = result.afterATS.scores.keywordMatch;
+        after.missingKeywords = result.afterATS.missingKeywords;
+        after.matchedKeywords = result.afterATS.matchedKeywords;
+        setAfterReport(after);
+        addATS(after);
       }
 
-      // Map the AI's InfoHAS Pro JSON shape to our ResumeData type
-      const aiSkills: ResumeSkill[] = (data.skills ?? []).flatMap((g: any) =>
-        (g.items ?? []).map((name: string) => ({ id: uid("s"), name, category: g.category || "General" }))
-      );
-      // If AI didn't return skills, keep original + add missing keywords
-      const skills: ResumeSkill[] = aiSkills.length > 0
-        ? aiSkills
-        : [
-            ...resume.skills,
-            ...beforeReport.missingKeywords.map((k) => ({ id: uid("s"), name: k, category: "From JD" })),
-          ].filter((s, idx, arr) => arr.findIndex((x) => x.name.toLowerCase() === s.name.toLowerCase()) === idx);
-
-      optimized = {
-        id: uid("r"),
-        name: data.name || resume.name,
-        headline: data.headline || resume.headline,
-        contact: {
-          email: data.email || resume.contact.email,
-          phone: data.phone || resume.contact.phone,
-          location: data.location || resume.contact.location,
-          website: resume.contact.website,
-          linkedin: resume.contact.linkedin,
-          github: resume.contact.github,
-        },
-        dateOfBirth: data.dateOfBirth || resume.dateOfBirth,
-        summary: data.summary,
-        experience: (data.experience ?? []).length > 0
-          ? (data.experience ?? []).map((e: any) => ({
-              id: uid("e"),
-              title: e.title || "",
-              company: e.company || "",
-              location: e.location || "",
-              startDate: e.startDate || "",
-              endDate: e.endDate || "Present",
-              bullets: e.bullets ?? [],
-            }))
-          : resume.experience, // preserve original experience if AI didn't return any
-        education: (data.education ?? []).length > 0
-          ? (data.education ?? []).map((ed: any) => ({
-              id: uid("ed"),
-              degree: ed.degree || "",
-              institution: ed.institution || "",
-              field: ed.field || "",
-              location: ed.location || "",
-              startDate: ed.startDate || "",
-              endDate: ed.endDate || "",
-              highlights: ed.modules ? [`Modules: ${ed.modules}`] : ed.highlights || [],
-            }))
-          : resume.education, // preserve original education if AI didn't return any
-        skills,
-        projects: resume.projects, // preserve original projects
-        certifications: resume.certifications, // preserve original certifications
-        languages: (data.languages ?? []).length > 0
-          ? (data.languages ?? []).map((l: any) => ({
-              id: uid("l"),
-              name: l.name || "",
-              proficiency: (l.proficiency || "fluent").toLowerCase() as any,
-              ...(l.note ? { note: l.note } : {}),
-            })) as any
-          : resume.languages, // preserve original languages if AI didn't return any
-        template: "infohas-pro",
-        accentColor: "#0563C1",
-        photoUrl: resume.photoUrl, // preserve if user already uploaded one
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-        source: "ai-optimized",
-        fileName: resume.fileName,
-      };
-
-      setAiLog((l) => [...l, `Mapped ${optimized.experience.length} experiences, ${optimized.skills.length} skills, ${optimized.languages.length} languages.`]);
-      if (data.missingKeywordsAdded?.length) {
-        setAiLog((l) => [...l, `Embedded ${data.missingKeywordsAdded.length} keywords: ${data.missingKeywordsAdded.slice(0, 5).join(", ")}${data.missingKeywordsAdded.length > 5 ? "…" : ""}`]);
-      }
-    } catch (e: any) {
-      setAiLog((l) => [...l, `⚠ AI parse failed (${e?.message || "unknown"}), falling back to rule-based optimization.`]);
-      // Fallback: simple rule-based optimization, still using infohas-pro template
-      optimized = {
-        ...resume,
-        id: uid("r"),
-        template: "infohas-pro",
-        accentColor: "#0563C1",
-        summary: (resume.summary ?? "").length > 500 ? (resume.summary ?? "").slice(0, 480).trim() + "…" : resume.summary,
-        skills: [
-          ...resume.skills,
-          ...beforeReport.missingKeywords.map((k) => ({ id: uid("s"), name: k, category: "Skills" })),
-        ].filter((s, idx, arr) => arr.findIndex((x) => x.name.toLowerCase() === s.name.toLowerCase()) === idx),
-        source: "ai-optimized",
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-      };
-    }
-
-    setAiLog((l) => [...l, "Rendering InfoHAS Pro template (Times New Roman, maroon name, blue underlines, right-side photo frame)…"]);
-
-    // ============================================================
-    // CONTENT VALIDATION — strip AI error leaks + analysis artifacts
-    // ============================================================
-    const contentCheck = validateResumeContent(optimized);
-    if (!contentCheck.valid && contentCheck.cleanedResume) {
-      setAiLog((l) => [...l, `⚠ Detected ${contentCheck.errors.length} AI error leak(s) — cleaning content...`]);
-      optimized = contentCheck.cleanedResume;
-    } else if (!contentCheck.valid) {
-      setAiLog((l) => [...l, `⚠ AI error leaks detected but content unsalvageable — using fallback...`]);
-      optimized = {
-        ...resume,
-        id: uid("r"),
-        template: "infohas-pro",
-        accentColor: "#0563C1",
-        source: "ai-optimized",
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-      };
-    }
-
-    // QUALITY GATE — reject analysis/report content, only allow professional resume content
-    const qualityCheck = isProfessionalResume(optimized);
-    if (!qualityCheck.professional) {
-      setAiLog((l) => [...l, `⚠ Quality gate: resume contains analysis artifacts — ${qualityCheck.issues.join("; ")}`]);
-      // Try to clean analysis artifacts from the resume
-      const exportCheck = validateResumeForExport(optimized);
-      if (exportCheck.cleanedResume) {
-        setAiLog((l) => [...l, `✓ Cleaned analysis artifacts from resume content.`]);
-        optimized = exportCheck.cleanedResume;
-      } else {
-        // Unsalvageable — fall back to original resume with infohas-pro template
-        setAiLog((l) => [...l, `⚠ Analysis artifacts could not be cleaned — using original resume.`]);
-        optimized = {
-          ...resume,
-          id: uid("r"),
-          template: "infohas-pro",
-          accentColor: "#0563C1",
-          source: "ai-optimized",
-          createdAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString(),
-        };
-      }
-    }
-
-    // ============================================================
-    // JOB INTELLIGENCE + RELEVANCE SCORING
-    // ============================================================
-    setAiLog((l) => [...l, "Analyzing job intelligence for relevance scoring..."]);
-    let ji: JobIntelligence | null = null;
-    try {
-      ji = await analyzeJobIntelligence(jdParsed);
-      const relevance = computeRelevanceScore(optimized, ji);
-      setAiLog((l) => [...l, `Job relevance score: ${relevance.overall}/100 (skill=${relevance.skillMatch}, exp=${relevance.experienceMatch}, role=${relevance.roleMatch})`]);
-      if (relevance.details.missingPriorityKeywords.length > 0) {
-        setAiLog((l) => [...l, `Missing priority keywords: ${relevance.details.missingPriorityKeywords.slice(0, 5).join(", ")}`]);
-      }
-      if (relevance.details.avoidKeywordsFound.length > 0) {
-        setAiLog((l) => [...l, `⚠ Irrelevant keywords detected: ${relevance.details.avoidKeywordsFound.join(", ")}`]);
-      }
-    } catch (e: any) {
-      setAiLog((l) => [...l, `Job intelligence analysis skipped: ${e?.message || "error"}`]);
-    }
-
-    // ============================================================
-    // OUTPUT VALIDATION PIPELINE
-    // ============================================================
-    setAiLog((l) => [...l, "Running output validation pipeline..."]);
-    const pipeline = runValidationPipeline(optimized, jdParsed, ji);
-    for (const check of pipeline.checks) {
-      const icon = check.passed ? "✓" : "⚠";
-      const score = check.score !== undefined ? ` (${check.score}/100)` : "";
-      setAiLog((l) => [...l, `${icon} ${check.name}${score}: ${check.details}`]);
-    }
-
-    if (!pipeline.allPassed) {
-      setAiLog((l) => [...l, `⚠ Validation pipeline did not fully pass — relevance score may be below 90.`]);
-      if (pipeline.relevanceScore !== undefined && pipeline.relevanceScore < 90) {
-        setAiLog((l) => [...l, `⚠ Relevance score ${pipeline.relevanceScore} < 90 — consider regenerating with a different provider or lower temperature.`]);
-      }
-    }
-
-    setAiLog((l) => [...l, "Validating one-page constraint: assert(pdf.pages === 1) ✓"]);
-
-    setOptimizedResume(optimized);
-    addResume(optimized);
-    const after = scoreATS(optimized, jdParsed);
-    setAfterReport(after);
-    addATS(after);
-    incUsage("resumesGenerated");
-    log({ actor: "you", action: "Resume optimized (InfoHAS Pro)", category: "ai", details: `ATS ${beforeReport.scores.ats} → ${after.scores.ats} via ${provider}${pipeline.relevanceScore !== undefined ? `, relevance=${pipeline.relevanceScore}` : ""}`, severity: "info" });
-    setAiThinking(false);
-    setStep("done");
-    const relevanceMsg = pipeline.relevanceScore !== undefined ? ` · Relevance: ${pipeline.relevanceScore}/100` : "";
-    toast.success(`Optimized! ATS: ${beforeReport.scores.ats} → ${after.scores.ats}${relevanceMsg}`);
-  };
-
-  // ===== Aviation ATS optimization via aviationOptimize() =====
-  // Uses the unified aviation directive that merges:
-  //   1. Super-admin's optimizer directive config (with custom override support)
-  //   2. Aviation keyword bank (cabin crew + broad aviation)
-  //   3. Airline-specific ATS profile (Emirates/Qatar/Etihad/…)
-  //   4. Tone / format / strictness settings
-  //
-  // CRITICAL FIX (previous bug):
-  //   The old code called analyzeWithGemini() which returns an HTML string,
-  //   but then DISCARDED the optimized_content and just kept the original
-  //   resume with keywords added as skills. This caused the resume to stay
-  //   SHORT and the aviation directives to have NO effect on the actual content.
-  //
-  //   The new code uses aviationOptimize() which returns a structured JSON
-  //   resume object (same shape as OPTIMIZER_DIRECTIVE) that we map directly
-  //   to ResumeData — same as the standard optimize() flow.
-  const optimizeAviation = async () => {
-    if (!resume || !jdParsed || !beforeReport) return;
-    const profile = AIRLINE_ATS_PROFILES[airlineProfile] || AIRLINE_ATS_PROFILES.generic;
-
-    // === Log directive synchronization status ===
-    const directiveConfig = useApp.getState().optimizerDirective;
-    const usingOverride = !!directiveConfig?.customDirectiveOverride?.trim();
-    setAiLog((l) => [...l, `Aviation ATS mode → ${profile.system}`]);
-    setAiLog((l) => [...l, `Airline focus: ${profile.focus}`]);
-    setAiLog((l) => [...l, `Priority keywords: ${profile.priorityKeywords?.join(", ") || "(none)"}`]);
-    setAiLog((l) => [...l, `Tone: ${aviationSettings.tone} · Format: ${aviationSettings.format} · Strictness: ${aviationSettings.strictness}`]);
-    setAiLog((l) => [...l, `Directive source: ${usingOverride ? "CUSTOM OVERRIDE (from Optimizer Directive settings) + aviation augmentation" : "GENERATED (from structured config) + aviation augmentation"}`]);
-    setAiLog((l) => [...l, "Calling aviationOptimize() with unified directive (super-admin config + aviation keywords + airline profile)…"]);
-
-    try {
-      const jdTextFull = jdParsed.rawText ?? jdParsed.keywords.join(", ");
-      const result = await aviationOptimize(resume, jdTextFull, airlineProfile, aviationSettings);
-
-      setAiLog((l) => [...l, `✓ AI produced structured resume via ${result.charCount} chars (target ~2,900)`]);
-      setAiLog((l) => [...l, `✓ ATS score: ${result.score}/100 (impact ${result.score_breakdown.impact}, brevity ${result.score_breakdown.brevity}, keywords ${result.score_breakdown.keywords})`]);
-      setAiLog((l) => [...l, `Matched ${result.matched_keywords.length} keywords · missing ${result.missing_keywords.length}`]);
-
-      if (result.resume.bulletsRewritten) {
-        setAiLog((l) => [...l, `Bullets rewritten: ${result.resume.bulletsRewritten}`]);
-      }
-      if (result.resume.missingKeywordsAdded?.length) {
-        setAiLog((l) => [...l, `Embedded ${result.resume.missingKeywordsAdded.length} keywords: ${result.resume.missingKeywordsAdded.slice(0, 5).join(", ")}${result.resume.missingKeywordsAdded.length > 5 ? "…" : ""}`]);
-      }
-
-      // === Map the AI's structured JSON to ResumeData (same logic as standard optimize() flow) ===
-      const aiSkills: ResumeSkill[] = (result.resume.skills ?? []).flatMap((g: any) =>
-        (g.items ?? []).map((name: string) => ({ id: uid("s"), name, category: g.category || "General" }))
-      );
-      const skills: ResumeSkill[] = aiSkills.length > 0
-        ? aiSkills
-        : [
-            ...resume.skills,
-            ...result.missing_keywords.map((k) => ({ id: uid("s"), name: k, category: "Skills" })),
-          ].filter((s, idx, arr) => arr.findIndex((x) => x.name.toLowerCase() === s.name.toLowerCase()) === idx);
-
-      let optimized: ResumeData = {
-        id: uid("r"),
-        name: result.resume.name || resume.name,
-        headline: result.resume.headline || resume.headline,
-        contact: {
-          email: result.resume.email || resume.contact.email,
-          phone: result.resume.phone || resume.contact.phone,
-          location: result.resume.location || resume.contact.location,
-          website: resume.contact.website,
-          linkedin: resume.contact.linkedin,
-          github: resume.contact.github,
-        },
-        dateOfBirth: result.resume.dateOfBirth || resume.dateOfBirth,
-        summary: result.resume.summary, // AI-written, aviation-tailored summary
-        experience: (result.resume.experience ?? []).length > 0
-          ? (result.resume.experience ?? []).map((e: any) => ({
-              id: uid("e"),
-              title: e.title || "",
-              company: e.company || "",
-              location: e.location || "",
-              startDate: e.startDate || "",
-              endDate: e.endDate || "Present",
-              bullets: e.bullets ?? [],
-            }))
-          : resume.experience,
-        education: (result.resume.education ?? []).length > 0
-          ? (result.resume.education ?? []).map((ed: any) => ({
-              id: uid("ed"),
-              degree: ed.degree || "",
-              institution: ed.institution || "",
-              field: ed.field || "",
-              location: ed.location || "",
-              startDate: ed.startDate || "",
-              endDate: ed.endDate || "",
-              highlights: ed.modules ? [`Modules: ${ed.modules}`] : ed.highlights || [],
-            }))
-          : resume.education,
-        skills,
-        projects: resume.projects, // preserve original projects
-        certifications: resume.certifications, // preserve original certifications
-        languages: (result.resume.languages ?? []).length > 0
-          ? (result.resume.languages ?? []).map((l: any) => ({
-              id: uid("l"),
-              name: l.name || "",
-              proficiency: (l.proficiency || "fluent").toLowerCase() as any,
-              ...(l.note ? { note: l.note } : {}),
-            })) as any
-          : resume.languages,
-        template: "infohas-pro",
-        accentColor: "#0563C1",
-        photoUrl: resume.photoUrl, // preserve if user already uploaded one
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-        source: "ai-optimized-aviation",
-        fileName: resume.fileName,
-      };
-
-      setAiLog((l) => [...l, `Mapped ${optimized.experience.length} experiences, ${optimized.skills.length} skills, ${optimized.languages.length} languages.`]);
-      const summaryLen = optimized.summary?.length ?? 0;
-      setAiLog((l) => [...l, `Summary: ${summaryLen} chars · ${optimized.experience.reduce((n, e) => n + e.bullets.length, 0)} total bullets`]);
-
-      // ============================================================
-      // CONTENT VALIDATION — strip AI error leaks + analysis artifacts
-      // ============================================================
-      const contentCheck = validateResumeContent(optimized);
-      if (!contentCheck.valid && contentCheck.cleanedResume) {
-        setAiLog((l) => [...l, `⚠ Detected ${contentCheck.errors.length} AI error leak(s) — cleaning content...`]);
-        optimized = contentCheck.cleanedResume;
-      }
-
-      // QUALITY GATE — reject analysis/report content, only allow professional resume content
-      const qualityCheck = isProfessionalResume(optimized);
-      if (!qualityCheck.professional) {
-        setAiLog((l) => [...l, `⚠ Quality gate: ${qualityCheck.issues.join("; ")}`]);
-        const exportCheck = validateResumeForExport(optimized);
-        if (exportCheck.cleanedResume) {
-          setAiLog((l) => [...l, `✓ Cleaned analysis artifacts from resume content.`]);
-          optimized = exportCheck.cleanedResume;
+      // Stream the per-step logs into the legacy aiLog panel
+      for (const step of result.steps) {
+        if (step.log) {
+          setAiLog((l) => [...l, `${step.status === "failed" ? "⚠" : "✓"} ${step.name}: ${step.log}`]);
         }
       }
 
-      setAviationResult(result);
-      setOptimizedResume(optimized);
-      addResume(optimized);
       incUsage("resumesGenerated");
       log({
         actor: "you",
-        action: "Resume optimized (Aviation ATS)",
+        action: `Resume optimized (${aviationMode ? "Aviation ATS" : "Standard"} — 5-agent pipeline)`,
         category: "ai",
-        details: `${profile.system} → score ${result.score}/100 · ${result.matched_keywords.length} keywords matched · ${result.charCount} chars`,
+        details: `ATS ${result.beforeATS?.scores.ats ?? "?"} → ${result.afterATS?.scores.ats ?? "?"} via ${result.provider}${result.qa ? `, confidence=${result.qa.confidence}` : ""}${result.reflection?.triggered ? ", reflection triggered" : ""}`,
         severity: "info",
       });
 
-      setAiLog((l) => [...l, "Validating one-A4-page constraint: assert(pdf.pages === 1) ✓"]);
-
-      // Build after-report using the ATS scorer on the optimized resume
-      const after = scoreATS(optimized, jdParsed);
-      // Override with the aviation-specific score from the AI
-      after.scores.ats = result.score;
-      after.scores.content = result.score_breakdown.impact;
-      after.scores.completeness = result.score_breakdown.brevity;
-      after.scores.keywords = result.score_breakdown.keywords;
-      after.missingKeywords = result.missing_keywords;
-      after.matchedKeywords = result.matched_keywords;
-      setAfterReport(after);
-      addATS(after);
-
       setAiThinking(false);
       setStep("done");
-      toast.success(`Aviation ATS optimization complete — score ${result.score}/100 · ${result.charCount} chars`);
+
+      const delta = (result.afterATS?.scores.ats ?? 0) - (result.beforeATS?.scores.ats ?? 0);
+      const confidence = result.qa?.confidence ?? 0;
+      toast.success(`Optimization complete — ATS ${result.beforeATS?.scores.ats ?? "?"} → ${result.afterATS?.scores.ats ?? "?"} (+${delta} pts) · Confidence ${confidence}/100`);
     } catch (e: any) {
-      setAiLog((l) => [...l, `⚠ ${e?.message || "Aviation optimization failed"}`]);
+      setAiLog((l) => [...l, `✗ Pipeline failed: ${e?.message || "unknown error"}`]);
       setAiThinking(false);
-      toast.error(e?.message || "Aviation optimization failed. Falling back to standard mode.");
-      // Fall back to standard optimize flow
-      setAviationMode(false);
-      optimize();
+      toast.error(e?.message || "Optimization failed. Please try again.");
     }
   };
+
+  // Legacy alias — the "Optimize" button still calls optimize().
+  // Now it delegates to runPipeline().
+  const optimize = runPipeline;
 
   const reset = () => {
     setStep("upload");
@@ -651,6 +324,12 @@ export function Optimizer() {
                   <div className="text-xs text-muted-foreground mt-1">.pdf, .docx, .txt</div>
                 </div>
                 <input ref={fileRef} type="file" accept=".pdf,.docx,.txt" className="hidden" onChange={(e) => uploadResume(e.target.files)} />
+                <div className="mt-3 rounded-lg bg-brand/5 dark:bg-brand/10 border border-brand/20 p-2.5 flex items-start gap-2">
+                  <Icon name="Info" className="w-3.5 h-3.5 text-brand shrink-0 mt-0.5" />
+                  <p className="text-xs text-muted-foreground">
+                    Upload your existing resume in PDF or DOCX. The Parser Agent extracts experience, education, skills, certifications, projects, achievements, and languages — all in your browser, nothing uploaded to a server.
+                  </p>
+                </div>
               </CardContent>
             </Card>
             <Card>
@@ -704,6 +383,12 @@ export function Optimizer() {
                     {aiLog.map((l, i) => <div key={i} className="flex items-center gap-2"><span className="text-brand">›</span> {l}</div>)}
                   </div>
                 )}
+                <div className="rounded-lg bg-brand/5 dark:bg-brand/10 border border-brand/20 p-2.5 flex items-start gap-2">
+                  <Icon name="Info" className="w-3.5 h-3.5 text-brand shrink-0 mt-0.5" />
+                  <p className="text-xs text-muted-foreground">
+                    Paste a job posting to tailor your resume. The Job Intelligence Agent will extract required skills, technologies, certifications, ATS keywords, and industry terminology. You can also use the <button onClick={() => useApp.getState().setView("jd-scraper")} className="text-brand underline hover:no-underline">JD Scraper</button> to extract from a URL.
+                  </p>
+                </div>
               </CardContent>
             </Card>
           </motion.div>
@@ -743,6 +428,12 @@ export function Optimizer() {
                 </div>
               </CardContent>
             </Card>
+            <div className="rounded-lg bg-brand/5 dark:bg-brand/10 border border-brand/20 p-3 flex items-start gap-2">
+              <Icon name="Info" className="w-4 h-4 text-brand shrink-0 mt-0.5" />
+              <p className="text-xs text-muted-foreground">
+                This score estimates compatibility with applicant tracking systems. The ATS Analysis Agent computes 7 explainable scores: keyword match, semantic similarity, readability, content quality, grammar, formatting, and completeness — each with a breakdown of what's driving the number.
+              </p>
+            </div>
           </motion.div>
         )}
 
@@ -840,9 +531,28 @@ export function Optimizer() {
                     {aiThinking ? "Optimizing…" : aviationMode ? "Run aviation ATS optimizer" : "Run AI optimizer"}
                   </Button>
                 </div>
+
+                {/* === 5-agent pipeline progress tracker === */}
                 {aiThinking && (
+                  <div className="mt-4">
+                    <PipelineProgressView progress={pipelineProgress} isRunning={aiThinking} />
+                  </div>
+                )}
+
+                {/* === Legacy log panel (still populated by the pipeline) === */}
+                {aiThinking && aiLog.length > 0 && (
                   <div className="mt-3 rounded-lg bg-secondary p-3 text-xs font-mono space-y-1 max-h-40 overflow-y-auto">
                     {aiLog.map((l, i) => <div key={i} className="flex items-center gap-2"><span className="text-brand">›</span> {l}</div>)}
+                  </div>
+                )}
+
+                {/* === Contextual hints === */}
+                {!aiThinking && (
+                  <div className="mt-4 rounded-lg bg-brand/5 dark:bg-brand/10 border border-brand/20 p-3 flex items-start gap-2">
+                    <Icon name="Info" className="w-4 h-4 text-brand shrink-0 mt-0.5" />
+                    <p className="text-xs text-muted-foreground">
+                      The resume is rewritten while preserving factual information — employers, dates, and metrics from your original resume are never invented. The 5-agent pipeline runs Job Intelligence → ATS Analysis → Optimizer → Quality Assurance → (optional) Reflection.
+                    </p>
                   </div>
                 )}
               </CardContent>
@@ -879,6 +589,11 @@ export function Optimizer() {
                 </div>
               </CardContent>
             </Card>
+
+            {/* === 5-agent pipeline results (before/after ATS, keyword improvements, recommendations, confidence, reflection) === */}
+            {pipelineResult && (
+              <PipelineResults result={pipelineResult} />
+            )}
 
             {/* Live-editable InfoHAS Pro preview */}
             <Card>
@@ -924,7 +639,7 @@ export function Optimizer() {
                   <div className="flex justify-between"><span className="text-muted-foreground">Matched keywords</span><span className="font-semibold">{beforeReport.matchedKeywords.length} → {afterReport.matchedKeywords.length}</span></div>
                   <div className="flex justify-between"><span className="text-muted-foreground">Keyword score</span><span className="font-semibold">{beforeReport.scores.keywords} → {afterReport.scores.keywords}</span></div>
                   <div className="flex justify-between"><span className="text-muted-foreground">Content score</span><span className="font-semibold">{beforeReport.scores.content} → {afterReport.scores.content}</span></div>
-                  <div className="flex justify-between"><span className="text-muted-foreground">Template</span><span className="font-semibold">{aviationResult ? "Aviation ATS (HTML)" : "InfoHAS Pro"}</span></div>
+                  <div className="flex justify-between"><span className="text-muted-foreground">Template</span><span className="font-semibold">{aviationMode ? "Aviation ATS" : "InfoHAS Pro"}</span></div>
                   <div className="flex justify-between"><span className="text-muted-foreground">One A4 page</span><span className="font-semibold text-emerald-600">✓ Validated</span></div>
                 </CardContent>
               </Card>
@@ -947,22 +662,14 @@ export function Optimizer() {
                         if (r.ok) { incUsage("downloads"); toast.success("PDF exported — 1 A4 page."); } else toast.error(r.error || "Export failed.");
                       }
                     }} className="bg-brand hover:bg-brand-dark text-white gap-2"><Icon name="Download" className="w-4 h-4" /> optimized_resume.pdf</Button>
-                    {aviationResult ? (
-                      <Button variant="outline" onClick={() => {
-                        // Aviation mode: use the structured optimizedResume (which now contains the AI-rewritten content)
-                        // and export it via the strict A4 one-page DOC pipeline.
-                        exportResumeDOC(optimizedResume);
-                        incUsage("downloads");
-                        log({ actor: "you", action: "Exported aviation resume (DOC)", category: "export", details: `Times New Roman 12pt · @page A4 · ${aviationResult.charCount} chars`, severity: "info" });
-                        toast.success("DOC exported — strict A4 one-page layout.");
-                      }} className="gap-2" title="Strict A4 one-page Word document (Times New Roman 12pt, @page A4)">
-                        <Icon name="FileText" className="w-4 h-4" /> optimized_resume.doc
-                      </Button>
-                    ) : (
-                      <Button variant="outline" onClick={() => { exportResumeDOC(optimizedResume); incUsage("downloads"); toast.success("DOC exported — strict A4 one-page layout."); }} className="gap-2" title="Strict A4 one-page Word document (Times New Roman 12pt)">
-                        <Icon name="FileText" className="w-4 h-4" /> .doc
-                      </Button>
-                    )}
+                    <Button variant="outline" onClick={() => {
+                      exportResumeDOC(optimizedResume);
+                      incUsage("downloads");
+                      log({ actor: "you", action: "Exported resume (DOC)", category: "export", details: `Times New Roman 12pt · @page A4 · ${pipelineResult?.charCount ?? "?"} chars`, severity: "info" });
+                      toast.success("DOC exported — strict A4 one-page layout.");
+                    }} className="gap-2" title="Strict A4 one-page Word document (Times New Roman 12pt, @page A4)">
+                      <Icon name="FileText" className="w-4 h-4" /> .doc
+                    </Button>
                     <Button variant="outline" onClick={() => { exportResumeDOCX(optimizedResume); incUsage("downloads"); toast.success("DOCX exported."); }} className="gap-2"><Icon name="FileType" className="w-4 h-4" /> .docx</Button>
                     <Button variant="outline" onClick={() => { exportResumeTXT(optimizedResume); incUsage("downloads"); toast.success("TXT exported."); }} className="gap-2"><Icon name="FileText" className="w-4 h-4" /> .txt</Button>
                   </div>
@@ -975,60 +682,16 @@ export function Optimizer() {
                       <li>optimized_resume.txt</li>
                     </ul>
                   </div>
+                  <div className="mt-3 rounded-lg bg-brand/5 dark:bg-brand/10 border border-brand/20 p-2.5 flex items-start gap-2">
+                    <Icon name="Info" className="w-3.5 h-3.5 text-brand shrink-0 mt-0.5" />
+                    <p className="text-xs text-muted-foreground">
+                      Download your optimized one-page ATS-friendly resume. PDF is best for online applications; DOC/DOCX for editing; TXT for pasting into web forms.
+                    </p>
+                  </div>
                 </CardContent>
               </Card>
             </div>
 
-            {/* Aviation ATS score breakdown + critique */}
-            {aviationResult && (
-              <Card>
-                <CardHeader>
-                  <CardTitle className="text-base flex items-center gap-2"><Icon name="Plane" className="w-4 h-4 text-amber-600" /> Aviation ATS Score Breakdown</CardTitle>
-                  <CardDescription>Aviation ATS optimization — {AIRLINE_ATS_PROFILES[airlineProfile]?.system} · {aviationResult.charCount} chars generated</CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <div className="grid sm:grid-cols-4 gap-4 mb-4">
-                    <div className="text-center">
-                      <ScoreRing value={aviationResult.score} size={120} label="ATS Score" />
-                    </div>
-                    <div className="space-y-3 flex-1">
-                      <div>
-                        <div className="flex justify-between text-xs mb-1"><span className="font-medium">Impact</span><span className="font-bold">{aviationResult.score_breakdown.impact}/100</span></div>
-                        <div className="h-2 bg-secondary rounded-full overflow-hidden"><div className="h-full bg-brand rounded-full" style={{ width: `${aviationResult.score_breakdown.impact}%` }} /></div>
-                      </div>
-                      <div>
-                        <div className="flex justify-between text-xs mb-1"><span className="font-medium">Brevity</span><span className="font-bold">{aviationResult.score_breakdown.brevity}/100</span></div>
-                        <div className="h-2 bg-secondary rounded-full overflow-hidden"><div className="h-full bg-emerald-500 rounded-full" style={{ width: `${aviationResult.score_breakdown.brevity}%` }} /></div>
-                      </div>
-                      <div>
-                        <div className="flex justify-between text-xs mb-1"><span className="font-medium">Keywords</span><span className="font-bold">{aviationResult.score_breakdown.keywords}/100</span></div>
-                        <div className="h-2 bg-secondary rounded-full overflow-hidden"><div className="h-full bg-gold rounded-full" style={{ width: `${aviationResult.score_breakdown.keywords}%` }} /></div>
-                      </div>
-                    </div>
-                    <div className="sm:col-span-2 rounded-lg bg-secondary/60 p-3">
-                      <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-1">Summary critique</div>
-                      <p className="text-sm text-pretty">{aviationResult.summary_critique}</p>
-                    </div>
-                  </div>
-                  <div className="grid sm:grid-cols-2 gap-4">
-                    <div>
-                      <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-2">Matched keywords ({aviationResult.matched_keywords.length})</div>
-                      <div className="flex flex-wrap gap-1.5">
-                        {aviationResult.matched_keywords.map((k) => <Badge key={k} variant="success" className="text-[10px]">{k}</Badge>)}
-                        {aviationResult.matched_keywords.length === 0 && <span className="text-xs text-muted-foreground">None</span>}
-                      </div>
-                    </div>
-                    <div>
-                      <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-2">Missing keywords ({aviationResult.missing_keywords.length})</div>
-                      <div className="flex flex-wrap gap-1.5">
-                        {aviationResult.missing_keywords.map((k) => <Badge key={k} variant="warning" className="text-[10px]">{k}</Badge>)}
-                        {aviationResult.missing_keywords.length === 0 && <span className="text-xs text-emerald-600">All keywords matched ✓</span>}
-                      </div>
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-            )}
           </motion.div>
         )}
       </AnimatePresence>
