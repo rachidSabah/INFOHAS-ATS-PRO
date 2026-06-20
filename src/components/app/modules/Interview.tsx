@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useCallback } from "react";
 import { motion } from "framer-motion";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -8,6 +8,7 @@ import { Badge, Icon } from "@/components/shared";
 import { useApp, uid } from "@/lib/store";
 import { callAI, extractJSON } from "@/lib/ai";
 import { exportInterviewPDF, exportInterviewDOCX } from "@/lib/exporter";
+import { InterviewSession, InterviewSkeleton } from "@/components/interview/InterviewSession";
 import { toast } from "sonner";
 import type { InterviewPackage, InterviewQuestion } from "@/lib/types";
 
@@ -32,6 +33,7 @@ export function Interview() {
 
   const [generating, setGenerating] = useState(false);
   const [expanded, setExpanded] = useState<string | null>(null);
+  const [practiceSession, setPracticeSession] = useState<InterviewPackage | null>(null);
 
   const generate = async () => {
     setGenerating(true);
@@ -88,18 +90,25 @@ export function Interview() {
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h1 className="font-display text-2xl font-bold flex items-center gap-2"><Icon name="MessagesSquare" className="w-6 h-6 text-brand" /> Interview Prep</h1>
-          <p className="text-sm text-muted-foreground mt-1">Technical, behavioral, situational, HR, and company-specific questions — with STAR answers and follow-ups.</p>
-        </div>
-        <Button onClick={generate} disabled={generating} className="bg-brand hover:bg-brand-dark text-white gap-2">
-          {generating ? <Icon name="Loader2" className="w-4 h-4 animate-spin" /> : <Icon name="Sparkles" className="w-4 h-4" />}
-          {generating ? "Generating…" : "Generate package"}
-        </Button>
-      </div>
+      {/* === Practice session mode (replaces the list view when active) === */}
+      {practiceSession ? (
+        <InterviewSession pkg={practiceSession} onClose={() => setPracticeSession(null)} />
+      ) : (
+        <>
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <h1 className="font-display text-2xl font-bold flex items-center gap-2"><Icon name="MessagesSquare" className="w-6 h-6 text-brand" /> Interview Prep</h1>
+              <p className="text-sm text-muted-foreground mt-1">Technical, behavioral, situational, HR, and company-specific questions — with STAR answers and follow-ups.</p>
+            </div>
+            <Button onClick={generate} disabled={generating} className="bg-brand hover:bg-brand-dark text-white gap-2">
+              {generating ? <Icon name="Loader2" className="w-4 h-4 animate-spin" /> : <Icon name="Sparkles" className="w-4 h-4" />}
+              {generating ? "Generating…" : "Generate package"}
+            </Button>
+          </div>
 
-      {interviews.length === 0 ? (
+      {generating ? (
+        <InterviewSkeleton />
+      ) : interviews.length === 0 ? (
         <Card>
           <CardContent className="py-16 text-center">
             <Icon name="MessagesSquare" className="w-12 h-12 text-muted-foreground/40 mx-auto" />
@@ -121,7 +130,10 @@ export function Interview() {
                     </CardTitle>
                     <CardDescription>{pkg.questions.length} questions · generated {new Date(pkg.createdAt).toLocaleDateString()}</CardDescription>
                   </div>
-                  <div className="flex gap-2">
+                  <div className="flex gap-2 flex-wrap">
+                    <Button size="sm" variant="outline" onClick={() => setPracticeSession(pkg)} className="gap-1.5 border-brand text-brand hover:bg-brand-light" title="Start interactive practice session">
+                      <Icon name="Play" className="w-3.5 h-3.5" /> Practice
+                    </Button>
                     <Button size="sm" variant="outline" onClick={() => { exportInterviewDOCX(pkg); incUsage("downloads"); toast.success("DOCX exported."); }} className="gap-1.5"><Icon name="FileType" className="w-3.5 h-3.5" /> DOCX</Button>
                     <Button size="sm" onClick={() => { exportInterviewPDF(pkg); incUsage("downloads"); log({ actor: "you", action: "Interview prep exported (PDF)", category: "export", details: `${pkg.role}.pdf`, severity: "info" }); toast.success("PDF exported."); }} className="bg-brand hover:bg-brand-dark text-white gap-1.5"><Icon name="Download" className="w-3.5 h-3.5" /> PDF</Button>
                     <Button size="sm" variant="ghost" className="text-destructive" onClick={() => { removeInterview(pkg.id); toast.success("Deleted."); }}><Icon name="Trash2" className="w-3.5 h-3.5" /></Button>
@@ -206,6 +218,8 @@ export function Interview() {
             </Card>
           );
         })
+      )}
+        </>
       )}
     </div>
   );
