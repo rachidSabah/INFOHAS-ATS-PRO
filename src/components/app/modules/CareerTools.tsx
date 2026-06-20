@@ -823,6 +823,66 @@ const POSITION_PRESETS: Record<string, string[]> = {
   "leadership": ["Team Lead", "Department Manager", "Director", "VP", "COO"],
 };
 
+// Topic-specific question examples — injected into the prompt to force the AI
+// to ask role-relevant questions instead of generic ones.
+const TOPIC_QUESTION_EXAMPLES: Record<string, string[]> = {
+  "cabin-crew": [
+    "Tell me about a time you handled a difficult passenger on a flight.",
+    "What would you do if you noticed a safety equipment issue during pre-flight checks?",
+    "How do you ensure excellent service for passengers with special needs (UMNR, PRM)?",
+    "Describe the emergency evacuation procedure you would follow in case of an unplanned decompression.",
+    "How would you handle a medical emergency on board with limited resources?",
+    "Tell me about a time you went above and beyond to make a passenger's flight memorable.",
+    "How do you manage cultural differences when serving passengers from 160+ nationalities?",
+    "What steps would you take if a passenger became aggressive during a flight?",
+  ],
+  "technical": [
+    "Walk me through how you would debug a production outage in a microservices architecture.",
+    "Design a URL shortener service that handles 100M requests per day.",
+    "How would you optimize a slow database query that's affecting page load times?",
+    "Explain how you would implement caching for a high-traffic web application.",
+    "Describe a technical decision you made that you later regretted. What did you learn?",
+  ],
+  "behavioral": [
+    "Tell me about a time you had to work with a difficult team member.",
+    "Describe a situation where you had to meet a tight deadline. How did you handle it?",
+    "Give an example of a time you took initiative on a project without being asked.",
+    "Tell me about a time you failed and what you learned from it.",
+    "Describe a situation where you had to persuade someone to see things your way.",
+  ],
+  "situational": [
+    "What would you do if you were given two urgent tasks by different managers with conflicting deadlines?",
+    "How would you handle a situation where you disagree with your manager's decision?",
+    "If you were leading a project and a key team member quit, what would you do?",
+    "How would you prioritize tasks if everything seems equally urgent?",
+  ],
+  "hr": [
+    "Tell me about yourself.",
+    "What are your greatest strengths and weaknesses?",
+    "Where do you see yourself in 5 years?",
+    "Why do you want to work for our company?",
+    "Why are you leaving your current job?",
+  ],
+  "customer-service": [
+    "Tell me about a time you turned an angry customer into a satisfied one.",
+    "How do you handle a customer who is being unreasonable or abusive?",
+    "Describe a situation where you went above and beyond for a customer.",
+    "How would you handle a high volume of customer complaints during a service outage?",
+  ],
+  "sales": [
+    "Walk me through your sales process from prospecting to closing.",
+    "Tell me about a time you lost a deal. What did you learn?",
+    "How do you handle price objections from a prospect?",
+    "Describe your most successful sale. What made it successful?",
+  ],
+  "leadership": [
+    "Tell me about a time you had to make an unpopular decision as a leader.",
+    "How do you motivate a team that's underperforming?",
+    "Describe how you handle conflict between team members.",
+    "What's your approach to delegating tasks to your team?",
+  ],
+};
+
 export function AiMockInterview() {
   const jds = useApp((s) => s.jobDescriptions);
   const [topic, setTopic] = useState<string>("cabin-crew");
@@ -850,11 +910,16 @@ export function AiMockInterview() {
         ? `Topic: ${selectedTopic.label} (${selectedTopic.description}). `
         : "";
       const positionContext = `Position: ${effectivePosition}. `;
+      const questionExamples = TOPIC_QUESTION_EXAMPLES[topic] ?? [];
+      const examplesText = questionExamples.length > 0
+        ? `\n\nHere are EXAMPLES of the kind of questions to ask for this topic (do NOT use these exact words — generate similar ones):\n${questionExamples.map((q) => `- ${q}`).join("\n")}\n\nCRITICAL: Your question MUST be relevant to ${selectedTopic?.label ?? "the selected topic"}. Do NOT ask generic software engineering questions unless the topic is "Technical".`
+        : "";
 
       const result = await callAI({
-        systemPrompt: `You are an expert interviewer conducting a mock interview for a ${effectivePosition} position. ${topicContext}Ask ONE realistic interview question at a time — the kind a real interviewer would ask for this specific role and topic. Wait for the candidate's answer. After they answer, provide brief feedback (1-2 sentences) and ask the next question. Always respond in plain text — NEVER return JSON. Make questions specific to the role and topic (e.g., for cabin crew: safety procedures, passenger service, emergency scenarios; for technical: coding, architecture, debugging; for behavioral: STAR-method past experiences).`,
-        userPrompt: `Start a mock interview for: ${positionContext}${topicContext}\nAsk the first question. Make it realistic and specific to this role — not a generic question. Respond in plain text only.`,
+        systemPrompt: `You are an expert interviewer conducting a mock interview for a ${effectivePosition} position. ${topicContext}Ask ONE realistic interview question at a time — the kind a real interviewer would ask for this specific role and topic. Wait for the candidate's answer. After they answer, provide brief feedback (1-2 sentences) and ask the next question. Always respond in plain text — NEVER return JSON.${examplesText}`,
+        userPrompt: `Start a mock interview for: ${positionContext}${topicContext}\nAsk the first question. The question MUST be specific to ${selectedTopic?.label ?? "the topic"} and relevant to the ${effectivePosition} role. Do NOT ask generic questions about software architecture or scaling — ask about the actual duties of this role. Respond in plain text only.`,
         maxTokens: 500, taskCategory: "interactive",
+        temperature: 0.8,
       });
 
       const parsed = parseInterviewResponse(result.text);
@@ -876,10 +941,16 @@ export function AiMockInterview() {
     setLoading(true);
     setError(null);
     try {
+      const questionExamples = TOPIC_QUESTION_EXAMPLES[topic] ?? [];
+      const examplesText = questionExamples.length > 0
+        ? `\n\nRemember: questions MUST be relevant to ${selectedTopic?.label ?? "the selected topic"}. Example topics for this role:\n${questionExamples.slice(0, 4).map((q) => `- ${q}`).join("\n")}`
+        : "";
+
       const result = await callAI({
-        systemPrompt: `You are an expert interviewer conducting a mock interview for a ${effectivePosition} position. The candidate just answered your question. Provide brief feedback (1-2 sentences) specific to their answer, then ask the next question on a different aspect of the role. Always respond in plain text — NEVER return JSON. Keep questions realistic and specific to ${selectedTopic?.label ?? "the topic"}.`,
-        userPrompt: `Candidate's answer: ${userAnswer}\n\nProvide brief feedback and ask the next question. Make the next question different from previous ones. Respond in plain text only.`,
+        systemPrompt: `You are an expert interviewer conducting a mock interview for a ${effectivePosition} position. The candidate just answered your question. Provide brief feedback (1-2 sentences) specific to their answer, then ask the next question on a different aspect of the role. Always respond in plain text — NEVER return JSON. Keep questions realistic and specific to ${selectedTopic?.label ?? "the topic"}.${examplesText}`,
+        userPrompt: `Candidate's answer: ${userAnswer}\n\nProvide brief feedback and ask the next question. The next question MUST be specific to ${selectedTopic?.label ?? "the topic"} and relevant to the ${effectivePosition} role. Do NOT ask generic software engineering questions unless the topic is Technical. Respond in plain text only.`,
         maxTokens: 500, taskCategory: "interactive",
+        temperature: 0.8,
       });
 
       const parsed = parseInterviewResponse(result.text);
