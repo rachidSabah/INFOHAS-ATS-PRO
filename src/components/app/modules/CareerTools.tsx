@@ -915,11 +915,15 @@ export function AiMockInterview() {
         ? `\n\nHere are EXAMPLES of the kind of questions to ask for this topic (do NOT use these exact words — generate similar ones):\n${questionExamples.map((q) => `- ${q}`).join("\n")}\n\nCRITICAL: Your question MUST be relevant to ${selectedTopic?.label ?? "the selected topic"}. Do NOT ask generic software engineering questions unless the topic is "Technical".`
         : "";
 
+      // Random seed to bust any AI caching — ensures different questions each time
+      const seed = Math.floor(Math.random() * 1000000);
+
       const result = await callAI({
         systemPrompt: `You are an expert interviewer conducting a mock interview for a ${effectivePosition} position. ${topicContext}Ask ONE realistic interview question at a time — the kind a real interviewer would ask for this specific role and topic. Wait for the candidate's answer. After they answer, provide brief feedback (1-2 sentences) and ask the next question. Always respond in plain text — NEVER return JSON.${examplesText}`,
-        userPrompt: `Start a mock interview for: ${positionContext}${topicContext}\nAsk the first question. The question MUST be specific to ${selectedTopic?.label ?? "the topic"} and relevant to the ${effectivePosition} role. Do NOT ask generic questions about software architecture or scaling — ask about the actual duties of this role. Respond in plain text only.`,
-        maxTokens: 500, taskCategory: "interactive",
-        temperature: 0.8,
+        userPrompt: `Start a mock interview for: ${positionContext}${topicContext}\nAsk the first question. The question MUST be specific to ${selectedTopic?.label ?? "the topic"} and relevant to the ${effectivePosition} role. Do NOT ask generic questions about software architecture or scaling — ask about the actual duties of this role.\n\n[Session ID: ${seed} — generate a unique question]`,
+        maxTokens: 500,
+        taskCategory: "document", // Use API providers (not Puter) — more reliable at following prompts
+        temperature: 0.9,
       });
 
       const parsed = parseInterviewResponse(result.text);
@@ -945,12 +949,14 @@ export function AiMockInterview() {
       const examplesText = questionExamples.length > 0
         ? `\n\nRemember: questions MUST be relevant to ${selectedTopic?.label ?? "the selected topic"}. Example topics for this role:\n${questionExamples.slice(0, 4).map((q) => `- ${q}`).join("\n")}`
         : "";
+      const seed = Math.floor(Math.random() * 1000000);
 
       const result = await callAI({
         systemPrompt: `You are an expert interviewer conducting a mock interview for a ${effectivePosition} position. The candidate just answered your question. Provide brief feedback (1-2 sentences) specific to their answer, then ask the next question on a different aspect of the role. Always respond in plain text — NEVER return JSON. Keep questions realistic and specific to ${selectedTopic?.label ?? "the topic"}.${examplesText}`,
-        userPrompt: `Candidate's answer: ${userAnswer}\n\nProvide brief feedback and ask the next question. The next question MUST be specific to ${selectedTopic?.label ?? "the topic"} and relevant to the ${effectivePosition} role. Do NOT ask generic software engineering questions unless the topic is Technical. Respond in plain text only.`,
-        maxTokens: 500, taskCategory: "interactive",
-        temperature: 0.8,
+        userPrompt: `Candidate's answer: ${userAnswer}\n\nProvide brief feedback and ask the next question. The next question MUST be specific to ${selectedTopic?.label ?? "the topic"} and relevant to the ${effectivePosition} role. Do NOT ask generic software engineering questions unless the topic is Technical.\n\n[Session ID: ${seed} — generate a unique question]`,
+        maxTokens: 500,
+        taskCategory: "document", // Use API providers (not Puter) — more reliable at following prompts
+        temperature: 0.9,
       });
 
       const parsed = parseInterviewResponse(result.text);
