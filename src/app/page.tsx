@@ -31,7 +31,7 @@ export default function Home() {
   // Sync all data from D1 on app mount
   useEffect(() => {
     if (isAuthed && !synced && user) {
-      setUserId(user.id);
+      setUserId(user.id); // Restore user ID for API calls (important after refresh)
       syncAllFromCloud(useApp).then(() => {
         useApp.setState({ synced: true });
       });

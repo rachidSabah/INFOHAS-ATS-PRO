@@ -1,4 +1,4 @@
-// ResumeAI Pro — global Zustand store (cloud-backed, no localStorage persistence)
+// ResumeAI Pro — global Zustand store (cloud-backed + sessionStorage session persistence)
 "use client";
 
 import { create } from "zustand";
@@ -195,10 +195,57 @@ interface AppState {
 
 const uid = (p = "id") => `${p}_${Math.random().toString(36).slice(2, 9)}${Date.now().toString(36).slice(-4)}`;
 
+// === Session persistence — survives browser refresh ===
+// The user object is saved to localStorage on sign-in and restored on page load.
+// This prevents the "login again on refresh" bug.
+// On explicit signOut, the session is cleared.
+const SESSION_KEY = "resumeai-session";
+
+function persistSession(user: User) {
+  if (typeof window === "undefined") return;
+  try {
+    localStorage.setItem(SESSION_KEY, JSON.stringify({
+      user,
+      expiresAt: Date.now() + 7 * 24 * 60 * 60 * 1000, // 7-day session expiry
+    }));
+  } catch {}
+}
+
+function restoreSession(): User | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = localStorage.getItem(SESSION_KEY);
+    if (!raw) return null;
+    const session = JSON.parse(raw);
+    // Check expiry
+    if (session.expiresAt && Date.now() > session.expiresAt) {
+      localStorage.removeItem(SESSION_KEY);
+      return null;
+    }
+    if (session.user && session.user.id) {
+      return session.user as User;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+function clearSession() {
+  if (typeof window === "undefined") return;
+  try {
+    localStorage.removeItem(SESSION_KEY);
+  } catch {}
+}
+
+// Try to restore session on module load (before React renders)
+const _restoredUser = restoreSession();
+
 export const useApp = create<AppState>()(
     (set, get) => ({
-      user: null,
-      isAuthed: false,
+      // Restore session from localStorage if available (survives browser refresh)
+      user: _restoredUser,
+      isAuthed: !!_restoredUser,
       authOpen: false,
 
       // User registry — seeded with the super admin
@@ -221,7 +268,7 @@ export const useApp = create<AppState>()(
         return [sa];
       })(),
 
-      view: "landing",
+      view: _restoredUser ? "dashboard" : "landing",
       activeResumeId: SEED_RESUMES[0]?.id ?? null,
       activeJdId: SEED_JDS[0]?.id ?? null,
       activeCoverLetterId: SEED_COVER_LETTERS[0]?.id ?? null,
@@ -255,6 +302,9 @@ export const useApp = create<AppState>()(
       sidebarCollapsed: false,
       synced: false,
 
+      // If session was restored, set the user ID for API calls + trigger cloud sync
+      ...(_restoredUser ? { _needsRestore: true } : {}),
+
       setView: (v) => set({ view: v, landingSection: null }),
       openAuth: () => set({ authOpen: true }),
       closeAuth: () => set({ authOpen: false }),
@@ -265,6 +315,8 @@ export const useApp = create<AppState>()(
         const now = new Date().toISOString();
         const updatedUser = { ...user, lastLoginAt: now, lastActiveAt: now };
         setUserId(updatedUser.id); // Set user ID for API calls
+        // Persist session to localStorage so it survives browser refresh
+        persistSession(updatedUser);
         set((s) => {
           const exists = s.users.find((u) => u.email === user.email);
           const users = exists
@@ -281,6 +333,7 @@ export const useApp = create<AppState>()(
           useApp.getState().log({ actor: s.user.email, action: "User signed out", category: "auth", details: "", severity: "info" });
         }
         clearUserId();
+        clearSession(); // Clear persisted session on explicit sign-out
         set({ user: null, isAuthed: false, view: "landing", synced: false });
       },
 
@@ -312,6 +365,7 @@ export const useApp = create<AppState>()(
           synced: false,
         }));
         setUserId(updatedUser.id);
+        persistSession(updatedUser);
         useApp.getState().log({ actor: normalizedEmail, action: "User signed in", category: "auth", details: "Provider: email", severity: "info" });
         return { ok: true, user: updatedUser };
       },
@@ -344,6 +398,8 @@ export const useApp = create<AppState>()(
         useApp.getState().log({ actor: normalizedEmail, action: "User registered (pending approval)", category: "auth", details: `Name: ${newUser.name}`, severity: "warning" });
         // Auto-sign-in the new user (they'll see the pending approval screen)
         set({ user: newUser, isAuthed: true, authOpen: false, view: "dashboard", synced: false });
+        setUserId(newUser.id);
+        persistSession(newUser);
         return { ok: true, user: newUser };
       },
 
@@ -407,6 +463,7 @@ export const useApp = create<AppState>()(
               synced: false,
             }));
             setUserId(updatedUser.id);
+            persistSession(updatedUser);
             if (shouldAutoApprove) {
               useApp.getState().log({ actor: puterEmail, action: "Puter user auto-approved on sign-in", category: "auth", details: `Name: ${updatedUser.name}`, severity: "info" });
             } else {
@@ -439,6 +496,7 @@ export const useApp = create<AppState>()(
             };
             set((s) => ({ users: [...s.users, newUser], user: newUser, isAuthed: true, authOpen: false, view: "dashboard", synced: false }));
             setUserId(newUser.id);
+            persistSession(newUser);
             useApp.getState().log({ actor: puterEmail, action: "User registered via Puter (auto-approved)", category: "auth", details: `Name: ${newUser.name}`, severity: "info" });
             return { ok: true, user: newUser };
           }
