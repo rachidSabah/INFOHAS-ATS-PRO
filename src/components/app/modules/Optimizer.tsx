@@ -275,7 +275,8 @@ export function Optimizer() {
 
       const delta = (result.afterATS?.scores.ats ?? 0) - (result.beforeATS?.scores.ats ?? 0);
       const confidence = result.qa?.confidence ?? 0;
-      toast.success(`Optimization complete — ATS ${result.beforeATS?.scores.ats ?? "?"} → ${result.afterATS?.scores.ats ?? "?"} (+${delta} pts) · Confidence ${confidence}/100`);
+      const deltaStr = delta >= 0 ? `+${delta}` : `${delta}`;
+      toast.success(`Optimization complete — ATS ${result.beforeATS?.scores.ats ?? "?"} → ${result.afterATS?.scores.ats ?? "?"} (${deltaStr} pts) · Confidence ${confidence}/100`);
     } catch (e: any) {
       if (controller.signal.aborted) return;
       const errMsg = e?.message || "Optimization failed. Please try again.";
@@ -599,15 +600,24 @@ export function Optimizer() {
                 <div className="flex items-center gap-5">
                   <div className="text-center">
                     <div className="text-xs uppercase tracking-wide opacity-80">Before</div>
-                    <div className="text-3xl font-bold font-display">{beforeReport.scores.ats}</div>
+                    <div className="text-3xl font-bold font-display">{pipelineResult?.beforeATS?.scores.ats ?? beforeReport.scores.ats}</div>
                   </div>
                   <Icon name="ArrowRight" className="w-5 h-5 opacity-70" />
                   <div className="text-center">
                     <div className="text-xs uppercase tracking-wide opacity-80">After</div>
-                    <div className="text-3xl font-bold font-display text-gold">{afterReport.scores.ats}</div>
+                    <div className="text-3xl font-bold font-display text-gold">{pipelineResult?.afterATS?.scores.ats ?? afterReport.scores.ats}</div>
                   </div>
                   <div className="ml-3">
-                    <Badge variant="gold" className="text-sm">+{afterReport.scores.ats - beforeReport.scores.ats} pts</Badge>
+                    {(() => {
+                      const beforeScore = pipelineResult?.beforeATS?.scores.ats ?? beforeReport.scores.ats;
+                      const afterScore = pipelineResult?.afterATS?.scores.ats ?? afterReport.scores.ats;
+                      const delta = afterScore - beforeScore;
+                      return (
+                        <Badge variant={delta >= 0 ? "gold" : "warning"} className="text-sm">
+                          {delta >= 0 ? "+" : ""}{delta} pts
+                        </Badge>
+                      );
+                    })()}
                   </div>
                 </div>
                 <div className="flex gap-2">
@@ -666,10 +676,10 @@ export function Optimizer() {
               <Card>
                 <CardHeader><CardTitle className="text-base">Improvements</CardTitle></CardHeader>
                 <CardContent className="text-sm space-y-2">
-                  <div className="flex justify-between"><span className="text-muted-foreground">Missing keywords</span><span className="font-semibold">{beforeReport.missingKeywords.length} → {afterReport.missingKeywords.length}</span></div>
-                  <div className="flex justify-between"><span className="text-muted-foreground">Matched keywords</span><span className="font-semibold">{beforeReport.matchedKeywords.length} → {afterReport.matchedKeywords.length}</span></div>
-                  <div className="flex justify-between"><span className="text-muted-foreground">Keyword score</span><span className="font-semibold">{beforeReport.scores.keywords} → {afterReport.scores.keywords}</span></div>
-                  <div className="flex justify-between"><span className="text-muted-foreground">Content score</span><span className="font-semibold">{beforeReport.scores.content} → {afterReport.scores.content}</span></div>
+                  <div className="flex justify-between"><span className="text-muted-foreground">Missing keywords</span><span className="font-semibold">{(pipelineResult?.beforeATS?.missingKeywords.length ?? beforeReport.missingKeywords.length)} → {(pipelineResult?.afterATS?.missingKeywords.length ?? afterReport.missingKeywords.length)}</span></div>
+                  <div className="flex justify-between"><span className="text-muted-foreground">Matched keywords</span><span className="font-semibold">{(pipelineResult?.beforeATS?.matchedKeywords.length ?? beforeReport.matchedKeywords.length)} → {(pipelineResult?.afterATS?.matchedKeywords.length ?? afterReport.matchedKeywords.length)}</span></div>
+                  <div className="flex justify-between"><span className="text-muted-foreground">Keyword score</span><span className="font-semibold">{(pipelineResult?.beforeATS?.scores.keywordMatch ?? beforeReport.scores.keywords)} → {(pipelineResult?.afterATS?.scores.keywordMatch ?? afterReport.scores.keywords)}</span></div>
+                  <div className="flex justify-between"><span className="text-muted-foreground">Content score</span><span className="font-semibold">{(pipelineResult?.beforeATS?.scores.content ?? beforeReport.scores.content)} → {(pipelineResult?.afterATS?.scores.content ?? afterReport.scores.content)}</span></div>
                   <div className="flex justify-between"><span className="text-muted-foreground">Template</span><span className="font-semibold">{aviationMode ? "Aviation ATS" : "InfoHAS Pro"}</span></div>
                   <div className="flex justify-between"><span className="text-muted-foreground">One A4 page</span><span className="font-semibold text-emerald-600">✓ Validated</span></div>
                 </CardContent>
