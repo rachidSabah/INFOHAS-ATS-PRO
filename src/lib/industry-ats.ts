@@ -36,13 +36,82 @@ export interface IndustryAtsProfile {
 // === Aviation (preserved from original) ===
 const AVIATION_PROFILE: IndustryAtsProfile = {
   id: "aviation",
-  label: "Aviation",
-  description: "Cabin crew, flight attendant, airline operations",
+  label: "Aviation (Cabin Crew)",
+  description: "Cabin crew, flight attendant, airline cabin operations",
   keywordBank: `${CABIN_CREW_KEYWORDS}\n${AVIATION_KEYWORDS}`,
   writingGuidance: `Emphasize MULTICULTURAL exposure, safety procedures, passenger service excellence.
 Highlight any SEP, CRM, First Aid, CPR/AED certifications.
 Tone: Premium, confident, service-oriented.`,
-  priorityKeywords: ["Multicultural", "Premium Service", "Safety", "Hospitality", "Cultural Awareness", "Service Excellence"],
+  priorityKeywords: ["Multicultural", "Premium Service", "Safety", "Hospitality", "Cultural Awareness", "Service Excellence", "SEP", "CRM"],
+  tone: "Premium",
+  commonAtsSystems: ["Workday", "SuccessFactors", "Taleo"],
+  sectionPriorities: ["Professional Summary", "Core Competencies & Skills", "Professional Experience", "Education", "Languages"],
+};
+
+// === Airline Airport Services (Ground Operations) ===
+const AIRLINE_AIRPORT_SERVICES_PROFILE: IndustryAtsProfile = {
+  id: "airline-airport-services",
+  label: "Airline Airport Services",
+  description: "Ground operations, check-in, boarding, ramp, passenger services at airports",
+  keywordBank: `Ground Operations: Check-in, Boarding, Disembarkation, Ramp Operations, Turnaround Management, Ground Handling, Aircraft Pushback, Baggage Handling, Load Sheet, Weight & Balance.
+Passenger Services: Passenger Assistance, Special Assistance (PRM, UMNR, CIP), Lounge Access, Boarding Pass Issuance, Flight Irregularity Handling, Denied Boarding, Rebooking, Compensation.
+Systems: Amadeus, Sabre, Galileo, DCS (Departure Control System), BRS (Baggage Reconciliation System), ACARS.
+Safety: Ramp Safety, FOD (Foreign Object Debris), Ground Safety, Fueling Safety, De-icing, Marshalling.
+Compliance: IATA AHM (Airport Handling Manual), ICAO Annex 14, SGHA (Standard Ground Handling Agreement).
+Metrics: On-Time Performance (OTP), Turnaround Time, Baggage Mishandling Rate, Passenger Satisfaction.`,
+  writingGuidance: `Highlight ground operations experience — check-in, boarding, ramp, baggage.
+Mention specific DCS/systems used (Amadeus, Sabre, DCS).
+Quantify operational metrics (OTP, turnaround time, baggage handling).
+Emphasize safety compliance and IATA/AHM knowledge.
+Tone: Professional, operational, safety-conscious.`,
+  priorityKeywords: ["Ground Operations", "Check-in", "Boarding", "Passenger Services", "Ramp", "Turnaround", "DCS", "IATA AHM", "OTP"],
+  tone: "Balanced",
+  commonAtsSystems: ["Workday", "SuccessFactors", "Taleo"],
+  sectionPriorities: ["Professional Summary", "Core Competencies & Skills", "Professional Experience", "Education", "Languages"],
+};
+
+// === Airport Duty Free Sales ===
+const AIRPORT_DUTY_FREE_PROFILE: IndustryAtsProfile = {
+  id: "airport-duty-free",
+  label: "Airport Duty Free Sales",
+  description: "Duty-free retail sales, airport shopping, travel retail",
+  keywordBank: `Sales: Duty-Free Sales, Travel Retail, Upselling, Cross-selling, Product Demonstration, Promotional Campaigns, Sales Targets, Revenue Generation, Conversion Rate.
+Products: Fragrances, Cosmetics, Liquor, Tobacco, Confectionery, Electronics, Luxury Goods, Fashion, Souvenirs, Local Specialties.
+Operations: Visual Merchandising, Stock Management, Inventory Control, Cash Handling, Card Transactions, Foreign Currency, Tax-Free Forms, Refund Processing.
+Customer Service: Multicultural Customer Service, Language Skills, Product Knowledge, Customer Engagement, VIP/CIP Service, Personal Shopping.
+Compliance: Customs Regulations, Duty-Free Allowances, Age Verification, Liquor/Tobacco Restrictions, Security Screening Awareness.
+Systems: POS Systems, SAP Retail, Inventory Management Systems, Sales Analytics.
+Metrics: Sales per Square Meter, Average Transaction Value, Units per Transaction, Conversion Rate, Customer Satisfaction.`,
+  writingGuidance: `Quantify sales achievements (e.g. "exceeded sales targets by 120%", "managed $50K daily revenue").
+Highlight product knowledge across categories (fragrances, cosmetics, liquor, luxury).
+Emphasize multicultural customer service and language skills.
+Mention POS systems and visual merchandising experience.
+Tone: Energetic, sales-driven, customer-focused.`,
+  priorityKeywords: ["Duty-Free Sales", "Travel Retail", "Upselling", "Visual Merchandising", "Multicultural", "POS", "Sales Targets", "Conversion Rate"],
+  tone: "Aggressive",
+  commonAtsSystems: ["Workday", "SuccessFactors", "Taleo"],
+  sectionPriorities: ["Professional Summary", "Core Competencies & Skills", "Professional Experience", "Education", "Languages"],
+};
+
+// === Hospitality (5-Star Hotels) ===
+const HOSPITALITY_PROFILE: IndustryAtsProfile = {
+  id: "hospitality",
+  label: "Hospitality (5-Star Hotels)",
+  description: "Luxury hotels, resorts, front office, guest services, F&B, concierge",
+  keywordBank: `Front Office: Guest Registration, Check-in/Check-out, Reservation Management, Room Assignment, Guest Relations, Concierge Services, Bell Desk, Valet, Loyalty Programs.
+Food & Beverage: Fine Dining Service, Banquet Operations, Room Service, Bar Service, Wine Knowledge, Menu Planning, Food Safety, HACCP, Allergen Management.
+Guest Services: VIP Services, Butler Service, Personalized Service, Complaint Resolution, Guest Satisfaction, Guest Feedback Management, Special Requests.
+Operations: Housekeeping Management, Laundry Services, Facility Management, Property Management System (PMS), Opera, Micros, Symphony.
+Luxury Standards: Forbes Travel Guide Standards, AAA Diamond Ratings, Luxury Brand Standards, Butler Protocols, Etiquette, Personal Grooming.
+Languages: English, Arabic, French, Mandarin, Russian, German — multicultural guest communication.
+Metrics: Guest Satisfaction Score (GSS), NPS, RevPAR, ADR, Occupancy Rate, Repeat Guest Rate.`,
+  writingGuidance: `Emphasize LUXURY service standards — Forbes/AAA ratings, brand standards.
+Quantify guest satisfaction scores and service metrics.
+Highlight specific hotel systems (Opera, Micros, Symphony).
+Mention fine dining, banquet, or butler experience if applicable.
+Emphasize multicultural communication and language skills.
+Tone: Premium, elegant, service-excellence-focused.`,
+  priorityKeywords: ["Guest Services", "Luxury", "Concierge", "Fine Dining", "Opera PMS", "VIP Services", "Guest Satisfaction", "Forbes Standards", "Multicultural"],
   tone: "Premium",
   commonAtsSystems: ["Workday", "SuccessFactors", "Taleo"],
   sectionPriorities: ["Professional Summary", "Core Competencies & Skills", "Professional Experience", "Education", "Languages"],
@@ -250,6 +319,9 @@ Tone: Professional, balanced.`,
 
 export const INDUSTRY_PROFILES: Record<string, IndustryAtsProfile> = {
   aviation: AVIATION_PROFILE,
+  "airline-airport-services": AIRLINE_AIRPORT_SERVICES_PROFILE,
+  "airport-duty-free": AIRPORT_DUTY_FREE_PROFILE,
+  hospitality: HOSPITALITY_PROFILE,
   technology: TECHNOLOGY_PROFILE,
   finance: FINANCE_PROFILE,
   marketing: MARKETING_PROFILE,

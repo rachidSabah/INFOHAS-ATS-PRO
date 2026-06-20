@@ -108,6 +108,27 @@ export const INDUSTRY_KEYWORDS: Record<string, string[]> = {
     "service excellence", "multicultural", "premium service", "hospitality",
     "evacuation", "dangerous goods", "DGR", "security", "AVSEC",
   ],
+  "airline-airport-services": [
+    "ground operations", "check-in", "boarding", "ramp", "turnaround",
+    "ground handling", "baggage handling", "departure control", "DCS",
+    "passenger services", "airport services", "ground staff", "load sheet",
+    "Amadeus", "Sabre", "IATA AHM", "ramp safety", "weight and balance",
+    "disembarkation", "baggage reconciliation",
+  ],
+  "airport-duty-free": [
+    "duty free", "duty-free", "travel retail", "airport retail",
+    "fragrance", "cosmetics", "liquor", "tobacco", "tax-free",
+    "visual merchandising", "POS system", "sales associate", "confectionery",
+    "luxury goods", "customs regulations", "foreign currency",
+    "stock management", "upselling", "cross-selling", "conversion rate",
+  ],
+  hospitality: [
+    "hotel", "resort", "guest", "concierge", "front office", "housekeeping",
+    "butler", "fine dining", "banquet", "room service", "opera pms",
+    "forbes", "aaa diamond", "luxury hotel", "5-star", "five star",
+    "guest satisfaction", "guest relations", "valet", "loyalty program",
+    "HACCP", "micros", "food and beverage", "VIP services",
+  ],
   retail: [
     "retail", "store", "customer service", "sales", "merchandising",
     "inventory", "POS", "cash handling", "visual merchandising", "loss prevention",
