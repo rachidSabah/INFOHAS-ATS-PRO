@@ -346,8 +346,20 @@ export const INDUSTRY_OPTIONS = Object.values(INDUSTRY_PROFILES).map((p) => ({
 
 /**
  * Detect the industry from a job description + resume.
- * Uses keyword matching against the INDUSTRY_KEYWORDS banks.
- * Returns the detected industry ID + confidence score.
+ * Uses keyword matching against industry-specific keyword banks.
+ *
+ * Detection priority (most specific first):
+ *   1. Airport Duty Free (very specific terms: "duty free", "travel retail")
+ *   2. Airline Airport Services (specific: "ground operations", "check-in", "ramp", "DCS")
+ *   3. Hospitality (specific: "hotel", "concierge", "butler", "opera pms")
+ *   4. Aviation / Cabin Crew (specific: "cabin crew", "flight attendant", "SEP")
+ *   5. Technology, Finance, Marketing, etc.
+ *   6. Generic (fallback)
+ *
+ * CRITICAL: Generic terms like "airline", "passenger", "safety" do NOT
+ * auto-trigger Aviation — only cabin-crew-specific terms do. This prevents
+ * ground operations, duty free, and hospitality jobs at airlines from being
+ * misclassified as cabin crew.
  */
 export function detectIndustry(jdText: string, resumeText: string = ""): {
   industryId: string;
@@ -357,9 +369,64 @@ export function detectIndustry(jdText: string, resumeText: string = ""): {
 } {
   const combinedText = `${jdText} ${resumeText}`.toLowerCase();
 
-  // Score each industry by counting keyword matches
+  // === Step 1: Check highly-specific industry indicators FIRST ===
+  // These are terms that ONLY appear in one industry — if found, we're confident.
+
+  // Airport Duty Free — very specific terms
+  const dutyFreeTerms = ["duty free", "duty-free", "travel retail", "airport retail", "tax-free sales"];
+  const dutyFreeMatches = dutyFreeTerms.filter((t) => combinedText.includes(t)).length;
+  if (dutyFreeMatches >= 1) {
+    return {
+      industryId: "airport-duty-free",
+      confidence: Math.min(100, 40 + dutyFreeMatches * 20),
+      detectedRole: detectRole(jdText),
+      detectedAts: detectAtsSystem(jdText),
+    };
+  }
+
+  // Airline Airport Services — specific ground ops terms
+  const groundOpsTerms = ["ground operations", "ground handling", "ramp operations", "departure control", "dcs", "turnaround management", "load sheet", "iata ahm", "baggage reconciliation", "ground staff", "airport services agent", "ground services"];
+  const groundOpsMatches = groundOpsTerms.filter((t) => combinedText.includes(t)).length;
+  if (groundOpsMatches >= 1) {
+    return {
+      industryId: "airline-airport-services",
+      confidence: Math.min(100, 40 + groundOpsMatches * 15),
+      detectedRole: detectRole(jdText),
+      detectedAts: detectAtsSystem(jdText),
+    };
+  }
+
+  // Hospitality — specific hotel terms
+  const hospitalityTerms = ["hotel", "resort", "concierge", "butler", "front office", "housekeeping", "opera pms", "forbes travel", "aaa diamond", "luxury hotel", "5-star hotel", "five star hotel", "guest relations", "banquet operations", "room service"];
+  const hospitalityMatches = hospitalityTerms.filter((t) => combinedText.includes(t)).length;
+  if (hospitalityMatches >= 1) {
+    return {
+      industryId: "hospitality",
+      confidence: Math.min(100, 40 + hospitalityMatches * 15),
+      detectedRole: detectRole(jdText),
+      detectedAts: detectAtsSystem(jdText),
+    };
+  }
+
+  // Aviation / Cabin Crew — ONLY cabin-crew-specific terms (NOT generic "airline")
+  const cabinCrewTerms = ["cabin crew", "flight attendant", "cabin safety", "sep ", "safety and emergency procedures", "cabin crew attestation", "cca ", "aviation first aid", "in-flight service", "galley management", "cabin pressurization", "disembarkation procedures", "dgr ", "dangerous goods regulations", "passenger announcement"];
+  const cabinCrewMatches = cabinCrewTerms.filter((t) => combinedText.includes(t)).length;
+  if (cabinCrewMatches >= 1) {
+    return {
+      industryId: "aviation",
+      confidence: Math.min(100, 40 + cabinCrewMatches * 15),
+      detectedRole: detectRole(jdText),
+      detectedAts: detectAtsSystem(jdText),
+    };
+  }
+
+  // === Step 2: Score remaining industries by keyword bank matching ===
   const scores: Record<string, number> = {};
-  for (const [industryId, keywords] of Object.entries(INDUSTRY_KEYWORDS)) {
+  // Only score non-aviation industries (aviation was already checked above)
+  const industriesToScore = Object.entries(INDUSTRY_KEYWORDS).filter(
+    ([id]) => id !== "aviation" && id !== "airline-airport-services" && id !== "airport-duty-free" && id !== "hospitality"
+  );
+  for (const [industryId, keywords] of industriesToScore) {
     let score = 0;
     for (const keyword of keywords) {
       if (combinedText.includes(keyword.toLowerCase())) {
@@ -369,15 +436,7 @@ export function detectIndustry(jdText: string, resumeText: string = ""): {
     scores[industryId] = score;
   }
 
-  // Also check aviation-specific terms
-  const aviationTerms = ["cabin crew", "flight attendant", "airline", "aviation", "cabin safety", "sep", "dgr"];
-  let aviationScore = 0;
-  for (const term of aviationTerms) {
-    if (combinedText.includes(term)) aviationScore += 2; // weight aviation higher since it's specific
-  }
-  scores.aviation = (scores.aviation || 0) + aviationScore;
-
-  // Find the best match
+  // Find the best match from remaining industries
   let bestIndustry = "generic";
   let bestScore = 0;
   for (const [industryId, score] of Object.entries(scores)) {
@@ -387,7 +446,7 @@ export function detectIndustry(jdText: string, resumeText: string = ""): {
     }
   }
 
-  // Confidence = score / (max possible score for that industry)
+  // Confidence
   const maxPossible = INDUSTRY_KEYWORDS[bestIndustry]?.length || 10;
   const confidence = bestScore > 0 ? Math.min(100, Math.round((bestScore / maxPossible) * 150)) : 0;
 
