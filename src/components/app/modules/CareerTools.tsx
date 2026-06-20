@@ -799,9 +799,35 @@ function parseInterviewResponse(text: string): { displayText: string; question?:
   return { displayText: cleaned };
 }
 
+// Interview topics — thematic fields the user can select
+const INTERVIEW_TOPICS = [
+  { id: "cabin-crew", label: "Cabin Crew / Flight Attendant", icon: "Plane", description: "Aviation service, safety, emergency procedures" },
+  { id: "technical", label: "Technical / Engineering", icon: "Code2", description: "Software, systems, architecture, coding" },
+  { id: "behavioral", label: "Behavioral", icon: "Users", description: "STAR method, past experiences, teamwork" },
+  { id: "situational", label: "Situational", icon: "GitBranch", description: "Hypothetical scenarios, problem-solving" },
+  { id: "hr", label: "HR / General", icon: "UserCheck", description: "Strengths, weaknesses, career goals" },
+  { id: "customer-service", label: "Customer Service", icon: "Headphones", description: "Service excellence, conflict resolution" },
+  { id: "sales", label: "Sales / Business", icon: "TrendingUp", description: "Selling, negotiation, business development" },
+  { id: "leadership", label: "Leadership / Management", icon: "Crown", description: "Team management, decision-making, vision" },
+] as const;
+
+// Position presets per topic — quick-select for common roles
+const POSITION_PRESETS: Record<string, string[]> = {
+  "cabin-crew": ["Cabin Crew (Emirates)", "Cabin Crew (Qatar Airways)", "Flight Attendant (Ryanair)", "Cabin Crew (Etihad)", "Senior Cabin Crew", "Purser / Cabin Supervisor"],
+  "technical": ["Software Engineer", "Senior Frontend Engineer", "Backend Developer", "Full-Stack Engineer", "DevOps Engineer", "Data Scientist", "Mobile Developer"],
+  "behavioral": ["Project Manager", "Team Lead", "Product Manager", "Business Analyst", "Operations Manager"],
+  "situational": ["Any role", "Management Trainee", "Consultant", "Operations Analyst"],
+  "hr": ["Any role", "Graduate Trainee", "Entry-level", "Career changer"],
+  "customer-service": ["Customer Service Agent", "Call Centre Representative", "Guest Relations Officer", "Front Desk Agent", "Customer Success Manager"],
+  "sales": ["Sales Representative", "Account Executive", "Business Development Manager", "Sales Manager", "Retail Sales Associate"],
+  "leadership": ["Team Lead", "Department Manager", "Director", "VP", "COO"],
+};
+
 export function AiMockInterview() {
   const jds = useApp((s) => s.jobDescriptions);
-  const [jdId, setJdId] = useState("");
+  const [topic, setTopic] = useState<string>("cabin-crew");
+  const [position, setPosition] = useState<string>("");
+  const [customPosition, setCustomPosition] = useState<string>("");
   const [messages, setMessages] = useState<MockInterviewMessage[]>([]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
@@ -809,17 +835,25 @@ export function AiMockInterview() {
   const [error, setError] = useState<string | null>(null);
   const [questionCount, setQuestionCount] = useState(0);
 
+  const selectedTopic = INTERVIEW_TOPICS.find((t) => t.id === topic);
+  const positionPresets = POSITION_PRESETS[topic] ?? [];
+  const effectivePosition = customPosition.trim() || position || (selectedTopic?.label ?? "the role");
+
   const startInterview = async () => {
-    const jd = jds.find((j) => j.id === jdId);
     setStarted(true);
     setMessages([]);
     setError(null);
     setQuestionCount(0);
     setLoading(true);
     try {
+      const topicContext = selectedTopic
+        ? `Topic: ${selectedTopic.label} (${selectedTopic.description}). `
+        : "";
+      const positionContext = `Position: ${effectivePosition}. `;
+
       const result = await callAI({
-        systemPrompt: "You are an expert interviewer conducting a mock interview. Ask ONE question at a time. Wait for the candidate's answer. After they answer, provide brief feedback (1-2 sentences) and ask the next question. Always respond in plain text — NEVER return JSON. Start with a behavioral question relevant to the role.",
-        userPrompt: `Start a mock interview for: ${jd?.title || "a general role"} at ${jd?.company || "a company"}. Ask the first question. Respond in plain text only.`,
+        systemPrompt: `You are an expert interviewer conducting a mock interview for a ${effectivePosition} position. ${topicContext}Ask ONE realistic interview question at a time — the kind a real interviewer would ask for this specific role and topic. Wait for the candidate's answer. After they answer, provide brief feedback (1-2 sentences) and ask the next question. Always respond in plain text — NEVER return JSON. Make questions specific to the role and topic (e.g., for cabin crew: safety procedures, passenger service, emergency scenarios; for technical: coding, architecture, debugging; for behavioral: STAR-method past experiences).`,
+        userPrompt: `Start a mock interview for: ${positionContext}${topicContext}\nAsk the first question. Make it realistic and specific to this role — not a generic question. Respond in plain text only.`,
         maxTokens: 500, taskCategory: "interactive",
       });
 
@@ -843,8 +877,8 @@ export function AiMockInterview() {
     setError(null);
     try {
       const result = await callAI({
-        systemPrompt: "You are an expert interviewer. The candidate just answered your question. Provide brief feedback (1-2 sentences) and ask the next question. Always respond in plain text — NEVER return JSON.",
-        userPrompt: `Candidate's answer: ${userAnswer}\n\nProvide brief feedback and ask the next question. Respond in plain text only.`,
+        systemPrompt: `You are an expert interviewer conducting a mock interview for a ${effectivePosition} position. The candidate just answered your question. Provide brief feedback (1-2 sentences) specific to their answer, then ask the next question on a different aspect of the role. Always respond in plain text — NEVER return JSON. Keep questions realistic and specific to ${selectedTopic?.label ?? "the topic"}.`,
+        userPrompt: `Candidate's answer: ${userAnswer}\n\nProvide brief feedback and ask the next question. Make the next question different from previous ones. Respond in plain text only.`,
         maxTokens: 500, taskCategory: "interactive",
       });
 
@@ -867,20 +901,96 @@ export function AiMockInterview() {
     setQuestionCount(0);
   };
 
+  const onTopicChange = (newTopic: string) => {
+    setTopic(newTopic);
+    setPosition(""); // reset position when topic changes
+    setCustomPosition("");
+  };
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between gap-3 flex-wrap">
-        <div><h1 className="font-display text-2xl font-bold flex items-center gap-2"><Icon name="Mic" className="w-6 h-6 text-brand" /> AI Mock Interview</h1><p className="text-sm text-muted-foreground mt-1">Practice with an AI interviewer that asks real questions and gives feedback.</p></div>
+        <div><h1 className="font-display text-2xl font-bold flex items-center gap-2"><Icon name="Mic" className="w-6 h-6 text-brand" /> AI Mock Interview</h1><p className="text-sm text-muted-foreground mt-1">Practice with an AI interviewer that asks real role-specific questions and gives feedback.</p></div>
         {started && <Button variant="outline" size="sm" onClick={reset} className="gap-1.5"><Icon name="RotateCcw" className="w-3.5 h-3.5" /> Restart</Button>}
       </div>
 
       {!started ? (
-        <Card><CardContent className="p-4 space-y-3">
-          <div><Label>Target Job (optional)</Label><select value={jdId} onChange={(e) => setJdId(e.target.value)} className="w-full h-9 px-3 rounded-md border border-input bg-background text-sm mt-1"><option value="">General interview</option>{jds.map((j) => <option key={j.id} value={j.id}>{j.title} — {j.company || "N/A"}</option>)}</select></div>
-          <Button onClick={startInterview} disabled={loading} className="bg-brand hover:bg-brand-dark text-white gap-2"><Icon name={loading ? "Loader2" : "Mic"} className={`w-4 h-4 ${loading ? "animate-spin" : ""}`} /> {loading ? "Starting…" : "Start Mock Interview"}</Button>
+        <Card><CardContent className="p-4 sm:p-5 space-y-4">
+          {/* Topic / Field selector */}
+          <div>
+            <Label className="text-xs uppercase tracking-wide font-semibold">Interview Topic / Field</Label>
+            <p className="text-xs text-muted-foreground mt-0.5 mb-2">Select the type of interview you want to practice.</p>
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+              {INTERVIEW_TOPICS.map((t) => (
+                <button
+                  key={t.id}
+                  onClick={() => onTopicChange(t.id)}
+                  className={`flex flex-col items-center gap-1.5 p-3 rounded-lg border-2 transition text-center ${
+                    topic === t.id
+                      ? "border-brand bg-brand/10"
+                      : "border-border hover:border-brand/40 hover:bg-secondary/40"
+                  }`}
+                >
+                  <Icon name={t.icon} className={`w-5 h-5 ${topic === t.id ? "text-brand" : "text-muted-foreground"}`} />
+                  <span className={`text-[10px] font-medium leading-tight ${topic === t.id ? "text-brand" : "text-foreground/80"}`}>{t.label}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Selected topic description */}
+          {selectedTopic && (
+            <div className="rounded-lg bg-brand/5 dark:bg-brand/10 border border-brand/20 p-2.5 flex items-start gap-2">
+              <Icon name="Info" className="w-3.5 h-3.5 text-brand shrink-0 mt-0.5" />
+              <p className="text-xs text-muted-foreground">{selectedTopic.description}. Questions will be tailored to this topic.</p>
+            </div>
+          )}
+
+          {/* Position selector */}
+          <div>
+            <Label className="text-xs uppercase tracking-wide font-semibold">Position (optional)</Label>
+            <p className="text-xs text-muted-foreground mt-0.5 mb-2">Choose a specific position or type your own.</p>
+            {positionPresets.length > 0 && (
+              <div className="flex flex-wrap gap-1.5 mb-2">
+                {positionPresets.map((p) => (
+                  <button
+                    key={p}
+                    onClick={() => { setPosition(p); setCustomPosition(""); }}
+                    className={`text-xs px-2.5 py-1 rounded-full border transition ${
+                      position === p && !customPosition
+                        ? "border-brand bg-brand/10 text-brand font-medium"
+                        : "border-border hover:border-brand/40 text-muted-foreground hover:text-foreground"
+                    }`}
+                  >
+                    {p}
+                  </button>
+                ))}
+              </div>
+            )}
+            <Input
+              value={customPosition}
+              onChange={(e) => { setCustomPosition(e.target.value); setPosition(""); }}
+              placeholder={`Or type a custom position (e.g. "Cabin Crew — Emirates")`}
+              className="text-sm"
+            />
+          </div>
+
+          {/* Summary + start button */}
+          <div className="pt-2 border-t border-border">
+            <div className="text-xs text-muted-foreground mb-3">
+              Starting <span className="font-semibold text-foreground">{selectedTopic?.label ?? "General"}</span> interview for <span className="font-semibold text-foreground">{effectivePosition}</span>
+            </div>
+            <Button onClick={startInterview} disabled={loading} className="bg-brand hover:bg-brand-dark text-white gap-2 w-full sm:w-auto"><Icon name={loading ? "Loader2" : "Mic"} className={`w-4 h-4 ${loading ? "animate-spin" : ""}`} /> {loading ? "Starting…" : "Start Mock Interview"}</Button>
+          </div>
         </CardContent></Card>
       ) : (
         <Card><CardContent className="p-4">
+          {/* Topic + position header */}
+          <div className="mb-3 flex items-center gap-2 flex-wrap">
+            <Badge variant="brand" className="text-[10px] gap-1"><Icon name={selectedTopic?.icon ?? "Circle"} className="w-3 h-3" /> {selectedTopic?.label ?? "General"}</Badge>
+            <Badge variant="outline" className="text-[10px] gap-1"><Icon name="Briefcase" className="w-3 h-3" /> {effectivePosition}</Badge>
+          </div>
+
           {/* Progress indicator */}
           {questionCount > 0 && (
             <div className="mb-3 flex items-center justify-between text-xs">
