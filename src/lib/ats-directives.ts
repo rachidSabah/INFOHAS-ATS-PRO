@@ -174,63 +174,97 @@ export async function analyzeWithGemini(
     const atsFocus = airlineProfile ? (AIRLINE_ATS_PROFILES[airlineProfile]?.focus || "General") : "General";
 
     const prompt = `
-      ACT AS: Senior ATS Optimization Expert and Master Executive Resume Writer.
+      ACT AS: Expert Recruiter, Senior ATS Consultant, and Master Resume Strategist.
 
-      OBJECTIVE: Optimise for maximum ATS score. Rewrite the resume to FILL EXACTLY ONE A4 PAGE (12pt font). You must strategically weave in exact keywords, hard skills, and industry terminology to guarantee a 90%+ match rate.
+      OBJECTIVE: Deeply analyze the resume and job description, then produce a highly optimized recruiter-grade resume that maximizes ATS compatibility while remaining 100% factual.
 
-      CONTEXT:
-      - ATS SYSTEM: ${atsSystem} (${atsFocus})
-      - INDUSTRY KEYWORDS: ${INDUSTRY_PROFILES[airlineProfile]?.keywordBank || AVIATION_KEYWORDS}
-      - INDUSTRY WRITING GUIDANCE: ${INDUSTRY_PROFILES[airlineProfile]?.writingGuidance || ""}
-      - TONE: ${toneInstruction}
-      - FORMAT STYLE: ${formatInstruction}
-      - STRATEGY: ${strictnessInstruction}
+      ═══════════════════════════════════════════════════════════
+      MULTI-STAGE REASONING PIPELINE (THINK BEFORE WRITING)
+      ═══════════════════════════════════════════════════════════
+
+      Stage 1 — RESUME UNDERSTANDING:
+      Extract from the resume: experience, achievements, technologies, competencies, certifications, transferable skills, leadership indicators, quantified metrics.
+      Identify what the candidate is ACTUALLY good at (not what they claim — what their achievements prove).
+
+      Stage 2 — JOB DESCRIPTION UNDERSTANDING:
+      Deeply analyze: responsibilities, required skills, preferred skills, hidden expectations, seniority indicators, industry terminology, business goals, soft skills, action verbs, repeated phrases.
+      Extract: high-value phrases, hiring signals, recruiter intent, critical requirements, implied requirements.
+      Identify what the recruiter ACTUALLY cares about (read between the lines).
+
+      Stage 3 — INDUSTRY UNDERSTANDING:
+      Industry: ${INDUSTRY_PROFILES[airlineProfile]?.label || "Generic"}
+      Determine: ATS conventions, resume conventions, recruiter expectations for this industry.
+
+      Stage 4 — SEMANTIC MAPPING:
+      Map: Resume Experience → Job Responsibilities. Resume Skills → Job Requirements. Resume Achievements → Business Objectives.
+      Identify: gaps, strengths, opportunities, transferable skills.
+
+      Stage 5 — OPTIMIZATION STRATEGY:
+      Decide: which keywords to use, which phrases to use, which sections to prioritize, what to condense, what to expand, what should appear earlier, what should be emphasized.
+
+      ═══════════════════════════════════════════════════════════
+      HIGH-VALUE LANGUAGE OPTIMIZATION
+      ═══════════════════════════════════════════════════════════
+
+      Use recruiter-grade wording. Transform weak phrases into high-impact statements:
+      - "Responsible for customer service" → "Delivered exceptional customer service resulting in measurable satisfaction improvements"
+      - "Worked on software" → "Designed and implemented scalable software solutions supporting mission-critical applications"
+      - "Helped with projects" → "Led cross-functional initiatives that improved operational efficiency and business outcomes"
+
+      Extract and reuse high-value phrases from the job description naturally:
+      - "cross-functional collaboration", "stakeholder management", "process optimization", "data-driven decision making"
+
+      ═══════════════════════════════════════════════════════════
+      KEYWORD STRATEGY (NO STUFFING)
+      ═══════════════════════════════════════════════════════════
+
+      1. Identify critical keywords (must-haves from JD).
+      2. Identify secondary keywords (nice-to-haves).
+      3. Identify semantic synonyms (use if natural keyword doesn't fit).
+      4. Identify industry terminology (from the keyword bank below).
+      5. Embed ALL keywords NATURALLY — never stuff. Each keyword must appear in context.
+
+      ═══════════════════════════════════════════════════════════
+      CONTEXT
+      ═══════════════════════════════════════════════════════════
+      ATS SYSTEM: ${atsSystem} (${atsFocus})
+      INDUSTRY KEYWORDS: ${INDUSTRY_PROFILES[airlineProfile]?.keywordBank || AVIATION_KEYWORDS}
+      INDUSTRY WRITING GUIDANCE: ${INDUSTRY_PROFILES[airlineProfile]?.writingGuidance || ""}
+      TONE: ${toneInstruction}
+      FORMAT: ${formatInstruction}
+      STRICTNESS: ${strictnessInstruction}
 
       INPUT DATA:
       [RESUME]: ${resumeText}
       [JOB DESCRIPTION]: ${jobDescription}
 
-      TASK 1: SCORING (Calculate ATS Score, Impact, Brevity, Keywords).
-      TASK 2: REWRITE (STRICT PLAIN TEXT).
+      ═══════════════════════════════════════════════════════════
+      CONTENT TARGET
+      ═══════════════════════════════════════════════════════════
+      Target: ~2,900 characters. Range: 2,700-3,100. One A4 page only.
+      Each bullet: 110-180 chars. Summary: 4-6 lines (~60-90 words).
+      Use 5-7 detailed bullets for the 2 most recent roles. 3 bullets for older roles.
 
-      CRITICAL LENGTH ENFORCEMENT (NON-NEGOTIABLE & STRICT):
-      The generated resume MUST contain EXACTLY 2,800 characters (excluding HTML tags). Not less, not more.
-      - 2,100 characters is too short and sparse. DO NOT OUTPUT SHORT TEXT.
-      - 3,000+ characters will cause page overflow. DO NOT EXCEED.
-      - **HOW TO HIT EXACTLY 2800 CHARACTERS INTELLIGENTLY**:
-        1. If the draft is short: Expand content intelligently without filler or redundancy. Add deep technical context. Improve impact-driven bullet points. Ensure measurable achievements are prioritized (e.g., increased efficiency by X%, managed $Y budget). Use 5-7 detailed bullet points for the 2 most recent roles.
-        2. If the draft is too long: Summarize older roles (older than 5 years) to a single line without bullet points. Keep the summary to exactly 3 lines.
-
-      FORMATTING RULES (NON-NEGOTIABLE):
-      1. **NO** Emojis, Icons, Graphics, Colors, Tables, Columns, or Decorative Symbols.
-      2. **NO** Underlines or horizontal rules (<hr>).
-      3. **FONT**: Times New Roman, Size 12.
-
-      STRUCTURE:
-      1. **HEADER**: Name (H1, Uppercase, Bold, LEFT ALIGNED), Contact Info (LEFT ALIGNED).
-      2. **SECTIONS** (H3 tags): PROFESSIONAL SUMMARY, EXPERIENCE, EDUCATION, SKILLS. (Uppercase, Bold, LEFT ALIGNED, No lines).
-      3. **EXPERIENCE ENTRIES**:
-         - Job Title, Company, Location, Date MUST be on ONE LINE.
-         - Format: <h4><strong>Job Title</strong> | <strong>Company Name</strong>, Location | <strong>YYYY to YYYY</strong></h4>
-         - Do NOT use "(1 Year)". Use "Present" if applicable.
-      4. **EDUCATION ENTRIES**:
-         - Format: <h4><strong>Degree</strong> | <strong>School</strong> | <strong>YYYY to YYYY</strong></h4>
-         - List relevant modules/subjects learned as a simple bullet list.
-      5. **CONTENT**: Use <strong> tags for bolding. NO markdown asterisks (**).
+      ═══════════════════════════════════════════════════════════
+      FACTUAL INTEGRITY (NON-NEGOTIABLE)
+      ═══════════════════════════════════════════════════════════
+      NEVER fabricate: experience, employers, dates, metrics, certifications, skills.
+      ONLY use information from the original resume.
+      Rephrase, expand, and optimize — but never invent.
 
       RETURN JSON FORMAT ONLY:
       {
         "score": number,
         "score_breakdown": { "impact": number, "brevity": number, "keywords": number },
-        "summary_critique": "string",
-        "missing_keywords": ["string", "string"],
-        "matched_keywords": ["string", "string"],
-        "optimized_content": "Valid HTML string..."
+        "summary_critique": "Brief explanation of what was optimized and why (shown in analysis panel, NOT in resume)",
+        "missing_keywords": ["string"],
+        "matched_keywords": ["string"],
+        "optimized_content": "Valid HTML string"
       }
     `;
 
     const result = await callAI({
-      systemPrompt: "You are a Senior ATS Optimization Expert and Master Executive Resume Writer for the aviation industry. Always return ONLY valid JSON — no markdown fences, no prose.",
+      systemPrompt: `You are an Expert Recruiter, Senior ATS Consultant, and Master Resume Strategist. You deeply analyze resumes and job descriptions before rewriting. You use recruiter-grade language, industry terminology, and high-impact phrases. You NEVER fabricate information. Industry: ${INDUSTRY_PROFILES[airlineProfile]?.label || "Generic"}. Always return ONLY valid JSON — no markdown fences, no prose.`,
       userPrompt: prompt,
       maxTokens: 4000,
       temperature: 0.4,
@@ -384,6 +418,44 @@ USER-SELECTED FORMAT: ${formatInstruction}
 USER-SELECTED STRICTNESS: ${strictnessInstruction}
 
 ═══════════════════════════════════════════════════════════════
+MULTI-STAGE REASONING PIPELINE (THINK BEFORE WRITING)
+═══════════════════════════════════════════════════════════════
+
+Stage 1 — RESUME UNDERSTANDING:
+Extract: experience, achievements, technologies, competencies, certifications, transferable skills, leadership indicators, quantified metrics.
+Identify what the candidate is ACTUALLY good at (not what they claim — what their achievements prove).
+
+Stage 2 — JOB DESCRIPTION UNDERSTANDING:
+Deeply analyze: responsibilities, required skills, preferred skills, hidden expectations, seniority indicators, industry terminology, business goals, soft skills, action verbs, repeated phrases.
+Extract: high-value phrases, hiring signals, recruiter intent, critical requirements, implied requirements.
+
+Stage 3 — SEMANTIC MAPPING:
+Map: Resume Experience → Job Responsibilities. Resume Skills → Job Requirements. Resume Achievements → Business Objectives.
+Identify: gaps, strengths, opportunities, transferable skills.
+
+Stage 4 — OPTIMIZATION STRATEGY:
+Decide: which keywords to use, which phrases to use, which sections to prioritize, what to condense, what to expand, what should appear earlier, what should be emphasized.
+
+═══════════════════════════════════════════════════════════════
+HIGH-VALUE LANGUAGE OPTIMIZATION
+═══════════════════════════════════════════════════════════════
+Transform weak phrases into high-impact statements:
+- "Responsible for customer service" → "Delivered exceptional customer service resulting in measurable satisfaction improvements"
+- "Worked on software" → "Designed and implemented scalable software solutions supporting mission-critical applications"
+- "Helped with projects" → "Led cross-functional initiatives that improved operational efficiency and business outcomes"
+
+Extract and reuse high-value phrases from the JD naturally: "cross-functional collaboration", "stakeholder management", "process optimization", "data-driven decision making".
+
+═══════════════════════════════════════════════════════════════
+KEYWORD STRATEGY (NO STUFFING)
+═══════════════════════════════════════════════════════════════
+1. Identify critical keywords (must-haves from JD).
+2. Identify secondary keywords (nice-to-haves).
+3. Identify semantic synonyms.
+4. Identify industry terminology (from the keyword bank below).
+5. Embed ALL keywords NATURALLY — never stuff. Each keyword must appear in context.
+
+═══════════════════════════════════════════════════════════════
 INDUSTRY KEYWORD BANK (weave relevant keywords naturally into summary, skills, and bullets)
 ═══════════════════════════════════════════════════════════════
 ${INDUSTRY_PROFILES[airlineProfile]?.keywordBank || `${CABIN_CREW_KEYWORDS}\n${AVIATION_KEYWORDS}`}
@@ -399,15 +471,20 @@ Acceptable range: 2,700 – 3,100 characters.
 - 2,100 chars = TOO SHORT — expand bullets, add measurable achievements, deepen technical context.
 - 3,200+ chars = TOO LONG — condense older roles, tighten bullets, merge similar skills.
 HOW TO HIT THE TARGET INTELLIGENTLY:
-1. PROFESSIONAL SUMMARY: 4-6 lines (~60-90 words). Embed 2-3 priority keywords naturally. The summary MUST be long enough that every line except the last wraps to the full content width — this lets the JUSTIFIED text alignment produce a clean straight right edge.
+1. PROFESSIONAL SUMMARY: 4-6 lines (~60-90 words). Embed 2-3 priority keywords naturally.
 2. EXPERIENCE: For the 2 most recent roles, write 5-7 detailed bullets each. Older roles can have 3 bullets.
 3. Each bullet must START with a strong action verb and QUANTIFY where possible (%, $, counts, time saved, team size, customer volume).
-4. Each bullet should be 110-180 characters — long enough to wrap onto 2 lines (so the JUSTIFIED text alignment produces a clean straight right edge), but not so long it becomes a paragraph. NEVER produce one-line bullets under 80 characters (they leave the right margin ragged and waste page space).
-5. EXPAND weak bullets — never leave a one-line bullet that just says "Responsible for X". Rewrite as "Led X to achieve Y, resulting in Z% improvement".
+4. Each bullet should be 110-180 characters — long enough to wrap onto 2 lines (for justified text).
+5. EXPAND weak bullets — never leave "Responsible for X". Rewrite as "Led X to achieve Y, resulting in Z% improvement".
 6. SKILLS: Group into 3-4 categories with 4-6 items each. Embed priority keywords as skill items where natural.
 7. Never produce a half-empty page — fully utilize the A4 layout.
 
-LAYOUT NOTE: Body text and bullets are rendered with text-align: JUSTIFY — meaning words are spaced so the right edge is straight on every line except the last line of each paragraph/bullet. To make this look good, write content that wraps to the full content width. Avoid very short bullets (under 80 chars) — they produce visible gaps on the right.
+═══════════════════════════════════════════════════════════════
+FACTUAL INTEGRITY (NON-NEGOTIABLE)
+═══════════════════════════════════════════════════════════════
+NEVER fabricate: experience, employers, dates, metrics, certifications, skills.
+ONLY use information from the original resume.
+Rephrase, expand, and optimize — but never invent.
 
 ═══════════════════════════════════════════════════════════════
 AIRLINE-SPECIFIC WRITING GUIDANCE
