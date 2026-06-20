@@ -680,57 +680,274 @@ export function AiCoach() {
 // ============================================================================
 // AI Mock Interview
 // ============================================================================
+//
+// Interactive interview experience. The AI asks questions one at a time,
+// the user answers, and the AI provides feedback + the next question.
+//
+// CRITICAL: The AI sometimes returns JSON {questions: [...]} instead of plain
+// text. This component parses the response and extracts the question text —
+// NEVER renders raw JSON to the user.
+
+interface MockInterviewMessage {
+  role: "assistant" | "user";
+  content: string;
+  /** Parsed question data (if the AI returned JSON) */
+  question?: {
+    category?: string;
+    question: string;
+    difficulty?: string;
+    talkingPoints?: string[];
+    followUps?: string[];
+  };
+  /** Parsed feedback data (if the AI returned JSON feedback) */
+  feedback?: {
+    strengths?: string[];
+    improvements?: string[];
+    score?: number;
+  };
+}
+
+/**
+ * Parse an AI response that might be:
+ *   - Plain text (question or feedback) — return as-is
+ *   - JSON {questions: [...]} — extract the first question
+ *   - JSON {feedback: {...}} — extract the feedback
+ *   - JSON {question: "...", ...} — extract the question
+ *
+ * Never returns raw JSON — always extracts human-readable content.
+ */
+function parseInterviewResponse(text: string): { displayText: string; question?: MockInterviewMessage["question"]; feedback?: MockInterviewMessage["feedback"] } {
+  const trimmed = text.trim();
+
+  // Check if it looks like JSON (starts with { or [)
+  if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
+    try {
+      const parsed = extractJSON<any>(trimmed);
+
+      // Case 1: {questions: [...]} — extract first question
+      if (parsed.questions && Array.isArray(parsed.questions) && parsed.questions.length > 0) {
+        const q = parsed.questions[0];
+        const questionText = q.question || q.text || "Question not available.";
+        const displayText = questionText;
+        return {
+          displayText,
+          question: {
+            category: q.category,
+            question: questionText,
+            difficulty: q.difficulty,
+            talkingPoints: q.talkingPoints,
+            followUps: q.followUps,
+          },
+        };
+      }
+
+      // Case 2: {question: "...", ...} — single question object
+      if (parsed.question && typeof parsed.question === "string") {
+        return {
+          displayText: parsed.question,
+          question: {
+            category: parsed.category,
+            question: parsed.question,
+            difficulty: parsed.difficulty,
+            talkingPoints: parsed.talkingPoints,
+            followUps: parsed.followUps,
+          },
+        };
+      }
+
+      // Case 3: {feedback: {...}} — feedback object
+      if (parsed.feedback) {
+        const f = parsed.feedback;
+        const parts: string[] = [];
+        if (f.score) parts.push(`Score: ${f.score}/100`);
+        if (f.strengths?.length) parts.push(`Strengths: ${f.strengths.join("; ")}`);
+        if (f.improvements?.length) parts.push(`Areas to improve: ${f.improvements.join("; ")}`);
+        if (f.nextQuestion) parts.push(f.nextQuestion);
+        if (f.message) parts.push(f.message);
+        return {
+          displayText: parts.join("\n\n") || "Feedback received.",
+          feedback: { strengths: f.strengths, improvements: f.improvements, score: f.score },
+        };
+      }
+
+      // Case 4: {message: "..."} or {text: "..."} or {response: "..."}
+      if (parsed.message) return { displayText: String(parsed.message) };
+      if (parsed.text) return { displayText: String(parsed.text) };
+      if (parsed.response) return { displayText: String(parsed.response) };
+
+      // Case 5: Unknown JSON structure — extract any string values
+      const stringValues = Object.values(parsed).filter((v) => typeof v === "string" && v.length > 10);
+      if (stringValues.length > 0) {
+        return { displayText: stringValues.join("\n\n") };
+      }
+
+      // Fallback: can't extract anything meaningful
+      return { displayText: "Interview question received. Please type your answer below." };
+    } catch {
+      // JSON parse failed — treat as plain text (might be partially JSON)
+      // Strip any JSON-like artifacts
+      const cleaned = trimmed.replace(/^\s*[\{\[]/, "").replace(/[\}\]]\s*$/, "").trim();
+      return { displayText: cleaned || "Please type your answer below." };
+    }
+  }
+
+  // Plain text — return as-is (strip markdown artifacts if present)
+  const cleaned = trimmed
+    .replace(/^```(?:json)?\s*/m, "")
+    .replace(/\s*```\s*$/m, "")
+    .trim();
+  return { displayText: cleaned };
+}
 
 export function AiMockInterview() {
   const jds = useApp((s) => s.jobDescriptions);
   const [jdId, setJdId] = useState("");
-  const [messages, setMessages] = useState<Array<{ role: string; content: string }>>([]);
+  const [messages, setMessages] = useState<MockInterviewMessage[]>([]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [started, setStarted] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [questionCount, setQuestionCount] = useState(0);
 
   const startInterview = async () => {
     const jd = jds.find((j) => j.id === jdId);
-    setStarted(true); setMessages([]);
+    setStarted(true);
+    setMessages([]);
+    setError(null);
+    setQuestionCount(0);
+    setLoading(true);
     try {
       const result = await callAI({
-        systemPrompt: "You are an interviewer. Ask one question at a time. Wait for the answer. Provide brief feedback after each answer. Start with a behavioral question.",
-        userPrompt: `Start a mock interview for: ${jd?.title || "a general role"} at ${jd?.company || "a company"}. Ask the first question.`,
+        systemPrompt: "You are an expert interviewer conducting a mock interview. Ask ONE question at a time. Wait for the candidate's answer. After they answer, provide brief feedback (1-2 sentences) and ask the next question. Always respond in plain text — NEVER return JSON. Start with a behavioral question relevant to the role.",
+        userPrompt: `Start a mock interview for: ${jd?.title || "a general role"} at ${jd?.company || "a company"}. Ask the first question. Respond in plain text only.`,
         maxTokens: 500, taskCategory: "interactive",
       });
-      setMessages([{ role: "assistant", content: result.text }]);
-    } catch (e: any) { toast.error(e?.message || "Failed"); }
+
+      const parsed = parseInterviewResponse(result.text);
+      setMessages([{ role: "assistant", content: parsed.displayText, question: parsed.question }]);
+      setQuestionCount(1);
+    } catch (e: any) {
+      setError(e?.message || "Failed to start interview. Please try again.");
+      toast.error(e?.message || "Failed to start interview.");
+    } finally {
+      setLoading(false);
+    }
   };
 
   const answer = async () => {
     if (!input.trim()) return;
-    setMessages((m) => [...m, { role: "user", content: input }]); setInput(""); setLoading(true);
+    const userAnswer = input;
+    setMessages((m) => [...m, { role: "user", content: userAnswer }]);
+    setInput("");
+    setLoading(true);
+    setError(null);
     try {
       const result = await callAI({
-        systemPrompt: "You are an interviewer. The candidate just answered your question. Provide brief feedback (1-2 sentences) and ask the next question.",
-        userPrompt: `Candidate's answer: ${input}\n\nProvide feedback and ask the next question.`,
+        systemPrompt: "You are an expert interviewer. The candidate just answered your question. Provide brief feedback (1-2 sentences) and ask the next question. Always respond in plain text — NEVER return JSON.",
+        userPrompt: `Candidate's answer: ${userAnswer}\n\nProvide brief feedback and ask the next question. Respond in plain text only.`,
         maxTokens: 500, taskCategory: "interactive",
       });
-      setMessages((m) => [...m, { role: "assistant", content: result.text }]);
-    } catch (e: any) { toast.error(e?.message || "Failed"); }
-    finally { setLoading(false); }
+
+      const parsed = parseInterviewResponse(result.text);
+      setMessages((m) => [...m, { role: "assistant", content: parsed.displayText, question: parsed.question, feedback: parsed.feedback }]);
+      setQuestionCount((c) => c + 1);
+    } catch (e: any) {
+      setError(e?.message || "Failed to get response. Please try again.");
+      toast.error(e?.message || "Failed to get response.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const reset = () => {
+    setStarted(false);
+    setMessages([]);
+    setInput("");
+    setError(null);
+    setQuestionCount(0);
   };
 
   return (
     <div className="space-y-6">
-      <div><h1 className="font-display text-2xl font-bold flex items-center gap-2"><Icon name="Mic" className="w-6 h-6 text-brand" /> AI Mock Interview</h1><p className="text-sm text-muted-foreground mt-1">Practice with an AI interviewer that asks real questions and gives feedback.</p></div>
+      <div className="flex items-center justify-between gap-3 flex-wrap">
+        <div><h1 className="font-display text-2xl font-bold flex items-center gap-2"><Icon name="Mic" className="w-6 h-6 text-brand" /> AI Mock Interview</h1><p className="text-sm text-muted-foreground mt-1">Practice with an AI interviewer that asks real questions and gives feedback.</p></div>
+        {started && <Button variant="outline" size="sm" onClick={reset} className="gap-1.5"><Icon name="RotateCcw" className="w-3.5 h-3.5" /> Restart</Button>}
+      </div>
+
       {!started ? (
         <Card><CardContent className="p-4 space-y-3">
           <div><Label>Target Job (optional)</Label><select value={jdId} onChange={(e) => setJdId(e.target.value)} className="w-full h-9 px-3 rounded-md border border-input bg-background text-sm mt-1"><option value="">General interview</option>{jds.map((j) => <option key={j.id} value={j.id}>{j.title} — {j.company || "N/A"}</option>)}</select></div>
-          <Button onClick={startInterview} className="bg-brand hover:bg-brand-dark text-white gap-2"><Icon name="Mic" className="w-4 h-4" /> Start Mock Interview</Button>
+          <Button onClick={startInterview} disabled={loading} className="bg-brand hover:bg-brand-dark text-white gap-2"><Icon name={loading ? "Loader2" : "Mic"} className={`w-4 h-4 ${loading ? "animate-spin" : ""}`} /> {loading ? "Starting…" : "Start Mock Interview"}</Button>
         </CardContent></Card>
       ) : (
         <Card><CardContent className="p-4">
-          <div className="space-y-3 max-h-96 overflow-y-auto mb-3">
-            {messages.map((m, i) => <div key={i} className={`flex ${m.role === "user" ? "justify-end" : "justify-start"}`}><div className={`rounded-lg px-3 py-2 max-w-[80%] text-sm ${m.role === "user" ? "bg-brand text-white" : "bg-secondary"}`}>{m.content}</div></div>)}
-            {loading && <div className="flex justify-start"><div className="rounded-lg px-3 py-2 bg-secondary"><Icon name="Loader2" className="w-4 h-4 animate-spin" /></div></div>}
+          {/* Progress indicator */}
+          {questionCount > 0 && (
+            <div className="mb-3 flex items-center justify-between text-xs">
+              <span className="text-muted-foreground font-medium">Question {questionCount}</span>
+              <Badge variant="outline" className="text-[10px] gap-1"><Icon name="MessagesSquare" className="w-3 h-3" /> {messages.filter((m) => m.role === "user").length} answered</Badge>
+            </div>
+          )}
+
+          {/* Chat messages — rendered as proper components, never raw JSON */}
+          <div className="space-y-3 max-h-[60vh] overflow-y-auto mb-3">
+            {messages.map((m, i) => (
+              <div key={i} className={`flex ${m.role === "user" ? "justify-end" : "justify-start"}`}>
+                <div className={`rounded-lg px-3 py-2 max-w-[85%] ${m.role === "user" ? "bg-brand text-white" : "bg-secondary"}`}>
+                  {m.role === "assistant" && m.question && (
+                    <>
+                      {/* Question card rendering */}
+                      {m.question.category && (
+                        <div className="mb-1.5 flex gap-1.5 flex-wrap">
+                          <Badge variant="outline" className="text-[9px] uppercase tracking-wide">{m.question.category}</Badge>
+                          {m.question.difficulty && <Badge variant="outline" className="text-[9px] uppercase tracking-wide">{m.question.difficulty}</Badge>}
+                        </div>
+                      )}
+                      <div className="text-sm text-pretty whitespace-pre-wrap">{m.content}</div>
+                      {m.question.talkingPoints && m.question.talkingPoints.length > 0 && (
+                        <div className="mt-2 pt-2 border-t border-border/30">
+                          <div className="text-[10px] uppercase tracking-wide opacity-70 font-semibold mb-1">Talking Points</div>
+                          <ul className="space-y-0.5">
+                            {m.question.talkingPoints.map((t, j) => <li key={j} className="text-xs flex gap-1.5"><span className="opacity-70">›</span> {t}</li>)}
+                          </ul>
+                        </div>
+                      )}
+                      {m.question.followUps && m.question.followUps.length > 0 && (
+                        <div className="mt-2 pt-2 border-t border-border/30">
+                          <div className="text-[10px] uppercase tracking-wide opacity-70 font-semibold mb-1">Follow-Up Questions</div>
+                          <ul className="space-y-0.5">
+                            {m.question.followUps.map((f, j) => <li key={j} className="text-xs flex gap-1.5"><span className="opacity-70">?</span> {f}</li>)}
+                          </ul>
+                        </div>
+                      )}
+                    </>
+                  )}
+                  {m.role === "assistant" && !m.question && (
+                    <div className="text-sm text-pretty whitespace-pre-wrap">{m.content}</div>
+                  )}
+                  {m.role === "user" && (
+                    <div className="text-sm text-pretty whitespace-pre-wrap">{m.content}</div>
+                  )}
+                </div>
+              </div>
+            ))}
+            {loading && <div className="flex justify-start"><div className="rounded-lg px-3 py-2 bg-secondary flex items-center gap-2"><Icon name="Loader2" className="w-4 h-4 animate-spin text-brand" /><span className="text-xs text-muted-foreground">Thinking…</span></div></div>}
           </div>
-          <div className="flex gap-2"><Input value={input} onChange={(e) => setInput(e.target.value)} onKeyDown={(e) => e.key === "Enter" && answer()} placeholder="Type your answer..." /><Button onClick={answer} disabled={loading} className="bg-brand hover:bg-brand-dark text-white"><Icon name="Send" className="w-4 h-4" /></Button></div>
+
+          {/* Error */}
+          {error && (
+            <div className="mb-3 rounded-lg bg-red-50 dark:bg-red-950/20 border border-red-200 dark:border-red-900 p-2.5 flex items-start gap-2">
+              <Icon name="AlertCircle" className="w-4 h-4 text-red-600 shrink-0 mt-0.5" />
+              <span className="text-xs text-red-700 dark:text-red-400">{error}</span>
+            </div>
+          )}
+
+          {/* Answer input */}
+          <div className="flex gap-2">
+            <Input value={input} onChange={(e) => setInput(e.target.value)} onKeyDown={(e) => e.key === "Enter" && !e.shiftKey && (e.preventDefault(), answer())} placeholder="Type your answer..." disabled={loading} />
+            <Button onClick={answer} disabled={loading || !input.trim()} className="bg-brand hover:bg-brand-dark text-white shrink-0"><Icon name="Send" className="w-4 h-4" /></Button>
+          </div>
+          <p className="text-[10px] text-muted-foreground mt-1.5">Press Enter to send. The AI will provide feedback and ask the next question.</p>
         </CardContent></Card>
       )}
     </div>
