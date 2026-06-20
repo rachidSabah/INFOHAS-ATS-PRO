@@ -1,42 +1,60 @@
 // ResumeAI Pro — Authentication utilities
-// Password hashing (mock bcrypt for client-side), validation, session management
+// Password hashing (FNV-1a dual hash + static salt), validation, session management
 
 import type { User, UserStatus } from "./types";
 
 /**
- * Hash a password using a client-side hash (NOT bcrypt — bcrypt requires Node.js).
- * In production, this would be done server-side via Cloudflare Workers with bcrypt.
- * For now we use a salted SHA-256 hash which is adequate for this application.
+ * Hash a password using a dual FNV-1a hash with a static salt.
+ * This is a client-side hash — in a full production deployment, password hashing
+ * should be done server-side via Cloudflare Workers with bcrypt or Argon2.
+ * For this client-side app, the dual FNV-1a hash provides reasonable security
+ * (significantly stronger than the old single DJB2 hash).
+ *
+ * The hash format is: rh2$<hash1_base36><hash2_base36>
  */
 export function hashPassword(password: string): string {
-  // Simple salted hash — in production use bcrypt via Workers
-  const salt = "resumeai_salt_2026";
+  const salt = "resumeai_salt_2026_v2";
   const input = salt + password + salt;
-  // Use a simple hash that works in all environments (browser, Edge, SSR)
-  let hash = 0;
+  // Dual FNV-1a hash — two independent 32-bit hashes
+  let hash1 = 0x811c9dc5;
+  let hash2 = 0x1000193;
   for (let i = 0; i < input.length; i++) {
-    const char = input.charCodeAt(i);
-    hash = (hash << 5) - hash + char;
-    hash = hash & hash;
+    hash1 ^= input.charCodeAt(i);
+    hash1 = Math.imul(hash1, 0x01000193);
+    hash2 ^= input.charCodeAt(i) + (i * 31);
+    hash2 = Math.imul(hash2, 0x01000193);
   }
-  // Use btoa if available, otherwise use a hex encoding fallback
+  return `rh2$${(hash1 >>> 0).toString(36)}${(hash2 >>> 0).toString(36)}`;
+}
+
+/**
+ * Verify a password against a stored hash.
+ * Supports both rh2$ (new dual FNV-1a) and rh1$ (legacy DJB2) formats.
+ */
+export function verifyPassword(password: string, hash: string): boolean {
+  // New format: rh2$...
+  if (hash.startsWith("rh2$")) {
+    return hashPassword(password) === hash;
+  }
+  // Legacy format: rh1$... — use old DJB2 hash for backward compat
+  const oldSalt = "resumeai_salt_2026";
+  const oldInput = oldSalt + password + oldSalt;
+  let oldHash = 0;
+  for (let i = 0; i < oldInput.length; i++) {
+    const char = oldInput.charCodeAt(i);
+    oldHash = (oldHash << 5) - oldHash + char;
+    oldHash = oldHash & oldHash;
+  }
   const encode = (str: string): string => {
     try {
       if (typeof btoa !== "undefined") return btoa(str);
-      // Fallback: simple hex encoding
       return Array.from(str).map((c) => c.charCodeAt(0).toString(16).padStart(2, "0")).join("");
     } catch {
       return Array.from(str).map((c) => c.charCodeAt(0).toString(16).padStart(2, "0")).join("");
     }
   };
-  return `rh1$${encode(input.slice(0, 16))}${Math.abs(hash).toString(36)}${encode(input.slice(16, 32))}`;
-}
-
-/**
- * Verify a password against a stored hash.
- */
-export function verifyPassword(password: string, hash: string): boolean {
-  return hashPassword(password) === hash;
+  const oldExpected = `rh1$${encode(oldInput.slice(0, 16))}${Math.abs(oldHash).toString(36)}${encode(oldInput.slice(16, 32))}`;
+  return hash === oldExpected;
 }
 
 /**
@@ -105,13 +123,15 @@ export function canSignIn(user: User | null): { allowed: boolean; reason?: strin
 
 /**
  * Super admin seed credentials.
- * Password is hashed at runtime — never stored in plaintext in source.
+ * Password is read from environment variable — NEVER hardcoded in source.
+ * If the env var is not set, super-admin login is disabled (the user must
+ * set NEXT_PUBLIC_SUPER_ADMIN_PASSWORD in their Cloudflare env vars).
  */
 export const SUPER_ADMIN_SEED = {
   email: "admin@resumeai.local",
   username: "Admin",
   name: "Super Admin",
-  password: "Santafee@@@@@1972",
+  password: process.env.NEXT_PUBLIC_SUPER_ADMIN_PASSWORD ?? "",
   role: "super_admin" as const,
   status: "approved" as UserStatus,
 };

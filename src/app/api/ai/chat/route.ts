@@ -54,9 +54,13 @@ export async function POST(req: NextRequest) {
     });
 
     if (!res.ok) {
+      // Log the real error server-side only — return generic message to client
       const errText = await res.text().catch(() => "");
+      if (process.env.NODE_ENV !== "production") {
+        console.error("[/api/ai/chat] Upstream error:", res.status, errText.slice(0, 200));
+      }
       return NextResponse.json(
-        { error: `Z.ai API ${res.status}: ${errText.slice(0, 200)}`, fallback: true },
+        { error: "AI service temporarily unavailable. Please try again.", fallback: true },
         { status: 502 }
       );
     }

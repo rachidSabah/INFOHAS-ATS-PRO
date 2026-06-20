@@ -75,7 +75,7 @@ export function ProviderEditor({ provider, onClose, onSave }: {
   const isPuter = form.type === "puter";
 
   const onTypeChange = (type: AIProviderType) => {
-    const t = PROVIDER_TYPES.find((x) => x.type === type)!;
+    const t = PROVIDER_TYPES.find((x) => x.type === type) ?? PROVIDER_TYPES[0];
     setForm((f) => ({
       ...f,
       type,

@@ -384,7 +384,10 @@ export async function migrateLocalStorageToCloud(store: any): Promise<void> {
 
     // DON'T clear old localStorage data yet — keep as backup
     // User can clear it manually from Settings → Privacy → Clear all local data
-    console.log("[Cloud Migration] Migrated localStorage data to D1 successfully.");
+    // Dev-only log
+    if (process.env.NODE_ENV !== "production") {
+      console.info("[Cloud Migration] Migrated localStorage data to D1 successfully.");
+    }
   } catch (e) {
     console.error("[Cloud Migration] Error:", e);
   }

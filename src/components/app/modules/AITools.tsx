@@ -44,7 +44,7 @@ export function AITools() {
       } else if (active === "bullets") {
         user = `Rewrite these bullets with strong action verbs and measurable outcomes (one per line):\n${input}`;
       } else if (active === "linkedin") {
-        user = `Generate a LinkedIn About section (~250 words) and 3 experience entries from this resume:\n${input || JSON.stringify(resume)}`;
+        user = `Generate a LinkedIn About section (~250 words) and 3 experience entries from this resume:\n${input || JSON.stringify(resume ?? {})}`;
       } else if (active === "translator") {
         user = `Translate this resume content to French (keep proper nouns):\n${input}`;
       } else if (active === "career") {

@@ -638,14 +638,16 @@ Return ONLY the JSON object described in the directive. No prose, no markdown fe
   try {
     data = extractJSON<AviationOptimizeResult>(result.text);
   } catch (parseErr: any) {
-    console.error("[aviationOptimize] JSON extraction failed:", parseErr?.message);
-    console.error("[aviationOptimize] Raw AI response (first 1000 chars):", result.text.slice(0, 1000));
-    throw new Error(`Aviation optimization failed: AI returned non-JSON response. Provider: ${result.provider}. Please try again or switch providers.`);
+    // Log only in development — never expose provider name or raw response to users
+    if (process.env.NODE_ENV !== "production") {
+      console.warn("[aviationOptimize] JSON extraction failed:", parseErr?.message);
+    }
+    throw new Error("Optimization failed — the AI returned an unexpected response. Please try again.");
   }
 
   // Validate the resume object exists
   if (!data.resume || typeof data.resume !== "object") {
-    throw new Error("Aviation optimization failed: AI response missing 'resume' object.");
+    throw new Error("Optimization failed — the AI response was incomplete. Please try again.");
   }
 
   // Validate minimal content

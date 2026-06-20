@@ -156,7 +156,7 @@ export function Interview() {
 
                 <div className="space-y-3">
                   {pkg.questions.map((q, i) => {
-                    const cat = CATEGORIES.find((c) => c.id === q.category)!;
+                    const cat = CATEGORIES.find((c) => c.id === q.category) ?? CATEGORIES[0];
                     const isOpen = expanded === q.id;
                     return (
                       <motion.div key={q.id} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.03 }} className="rounded-xl border border-border overflow-hidden">
