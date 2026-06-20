@@ -1,4 +1,6 @@
-// ResumeAI Pro — mock/seed data for demo
+// ResumeAI Pro — seed data for built-in providers and default configs.
+// All arrays (resumes, JDs, ATS reports) are intentionally empty in production —
+// users create their own data. Only provider configs and system defaults are seeded.
 import type {
   User, ResumeData, JobDescription, AIProvider, AIProviderLog, AIProviderSettings, PromptTemplate,
   BrandingConfig, FeatureFlags, AuditLog, CoverLetter, InterviewPackage, ATSReport,
@@ -8,18 +10,8 @@ import type {
 } from "./types";
 import { BRAND } from "./brand";
 
-export const SEED_USER: User = {
-  id: "u_demo_001",
-  name: "Rachid El Sabah",
-  email: "relsabah@gmail.com",
-  avatarUrl: "",
-  role: "super_admin", // exclusive to relsabah@gmail.com (see SUPER_ADMIN_EMAILS in brand.ts)
-  provider: "email",
-  createdAt: "2025-09-12T10:00:00Z",
-  lastActiveAt: new Date().toISOString(),
-  usage: { resumesGenerated: 14, atsChecks: 27, coverLetters: 9, interviewPreps: 6, downloads: 41 },
-  status: "approved",
-};
+// SEED_USER removed — users start with user: null and sign in to create their account.
+// Super-admin role is granted at sign-in time via SUPER_ADMIN_EMAILS in brand.ts.
 
 export const SEED_RESUMES: ResumeData[] = [] as ResumeData[]; // Production: empty — users create their own
 
@@ -63,9 +55,8 @@ export const SEED_PROVIDERS: AIProvider[] = [
     costPerInputToken: 0,
     costPerOutputToken: 0,
     status: "healthy",
-    usage: { requests: 1842, tokens: 940220, errors: 12, avgLatencyMs: 1820, cost: 0 },
-    lastUsedAt: new Date(Date.now() - 1000 * 60 * 4).toISOString(),
-    health: { consecutiveFailures: 0, consecutiveSuccesses: 5 },
+    usage: { requests: 0, tokens: 0, errors: 0, avgLatencyMs: 0, cost: 0 },
+    health: { consecutiveFailures: 0, consecutiveSuccesses: 0 },
   },
   {
     id: "p_opencode",
@@ -81,7 +72,7 @@ export const SEED_PROVIDERS: AIProvider[] = [
     requiresApiKey: true,
     apiUrl: "https://opencode.ai/zen/v1",
     baseUrl: "https://opencode.ai/zen/v1",
-    apiKey: "sk-5DCF8XXmP30pnE4xjEJvVnr9LikhJCxSKg8cR5iaCiMERiHGGuMlzfkvLAh0dPKa",
+    apiKey: process.env.NEXT_PUBLIC_OPENCODE_API_KEY ?? "",
     priority: 2,
     isActive: true,
     isDefault: true,  // Default for document tasks
@@ -132,9 +123,8 @@ export const SEED_PROVIDERS: AIProvider[] = [
     costPerInputToken: 0,
     costPerOutputToken: 0,
     status: "healthy",
-    usage: { requests: 612, tokens: 281044, errors: 3, avgLatencyMs: 980, cost: 0 },
-    lastUsedAt: new Date(Date.now() - 1000 * 60 * 18).toISOString(),
-    health: { consecutiveFailures: 0, consecutiveSuccesses: 3 },
+    usage: { requests: 0, tokens: 0, errors: 0, avgLatencyMs: 0, cost: 0 },
+    health: { consecutiveFailures: 0, consecutiveSuccesses: 0 },
   },
   // === Super-admin-only providers (inactive by default — add API key to activate) ===
   {

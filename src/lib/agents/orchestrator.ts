@@ -1,0 +1,612 @@
+// ============================================================================
+// Agent Orchestrator — coordinates the 5-agent resume optimization pipeline.
+//
+// Pipeline:
+//   1. Resume Parser Agent      — parses uploaded file → ResumeData
+//   2. Job Intelligence Agent   — scrapes URL / analyzes JD → JobIntelligence
+//   3. ATS Analysis Agent       — scores resume against JD → ATSAnalysisResult
+//   4. Resume Optimizer Agent   — rewrites resume for ATS + JD → optimized ResumeData
+//   5. Quality Assurance Agent  — validates optimized resume → QAResult
+//   6. Reflection Agent (opt.)  — triggered when QA confidence < 80 → reflection notes
+//
+// This is a COMPOSITION layer over the existing agents — no rewrites.
+// Each step calls into the existing modules (parser.ts, job-intelligence.ts,
+// ats.ts, ai.ts, output-validator.ts) and the new agent modules
+// (ats-analysis.ts, qa-agent.ts).
+//
+// Designed for Cloudflare Pages Free (Edge Runtime compatible):
+//   - No external queues, no message buses, no long-running state
+//   - Each step is an async function that completes in < 30s
+//   - Intermediate artifacts are returned to the caller (UI) for persistence
+// ============================================================================
+
+import type { ResumeData, JobDescription } from "../types";
+import type { JobIntelligence } from "../job-intelligence";
+import { analyzeJobIntelligence } from "../job-intelligence";
+import { callAI, getOptimizerDirective, extractJSON } from "../ai";
+import { processAIResponse } from "../ai-response-processor";
+import { validateResumeContent } from "../ai-error-filter";
+import { aviationOptimize, type AviationOptimizeResult } from "../ats-directives";
+import type { AppSettings } from "../ats-directives";
+import { analyzeATS, type ATSAnalysisResult } from "./ats-analysis";
+import { runQA, type QAResult } from "./qa-agent";
+import { uid } from "../store";
+import type { ResumeSkill } from "../types";
+
+// ============================================================================
+// Types
+// ============================================================================
+
+export interface PipelineInput {
+  /** The user's uploaded resume (already parsed) */
+  resume: ResumeData;
+  /** The target job description (already parsed) */
+  jd: JobDescription;
+  /** Optional user override directives (from Optimizer Directive settings) */
+  userDirectives?: string;
+  /** Optional: run in Aviation ATS Mode (uses aviation-specific directive + airline profile) */
+  aviationMode?: {
+    airlineProfile: string;
+    settings: AppSettings;
+  };
+  /** Optional: run the export quality check (slow, renders a PDF). Default: false. */
+  checkExport?: boolean;
+  /** Optional: enable the Reflection Agent (triggers when QA confidence < 80). Default: true. */
+  enableReflection?: boolean;
+}
+
+export interface PipelineStep {
+  name: string;
+  status: "pending" | "running" | "completed" | "failed" | "skipped";
+  startedAt?: string;
+  completedAt?: string;
+  durationMs?: number;
+  error?: string;
+  /** Human-readable log line for the UI */
+  log?: string;
+}
+
+export interface PipelineResult {
+  /** The optimized resume (null if optimization failed) */
+  optimizedResume: ResumeData | null;
+  /** ATS analysis of the original resume (before optimization) */
+  beforeATS: ATSAnalysisResult | null;
+  /** ATS analysis of the optimized resume (after optimization) */
+  afterATS: ATSAnalysisResult | null;
+  /** Job intelligence extracted from the JD */
+  jobIntelligence: JobIntelligence | null;
+  /** QA validation result */
+  qa: QAResult | null;
+  /** Reflection notes (only if Reflection Agent triggered) */
+  reflection: ReflectionResult | null;
+  /** Per-step execution status (for the UI pipeline visualization) */
+  steps: PipelineStep[];
+  /** Overall pipeline status */
+  status: "running" | "completed" | "failed";
+  /** Provider that generated the optimized resume */
+  provider: string;
+  /** Character count of the optimized resume body content */
+  charCount: number;
+  /** Whether the optimization met the ~2900 char target */
+  metCharTarget: boolean;
+}
+
+export interface ReflectionResult {
+  triggered: boolean;
+  reason: string;
+  /** AI-generated reflection on the optimization quality */
+  notes: string;
+  /** Identified issues */
+  issues: string[];
+  /** Suggested improvements */
+  suggestions: string[];
+  /** Confidence in the reflection (0-100) */
+  confidence: number;
+}
+
+// ============================================================================
+// Main orchestrator
+// ============================================================================
+
+/**
+ * Run the full 5-agent optimization pipeline.
+ *
+ * This is the single entry point for resume optimization. It coordinates:
+ *   1. Job Intelligence Agent (analyze the JD)
+ *   2. ATS Analysis Agent (score the original resume — "before")
+ *   3. Resume Optimizer Agent (rewrite the resume)
+ *   4. Quality Assurance Agent (validate the optimized resume)
+ *   5. Reflection Agent (optional — triggers when QA confidence < 80)
+ *
+ * The Resume Parser Agent is NOT called here — the caller passes an already-parsed
+ * ResumeData. Parsing happens at upload time (see parser.ts → Optimizer.tsx).
+ *
+ * @returns A PipelineResult with all intermediate artifacts + the optimized resume.
+ */
+export async function runOptimizationPipeline(input: PipelineInput): Promise<PipelineResult> {
+  const { resume, jd, userDirectives, aviationMode, checkExport = false, enableReflection = true } = input;
+
+  const steps: PipelineStep[] = [
+    { name: "Job Intelligence", status: "pending" },
+    { name: "ATS Analysis (Before)", status: "pending" },
+    { name: "Resume Optimizer", status: "pending" },
+    { name: "Quality Assurance", status: "pending" },
+    { name: "Reflection", status: "pending" },
+  ];
+
+  const result: PipelineResult = {
+    optimizedResume: null,
+    beforeATS: null,
+    afterATS: null,
+    jobIntelligence: null,
+    qa: null,
+    reflection: null,
+    steps,
+    status: "running",
+    provider: "unknown",
+    charCount: 0,
+    metCharTarget: false,
+  };
+
+  const log = (stepName: string, message: string) => {
+    const step = steps.find((s) => s.name === stepName);
+    if (step) step.log = message;
+  };
+
+  // ========================================================================
+  // Step 1: Job Intelligence Agent
+  // ========================================================================
+  try {
+    const step = steps[0];
+    step.status = "running";
+    step.startedAt = new Date().toISOString();
+    log("Job Intelligence", "Analyzing job description for skills, keywords, and industry context…");
+
+    result.jobIntelligence = await analyzeJobIntelligence(jd);
+
+    step.completedAt = new Date().toISOString();
+    step.durationMs = Date.now() - new Date(step.startedAt).getTime();
+    step.status = "completed";
+    log("Job Intelligence", `Extracted ${result.jobIntelligence.priorityKeywords.length} priority keywords, ${result.jobIntelligence.requiredSkills.length} required skills. Industry: ${result.jobIntelligence.industry ?? "unknown"}.`);
+  } catch (e: any) {
+    steps[0].status = "failed";
+    steps[0].error = e?.message ?? "Job Intelligence failed";
+    log("Job Intelligence", `⚠ Job Intelligence failed: ${e?.message}. Continuing without JI.`);
+    // Non-fatal — continue without JI
+  }
+
+  // ========================================================================
+  // Step 2: ATS Analysis Agent (Before)
+  // ========================================================================
+  try {
+    const step = steps[1];
+    step.status = "running";
+    step.startedAt = new Date().toISOString();
+    log("ATS Analysis (Before)", "Scoring original resume against job description…");
+
+    result.beforeATS = analyzeATS(resume, jd);
+
+    step.completedAt = new Date().toISOString();
+    step.durationMs = Date.now() - new Date(step.startedAt).getTime();
+    step.status = "completed";
+    log("ATS Analysis (Before)", `ATS score: ${result.beforeATS.scores.ats}/100 (keyword: ${result.beforeATS.scores.keywordMatch}, semantic: ${result.beforeATS.scores.semanticSimilarity}, readability: ${result.beforeATS.scores.readability}). Missing ${result.beforeATS.missingKeywords.length} keywords.`);
+  } catch (e: any) {
+    steps[1].status = "failed";
+    steps[1].error = e?.message ?? "ATS Analysis failed";
+    log("ATS Analysis (Before)", `⚠ ATS Analysis failed: ${e?.message}.`);
+    // Fatal — can't optimize without a baseline score
+    result.status = "failed";
+    return result;
+  }
+
+  // ========================================================================
+  // Step 3: Resume Optimizer Agent
+  // ========================================================================
+  try {
+    const step = steps[2];
+    step.status = "running";
+    step.startedAt = new Date().toISOString();
+
+    if (aviationMode) {
+      log("Resume Optimizer", `Aviation ATS mode → ${aviationMode.airlineProfile}. Calling aviationOptimize() with unified directive…`);
+      const aviationResult = await aviationOptimize(resume, jd.rawText ?? "", aviationMode.airlineProfile, aviationMode.settings);
+      result.optimizedResume = mapAviationResultToResumeData(aviationResult, resume);
+      result.provider = "aviation-ats";
+      result.charCount = aviationResult.charCount;
+      log("Resume Optimizer", `✓ Generated ${aviationResult.charCount} chars (target ~2900). ATS score: ${aviationResult.score}/100. ${aviationResult.matched_keywords.length} keywords matched.`);
+    } else {
+      log("Resume Optimizer", "Standard optimization mode. Building directive from super-admin config + JD context…");
+      const directive = userDirectives?.trim() || getOptimizerDirective();
+      const optimizeResult = await optimizeResumeStandard(resume, jd, directive, result.jobIntelligence);
+      result.optimizedResume = optimizeResult.resume;
+      result.provider = optimizeResult.provider;
+      result.charCount = optimizeResult.charCount;
+      log("Resume Optimizer", `✓ Generated ${optimizeResult.charCount} chars (target ~2900) via ${optimizeResult.provider}. Embedded ${optimizeResult.keywordsAdded} keywords.`);
+    }
+
+    result.metCharTarget = result.charCount >= 2500 && result.charCount <= 3100;
+
+    step.completedAt = new Date().toISOString();
+    step.durationMs = Date.now() - new Date(step.startedAt).getTime();
+    step.status = "completed";
+  } catch (e: any) {
+    steps[2].status = "failed";
+    steps[2].error = e?.message ?? "Optimizer failed";
+    log("Resume Optimizer", `✗ Optimizer failed: ${e?.message}`);
+    result.status = "failed";
+    return result;
+  }
+
+  // ========================================================================
+  // Step 4: Quality Assurance Agent
+  // ========================================================================
+  try {
+    const step = steps[3];
+    step.status = "running";
+    step.startedAt = new Date().toISOString();
+    log("Quality Assurance", "Validating optimized resume: factual consistency, professional tone, ATS compatibility, export quality…");
+
+    result.qa = await runQA(
+      result.optimizedResume!,
+      jd,
+      result.jobIntelligence,
+      resume, // original — for factual consistency check
+      { checkExport }
+    );
+
+    step.completedAt = new Date().toISOString();
+    step.durationMs = Date.now() - new Date(step.startedAt).getTime();
+    step.status = "completed";
+
+    const passedChecks = result.qa.checks.filter((c) => c.passed).length;
+    const totalChecks = result.qa.checks.length;
+    log("Quality Assurance", `${passedChecks}/${totalChecks} checks passed. Confidence: ${result.qa.confidence}/100. ${result.qa.factualConsistency?.passed ? "No fabrication detected." : `⚠ ${result.qa.factualConsistency?.issueCount} factual issues.`}`);
+
+    // === ATS Analysis (After) ===
+    result.afterATS = analyzeATS(result.optimizedResume!, jd);
+    const beforeScore = result.beforeATS.scores.ats;
+    const afterScore = result.afterATS.scores.ats;
+    log("Quality Assurance", `After-optimization ATS score: ${afterScore}/100 (was ${beforeScore}, +${afterScore - beforeScore} pts).`);
+  } catch (e: any) {
+    steps[3].status = "failed";
+    steps[3].error = e?.message ?? "QA failed";
+    log("Quality Assurance", `⚠ QA failed: ${e?.message}. Optimized resume may still be usable.`);
+    // Non-fatal — return the optimized resume even if QA failed
+  }
+
+  // ========================================================================
+  // Step 5: Reflection Agent (optional — triggers when confidence < 80)
+  // ========================================================================
+  const reflectionStep = steps[4];
+  if (enableReflection && result.qa && result.qa.shouldReflect) {
+    try {
+      reflectionStep.status = "running";
+      reflectionStep.startedAt = new Date().toISOString();
+      log("Reflection", `QA confidence is ${result.qa.confidence}/100 — triggering Reflection Agent…`);
+
+      result.reflection = await runReflectionAgent(
+        resume,
+        result.optimizedResume!,
+        jd,
+        result.qa
+      );
+
+      reflectionStep.completedAt = new Date().toISOString();
+      reflectionStep.durationMs = Date.now() - new Date(reflectionStep.startedAt).getTime();
+      reflectionStep.status = "completed";
+      log("Reflection", `Reflection complete: ${result.reflection.issues.length} issues identified, ${result.reflection.suggestions.length} suggestions. Confidence: ${result.reflection.confidence}/100.`);
+    } catch (e: any) {
+      reflectionStep.status = "failed";
+      reflectionStep.error = e?.message ?? "Reflection failed";
+      log("Reflection", `⚠ Reflection failed: ${e?.message}`);
+    }
+  } else {
+    reflectionStep.status = "skipped";
+    log("Reflection", enableReflection
+      ? `Skipped — QA confidence is ${result.qa?.confidence ?? "?"}/100 (threshold: 80).`
+      : "Skipped — Reflection Agent disabled.");
+  }
+
+  result.status = "completed";
+  return result;
+}
+
+// ============================================================================
+// Standard Resume Optimizer (extracted from Optimizer.tsx inline logic)
+// ============================================================================
+
+async function optimizeResumeStandard(
+  resume: ResumeData,
+  jd: JobDescription,
+  directive: string,
+  ji: JobIntelligence | null
+): Promise<{ resume: ResumeData; provider: string; charCount: number; keywordsAdded: number }> {
+  // Compute missing keywords from the JD
+  const jdKeywords = jd.keywords ?? [];
+  const resumeText = JSON.stringify(resume).toLowerCase();
+  const missingKeywords = jdKeywords.filter((k) => !resumeText.includes(k.toLowerCase()));
+
+  const result = await callAI({
+    systemPrompt: directive,
+    userPrompt: `SOURCE RESUME (be truthful to this — never invent employers, dates, or metrics):\n${JSON.stringify({
+      name: resume.name,
+      headline: resume.headline,
+      contact: resume.contact,
+      dateOfBirth: resume.dateOfBirth,
+      summary: resume.summary,
+      experience: resume.experience.map((e) => ({ title: e.title, company: e.company, location: e.location, startDate: e.startDate, endDate: e.endDate, bullets: e.bullets })),
+      education: resume.education.map((ed) => ({ degree: ed.degree, field: ed.field, institution: ed.institution, location: ed.location, startDate: ed.startDate, endDate: ed.endDate, highlights: ed.highlights })),
+      skills: resume.skills.map((s) => ({ name: s.name, category: s.category })),
+      languages: resume.languages,
+      certifications: resume.certifications,
+    })}\n\nTARGET JOB DESCRIPTION:\n${jd.rawText ?? JSON.stringify({ title: jd.title, company: jd.company, responsibilities: jd.responsibilities, requiredSkills: jd.requiredSkills, keywords: jd.keywords })}\n\n${ji ? `JOB INTELLIGENCE:\nIndustry: ${ji.industry}\nBusiness Function: ${ji.businessFunction}\nPriority Keywords: ${ji.priorityKeywords.join(", ")}\nRecruiter Intent: ${ji.recruiterIntent}\n` : ""}\nMISSING KEYWORDS TO EMBED NATURALLY: ${missingKeywords.join(", ") || "(none — focus on rewriting for impact)"}\n\nReturn ONLY the JSON object described in the directive. No prose, no markdown fences.`,
+    maxTokens: 4000,
+    temperature: 0.4,
+    taskCategory: "document",
+  });
+
+  // Process the AI response through the full leak-prevention pipeline
+  const processed = processAIResponse<any>(result.text, result.provider, { expectJson: true });
+  let data: any;
+  if (processed.data) {
+    data = processed.data;
+  } else {
+    throw new Error("AI returned non-JSON response after repair attempts.");
+  }
+
+  // Map AI JSON → ResumeData
+  const aiSkills: ResumeSkill[] = (data.skills ?? []).flatMap((g: any) =>
+    (g.items ?? []).map((name: string) => ({ id: uid("s"), name, category: g.category || "General" }))
+  );
+  const skills: ResumeSkill[] = aiSkills.length > 0
+    ? aiSkills
+    : [...resume.skills, ...missingKeywords.map((k) => ({ id: uid("s"), name: k, category: "Skills" }))].filter((s, idx, arr) => arr.findIndex((x) => x.name.toLowerCase() === s.name.toLowerCase()) === idx);
+
+  const optimized: ResumeData = {
+    id: uid("r"),
+    name: data.name || resume.name,
+    headline: data.headline || resume.headline,
+    contact: {
+      email: data.email || resume.contact.email,
+      phone: data.phone || resume.contact.phone,
+      location: data.location || resume.contact.location,
+      website: resume.contact.website,
+      linkedin: resume.contact.linkedin,
+      github: resume.contact.github,
+    },
+    dateOfBirth: data.dateOfBirth || resume.dateOfBirth,
+    summary: data.summary,
+    experience: (data.experience ?? []).length > 0
+      ? data.experience.map((e: any) => ({
+          id: uid("e"),
+          title: e.title || "",
+          company: e.company || "",
+          location: e.location || "",
+          startDate: e.startDate || "",
+          endDate: e.endDate || "Present",
+          bullets: e.bullets ?? [],
+        }))
+      : resume.experience,
+    education: (data.education ?? []).length > 0
+      ? data.education.map((ed: any) => ({
+          id: uid("ed"),
+          degree: ed.degree || "",
+          institution: ed.institution || "",
+          field: ed.field || "",
+          location: ed.location || "",
+          startDate: ed.startDate || "",
+          endDate: ed.endDate || "",
+          highlights: ed.modules ? [`Modules: ${ed.modules}`] : ed.highlights || [],
+        }))
+      : resume.education,
+    skills,
+    projects: resume.projects,
+    certifications: resume.certifications,
+    languages: (data.languages ?? []).length > 0
+      ? data.languages.map((l: any) => ({
+          id: uid("l"),
+          name: l.name || "",
+          proficiency: (l.proficiency || "fluent").toLowerCase() as any,
+          ...(l.note ? { note: l.note } : {}),
+        })) as any
+      : resume.languages,
+    template: "infohas-pro",
+    accentColor: "#0563C1",
+    photoUrl: resume.photoUrl,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    source: "ai-optimized",
+    fileName: resume.fileName,
+  };
+
+  // Run content validation + leak cleaning
+  const contentCheck = validateResumeContent(optimized);
+  const finalResume = contentCheck.cleanedResume ?? optimized;
+
+  // Compute char count
+  const charCount = JSON.stringify({
+    summary: finalResume.summary,
+    experience: finalResume.experience,
+    skills: finalResume.skills,
+    education: finalResume.education,
+    languages: finalResume.languages,
+  }).length;
+
+  return {
+    resume: finalResume,
+    provider: result.provider,
+    charCount,
+    keywordsAdded: data.missingKeywordsAdded?.length ?? 0,
+  };
+}
+
+// ============================================================================
+// Helper: map AviationOptimizeResult → ResumeData
+// ============================================================================
+
+function mapAviationResultToResumeData(result: AviationOptimizeResult, original: ResumeData): ResumeData {
+  const aiSkills: ResumeSkill[] = (result.resume.skills ?? []).flatMap((g: any) =>
+    (g.items ?? []).map((name: string) => ({ id: uid("s"), name, category: g.category || "General" }))
+  );
+
+  return {
+    id: uid("r"),
+    name: result.resume.name || original.name,
+    headline: result.resume.headline || original.headline,
+    contact: {
+      email: result.resume.email || original.contact.email,
+      phone: result.resume.phone || original.contact.phone,
+      location: result.resume.location || original.contact.location,
+      website: original.contact.website,
+      linkedin: original.contact.linkedin,
+      github: original.contact.github,
+    },
+    dateOfBirth: result.resume.dateOfBirth || original.dateOfBirth,
+    summary: result.resume.summary,
+    experience: (result.resume.experience ?? []).length > 0
+      ? result.resume.experience.map((e: any) => ({
+          id: uid("e"),
+          title: e.title || "",
+          company: e.company || "",
+          location: e.location || "",
+          startDate: e.startDate || "",
+          endDate: e.endDate || "Present",
+          bullets: e.bullets ?? [],
+        }))
+      : original.experience,
+    education: (result.resume.education ?? []).length > 0
+      ? result.resume.education.map((ed: any) => ({
+          id: uid("ed"),
+          degree: ed.degree || "",
+          institution: ed.institution || "",
+          field: ed.field || "",
+          location: ed.location || "",
+          startDate: ed.startDate || "",
+          endDate: ed.endDate || "",
+          highlights: ed.modules ? [`Modules: ${ed.modules}`] : ed.highlights || [],
+        }))
+      : original.education,
+    skills: aiSkills.length > 0 ? aiSkills : original.skills,
+    projects: original.projects,
+    certifications: original.certifications,
+    languages: (result.resume.languages ?? []).length > 0
+      ? result.resume.languages.map((l: any) => ({
+          id: uid("l"),
+          name: l.name || "",
+          proficiency: (l.proficiency || "fluent").toLowerCase() as any,
+          ...(l.note ? { note: l.note } : {}),
+        })) as any
+      : original.languages,
+    template: "infohas-pro",
+    accentColor: "#0563C1",
+    photoUrl: original.photoUrl,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    source: "ai-optimized-aviation",
+    fileName: original.fileName,
+  };
+}
+
+// ============================================================================
+// Reflection Agent (optional — triggers when QA confidence < 80)
+// ============================================================================
+
+/**
+ * Run the Reflection Agent on the optimized resume.
+ *
+ * This agent reviews the diff between the original and optimized resume and
+ * provides feedback on:
+ *   - Factual preservation (did the AI invent anything?)
+ *   - Keyword stuffing (did the AI over-stuff keywords?)
+ *   - Tone (is the language professional?)
+ *   - Regression risk (did the optimization make anything worse?)
+ *
+ * Only triggered when QA confidence < 80 or when critical QA checks fail.
+ */
+export async function runReflectionAgent(
+  original: ResumeData,
+  optimized: ResumeData,
+  jd: JobDescription,
+  qa: QAResult
+): Promise<ReflectionResult> {
+  const reason = qa.confidence < 80
+    ? `QA confidence is ${qa.confidence}/100 (below 80 threshold)`
+    : `${qa.checks.filter((c) => !c.passed).length} QA checks failed`;
+
+  const prompt = `You are a Reflection Agent reviewing an AI-optimized resume. Your job is to identify issues and suggest improvements.
+
+ORIGINAL RESUME (JSON):
+${JSON.stringify({
+  name: original.name,
+  summary: original.summary,
+  experience: original.experience.map((e) => ({ title: e.title, company: e.company, bullets: e.bullets })),
+})}
+
+OPTIMIZED RESUME (JSON):
+${JSON.stringify({
+  name: optimized.name,
+  summary: optimized.summary,
+  experience: optimized.experience.map((e) => ({ title: e.title, company: e.company, bullets: e.bullets })),
+})}
+
+QA RESULT:
+- Confidence: ${qa.confidence}/100
+- Failed checks: ${qa.checks.filter((c) => !c.passed).map((c) => `${c.name} (${c.details})`).join("; ") || "none"}
+- Factual consistency issues: ${qa.factualConsistency?.issueCount ?? 0}
+- Professional tone issues: ${qa.professionalTone ? (qa.professionalTone.artifactsFound.length + qa.professionalTone.leaksFound.length) : 0}
+
+Review the optimized resume for:
+1. FACTUAL PRESERVATION: Did the AI invent any employers, dates, metrics, or certifications not in the original?
+2. KEYWORD STUFFING: Did the AI over-stuff keywords awkwardly? (Keywords should appear naturally in context)
+3. TONE: Is the language professional and recruiter-friendly?
+4. REGRESSION: Did the optimization make anything worse (e.g. removed important content, weakened bullets)?
+
+Return ONLY valid JSON:
+{
+  "issues": ["specific issue 1", "specific issue 2", ...],
+  "suggestions": ["specific suggestion 1", "specific suggestion 2", ...],
+  "confidence": 85
+}`;
+
+  try {
+    const result = await callAI({
+      systemPrompt: "You are a Reflection Agent that reviews AI-optimized resumes for quality. Always return ONLY valid JSON — no markdown fences, no prose.",
+      userPrompt: prompt,
+      maxTokens: 1500,
+      temperature: 0.3,
+      taskCategory: "document",
+    });
+
+    let data: { issues: string[]; suggestions: string[]; confidence: number };
+    try {
+      data = extractJSON(result.text);
+    } catch {
+      return {
+        triggered: true,
+        reason,
+        notes: "Reflection Agent could not parse its own output. Manual review recommended.",
+        issues: [],
+        suggestions: ["Manually review the optimized resume for quality."],
+        confidence: 50,
+      };
+    }
+
+    return {
+      triggered: true,
+      reason,
+      notes: `Reflected on ${qa.checks.filter((c) => !c.passed).length} failed QA checks. Identified ${data.issues.length} issues and ${data.suggestions.length} suggestions.`,
+      issues: data.issues ?? [],
+      suggestions: data.suggestions ?? [],
+      confidence: typeof data.confidence === "number" ? data.confidence : 50,
+    };
+  } catch (e: any) {
+    return {
+      triggered: true,
+      reason,
+      notes: `Reflection Agent failed: ${e?.message}. Manual review recommended.`,
+      issues: [],
+      suggestions: ["Manually review the optimized resume for quality."],
+      confidence: 0,
+    };
+  }
+}

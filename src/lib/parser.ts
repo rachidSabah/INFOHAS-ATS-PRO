@@ -140,11 +140,12 @@ export function extractResumeFromText(text: string, fileName: string): ResumeDat
   const projStart = sectionIndex(["projects", "side projects", "personal projects"]);
   const certStart = sectionIndex(["certifications", "certificates", "licenses"]);
   const langStart = sectionIndex(["languages"]);
+  const achStart = sectionIndex(["achievements", "key achievements", "awards", "honors", "awards & honors"]);
   const summaryStart = sectionIndex(["summary", "professional summary", "profile", "objective"]);
 
   const nextSectionStart = (start: number) => {
     if (start < 0) return lines.length;
-    const candidates = [expStart, eduStart, skillsStart, projStart, certStart, langStart, summaryStart]
+    const candidates = [expStart, eduStart, skillsStart, projStart, certStart, langStart, achStart, summaryStart]
       .filter((i) => i > start);
     return candidates.length ? Math.min(...candidates) : lines.length;
   };
@@ -172,23 +173,38 @@ export function extractResumeFromText(text: string, fileName: string): ResumeDat
     .filter((s) => s.length > 0 && s.length < 40)
     .map((s) => ({ id: uid("s"), name: s }));
 
-  // Projects
+  // Projects — split by blank lines or "•"/"-" prefixed entries to support multiple projects
   const projLines = sliceSection(projStart);
-  const projects = projLines.length
-    ? [{ id: uid("p"), name: projLines[0] || "Project", description: projLines.slice(1).join(" "), bullets: [] }]
-    : [];
+  const projects = parseProjects(projLines);
 
   // Certifications
   const certLines = sliceSection(certStart);
   const certifications = certLines.map((c) => ({ id: uid("c"), name: c }));
 
-  // Languages
+  // Languages — try to detect proficiency from common patterns like "English (Fluent)" or "French: Native"
   const langLines = sliceSection(langStart);
   const languages = langLines
     .flatMap((l) => l.split(/[,;]/))
     .map((s) => s.trim())
     .filter(Boolean)
-    .map((s) => ({ id: uid("l"), name: s, proficiency: "fluent" as const }));
+    .map((s) => {
+      // Try to extract proficiency from patterns like "English (Fluent)" or "French: Native"
+      const match = s.match(/^([A-Za-z]+)\s*[\(:]\s*(Native|Fluent|Proficient|Conversational|Intermediate|Basic|Advanced|Professional)\s*\)?$/i);
+      if (match) {
+        const proficiency = match[2].toLowerCase();
+        const normalizedProf = (["basic", "conversational", "fluent", "native"].includes(proficiency) ? proficiency : "fluent") as "basic" | "conversational" | "fluent" | "native";
+        return { id: uid("l"), name: match[1], proficiency: normalizedProf };
+      }
+      return { id: uid("l"), name: s, proficiency: "fluent" as const };
+    });
+
+  // Achievements (new — extracted as an array of { title, description })
+  const achLines = sliceSection(achStart);
+  const achievements = achLines.map((line) => ({
+    id: uid("a"),
+    title: line.length > 60 ? line.slice(0, 57) + "…" : line,
+    description: line,
+  }));
 
   const now = new Date().toISOString();
   return {
@@ -210,6 +226,7 @@ export function extractResumeFromText(text: string, fileName: string): ResumeDat
     projects,
     certifications,
     languages,
+    achievements: achievements.map((a) => a.title),
     template: "ats-professional",
     accentColor: "#1154A3",
     createdAt: now,
@@ -271,16 +288,163 @@ function parseDateRange(s: string): { start: string; end: string } {
 
 function parseEducation(lines: string[]): ResumeData["education"] {
   if (!lines.length) return [];
-  return [
-    {
+
+  // Split into entries by blank lines OR by lines that look like a degree/institution header.
+  // A "header" line is one that contains a degree keyword (B.S., M.S., PhD, Bachelor, Master, etc.)
+  // or a year range (2014-2018, 2014 - 2018, 2014–2018).
+  const degreePattern = /\b(b\.?\s?s\.?|b\.?\s?a\.?|b\.?\s?eng\.?|b\.?\s?tech|m\.?\s?s\.?|m\.?\s?a\.?|mba|ph\.?d|bachelor|master|doctorate|diploma|certificate|associate)\b/i;
+  const yearRangePattern = /\b(19|20)\d{2}\s*[–\-]\s*(19|20)\d{2}\b|\b(19|20)\d{2}\s*[–\-]\s*present\b/i;
+
+  const entries: string[][] = [];
+  let current: string[] = [];
+
+  for (const line of lines) {
+    const isHeader = degreePattern.test(line) || yearRangePattern.test(line);
+    // If we hit a header line and we already have content in current, start a new entry
+    if (isHeader && current.length > 0) {
+      entries.push(current);
+      current = [line];
+    } else {
+      current.push(line);
+    }
+  }
+  if (current.length > 0) entries.push(current);
+
+  // If we only found 1 entry via splitting, but it has many lines, try splitting by blank-line gaps
+  if (entries.length === 1 && lines.length > 5) {
+    const blankSplit: string[][] = [];
+    let curr: string[] = [];
+    for (const line of lines) {
+      if (line === "") {
+        if (curr.length > 0) blankSplit.push(curr);
+        curr = [];
+      } else {
+        curr.push(line);
+      }
+    }
+    if (curr.length > 0) blankSplit.push(curr);
+    if (blankSplit.length > 1) {
+      entries.length = 0;
+      entries.push(...blankSplit);
+    }
+  }
+
+  // Parse each entry
+  return entries.map((entryLines) => {
+    // Try to extract year range from any line
+    let startDate = "";
+    let endDate = "";
+    for (const l of entryLines) {
+      const yrMatch = l.match(/\b(19|20)\d{2}\b/g);
+      if (yrMatch && yrMatch.length >= 2) {
+        startDate = yrMatch[0];
+        endDate = yrMatch[1];
+        break;
+      } else if (yrMatch && yrMatch.length === 1) {
+        startDate = yrMatch[0];
+        if (/present/i.test(l)) endDate = "Present";
+        break;
+      }
+    }
+
+    // First line with a degree keyword → degree; next line → institution
+    let degree = "";
+    let institution = "";
+    let field = "";
+    const highlights: string[] = [];
+
+    for (let i = 0; i < entryLines.length; i++) {
+      const l = entryLines[i];
+      if (!degree && degreePattern.test(l)) {
+        // Extract degree + field (e.g. "B.S. in Computer Science")
+        degree = l;
+        const fieldMatch = l.match(/\bin\s+(.+)$/i);
+        if (fieldMatch) {
+          field = fieldMatch[1].trim();
+          degree = l.replace(/\s+in\s+.+$/i, "").trim();
+        }
+      } else if (!institution && !degreePattern.test(l) && !yearRangePattern.test(l)) {
+        institution = l;
+      } else if (i > 1 && !yearRangePattern.test(l)) {
+        highlights.push(l);
+      }
+    }
+
+    // Fallback: if no degree found, use first line as institution, second as degree
+    if (!degree && !institution) {
+      institution = entryLines[0] || "Institution";
+      degree = entryLines[1] || "Degree";
+      highlights.push(...entryLines.slice(2, 4));
+    } else if (!institution) {
+      institution = entryLines.find((l) => l !== degree && !degreePattern.test(l) && !yearRangePattern.test(l)) || "Institution";
+    }
+
+    return {
       id: uid("ed"),
-      institution: lines[0] || "Institution",
-      degree: lines[1] || "Degree",
-      startDate: "",
-      endDate: "",
-      highlights: lines.slice(2, 4),
-    },
-  ];
+      institution,
+      degree,
+      field: field || undefined,
+      startDate,
+      endDate,
+      highlights: highlights.slice(0, 4),
+    };
+  });
+}
+
+/**
+ * Parse the projects section into multiple project entries.
+ * Previously this collapsed all projects into a single entry — now it splits
+ * by blank lines OR by lines starting with bullet markers (•, -, *) or
+ * numbered entries (1., 2.).
+ */
+function parseProjects(lines: string[]): ResumeData["projects"] {
+  if (!lines.length) return [];
+
+  // Split into project blocks
+  const blocks: string[][] = [];
+  let current: string[] = [];
+
+  for (const line of lines) {
+    const isBulletStart = /^[•\-\*]\s+/.test(line);
+    const isNumberedStart = /^\d+\.\s+/.test(line);
+    const isHeader = (isBulletStart || isNumberedStart) && current.length > 0;
+
+    if (isHeader) {
+      blocks.push(current);
+      current = [line.replace(/^[•\-\*]\s+/, "").replace(/^\d+\.\s+/, "")];
+    } else if (isBulletStart || isNumberedStart) {
+      current.push(line.replace(/^[•\-\*]\s+/, "").replace(/^\d+\.\s+/, ""));
+    } else {
+      current.push(line);
+    }
+  }
+  if (current.length > 0) blocks.push(current);
+
+  // If no bullet/numbered structure detected, try splitting by blank lines
+  if (blocks.length === 1 && lines.length > 3) {
+    const blankSplit: string[][] = [];
+    let curr: string[] = [];
+    for (const line of lines) {
+      if (line === "") {
+        if (curr.length > 0) blankSplit.push(curr);
+        curr = [];
+      } else {
+        curr.push(line);
+      }
+    }
+    if (curr.length > 0) blankSplit.push(curr);
+    if (blankSplit.length > 1) {
+      blocks.length = 0;
+      blocks.push(...blankSplit);
+    }
+  }
+
+  return blocks.map((blockLines) => ({
+    id: uid("p"),
+    name: blockLines[0] || "Project",
+    description: blockLines.slice(1).join(" ").trim() || undefined,
+    bullets: blockLines.slice(1).filter((l) => l.startsWith("•") || l.startsWith("-")).map((l) => l.replace(/^[•\-]\s*/, "")),
+  }));
 }
 
 /**

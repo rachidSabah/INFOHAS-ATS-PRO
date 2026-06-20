@@ -36,6 +36,15 @@ export interface JobIntelligence {
   requiredIndustryKnowledge: string[];
   // Preferred qualifications
   preferredQualifications: string[];
+  // Technologies / tools explicitly mentioned (e.g. React, Kubernetes, Salesforce)
+  technologies: string[];
+  // Required certifications (e.g. PMP, AWS Certified, CPA)
+  requiredCertifications: string[];
+  // ATS keywords — the exact phrases the ATS will scan for (extracted from
+  // responsibilities + requirements, normalized to lowercase)
+  atsKeywords: string[];
+  // Industry terminology — domain-specific terms that signal industry familiarity
+  industryTerminology: string[];
   // Industry / business function
   industry: string;
   businessFunction: string;
@@ -83,10 +92,14 @@ Extract:
 7. Required soft skills (e.g. "communication", "active listening")
 8. Required industry knowledge (e.g. "aviation", "retail", "hospitality")
 9. Preferred qualifications
-10. Industry + business function (e.g. "aviation / customer service")
-11. Recruiter intent — what is the recruiter ACTUALLY looking for? (1-2 sentences)
-12. Top 10 PRIORITY keywords — ranked by importance. These are the keywords the resume optimizer MUST embed naturally, in priority order.
-13. Keywords to AVOID — keywords that are IRRELEVANT to this job and should NOT be emphasized (e.g. "airport security" for a call center role).
+10. Technologies / tools explicitly mentioned (e.g. React, Kubernetes, Salesforce, SAP)
+11. Required certifications (e.g. PMP, AWS Certified, CPA, CCA)
+12. ATS keywords — the exact phrases an Applicant Tracking System will scan for (from responsibilities + requirements, lowercase)
+13. Industry terminology — domain-specific terms that signal industry familiarity (e.g. "SEP", "CRM", "DGR" for aviation)
+14. Industry + business function (e.g. "aviation / customer service")
+15. Recruiter intent — what is the recruiter ACTUALLY looking for? (1-2 sentences)
+16. Top 10 PRIORITY keywords — ranked by importance. These are the keywords the resume optimizer MUST embed naturally, in priority order.
+17. Keywords to AVOID — keywords that are IRRELEVANT to this job and should NOT be emphasized (e.g. "airport security" for a call center role).
 
 Return ONLY valid JSON:
 {
@@ -100,6 +113,10 @@ Return ONLY valid JSON:
   "requiredSoftSkills": ["communication", "active listening", ...],
   "requiredIndustryKnowledge": ["aviation", "retail", ...],
   "preferredQualifications": ["Bachelor's degree", ...],
+  "technologies": ["React", "Kubernetes", "Salesforce", ...],
+  "requiredCertifications": ["PMP", "AWS Certified", ...],
+  "atsKeywords": ["customer service", "call handling", "problem resolution", ...],
+  "industryTerminology": ["SEP", "CRM", "DGR", ...],
   "industry": "aviation",
   "businessFunction": "customer service",
   "recruiterIntent": "Looking for a customer-focused agent who can handle high-volume call center operations...",
@@ -137,6 +154,10 @@ function normalizeJobIntelligence(data: any, jd: JobDescription): JobIntelligenc
     requiredSoftSkills: Array.isArray(data.requiredSoftSkills) ? data.requiredSoftSkills : [],
     requiredIndustryKnowledge: Array.isArray(data.requiredIndustryKnowledge) ? data.requiredIndustryKnowledge : [],
     preferredQualifications: Array.isArray(data.preferredQualifications) ? data.preferredQualifications : [],
+    technologies: Array.isArray(data.technologies) ? data.technologies : (jd.technologies || []),
+    requiredCertifications: Array.isArray(data.requiredCertifications) ? data.requiredCertifications : [],
+    atsKeywords: Array.isArray(data.atsKeywords) ? data.atsKeywords : (jd.keywords || []),
+    industryTerminology: Array.isArray(data.industryTerminology) ? data.industryTerminology : [],
     industry: data.industry || "",
     businessFunction: data.businessFunction || "",
     recruiterIntent: data.recruiterIntent || "",
@@ -159,6 +180,10 @@ function fallbackJobIntelligence(jd: JobDescription): JobIntelligence {
     requiredSoftSkills: [],
     requiredIndustryKnowledge: [],
     preferredQualifications: [],
+    technologies: jd.technologies || [],
+    requiredCertifications: [],
+    atsKeywords: jd.keywords || [],
+    industryTerminology: [],
     industry: "",
     businessFunction: "",
     recruiterIntent: "",
