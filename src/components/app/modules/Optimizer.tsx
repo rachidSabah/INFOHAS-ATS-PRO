@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -174,22 +174,28 @@ export function Optimizer() {
   //   4. Quality Assurance Agent
   //   5. Reflection Agent (optional — triggers when confidence < 75 or ATS improvement < 5)
   //
-  // The orchestrator handles:
-  //   - AI call + JSON mapping (standard + aviation modes)
-  //   - Content validation + leak prevention
-  //   - Factual consistency check (compares optimized vs original)
-  //   - Professional tone check
-  //   - ATS scoring (before + after) with semantic similarity + readability
-  //   - Reflection (when needed)
-  //
-  // Real-time progress is streamed via the onProgress callback.
+  // Features:
+  //   - Real-time progress streamed via the onProgress callback
+  //   - Error handling with retry support (partial progress preserved)
+  //   - Request cancellation via AbortController (if user navigates away)
+  //   - Memoized callbacks (useCallback) to prevent unnecessary rerenders
   // ============================================================================
-  const runPipeline = async () => {
+  const [pipelineError, setPipelineError] = useState<string | null>(null);
+  const abortRef = useRef<AbortController | null>(null);
+
+  const runPipeline = useCallback(async () => {
     if (!resume || !jdParsed || !beforeReport) return;
+
+    // Cancel any in-flight pipeline (shouldn't happen, but defensive)
+    if (abortRef.current) abortRef.current.abort();
+    const controller = new AbortController();
+    abortRef.current = controller;
+
     setAiThinking(true);
     setAiLog([]);
     setPipelineProgress(null);
     setPipelineResult(null);
+    setPipelineError(null);
     setOptimizedResume(null);
     setAfterReport(null);
 
@@ -211,12 +217,15 @@ export function Optimizer() {
         enableReflection: true,
         checkExport: false,
         onProgress: (progress) => {
+          if (controller.signal.aborted) return;
           setPipelineProgress(progress);
           if (progress.log) {
             setAiLog((l) => [...l, `[Step ${progress.stepNumber}/${progress.totalSteps}] ${progress.log}`]);
           }
         },
       });
+
+      if (controller.signal.aborted) return;
 
       setPipelineResult(result);
 
@@ -246,6 +255,12 @@ export function Optimizer() {
         }
       }
 
+      // Check for partial failures (some steps failed but pipeline continued)
+      const failedSteps = result.steps.filter((s) => s.status === "failed");
+      if (failedSteps.length > 0 && result.optimizedResume) {
+        setPipelineError(`${failedSteps.length} step(s) failed: ${failedSteps.map((s) => s.name).join(", ")}. The optimized resume may still be usable.`);
+      }
+
       incUsage("resumesGenerated");
       log({
         actor: "you",
@@ -262,15 +277,25 @@ export function Optimizer() {
       const confidence = result.qa?.confidence ?? 0;
       toast.success(`Optimization complete — ATS ${result.beforeATS?.scores.ats ?? "?"} → ${result.afterATS?.scores.ats ?? "?"} (+${delta} pts) · Confidence ${confidence}/100`);
     } catch (e: any) {
-      setAiLog((l) => [...l, `✗ Pipeline failed: ${e?.message || "unknown error"}`]);
+      if (controller.signal.aborted) return;
+      const errMsg = e?.message || "Optimization failed. Please try again.";
+      setPipelineError(errMsg);
+      setAiLog((l) => [...l, `✗ Pipeline failed: ${errMsg}`]);
       setAiThinking(false);
-      toast.error(e?.message || "Optimization failed. Please try again.");
+      toast.error(errMsg);
     }
-  };
+  }, [resume, jdParsed, beforeReport, aviationMode, airlineProfile, aviationSettings, addResume, addATS, incUsage, log]);
 
   // Legacy alias — the "Optimize" button still calls optimize().
   // Now it delegates to runPipeline().
   const optimize = runPipeline;
+
+  // Cancel any in-flight pipeline when the component unmounts
+  useEffect(() => {
+    return () => {
+      if (abortRef.current) abortRef.current.abort();
+    };
+  }, []);
 
   const reset = () => {
     setStep("upload");
@@ -532,10 +557,16 @@ export function Optimizer() {
                   </Button>
                 </div>
 
-                {/* === 5-agent pipeline progress tracker === */}
-                {aiThinking && (
+                {/* === 5-agent pipeline progress tracker (shows during run + on error) === */}
+                {(aiThinking || pipelineError) && (
                   <div className="mt-4">
-                    <PipelineProgressView progress={pipelineProgress} isRunning={aiThinking} />
+                    <PipelineProgressView
+                      progress={pipelineProgress}
+                      isRunning={aiThinking}
+                      result={pipelineResult}
+                      error={pipelineError}
+                      onRetry={optimize}
+                    />
                   </div>
                 )}
 

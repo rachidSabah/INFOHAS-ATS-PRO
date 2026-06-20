@@ -220,12 +220,12 @@ export function PipelineResults({ result }: PipelineResultsProps) {
         </Card>
       )}
 
-      {/* === Reflection (only if triggered) === */}
-      {reflection && reflection.triggered && (
+      {/* === Reflection Notes === */}
+      {reflection && reflection.triggered ? (
         <Card className="border-amber-200 dark:border-amber-900">
           <CardHeader className="pb-3">
             <CardTitle className="text-sm flex items-center gap-2">
-              <Icon name="Brain" className="w-4 h-4 text-amber-600" /> Reflection Agent
+              <Icon name="Brain" className="w-4 h-4 text-amber-600" /> Reflection Notes
               <Badge variant="outline" className="ml-auto text-[10px]">triggered</Badge>
             </CardTitle>
             <CardDescription className="text-xs">{reflection.reason}</CardDescription>
@@ -234,7 +234,7 @@ export function PipelineResults({ result }: PipelineResultsProps) {
             <p className="text-xs text-muted-foreground">{reflection.notes}</p>
             {reflection.issues.length > 0 && (
               <div>
-                <div className="text-xs font-semibold mb-1">Issues identified:</div>
+                <div className="text-xs font-semibold mb-1">Issues found:</div>
                 <ul className="space-y-1">
                   {reflection.issues.map((issue, i) => (
                     <li key={i} className="text-xs text-foreground/80 flex items-start gap-1.5">
@@ -246,7 +246,7 @@ export function PipelineResults({ result }: PipelineResultsProps) {
             )}
             {reflection.suggestions.length > 0 && (
               <div>
-                <div className="text-xs font-semibold mb-1">Suggestions:</div>
+                <div className="text-xs font-semibold mb-1">Improvements suggested:</div>
                 <ul className="space-y-1">
                   {reflection.suggestions.map((sug, i) => (
                     <li key={i} className="text-xs text-foreground/80 flex items-start gap-1.5">
@@ -258,7 +258,60 @@ export function PipelineResults({ result }: PipelineResultsProps) {
             )}
           </CardContent>
         </Card>
+      ) : (
+        <Card className="border-emerald-200 dark:border-emerald-900 bg-emerald-50/50 dark:bg-emerald-950/10">
+          <CardContent className="p-4 flex items-center gap-2.5">
+            <Icon name="CheckCircle2" className="w-5 h-5 text-emerald-600 shrink-0" />
+            <p className="text-sm text-emerald-800 dark:text-emerald-300 font-medium">
+              High confidence result. Additional review was not required.
+            </p>
+          </CardContent>
+        </Card>
       )}
+
+      {/* === Optimization Summary === */}
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="text-sm flex items-center gap-2">
+            <Icon name="FileText" className="w-4 h-4 text-brand" /> Optimization Summary
+          </CardTitle>
+          <CardDescription className="text-xs">What the 5-agent pipeline did to your resume</CardDescription>
+        </CardHeader>
+        <CardContent className="pt-0 space-y-2">
+          <div className="grid grid-cols-2 gap-3 text-xs">
+            <div className="rounded-lg bg-secondary/40 p-2.5">
+              <div className="text-muted-foreground">Keywords Added</div>
+              <div className="text-lg font-bold text-emerald-600 mt-0.5">
+                {beforeATS && afterATS ? Math.max(0, afterATS.matchedKeywords.length - beforeATS.matchedKeywords.length) : 0}
+              </div>
+              <div className="text-[10px] text-muted-foreground">new keywords embedded</div>
+            </div>
+            <div className="rounded-lg bg-secondary/40 p-2.5">
+              <div className="text-muted-foreground">ATS Improvement</div>
+              <div className="text-lg font-bold text-brand mt-0.5">
+                +{beforeATS && afterATS ? afterATS.scores.ats - beforeATS.scores.ats : 0} pts
+              </div>
+              <div className="text-[10px] text-muted-foreground">{beforeATS?.scores.ats ?? "?"} → {afterATS?.scores.ats ?? "?"}</div>
+            </div>
+            <div className="rounded-lg bg-secondary/40 p-2.5">
+              <div className="text-muted-foreground">Content Generated</div>
+              <div className="text-lg font-bold text-foreground mt-0.5">{charCount}</div>
+              <div className="text-[10px] text-muted-foreground">chars {metCharTarget ? "✓ on target" : ""}</div>
+            </div>
+            <div className="rounded-lg bg-secondary/40 p-2.5">
+              <div className="text-muted-foreground">Provider</div>
+              <div className="text-lg font-bold text-foreground mt-0.5 truncate">{provider}</div>
+              <div className="text-[10px] text-muted-foreground">AI engine used</div>
+            </div>
+          </div>
+          {qa?.factualConsistency?.passed && (
+            <div className="rounded-lg bg-emerald-50 dark:bg-emerald-950/20 p-2.5 flex items-center gap-2">
+              <Icon name="ShieldCheck" className="w-4 h-4 text-emerald-600 shrink-0" />
+              <span className="text-xs text-emerald-800 dark:text-emerald-300">Factual consistency verified — no fabricated employers, dates, or metrics.</span>
+            </div>
+          )}
+        </CardContent>
+      </Card>
 
       {/* === Pipeline Timings === */}
       <Card>
