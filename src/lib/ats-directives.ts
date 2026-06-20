@@ -16,6 +16,7 @@
 // with the original spec — in practice any provider can serve it.
 
 import { callAI, extractJSON, getOptimizerDirective } from "./ai";
+import { INDUSTRY_PROFILES } from "./industry-ats";
 import type { OptimizerDirectiveConfig, ResumeData } from "./types";
 import { useApp } from "./store";
 
@@ -179,7 +180,8 @@ export async function analyzeWithGemini(
 
       CONTEXT:
       - ATS SYSTEM: ${atsSystem} (${atsFocus})
-      - INDUSTRY KEYWORDS: ${AVIATION_KEYWORDS}
+      - INDUSTRY KEYWORDS: ${INDUSTRY_PROFILES[airlineProfile]?.keywordBank || AVIATION_KEYWORDS}
+      - INDUSTRY WRITING GUIDANCE: ${INDUSTRY_PROFILES[airlineProfile]?.writingGuidance || ""}
       - TONE: ${toneInstruction}
       - FORMAT STYLE: ${formatInstruction}
       - STRATEGY: ${strictnessInstruction}
@@ -366,26 +368,28 @@ export function getAviationOptimizerDirective(
     ? customOverride
     : getOptimizerDirective(); // generates from structured config OR falls back to hardcoded
 
-  // --- 3. Build the aviation augmentation layer ---
+  // --- 3. Build the industry augmentation layer ---
+  const industryProfile = INDUSTRY_PROFILES[airlineProfile];
   const aviationAugmentation = `
 ═══════════════════════════════════════════════════════════════
-AVIATION ATS MODE — ACTIVE (overrides standard flow)
+INDUSTRY ATS MODE — ACTIVE
 ═══════════════════════════════════════════════════════════════
-TARGET AIRLINE: ${profile.system}
-AIRLINE FOCUS: ${profile.focus}
-AIRLINE PRIORITY KEYWORDS (embed these naturally throughout the resume): ${profile.priorityKeywords?.join(", ") || "(none — use general aviation keywords)"}
-AIRLINE TONE PREFERENCE: ${profile.tone || "Balanced"}
+OPTIMIZATION PROFILE: ${industryProfile?.label || profile.system}
+INDUSTRY: ${industryProfile?.description || profile.focus}
+${industryProfile?.priorityKeywords?.length ? `INDUSTRY PRIORITY KEYWORDS: ${industryProfile.priorityKeywords.join(", ")}` : `AIRLINE PRIORITY KEYWORDS: ${profile.priorityKeywords?.join(", ") || "(none)"}`}
+INDUSTRY TONE PREFERENCE: ${industryProfile?.tone || profile.tone || "Balanced"}
 
 USER-SELECTED TONE: ${toneInstruction}
 USER-SELECTED FORMAT: ${formatInstruction}
 USER-SELECTED STRICTNESS: ${strictnessInstruction}
 
 ═══════════════════════════════════════════════════════════════
-AVIATION KEYWORD BANK (weave relevant keywords naturally into summary, skills, and bullets)
+INDUSTRY KEYWORD BANK (weave relevant keywords naturally into summary, skills, and bullets)
 ═══════════════════════════════════════════════════════════════
-${CABIN_CREW_KEYWORDS}
+${INDUSTRY_PROFILES[airlineProfile]?.keywordBank || `${CABIN_CREW_KEYWORDS}\n${AVIATION_KEYWORDS}`}
 
-${AVIATION_KEYWORDS}
+INDUSTRY WRITING GUIDANCE:
+${INDUSTRY_PROFILES[airlineProfile]?.writingGuidance || ""}
 
 ═══════════════════════════════════════════════════════════════
 CONTENT TARGET — STRICT ENFORCEMENT (NON-NEGOTIABLE)
