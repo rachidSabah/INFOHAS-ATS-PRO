@@ -119,7 +119,13 @@ export type ResumeTemplate =
   | "europass"
   | "creative"
   | "minimal"
-  | "infohas-pro";
+  | "infohas-pro"
+  | "compact"
+  | "tech"
+  | "academic"
+  | "consulting"
+  | "startup"
+  | "classic";
 
 export interface JobDescription {
   id: string;

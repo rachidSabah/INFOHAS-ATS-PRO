@@ -61,6 +61,12 @@ export const TEMPLATES: { id: string; name: string; description: string; premium
   { id: "europass", name: "Europass", description: "European-standard layout with photo placeholder." },
   { id: "creative", name: "Creative", description: "Bold color blocks for design-forward roles." },
   { id: "minimal", name: "Minimal", description: "Maximum whitespace, maximum focus." },
+  { id: "compact", name: "Compact", description: "Tight 9.5pt layout — maximum content per page." },
+  { id: "tech", name: "Tech / Engineering", description: "Monospace accents, skills grid, GitHub-friendly." },
+  { id: "academic", name: "Academic", description: "CV-style with publications, research, teaching." },
+  { id: "consulting", name: "Consulting", description: "Case-style bullets, impact-first, top-tier firms." },
+  { id: "startup", name: "Startup", description: "Bold sans-serif, growth metrics, entrepreneurial." },
+  { id: "classic", name: "Classic", description: "Traditional Garamond, centered header, timeless." },
 ];
 
 export const NAV_USER: { key: string; label: string; icon: string; group: string }[] = [

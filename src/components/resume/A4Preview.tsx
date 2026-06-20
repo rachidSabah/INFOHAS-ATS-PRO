@@ -72,6 +72,12 @@ const TEMPLATE_MAP: Record<string, React.FC<{ resume: ResumeData; accent: string
   creative: ModernTemplate,
   minimal: ATSProfessionalTemplate,
   "infohas-pro": InfohasProTemplate,
+  compact: CompactTemplate,
+  tech: TechTemplate,
+  academic: AcademicTemplate,
+  consulting: ConsultingTemplate,
+  startup: StartupTemplate,
+  classic: ClassicTemplate,
 };
 
 // ---- InfoHAS Pro template ----
@@ -590,6 +596,555 @@ function ModernTemplate({ resume, accent }: { resume: ResumeData; accent: string
           </ModernSection>
         )}
       </main>
+    </div>
+  );
+}
+
+// ============================================================================
+// 6 NEW TEMPLATES (added 2026-06-19)
+// ============================================================================
+
+// ---- Compact template ----
+// Tight 9.5pt layout for maximum content per page. Ideal for experienced
+// candidates who need to fit 5+ roles on a single A4 page without cutting content.
+function CompactTemplate({ resume, accent }: { resume: ResumeData; accent: string }) {
+  return (
+    <div className="p-[10mm] text-[9.5pt] leading-[1.3] text-slate-800" style={{ fontFamily: "'Inter', 'Helvetica', sans-serif" }}>
+      <header className="mb-2 pb-2 border-b-2" style={{ borderColor: accent }}>
+        <h1 className="text-[18pt] font-bold text-slate-900 leading-tight">{resume.name}</h1>
+        {resume.headline && <div className="text-[10pt] mt-0.5" style={{ color: accent }}>{resume.headline}</div>}
+        <div className="text-[8.5pt] text-slate-500 mt-1 flex flex-wrap gap-x-2 gap-y-0.5">
+          {resume.contact.email && <span>{resume.contact.email}</span>}
+          {resume.contact.phone && <span>• {resume.contact.phone}</span>}
+          {resume.contact.location && <span>• {resume.contact.location}</span>}
+          {resume.contact.linkedin && <span>• {resume.contact.linkedin}</span>}
+          {resume.contact.github && <span>• {resume.contact.github}</span>}
+        </div>
+      </header>
+
+      {resume.summary && (
+        <section className="mb-2">
+          <h2 className="text-[9.5pt] font-bold uppercase tracking-wider mb-0.5" style={{ color: accent }}>Summary</h2>
+          <p className="text-[9pt] text-slate-700 text-justify">{resume.summary}</p>
+        </section>
+      )}
+
+      {resume.experience.length > 0 && (
+        <section className="mb-2">
+          <h2 className="text-[9.5pt] font-bold uppercase tracking-wider mb-1" style={{ color: accent }}>Experience</h2>
+          <div className="space-y-1.5">
+            {resume.experience.map((e) => (
+              <div key={e.id}>
+                <div className="flex justify-between items-baseline">
+                  <div className="font-semibold text-[9.5pt] text-slate-900">
+                    {e.title}{e.company && <span className="font-normal text-slate-600"> · {e.company}</span>}
+                  </div>
+                  <div className="text-[8pt] text-slate-500">{fmtDate(e.startDate)} – {fmtDate(e.endDate)}</div>
+                </div>
+                <ul className="mt-0.5 space-y-0">
+                  {e.bullets.map((b, i) => (
+                    <li key={i} className="text-[9pt] text-slate-700 pl-3 text-justify">• {b}</li>
+                  ))}
+                </ul>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
+
+      <div className="grid grid-cols-2 gap-3">
+        {resume.education.length > 0 && (
+          <section>
+            <h2 className="text-[9.5pt] font-bold uppercase tracking-wider mb-1" style={{ color: accent }}>Education</h2>
+            <div className="space-y-0.5">
+              {resume.education.map((ed) => (
+                <div key={ed.id} className="text-[8.5pt]">
+                  <div className="font-semibold text-slate-900">{ed.degree}{ed.field && ` in ${ed.field}`}</div>
+                  <div className="text-slate-600">{ed.institution} · {fmtDate(ed.startDate)} – {fmtDate(ed.endDate)}</div>
+                </div>
+              ))}
+            </div>
+          </section>
+        )}
+
+        {resume.skills.length > 0 && (
+          <section>
+            <h2 className="text-[9.5pt] font-bold uppercase tracking-wider mb-1" style={{ color: accent }}>Skills</h2>
+            <div className="text-[8.5pt] text-slate-700">{resume.skills.map((s) => s.name).join(" · ")}</div>
+          </section>
+        )}
+      </div>
+
+      {resume.languages.length > 0 && (
+        <section className="mt-2">
+          <h2 className="text-[9.5pt] font-bold uppercase tracking-wider mb-0.5" style={{ color: accent }}>Languages</h2>
+          <div className="text-[8.5pt] text-slate-700">{resume.languages.map((l) => `${l.name}: ${l.proficiency}`).join(" · ")}</div>
+        </section>
+      )}
+    </div>
+  );
+}
+
+// ---- Tech / Engineering template ----
+// Monospace accents for job titles/dates, skills in a grid, GitHub-friendly aesthetic.
+function TechTemplate({ resume, accent }: { resume: ResumeData; accent: string }) {
+  return (
+    <div className="p-[12mm] text-[10pt] leading-snug text-slate-800" style={{ fontFamily: "'Inter', 'Helvetica', sans-serif" }}>
+      <header className="mb-3 pb-2 border-b" style={{ borderColor: `${accent}44` }}>
+        <h1 className="text-[22pt] font-bold text-slate-900 leading-tight" style={{ fontFamily: "'Geist Mono', 'JetBrains Mono', 'Courier New', monospace" }}>{resume.name}</h1>
+        {resume.headline && <div className="text-[11pt] mt-0.5 font-medium" style={{ color: accent }}>{resume.headline}</div>}
+        <div className="text-[9pt] text-slate-500 mt-1.5 flex flex-wrap gap-x-3 gap-y-0.5" style={{ fontFamily: "'Geist Mono', 'JetBrains Mono', 'Courier New', monospace" }}>
+          {resume.contact.email && <span>{resume.contact.email}</span>}
+          {resume.contact.phone && <span>• {resume.contact.phone}</span>}
+          {resume.contact.location && <span>• {resume.contact.location}</span>}
+          {resume.contact.github && <span>• github.com/{resume.contact.github?.replace(/^.*\//, "")}</span>}
+          {resume.contact.website && <span>• {resume.contact.website}</span>}
+        </div>
+      </header>
+
+      {resume.summary && (
+        <section className="mb-3">
+          <h2 className="text-[10pt] font-bold uppercase tracking-wider mb-1" style={{ color: accent }}>// Profile</h2>
+          <p className="text-[9.5pt] text-slate-700 text-justify">{resume.summary}</p>
+        </section>
+      )}
+
+      {resume.skills.length > 0 && (
+        <section className="mb-3">
+          <h2 className="text-[10pt] font-bold uppercase tracking-wider mb-1" style={{ color: accent }}>// Tech Stack</h2>
+          <div className="grid grid-cols-3 gap-1.5 text-[9pt]">
+            {resume.skills.map((s) => (
+              <div key={s.id} className="px-2 py-1 rounded border" style={{ borderColor: `${accent}33`, background: `${accent}08` }}>
+                <span className="font-medium text-slate-800">{s.name}</span>
+                {s.category && <span className="text-[8pt] text-slate-500 block">{s.category}</span>}
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
+
+      {resume.experience.length > 0 && (
+        <section className="mb-3">
+          <h2 className="text-[10pt] font-bold uppercase tracking-wider mb-1" style={{ color: accent }}>// Experience</h2>
+          <div className="space-y-2.5">
+            {resume.experience.map((e) => (
+              <div key={e.id}>
+                <div className="flex justify-between items-baseline">
+                  <div className="font-bold text-[10.5pt] text-slate-900">{e.title}</div>
+                  <div className="text-[8.5pt] text-slate-500" style={{ fontFamily: "'Geist Mono', monospace" }}>{fmtDate(e.startDate)} → {fmtDate(e.endDate)}</div>
+                </div>
+                <div className="text-[9.5pt] font-medium mb-0.5" style={{ color: accent }}>{e.company}{e.location && ` · ${e.location}`}</div>
+                <ul className="space-y-0.5">
+                  {e.bullets.map((b, i) => (
+                    <li key={i} className="text-[9.5pt] text-slate-700 pl-4 relative text-justify">
+                      <span className="absolute left-0 text-slate-400" style={{ fontFamily: "monospace" }}>-</span>
+                      {b}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
+
+      <div className="grid grid-cols-2 gap-3">
+        {resume.education.length > 0 && (
+          <section>
+            <h2 className="text-[10pt] font-bold uppercase tracking-wider mb-1" style={{ color: accent }}>// Education</h2>
+            <div className="space-y-0.5">
+              {resume.education.map((ed) => (
+                <div key={ed.id} className="text-[9pt]">
+                  <div className="font-semibold text-slate-900">{ed.degree}{ed.field && ` in ${ed.field}`}</div>
+                  <div className="text-slate-600">{ed.institution}</div>
+                  <div className="text-[8pt] text-slate-500" style={{ fontFamily: "monospace" }}>{fmtDate(ed.startDate)} → {fmtDate(ed.endDate)}</div>
+                </div>
+              ))}
+            </div>
+          </section>
+        )}
+
+        {resume.projects.length > 0 && (
+          <section>
+            <h2 className="text-[10pt] font-bold uppercase tracking-wider mb-1" style={{ color: accent }}>// Projects</h2>
+            <div className="space-y-0.5">
+              {resume.projects.slice(0, 3).map((p) => (
+                <div key={p.id} className="text-[9pt]">
+                  <div className="font-semibold text-slate-900">{p.name}</div>
+                  {p.description && <div className="text-slate-600 text-[8.5pt]">{p.description}</div>}
+                </div>
+              ))}
+            </div>
+          </section>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ---- Academic template ----
+// CV-style with publications, research interests, teaching experience.
+// Uses Garamond serif, numbered citations, formal academic tone.
+function AcademicTemplate({ resume, accent }: { resume: ResumeData; accent: string }) {
+  return (
+    <div className="p-[16mm] text-[10.5pt] leading-[1.35] text-slate-800" style={{ fontFamily: "'Garamond', 'Georgia', 'Times New Roman', serif" }}>
+      <header className="text-center mb-4">
+        <h1 className="text-[24pt] font-bold text-slate-900 tracking-wide">{resume.name}</h1>
+        {resume.headline && <div className="text-[12pt] mt-1 italic" style={{ color: accent }}>{resume.headline}</div>}
+        <div className="text-[10pt] text-slate-600 mt-1.5">
+          {resume.contact.email && <span>{resume.contact.email}</span>}
+          {resume.contact.location && <span> · {resume.contact.location}</span>}
+          {resume.contact.phone && <span> · {resume.contact.phone}</span>}
+        </div>
+        {resume.contact.website && <div className="text-[10pt] mt-0.5" style={{ color: accent }}>{resume.contact.website}</div>}
+        <div className="mt-2 h-px" style={{ background: `${accent}66` }} />
+      </header>
+
+      {resume.summary && (
+        <section className="mb-3">
+          <h2 className="text-[11pt] font-bold uppercase tracking-wide mb-1 pb-0.5 border-b" style={{ color: accent, borderColor: `${accent}44` }}>Research Interests</h2>
+          <p className="text-[10pt] text-slate-700 text-justify">{resume.summary}</p>
+        </section>
+      )}
+
+      {resume.experience.length > 0 && (
+        <section className="mb-3">
+          <h2 className="text-[11pt] font-bold uppercase tracking-wide mb-1 pb-0.5 border-b" style={{ color: accent, borderColor: `${accent}44` }}>Academic Appointments</h2>
+          <div className="space-y-2">
+            {resume.experience.map((e) => (
+              <div key={e.id}>
+                <div className="flex justify-between items-baseline">
+                  <div className="font-bold text-[10.5pt] text-slate-900">{e.title}, <span className="italic">{e.company}</span></div>
+                  <div className="text-[9.5pt] text-slate-600">{fmtDate(e.startDate)} – {fmtDate(e.endDate)}</div>
+                </div>
+                {e.location && <div className="text-[9.5pt] text-slate-600 italic">{e.location}</div>}
+                <ul className="mt-0.5 space-y-0">
+                  {e.bullets.map((b, i) => (
+                    <li key={i} className="text-[9.5pt] text-slate-700 pl-4 text-justify">• {b}</li>
+                  ))}
+                </ul>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
+
+      {resume.education.length > 0 && (
+        <section className="mb-3">
+          <h2 className="text-[11pt] font-bold uppercase tracking-wide mb-1 pb-0.5 border-b" style={{ color: accent, borderColor: `${accent}44` }}>Education</h2>
+          <div className="space-y-1">
+            {resume.education.map((ed) => (
+              <div key={ed.id}>
+                <div className="flex justify-between items-baseline">
+                  <div className="font-bold text-[10.5pt] text-slate-900">{ed.degree}{ed.field && ` in ${ed.field}`}, <span className="italic">{ed.institution}</span></div>
+                  <div className="text-[9.5pt] text-slate-600">{fmtDate(ed.startDate)} – {fmtDate(ed.endDate)}</div>
+                </div>
+                {ed.highlights && ed.highlights.length > 0 && (
+                  <div className="text-[9.5pt] text-slate-600 italic mt-0.5">{ed.highlights.join("; ")}</div>
+                )}
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
+
+      {resume.projects.length > 0 && (
+        <section className="mb-3">
+          <h2 className="text-[11pt] font-bold uppercase tracking-wide mb-1 pb-0.5 border-b" style={{ color: accent, borderColor: `${accent}44` }}>Selected Publications</h2>
+          <div className="space-y-1">
+            {resume.projects.map((p, i) => (
+              <div key={p.id} className="text-[9.5pt] text-slate-700 text-justify">
+                <span className="font-bold">[{i + 1}]</span> {p.name}{p.description && `. ${p.description}`}
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
+
+      {resume.skills.length > 0 && (
+        <section className="mb-3">
+          <h2 className="text-[11pt] font-bold uppercase tracking-wide mb-1 pb-0.5 border-b" style={{ color: accent, borderColor: `${accent}44` }}>Skills & Methods</h2>
+          <div className="text-[9.5pt] text-slate-700 text-justify">{resume.skills.map((s) => s.name).join(" · ")}</div>
+        </section>
+      )}
+
+      {resume.languages.length > 0 && (
+        <section>
+          <h2 className="text-[11pt] font-bold uppercase tracking-wide mb-1 pb-0.5 border-b" style={{ color: accent, borderColor: `${accent}44` }}>Languages</h2>
+          <div className="text-[9.5pt] text-slate-700">{resume.languages.map((l) => `${l.name} (${l.proficiency})`).join(" · ")}</div>
+        </section>
+      )}
+    </div>
+  );
+}
+
+// ---- Consulting template ----
+// Case-style bullets, impact-first framing, top-tier firm aesthetic (McKinsey/BCG/Bain).
+// Clean sans-serif, strong horizontal rules, quantified achievements front and center.
+function ConsultingTemplate({ resume, accent }: { resume: ResumeData; accent: string }) {
+  return (
+    <div className="p-[14mm] text-[10pt] leading-snug text-slate-800" style={{ fontFamily: "'Inter', 'Helvetica', sans-serif" }}>
+      <header className="mb-4 pb-3" style={{ borderBottom: `2.5pt solid ${accent}` }}>
+        <h1 className="text-[24pt] font-bold text-slate-900 leading-tight uppercase tracking-tight">{resume.name}</h1>
+        {resume.headline && <div className="text-[12pt] mt-1 font-medium text-slate-700">{resume.headline}</div>}
+        <div className="text-[9pt] text-slate-600 mt-2 flex flex-wrap gap-x-3 gap-y-0.5">
+          {resume.contact.email && <span>{resume.contact.email}</span>}
+          {resume.contact.phone && <span>• {resume.contact.phone}</span>}
+          {resume.contact.location && <span>• {resume.contact.location}</span>}
+          {resume.contact.linkedin && <span>• {resume.contact.linkedin}</span>}
+        </div>
+      </header>
+
+      {resume.summary && (
+        <section className="mb-4">
+          <p className="text-[10pt] text-slate-700 text-justify leading-relaxed">{resume.summary}</p>
+        </section>
+      )}
+
+      {resume.experience.length > 0 && (
+        <section className="mb-4">
+          <h2 className="text-[11pt] font-bold uppercase tracking-wider mb-2 pb-1 border-b border-slate-300" style={{ color: accent }}>Professional Experience</h2>
+          <div className="space-y-3">
+            {resume.experience.map((e) => (
+              <div key={e.id}>
+                <div className="flex justify-between items-baseline">
+                  <div className="font-bold text-[11pt] text-slate-900">{e.title}</div>
+                  <div className="text-[9pt] text-slate-500 font-medium">{fmtDate(e.startDate)} – {fmtDate(e.endDate)}</div>
+                </div>
+                <div className="text-[10pt] font-medium mb-1" style={{ color: accent }}>{e.company}{e.location && ` | ${e.location}`}</div>
+                <ul className="space-y-1">
+                  {e.bullets.map((b, i) => (
+                    <li key={i} className="text-[9.5pt] text-slate-700 pl-5 relative text-justify">
+                      <span className="absolute left-0 font-bold" style={{ color: accent }}>▸</span>
+                      {b}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
+
+      <div className="grid grid-cols-2 gap-4">
+        {resume.education.length > 0 && (
+          <section>
+            <h2 className="text-[11pt] font-bold uppercase tracking-wider mb-2 pb-1 border-b border-slate-300" style={{ color: accent }}>Education</h2>
+            <div className="space-y-1">
+              {resume.education.map((ed) => (
+                <div key={ed.id}>
+                  <div className="font-bold text-[10pt] text-slate-900">{ed.degree}{ed.field && ` in ${ed.field}`}</div>
+                  <div className="text-[9pt] text-slate-600">{ed.institution}</div>
+                  <div className="text-[8.5pt] text-slate-500">{fmtDate(ed.startDate)} – {fmtDate(ed.endDate)}</div>
+                </div>
+              ))}
+            </div>
+          </section>
+        )}
+
+        {resume.skills.length > 0 && (
+          <section>
+            <h2 className="text-[11pt] font-bold uppercase tracking-wider mb-2 pb-1 border-b border-slate-300" style={{ color: accent }}>Core Skills</h2>
+            <div className="space-y-0.5 text-[9pt] text-slate-700">
+              {groupSkillsByCategory(resume.skills).map((g, i) => (
+                <div key={i}>
+                  <span className="font-semibold">{g.category}:</span> {g.items.join(", ")}
+                </div>
+              ))}
+            </div>
+          </section>
+        )}
+      </div>
+
+      {resume.certifications.length > 0 && (
+        <section className="mt-4">
+          <h2 className="text-[11pt] font-bold uppercase tracking-wider mb-2 pb-1 border-b border-slate-300" style={{ color: accent }}>Certifications</h2>
+          <div className="text-[9pt] text-slate-700">{resume.certifications.map((c) => `${c.name}${c.issuer ? ` (${c.issuer})` : ""}`).join(" · ")}</div>
+        </section>
+      )}
+    </div>
+  );
+}
+
+// ---- Startup template ----
+// Bold sans-serif, growth-metric callouts, entrepreneurial energy. Ideal for
+// founders, growth roles, and startup-adjacent positions. Uses accent color blocks.
+function StartupTemplate({ resume, accent }: { resume: ResumeData; accent: string }) {
+  return (
+    <div className="text-[10pt] leading-snug text-slate-800" style={{ fontFamily: "'Inter', 'Helvetica', sans-serif" }}>
+      {/* Bold colored header block */}
+      <header className="px-[12mm] py-[8mm] text-white" style={{ background: accent }}>
+        <h1 className="text-[28pt] font-bold leading-tight">{resume.name}</h1>
+        {resume.headline && <div className="text-[13pt] mt-1 opacity-90">{resume.headline}</div>}
+        <div className="text-[9.5pt] mt-2 flex flex-wrap gap-x-3 gap-y-0.5 opacity-90">
+          {resume.contact.email && <span>{resume.contact.email}</span>}
+          {resume.contact.phone && <span>• {resume.contact.phone}</span>}
+          {resume.contact.location && <span>• {resume.contact.location}</span>}
+          {resume.contact.linkedin && <span>• {resume.contact.linkedin}</span>}
+          {resume.contact.github && <span>• {resume.contact.github}</span>}
+        </div>
+      </header>
+
+      <div className="p-[12mm]">
+        {resume.summary && (
+          <section className="mb-4">
+            <h2 className="text-[13pt] font-bold mb-1" style={{ color: accent }}>About</h2>
+            <p className="text-[10pt] text-slate-700 text-justify">{resume.summary}</p>
+          </section>
+        )}
+
+        {resume.experience.length > 0 && (
+          <section className="mb-4">
+            <h2 className="text-[13pt] font-bold mb-2" style={{ color: accent }}>Experience</h2>
+            <div className="space-y-3">
+              {resume.experience.map((e) => (
+                <div key={e.id} className="pl-3 border-l-2" style={{ borderColor: accent }}>
+                  <div className="flex justify-between items-baseline">
+                    <div className="font-bold text-[11pt] text-slate-900">{e.title}</div>
+                    <div className="text-[9pt] text-slate-500 font-medium px-2 py-0.5 rounded-full" style={{ background: `${accent}15`, color: accent }}>{fmtDate(e.startDate)} – {fmtDate(e.endDate)}</div>
+                  </div>
+                  <div className="text-[10pt] font-medium mb-1 text-slate-600">{e.company}{e.location && ` · ${e.location}`}</div>
+                  <ul className="space-y-0.5">
+                    {e.bullets.map((b, i) => (
+                      <li key={i} className="text-[9.5pt] text-slate-700 pl-3 relative text-justify">
+                        <span className="absolute left-0 top-1.5 w-1 h-1 rounded-full" style={{ background: accent }} />
+                        {b}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ))}
+            </div>
+          </section>
+        )}
+
+        {resume.skills.length > 0 && (
+          <section className="mb-4">
+            <h2 className="text-[13pt] font-bold mb-2" style={{ color: accent }}>Skills</h2>
+            <div className="flex flex-wrap gap-1.5">
+              {resume.skills.map((s) => (
+                <span key={s.id} className="text-[9pt] px-2.5 py-1 rounded-full font-medium" style={{ background: `${accent}12`, color: accent, border: `1px solid ${accent}33` }}>
+                  {s.name}
+                </span>
+              ))}
+            </div>
+          </section>
+        )}
+
+        <div className="grid grid-cols-2 gap-4">
+          {resume.education.length > 0 && (
+            <section>
+              <h2 className="text-[13pt] font-bold mb-1" style={{ color: accent }}>Education</h2>
+              <div className="space-y-1">
+                {resume.education.map((ed) => (
+                  <div key={ed.id} className="text-[9pt]">
+                    <div className="font-bold text-slate-900">{ed.degree}{ed.field && ` in ${ed.field}`}</div>
+                    <div className="text-slate-600">{ed.institution} · {fmtDate(ed.startDate)}–{fmtDate(ed.endDate)}</div>
+                  </div>
+                ))}
+              </div>
+            </section>
+          )}
+
+          {resume.projects.length > 0 && (
+            <section>
+              <h2 className="text-[13pt] font-bold mb-1" style={{ color: accent }}>Projects</h2>
+              <div className="space-y-1">
+                {resume.projects.slice(0, 3).map((p) => (
+                  <div key={p.id} className="text-[9pt]">
+                    <div className="font-bold text-slate-900">{p.name}</div>
+                    {p.description && <div className="text-slate-600">{p.description}</div>}
+                  </div>
+                ))}
+              </div>
+            </section>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ---- Classic template ----
+// Traditional Garamond serif, centered header, timeless formal aesthetic.
+// Ideal for law, finance, academia, and traditional industries.
+function ClassicTemplate({ resume, accent }: { resume: ResumeData; accent: string }) {
+  return (
+    <div className="p-[18mm] text-[10.5pt] leading-[1.4] text-slate-800" style={{ fontFamily: "'Garamond', 'Georgia', 'Times New Roman', serif" }}>
+      <header className="text-center mb-4">
+        <h1 className="text-[26pt] font-bold text-slate-900 tracking-wide">{resume.name}</h1>
+        {resume.headline && <div className="text-[12pt] mt-1 italic text-slate-700">{resume.headline}</div>}
+        <div className="text-[9.5pt] text-slate-600 mt-2">
+          {resume.contact.email && <span>{resume.contact.email}</span>}
+          {resume.contact.phone && <span> · {resume.contact.phone}</span>}
+          {resume.contact.location && <span> · {resume.contact.location}</span>}
+        </div>
+        <div className="mt-2 flex items-center gap-2">
+          <div className="flex-1 h-px" style={{ background: `${accent}66` }} />
+          <div className="w-1.5 h-1.5 rounded-full" style={{ background: accent }} />
+          <div className="flex-1 h-px" style={{ background: `${accent}66` }} />
+        </div>
+      </header>
+
+      {resume.summary && (
+        <section className="mb-3">
+          <h2 className="text-[11pt] font-bold text-center uppercase tracking-widest mb-1.5" style={{ color: accent }}>Professional Summary</h2>
+          <p className="text-[10pt] text-slate-700 text-justify px-2">{resume.summary}</p>
+        </section>
+      )}
+
+      {resume.experience.length > 0 && (
+        <section className="mb-3">
+          <h2 className="text-[11pt] font-bold text-center uppercase tracking-widest mb-2" style={{ color: accent }}>Professional Experience</h2>
+          <div className="space-y-2.5">
+            {resume.experience.map((e) => (
+              <div key={e.id}>
+                <div className="text-center">
+                  <div className="font-bold text-[10.5pt] text-slate-900">{e.company}</div>
+                  <div className="text-[10pt] italic text-slate-700">{e.title}{e.location && ` · ${e.location}`}</div>
+                  <div className="text-[9pt] text-slate-500">{fmtDate(e.startDate)} – {fmtDate(e.endDate)}</div>
+                </div>
+                <ul className="mt-1 space-y-0.5 max-w-[90%] mx-auto">
+                  {e.bullets.map((b, i) => (
+                    <li key={i} className="text-[9.5pt] text-slate-700 pl-3 text-justify">• {b}</li>
+                  ))}
+                </ul>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
+
+      {resume.education.length > 0 && (
+        <section className="mb-3">
+          <h2 className="text-[11pt] font-bold text-center uppercase tracking-widest mb-1.5" style={{ color: accent }}>Education</h2>
+          <div className="space-y-1 text-center">
+            {resume.education.map((ed) => (
+              <div key={ed.id}>
+                <div className="font-bold text-[10pt] text-slate-900">{ed.degree}{ed.field && ` in ${ed.field}`}</div>
+                <div className="text-[9.5pt] text-slate-700 italic">{ed.institution}</div>
+                <div className="text-[9pt] text-slate-500">{fmtDate(ed.startDate)} – {fmtDate(ed.endDate)}</div>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
+
+      <div className="grid grid-cols-2 gap-4">
+        {resume.skills.length > 0 && (
+          <section>
+            <h2 className="text-[11pt] font-bold text-center uppercase tracking-widest mb-1" style={{ color: accent }}>Skills</h2>
+            <div className="text-[9.5pt] text-slate-700 text-center">{resume.skills.map((s) => s.name).join(" · ")}</div>
+          </section>
+        )}
+
+        {resume.languages.length > 0 && (
+          <section>
+            <h2 className="text-[11pt] font-bold text-center uppercase tracking-widest mb-1" style={{ color: accent }}>Languages</h2>
+            <div className="text-[9.5pt] text-slate-700 text-center">{resume.languages.map((l) => `${l.name}: ${l.proficiency}`).join(" · ")}</div>
+          </section>
+        )}
+      </div>
     </div>
   );
 }
