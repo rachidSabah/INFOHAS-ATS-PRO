@@ -18,6 +18,7 @@ import { AIRLINE_ATS_PROFILES, AIRLINE_OPTIONS, DEFAULT_APP_SETTINGS, type AppSe
 import { runOptimizationPipeline, type PipelineResult as AgentPipelineResult, type PipelineProgress } from "@/lib/agents";
 import { PipelineProgressView } from "@/components/optimizer/PipelineProgressView";
 import { PipelineResults } from "@/components/optimizer/PipelineResults";
+import { InterviewPrepSuite } from "@/components/interview/InterviewPrepSuite";
 import { toast } from "sonner";
 import type { ResumeData, JobDescription, ResumeSkill } from "@/lib/types";
 
@@ -49,6 +50,8 @@ export function Optimizer() {
   // Pipeline state — the orchestrator's real-time progress + final result
   const [pipelineProgress, setPipelineProgress] = useState<PipelineProgress | null>(null);
   const [pipelineResult, setPipelineResult] = useState<AgentPipelineResult | null>(null);
+  // Interview prep mode — shows when user clicks "Prepare for Interview"
+  const [showInterviewPrep, setShowInterviewPrep] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
 
   // Responsive preview scale — recomputed on window resize so the A4 preview
@@ -594,6 +597,13 @@ export function Optimizer() {
 
         {/* Step 5: Done — InfoHAS Pro layout with live editing + photo upload */}
         {step === "done" && optimizedResume && afterReport && beforeReport && (
+          showInterviewPrep && jdParsed ? (
+            <InterviewPrepSuite
+              optimizedResume={optimizedResume}
+              jd={jdParsed}
+              onClose={() => setShowInterviewPrep(false)}
+            />
+          ) : (
           <motion.div key="done" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} className="space-y-4">
             <Card className="gradient-brand text-white">
               <CardContent className="p-6 flex flex-wrap items-center justify-between gap-4">
@@ -620,12 +630,15 @@ export function Optimizer() {
                     })()}
                   </div>
                 </div>
-                <div className="flex gap-2">
+                <div className="flex gap-2 flex-wrap">
+                  <Button onClick={() => setShowInterviewPrep(true)} className="bg-white text-brand hover:bg-white/90 gap-2" title="Generate tailored interview questions and practice with a mock interview">
+                    <Icon name="GraduationCap" className="w-4 h-4" /> Prepare for Interview
+                  </Button>
                   <Button onClick={() => { setOptimizedResume({ ...optimizedResume, photoUrl: "/brand/sample-photo.png" }); updateResume(optimizedResume.id, { photoUrl: "/brand/sample-photo.png" }); toast.success("Sample photo loaded — click the photo frame to replace it."); }} variant="outline" className="bg-white/10 border-white/40 text-white hover:bg-white/20 hover:text-white gap-2">
-                    <Icon name="ImagePlus" className="w-4 h-4" /> Load sample photo
+                    <Icon name="ImagePlus" className="w-4 h-4" /> <span className="hidden sm:inline">Load photo</span>
                   </Button>
                   <Button onClick={reset} variant="outline" className="bg-transparent border-white/40 text-white hover:bg-white/10 hover:text-white gap-2">
-                    <Icon name="RotateCcw" className="w-4 h-4" /> Optimize another
+                    <Icon name="RotateCcw" className="w-4 h-4" /> <span className="hidden sm:inline">Optimize another</span>
                   </Button>
                 </div>
               </CardContent>
@@ -734,6 +747,7 @@ export function Optimizer() {
             </div>
 
           </motion.div>
+          )
         )}
       </AnimatePresence>
     </div>
