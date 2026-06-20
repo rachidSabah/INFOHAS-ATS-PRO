@@ -512,8 +512,8 @@ export function Optimizer() {
                       <div>
                         <div className="font-semibold text-sm flex items-center gap-2">
                           Industry ATS Mode
-                          {industryDetection && industryDetection.confidence >= 20 && (
-                            <Badge variant="brand" className="text-[10px]">{INDUSTRY_PROFILES[industryDetection.industryId]?.label ?? "Detected"}</Badge>
+                          {industryMode && (
+                            <Badge variant="brand" className="text-[10px]">{INDUSTRY_PROFILES[industryId]?.label ?? "Generic"}</Badge>
                           )}
                         </div>
                         <div className="text-xs text-muted-foreground">Auto-detects your industry and applies the optimal ATS keyword bank, writing guidance, and section priorities</div>
@@ -533,7 +533,7 @@ export function Optimizer() {
                           </div>
                           <div className="rounded-lg bg-secondary/40 p-2 flex items-center justify-between">
                             <span className="text-muted-foreground">Detected Industry:</span>
-                            <span className="font-semibold">{INDUSTRY_PROFILES[industryDetection.industryId]?.label ?? "Generic"}</span>
+                            <span className="font-semibold">{INDUSTRY_PROFILES[industryDetection.industryId]?.label ?? "Generic"} {industryDetection.confidence < 30 && <span className="text-amber-500 text-[9px]">(low confidence)</span>}</span>
                           </div>
                           <div className="rounded-lg bg-secondary/40 p-2 flex items-center justify-between">
                             <span className="text-muted-foreground">Optimization Profile:</span>

@@ -409,15 +409,30 @@ export function detectIndustry(jdText: string, resumeText: string = ""): {
   }
 
   // Aviation / Cabin Crew — ONLY cabin-crew-specific terms (NOT generic "airline")
-  const cabinCrewTerms = ["cabin crew", "flight attendant", "cabin safety", "sep ", "safety and emergency procedures", "cabin crew attestation", "cca ", "aviation first aid", "in-flight service", "galley management", "cabin pressurization", "disembarkation procedures", "dgr ", "dangerous goods regulations", "passenger announcement"];
+  // Require at least 2 specific cabin crew terms to avoid false positives
+  // (e.g. "SEP" alone could be a month abbreviation, "passenger" is too generic)
+  const cabinCrewTerms = ["cabin crew", "flight attendant", "cabin safety", "safety and emergency procedures", "cabin crew attestation", "aviation first aid", "in-flight service", "galley management", "cabin pressurization", "dangerous goods regulations", "passenger announcement", "aviation security", "avsec", "cabin crew medical"];
   const cabinCrewMatches = cabinCrewTerms.filter((t) => combinedText.includes(t)).length;
-  if (cabinCrewMatches >= 1) {
+  if (cabinCrewMatches >= 2) {
     return {
       industryId: "aviation",
       confidence: Math.min(100, 40 + cabinCrewMatches * 15),
       detectedRole: detectRole(jdText),
       detectedAts: detectAtsSystem(jdText),
     };
+  }
+  // Single match = low confidence, don't auto-detect as aviation
+  if (cabinCrewMatches === 1) {
+    // Check if the single match is "cabin crew" or "flight attendant" (strong indicators)
+    if (combinedText.includes("cabin crew") || combinedText.includes("flight attendant")) {
+      return {
+        industryId: "aviation",
+        confidence: 45,
+        detectedRole: detectRole(jdText),
+        detectedAts: detectAtsSystem(jdText),
+      };
+    }
+    // Otherwise, don't auto-detect as aviation — fall through to other checks
   }
 
   // === Step 2: Score remaining industries by keyword bank matching ===
