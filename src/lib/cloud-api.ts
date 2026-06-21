@@ -228,9 +228,52 @@ export async function syncAllFromCloud(store: any): Promise<void> {
       }
     }
     if (coverLetters.length) store.setState({ coverLetters });
+    else {
+      // Fallback: restore cover letters from localStorage backup
+      if (typeof localStorage !== "undefined") {
+        try {
+          const backup = JSON.parse(localStorage.getItem("resumeai-coverletters-backup") || "[]");
+          if (backup.length > 0) store.setState({ coverLetters: backup });
+        } catch {}
+      }
+    }
     if (jobDescriptions.length) store.setState({ jobDescriptions });
+    else {
+      // Fallback: restore JDs from localStorage backup — fixes the "skill gap
+      // showing zero job" bug where parsed JDs were lost after browser refresh
+      // because the cloud worker returned an empty array (network failure,
+      // user-id mismatch, or D1 still seeding).
+      if (typeof localStorage !== "undefined") {
+        try {
+          const backup = JSON.parse(localStorage.getItem("resumeai-jds-backup") || "[]");
+          if (backup.length > 0) {
+            store.setState({ jobDescriptions: backup });
+            // Best-effort: re-sync backup JDs to the cloud so future loads work.
+            for (const jd of backup) {
+              api.createJobDescription(jd).catch(() => {});
+            }
+          }
+        } catch {}
+      }
+    }
     if (interviews.length) store.setState({ interviews });
+    else {
+      if (typeof localStorage !== "undefined") {
+        try {
+          const backup = JSON.parse(localStorage.getItem("resumeai-interviews-backup") || "[]");
+          if (backup.length > 0) store.setState({ interviews: backup });
+        } catch {}
+      }
+    }
     if (atsReports.length) store.setState({ atsReports });
+    else {
+      if (typeof localStorage !== "undefined") {
+        try {
+          const backup = JSON.parse(localStorage.getItem("resumeai-ats-backup") || "[]");
+          if (backup.length > 0) store.setState({ atsReports: backup });
+        } catch {}
+      }
+    }
     if (providers.length) store.setState({ providers });
     if (prompts.length) store.setState({ prompts });
     if (logs.length) store.setState({ logs });

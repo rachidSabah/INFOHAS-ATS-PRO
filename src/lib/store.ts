@@ -631,16 +631,40 @@ export const useApp = create<AppState>()(
       addJD: (j) => {
         set((s) => ({ jobDescriptions: [j, ...s.jobDescriptions] }));
         cloudApiSafe(createJobDescription)(j).catch(() => {});
+        // Defensive localStorage backup so parsed JDs survive browser refresh
+        // even when the Cloudflare Worker / D1 is unreachable or returns empty.
+        if (typeof localStorage !== "undefined") {
+          try {
+            const existing = JSON.parse(localStorage.getItem("resumeai-jds-backup") || "[]");
+            localStorage.setItem("resumeai-jds-backup", JSON.stringify([j, ...existing.filter((x: any) => x.id !== j.id)].slice(0, 100)));
+          } catch {}
+        }
       },
       removeJD: (id) => {
-        set((s) => ({ jobDescriptions: s.jobDescriptions.filter((j) => j.id !== id) }));
+        set((s) => ({
+          jobDescriptions: s.jobDescriptions.filter((j) => j.id !== id),
+          activeJdId: s.activeJdId === id ? (s.jobDescriptions.find((j) => j.id !== id)?.id ?? null) : s.activeJdId,
+        }));
         cloudApiSafe(deleteJobDescription)(id).catch(() => {});
+        // Also remove from localStorage backup
+        if (typeof localStorage !== "undefined") {
+          try {
+            const existing = JSON.parse(localStorage.getItem("resumeai-jds-backup") || "[]");
+            localStorage.setItem("resumeai-jds-backup", JSON.stringify(existing.filter((x: any) => x.id !== id)));
+          } catch {}
+        }
       },
       setActiveJD: (id) => set({ activeJdId: id }),
 
       addCoverLetter: (c) => {
         set((s) => ({ coverLetters: [c, ...s.coverLetters] }));
         cloudApiSafe(createCoverLetter)(c).catch(() => {});
+        if (typeof localStorage !== "undefined") {
+          try {
+            const existing = JSON.parse(localStorage.getItem("resumeai-coverletters-backup") || "[]");
+            localStorage.setItem("resumeai-coverletters-backup", JSON.stringify([c, ...existing.filter((x: any) => x.id !== c.id)].slice(0, 50)));
+          } catch {}
+        }
       },
       updateCoverLetter: (id, patch) => {
         set((s) => ({
@@ -649,26 +673,57 @@ export const useApp = create<AppState>()(
           ),
         }));
         cloudApiSafe(updateCoverLetter)(id, patch).catch(() => {});
+        if (typeof localStorage !== "undefined") {
+          try {
+            const existing = JSON.parse(localStorage.getItem("resumeai-coverletters-backup") || "[]");
+            const updated = existing.map((x: any) => x.id === id ? { ...x, ...patch, updatedAt: new Date().toISOString() } : x);
+            localStorage.setItem("resumeai-coverletters-backup", JSON.stringify(updated));
+          } catch {}
+        }
       },
       removeCoverLetter: (id) => {
         set((s) => ({ coverLetters: s.coverLetters.filter((c) => c.id !== id) }));
         cloudApiSafe(deleteCoverLetter)(id).catch(() => {});
+        if (typeof localStorage !== "undefined") {
+          try {
+            const existing = JSON.parse(localStorage.getItem("resumeai-coverletters-backup") || "[]");
+            localStorage.setItem("resumeai-coverletters-backup", JSON.stringify(existing.filter((x: any) => x.id !== id)));
+          } catch {}
+        }
       },
       setActiveCoverLetter: (id) => set({ activeCoverLetterId: id }),
 
       addInterview: (i) => {
         set((s) => ({ interviews: [i, ...s.interviews] }));
         cloudApiSafe(createInterview)(i).catch(() => {});
+        if (typeof localStorage !== "undefined") {
+          try {
+            const existing = JSON.parse(localStorage.getItem("resumeai-interviews-backup") || "[]");
+            localStorage.setItem("resumeai-interviews-backup", JSON.stringify([i, ...existing.filter((x: any) => x.id !== i.id)].slice(0, 50)));
+          } catch {}
+        }
       },
       removeInterview: (id) => {
         set((s) => ({ interviews: s.interviews.filter((i) => i.id !== id) }));
         cloudApiSafe(deleteInterview)(id).catch(() => {});
+        if (typeof localStorage !== "undefined") {
+          try {
+            const existing = JSON.parse(localStorage.getItem("resumeai-interviews-backup") || "[]");
+            localStorage.setItem("resumeai-interviews-backup", JSON.stringify(existing.filter((x: any) => x.id !== id)));
+          } catch {}
+        }
       },
       setActiveInterview: (id) => set({ activeInterviewId: id }),
 
       addATSReport: (r) => {
         set((s) => ({ atsReports: [r, ...s.atsReports] }));
         cloudApiSafe(createATSReport)(r).catch(() => {});
+        if (typeof localStorage !== "undefined") {
+          try {
+            const existing = JSON.parse(localStorage.getItem("resumeai-ats-backup") || "[]");
+            localStorage.setItem("resumeai-ats-backup", JSON.stringify([r, ...existing.filter((x: any) => x.id !== r.id)].slice(0, 50)));
+          } catch {}
+        }
       },
 
       // === AI PROVIDERS — sync to D1 ===

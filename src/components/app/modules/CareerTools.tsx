@@ -4,7 +4,7 @@
 
 "use client";
 
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -746,12 +746,19 @@ interface SkillGapReport {
 export function SkillGap() {
   const resumes = useApp((s) => s.resumes);
   const jds = useApp((s) => s.jobDescriptions);
+  const setView = useApp((s) => s.setView);
   const [jdId, setJdId] = useState("");
   const [loading, setLoading] = useState(false);
   const [report, setReport] = useState<SkillGapReport | null>(null);
 
   const resume = resumes[0] ?? null;
   const selectedJd = jds.find((j) => j.id === jdId) ?? null;
+  // Auto-select the most recent JD when one becomes available and none is chosen
+  useEffect(() => {
+    if (!jdId && jds.length > 0) {
+      setJdId(jds[0].id);
+    }
+  }, [jds, jdId]);
 
   const analyze = async () => {
     if (!resume) { toast.error("Create a resume first."); return; }
@@ -812,9 +819,37 @@ Analyze the skill gap between the candidate and the job. Return JSON:
 
       <Card><CardContent className="p-4 space-y-3">
         <div className="grid sm:grid-cols-2 gap-3">
-          <div><Label>Resume</Label><div className="text-sm font-semibold mt-1">{resume?.name ?? "No resume"}</div></div>
-          <div><Label>Target Job</Label><select value={jdId} onChange={(e) => setJdId(e.target.value)} className="w-full h-9 px-3 rounded-md border border-input bg-background text-sm mt-1"><option value="">Select...</option>{jds.map((j) => <option key={j.id} value={j.id}>{j.title} — {j.company || "N/A"}</option>)}</select></div>
+          <div>
+            <Label>Resume</Label>
+            <div className="text-sm font-semibold mt-1">{resume?.name ?? "No resume"}</div>
+            {!resume && <p className="text-[11px] text-muted-foreground mt-1">Create a resume in the Builder first.</p>}
+          </div>
+          <div>
+            <Label>Target Job</Label>
+            {jds.length > 0 ? (
+              <select value={jdId} onChange={(e) => setJdId(e.target.value)} className="w-full h-9 px-3 rounded-md border border-input bg-background text-sm mt-1">
+                <option value="">Select...</option>
+                {jds.map((j) => <option key={j.id} value={j.id}>{j.title}{j.company ? ` — ${j.company}` : ""}</option>)}
+              </select>
+            ) : (
+              <div className="mt-1 space-y-1.5">
+                <div className="text-xs text-muted-foreground italic">No parsed jobs found.</div>
+                <Button size="sm" variant="outline" onClick={() => setView("jd-scraper")} className="gap-1.5 h-7 text-xs">
+                  <Icon name="Search" className="w-3 h-3" /> Parse a Job from URL
+                </Button>
+              </div>
+            )}
+          </div>
         </div>
+        {jds.length === 0 && (
+          <div className="rounded-md border border-dashed border-amber-300 bg-amber-50 dark:bg-amber-950/30 dark:border-amber-700 p-3 text-xs text-amber-800 dark:text-amber-200 flex items-start gap-2">
+            <Icon name="Info" className="w-4 h-4 mt-0.5 shrink-0" />
+            <div>
+              <p className="font-semibold mb-0.5">No job descriptions available</p>
+              <p>Skill Intelligence needs a parsed job to compare against your resume. Go to <strong>JD Scraper</strong>, paste a job URL or job text, and the parsed job will appear here automatically.</p>
+            </div>
+          </div>
+        )}
         <Button onClick={analyze} disabled={loading || !resume || !jdId} className="bg-brand hover:bg-brand-dark text-white gap-2"><Icon name={loading ? "Loader2" : "GitCompare"} className={`w-4 h-4 ${loading ? "animate-spin" : ""}`} /> {loading ? "Analyzing…" : "Analyze Skill Gaps"}</Button>
       </CardContent></Card>
 
