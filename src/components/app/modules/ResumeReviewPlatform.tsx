@@ -127,6 +127,9 @@ export function ResumeReviewPlatform() {
   const removeReviewReport = useApp((s) => s.removeReviewReport);
   const updateResume = useApp((s) => s.updateResume);
   const addResume = useApp((s) => s.addResume);
+  const setActiveResume = useApp((s) => s.setActiveResume);
+  const setActiveJD = useApp((s) => s.setActiveJD);
+  const setView = useApp((s) => s.setView);
   const user = useApp((s) => s.user);
   const log = useApp((s) => s.log);
   const incUsage = useApp((s) => s.incUsage);
@@ -449,6 +452,28 @@ Rules:
   };
 
   // ============================================================================
+  // OPTIMIZE RESUME CTA — navigate to the Resume Optimizer with the current
+  // review's resume + JD pre-selected so the user can immediately run the
+  // 5-agent optimization pipeline. The optimizer will pick up the active
+  // resume + active JD from the store.
+  // ============================================================================
+  const goToOptimizer = () => {
+    if (!resume) { toast.error("No resume selected."); return; }
+    // Set the active resume + JD so the Optimizer picks them up automatically
+    setActiveResume(resume.id);
+    if (jd) setActiveJD(jd.id);
+    log({
+      actor: user?.email || "you",
+      action: "Optimize Resume clicked from AI Resume Review",
+      category: "ai",
+      details: `Resume: ${resume.name}${jd ? ` · JD: ${jd.title}` : ""} · Review ATS: ${report?.dashboard.atsScore ?? "?"}/100`,
+      severity: "info",
+    });
+    toast.success("Opening Resume Optimizer…");
+    setView("optimizer");
+  };
+
+  // ============================================================================
   // EXPORTS
   // ============================================================================
   const exportJSON = () => {
@@ -735,6 +760,64 @@ Rules:
               )}
             </motion.div>
           </AnimatePresence>
+
+          {/* === OPTIMIZE RESUME CTA ===
+              Prominent action banner shown after every review tab (except
+              History) so the user can immediately act on the review's
+              recommendations by jumping to the 5-agent Resume Optimizer
+              with the current resume + JD pre-selected. */}
+          {activeTab !== "history" && (
+            <motion.div
+              initial={{ opacity: 0, y: 12 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.2, duration: 0.3 }}
+            >
+              <Card className="border-2 border-brand/40 bg-gradient-to-br from-brand/5 to-emerald-500/5 dark:from-brand/10 dark:to-emerald-500/10">
+                <CardContent className="p-5">
+                  <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4">
+                    <div className="w-12 h-12 rounded-xl bg-brand/15 flex items-center justify-center shrink-0">
+                      <Icon name="Wand2" className="w-6 h-6 text-brand" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <h3 className="font-display font-bold text-base flex items-center gap-2 flex-wrap">
+                        Ready to optimize this resume?
+                        {report.dashboard.atsScore < 85 && (
+                          <Badge variant="warning" className="text-[10px] gap-1">
+                            <Icon name="TrendingUp" className="w-3 h-3" /> +{report.actionPlan.expectedAtsIncrease} pts available
+                          </Badge>
+                        )}
+                      </h3>
+                      <p className="text-xs text-muted-foreground mt-1">
+                        Jump to the <strong>Resume Optimizer</strong> with this resume{jd ? " and job description" : ""} pre-loaded. The 5-agent pipeline will rewrite bullets, embed missing keywords, and maximize your ATS score.
+                      </p>
+                      <div className="flex flex-wrap gap-1.5 mt-2">
+                        {report.ats.missingKeywords.slice(0, 5).map((k, i) => (
+                          <span key={i} className="text-[10px] px-1.5 py-0.5 rounded bg-red-100 text-red-700 dark:bg-red-950/40 dark:text-red-300">{k}</span>
+                        ))}
+                        {report.ats.missingKeywords.length > 5 && (
+                          <span className="text-[10px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground">+{report.ats.missingKeywords.length - 5} more</span>
+                        )}
+                      </div>
+                    </div>
+                    <div className="flex flex-col gap-2 shrink-0 w-full sm:w-auto">
+                      <Button onClick={goToOptimizer} className="bg-brand hover:bg-brand-dark text-white gap-2 h-10 px-5">
+                        <Icon name="Wand2" className="w-4 h-4" /> Optimize Resume
+                        <Icon name="ArrowRight" className="w-4 h-4" />
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setActiveTab("fixes")}
+                        className="gap-1.5 text-xs h-7"
+                      >
+                        <Icon name="Zap" className="w-3 h-3" /> Or try One-Click Fixes
+                      </Button>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            </motion.div>
+          )}
         </>
       )}
 

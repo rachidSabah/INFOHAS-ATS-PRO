@@ -36,7 +36,14 @@ export function Optimizer() {
   const log = useApp((s) => s.log);
 
   const [step, setStep] = useState<Step>("upload");
-  const [resume, setResume] = useState<ResumeData | null>(resumes[0] ?? null);
+  // Honor the active resume / JD from the store so navigation from
+  // AI Resume Review (or any other module that sets activeResumeId/
+  // activeJdId) pre-loads the right data.
+  const activeResumeId = useApp((s) => s.activeResumeId);
+  const activeJdId = useApp((s) => s.activeJdId);
+  const [resume, setResume] = useState<ResumeData | null>(
+    resumes.find((r) => r.id === activeResumeId) ?? resumes[0] ?? null
+  );
   const [jdText, setJdText] = useState("");
   const [jdParsed, setJdParsed] = useState<JobDescription | null>(null);
   const [beforeReport, setBeforeReport] = useState<ReturnType<typeof scoreATS> | null>(null);
@@ -346,6 +353,31 @@ export function Optimizer() {
       if (abortRef.current) abortRef.current.abort();
     };
   }, []);
+
+  // === Auto-load active JD when arriving from AI Resume Review ===
+  // If the user navigated here with an activeJdId set (e.g. from the
+  // "Optimize Resume" CTA in AI Resume Review), pre-populate the JD
+  // text and skip straight to the JD step so they don't have to re-paste.
+  useEffect(() => {
+    if (activeJdId && !jdText && !jdParsed) {
+      const activeJd = jds.find((j) => j.id === activeJdId);
+      if (activeJd) {
+        const jdRaw = Array.isArray(activeJd.keywords) ? activeJd.keywords : [];
+        const text = typeof activeJd.rawText === "string" && activeJd.rawText.length > 30
+          ? activeJd.rawText
+          : jdRaw.join(", ");
+        if (text && text.length >= 30) {
+          setJdText(text);
+          // Auto-select the resume if activeResumeId is set
+          if (activeResumeId) {
+            const r = resumes.find((x) => x.id === activeResumeId);
+            if (r) setResume(r);
+          }
+          setStep("jd");
+        }
+      }
+    }
+  }, [activeJdId]);
 
   const reset = () => {
     setStep("upload");
