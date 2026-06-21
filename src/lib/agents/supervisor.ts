@@ -195,6 +195,132 @@ function deepClone<T>(obj: T): T {
 }
 
 // ============================================================================
+// Core agent status sync — maps V2 pipeline steps → Supervisor agent statuses
+// ============================================================================
+
+/**
+ * Sync the 6 core agent statuses from the V2 PipelineResult.
+ * The V2 runOptimizationPipeline() runs these agents internally but doesn't
+ * update the Supervisor's agent status map. This function maps each V2
+ * pipeline step to its corresponding Supervisor agent and copies the status.
+ *
+ * This fixes the "impossible state" defect where core agents showed "Pending"
+ * while the Supervisor showed "Completed".
+ */
+function syncCoreAgentStatusesFromPipeline(result: PipelineResult): void {
+  // The V2 pipeline steps array (indices: 0=JI, 1=Company+SkillGap, 2=ATS-before, 3=Optimizer, 4=QA, 5=Reflection)
+  const steps = result.steps;
+
+  // Map V2 step index → Supervisor agent IDs
+  const stepToAgentMap: { stepIndex: number; agentIds: AgentId[] }[] = [
+    { stepIndex: 0, agentIds: ["job-intelligence"] },
+    { stepIndex: 1, agentIds: ["company-intelligence", "skill-gap"] },
+    { stepIndex: 2, agentIds: ["ats-analysis"] },
+    { stepIndex: 3, agentIds: ["optimizer"] },
+    { stepIndex: 4, agentIds: ["qa"] },
+    { stepIndex: 5, agentIds: ["reflection"] },
+  ];
+
+  // Resume Parser is always completed (the resume was already parsed before the pipeline ran)
+  updateAgent("resume-parser", {
+    status: "completed",
+    completedAt: new Date().toISOString(),
+    log: `Resume parsed: ${result.optimizedResume ? "optimized" : "original"}`,
+  });
+
+  // Sync each V2 step → Supervisor agent(s)
+  for (const { stepIndex, agentIds } of stepToAgentMap) {
+    const step = steps[stepIndex];
+    if (!step) continue;
+    for (const agentId of agentIds) {
+      updateAgent(agentId, {
+        status: step.status === "completed" ? "completed" : step.status === "failed" ? "failed" : step.status === "skipped" ? "skipped" : "pending",
+        startedAt: step.startedAt,
+        completedAt: step.completedAt,
+        durationMs: step.durationMs,
+        error: step.error,
+        log: step.log,
+      });
+    }
+  }
+
+  // Research agent — mark as completed (it ran inside JI)
+  updateAgent("research", {
+    status: "completed",
+    completedAt: new Date().toISOString(),
+    log: "Research bundled with Job Intelligence.",
+  });
+
+  // Planner + Memory — mark as completed (they ran as part of the Supervisor setup)
+  updateAgent("planner", {
+    status: "completed",
+    completedAt: new Date().toISOString(),
+    log: "Plan: run V2 pipeline → post-optimization agents.",
+  });
+  updateAgent("memory", {
+    status: "completed",
+    completedAt: new Date().toISOString(),
+    log: "User profile loaded + resume/JD ingested.",
+  });
+}
+
+/**
+ * Finalize the Supervisor's status based on ALL agent statuses.
+ * The Supervisor may only complete when every agent has reached a terminal
+ * state (Completed, Failed, or Skipped). If any agent is still Pending or
+ * Running, the Supervisor stays Running.
+ *
+ * The Supervisor's final status is:
+ *   - "completed" if all agents are Completed/Skipped
+ *   - "failed" if any required agent Failed (but the pipeline still produced an optimized resume)
+ *   - "running" otherwise (should not happen at this point, but defensive)
+ */
+function finalizeSupervisorStatus(): void {
+  const agentList = Object.values(state.agents);
+  const requiredAgentIds: AgentId[] = [
+    "resume-parser", "job-intelligence", "ats-analysis", "optimizer",
+    // QA + Reflection can be skipped/failed (non-fatal)
+    // Post-optimization agents can fail (non-fatal)
+  ];
+
+  // Check if any agent is still in a non-terminal state
+  const stillRunning = agentList.filter(
+    (a) => a.status === "pending" || a.status === "running",
+  );
+  if (stillRunning.length > 0) {
+    updateAgent("supervisor", {
+      status: "running",
+      log: `Waiting for ${stillRunning.length} agent(s): ${stillRunning.map((a) => a.name).join(", ")}`,
+    });
+    return;
+  }
+
+  // Check if any REQUIRED agent failed
+  const failedRequired = requiredAgentIds
+    .map((id) => state.agents[id])
+    .filter((a) => a && a.status === "failed");
+
+  const failedAgents = agentList.filter((a) => a.status === "failed");
+  if (failedRequired.length > 0) {
+    updateAgent("supervisor", {
+      status: "failed",
+      completedAt: new Date().toISOString(),
+      error: `Required agents failed: ${failedRequired.map((a) => a.name).join(", ")}`,
+      log: `Pipeline completed with ${failedAgents.length} failed agent(s).`,
+    });
+  } else {
+    const completedCount = agentList.filter((a) => a.status === "completed" || a.status === "cached").length;
+    const skippedCount = agentList.filter((a) => a.status === "skipped").length;
+    const failedCount = failedAgents.length;
+    updateAgent("supervisor", {
+      status: "completed",
+      completedAt: new Date().toISOString(),
+      log: `Pipeline complete: ${completedCount} completed, ${skippedCount} skipped, ${failedCount} failed.`,
+    });
+  }
+}
+
+// ============================================================================
 // Retry helper
 // ============================================================================
 
@@ -312,7 +438,11 @@ export async function handleOptimizationRequested(
   const cacheK = cacheKey("optimization", resume.id, jd.id);
   const cachedResult = getCached<PipelineResult>(cacheK);
   if (cachedResult) {
-    updateAgent("supervisor", { status: "completed", log: "Served optimization from cache.", cached: true });
+    // === SYNC CORE AGENT STATUSES FROM CACHE ===
+    // Even on cache hit, we must sync the core agent statuses so the
+    // dashboard doesn't show them as "Pending".
+    syncCoreAgentStatusesFromPipeline(cachedResult);
+    updateAgent("supervisor", { status: "running", log: "Served optimization from cache. Checking post-optimization agents…", cached: true });
     updateContext({
       optimizedResume: cachedResult.optimizedResume,
       beforeATS: cachedResult.beforeATS,
@@ -345,6 +475,8 @@ export async function handleOptimizationRequested(
       }
     }
 
+    // === FINALIZE: Supervisor completes only when all agents are terminal ===
+    finalizeSupervisorStatus();
     setState((prev) => ({ ...prev, isRunning: false }));
     return cachedResult;
   }
@@ -382,8 +514,20 @@ export async function handleOptimizationRequested(
       optimizationId: result.optimizedResume?.id ?? null,
     });
 
+    // === SYNC CORE AGENT STATUSES FROM THE V2 PIPELINE RESULT ===
+    // The V2 runOptimizationPipeline() runs 6 core agents internally but
+    // doesn't update the Supervisor's agent status map. We sync them here
+    // so the PipelineDashboard shows the correct status for every agent.
+    // This fixes the "impossible state" where core agents showed "Pending"
+    // while the Supervisor showed "Completed".
+    syncCoreAgentStatusesFromPipeline(result);
+
     setCached(cacheK, result);
-    updateAgent("supervisor", { status: "completed", completedAt: new Date().toISOString(), log: "Optimization pipeline complete." });
+    // === SUPERVISOR DOES NOT COMPLETE YET ===
+    // The Supervisor only completes AFTER all post-optimization agents
+    // (CoverLetter, Interview, CareerCoach) have also reached a terminal
+    // state. This fixes the "premature completion" defect.
+    updateAgent("supervisor", { status: "running", log: "Core pipeline complete. Running post-optimization agents…" });
 
     // Record in memory
     if (result.optimizedResume && result.beforeATS && result.afterATS) {
@@ -406,6 +550,13 @@ export async function handleOptimizationRequested(
       logEvent("optimization-complete", { optimizationId: result.optimizedResume.id });
       await runPostOptimizationAgents(result, jd);
     }
+
+    // === SUPERVISOR COMPLETION RULE ===
+    // The Supervisor may only complete when ALL agents have reached a
+    // terminal state (Completed, Failed, or Skipped). This prevents the
+    // "premature completion" defect where the Supervisor showed Completed
+    // while core agents were still Pending.
+    finalizeSupervisorStatus();
 
     setState((prev) => ({ ...prev, isRunning: false }));
     return result;
@@ -470,6 +621,20 @@ Write the cover letter now. Address it to the hiring team. Be specific to ${comp
       maxTokens: 1000,
       taskCategory: "document",
     }), 1, "cover-letter");
+
+    // === OUTPUT VALIDATION ===
+    // Cover letter must be at least 500 characters. If the AI returned a
+    // short/empty response, mark the agent as FAILED (not Completed).
+    if (!result.text || result.text.trim().length < 500) {
+      updateContext({ coverLetter: null });
+      updateAgent(agentId, {
+        status: "failed",
+        completedAt: new Date().toISOString(),
+        error: `Cover letter too short (${result.text?.length ?? 0} chars, minimum 500).`,
+        log: `✗ Cover letter validation failed: only ${result.text?.length ?? 0} chars.`,
+      });
+      return;
+    }
 
     updateContext({ coverLetter: result.text });
     setCached(cacheK, result.text);
@@ -586,23 +751,52 @@ The 'questions' array MUST contain exactly 9 objects. The 'readinessScore' MUST 
       companyInsights,
     };
 
-    // === FALLBACK: if the AI returned 0 questions, generate a minimal
-    // package from the resume + JD so the user always gets something useful. ===
-    if (normalized.questions.length === 0) {
+    // === FALLBACK: if the AI returned fewer than 9 questions, generate
+    // fallback questions to reach the minimum. The spec requires ≥ 9. ===
+    if (normalized.questions.length < 9) {
       const fallbackQuestions = generateFallbackInterviewQuestions(resume, jd, company);
-      normalized.questions = fallbackQuestions;
+      // Merge: keep AI questions first, add fallbacks to reach 9
+      const aiCount = normalized.questions.length;
+      const needed = Math.max(0, 9 - aiCount);
+      normalized.questions = [...normalized.questions, ...fallbackQuestions.slice(0, needed)];
       normalized.readinessScore = normalized.readinessScore > 0 ? normalized.readinessScore : 50;
-      updateAgent(agentId, {
-        status: "completed",
-        completedAt: new Date().toISOString(),
-        log: `Interview package generated via fallback: ${fallbackQuestions.length} questions, readiness ${normalized.readinessScore}/100. (AI response did not contain parseable questions.)`,
-      });
+
+      if (aiCount === 0) {
+        // AI returned 0 questions — this is a partial failure. Mark as completed
+        // (we produced a usable package via fallback) but log the degradation.
+        updateAgent(agentId, {
+          status: "completed",
+          completedAt: new Date().toISOString(),
+          log: `Interview package generated via fallback: ${normalized.questions.length} questions, readiness ${normalized.readinessScore}/100. (AI returned 0 parseable questions.)`,
+        });
+      } else {
+        // AI returned some questions but fewer than 9 — supplement with fallbacks.
+        updateAgent(agentId, {
+          status: "completed",
+          completedAt: new Date().toISOString(),
+          log: `Interview package generated: ${aiCount} AI + ${needed} fallback = ${normalized.questions.length} questions, readiness ${normalized.readinessScore}/100.`,
+        });
+      }
     } else {
+      // AI returned ≥ 9 questions — full success.
       updateAgent(agentId, {
         status: "completed",
         completedAt: new Date().toISOString(),
         log: `Interview package generated: ${normalized.questions.length} questions, readiness ${normalized.readinessScore}/100.`,
       });
+    }
+
+    // === FINAL VALIDATION: if we still have 0 questions (shouldn't happen),
+    // mark as FAILED with readiness 0. ===
+    if (normalized.questions.length === 0) {
+      updateContext({ interviewPackage: null });
+      updateAgent(agentId, {
+        status: "failed",
+        completedAt: new Date().toISOString(),
+        error: "Interview generation incomplete — 0 questions.",
+        log: "✗ Interview generation failed: 0 questions after fallback.",
+      });
+      return;
     }
 
     updateContext({ interviewPackage: normalized });
@@ -611,6 +805,16 @@ The 'questions' array MUST contain exactly 9 objects. The 'readinessScore' MUST 
     // === EVEN ON FAILURE, generate a fallback package so the user never
     // sees "0 questions, readiness 0/100". ===
     const fallbackQuestions = generateFallbackInterviewQuestions(resume, jd, company);
+    if (fallbackQuestions.length === 0) {
+      // Fallback itself failed (extremely unlikely) — mark as FAILED.
+      updateAgent(agentId, {
+        status: "failed",
+        completedAt: new Date().toISOString(),
+        error: `Interview generation failed: ${e?.message ?? "unknown"}`,
+        log: `✗ Interview generation failed and fallback produced 0 questions.`,
+      });
+      return;
+    }
     const fallbackPackage = {
       questions: fallbackQuestions,
       readinessScore: 40,
