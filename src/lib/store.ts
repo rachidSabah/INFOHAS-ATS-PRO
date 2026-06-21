@@ -8,6 +8,7 @@ import type {
   OptimizerDirectiveConfig,
   AIDevAgentSettings, AIDevAgentHistory, AIDevReport,
   AITask, AIWorkspacePatch, AIGitBranch, AIGitCommit, AIRollback,
+  ResumeReviewReport,
 } from "./types";
 import {
   SEED_RESUMES, SEED_JDS, SEED_PROVIDERS, SEED_PROVIDER_LOGS, SEED_PROVIDER_SETTINGS,
@@ -70,6 +71,12 @@ interface AppState {
   coverLetters: CoverLetter[];
   interviews: InterviewPackage[];
   atsReports: ATSReport[];
+  // AI Resume Review Platform — comprehensive multi-module review reports.
+  // Stored as rich JSON blobs in the store; persisted to localStorage as
+  // `resumeai-review-reports-backup` and best-effort synced to the
+  // existing ats_reports D1 table (review_data_json column added in a
+  // follow-up migration; until then, sync is localStorage-only).
+  reviewReports: ResumeReviewReport[];
 
   // admin
   providers: AIProvider[];
@@ -148,6 +155,11 @@ interface AppState {
 
   // ats
   addATSReport: (r: ATSReport) => void;
+
+  // resume review reports (AI Resume Review Platform)
+  addReviewReport: (r: ResumeReviewReport) => void;
+  updateReviewReport: (id: string, patch: Partial<ResumeReviewReport>) => void;
+  removeReviewReport: (id: string) => void;
 
   // providers
   addProvider: (p: AIProvider) => void;
@@ -323,6 +335,14 @@ export const useApp = create<AppState>()(
       coverLetters: SEED_COVER_LETTERS,
       interviews: SEED_INTERVIEW,
       atsReports: SEED_ATS_REPORTS,
+      // Restore review reports from localStorage backup so they survive
+      // refresh / logout / login cycles even when the cloud is unreachable.
+      reviewReports: (() => {
+        if (typeof localStorage === "undefined") return [];
+        try {
+          return JSON.parse(localStorage.getItem("resumeai-review-reports-backup") || "[]");
+        } catch { return []; }
+      })(),
 
       providers: SEED_PROVIDERS,
       providerLogs: SEED_PROVIDER_LOGS,
@@ -778,6 +798,46 @@ export const useApp = create<AppState>()(
           try {
             const existing = JSON.parse(localStorage.getItem("resumeai-ats-backup") || "[]");
             localStorage.setItem("resumeai-ats-backup", JSON.stringify([r, ...existing.filter((x: any) => x.id !== r.id)].slice(0, 50)));
+          } catch {}
+        }
+      },
+
+      // === RESUME REVIEW REPORTS (AI Resume Review Platform) ===
+      // Persisted to localStorage (`resumeai-review-reports-backup`) for
+      // survival across refresh/logout/login cycles. Cloud sync to a
+      // dedicated D1 table will be added in a follow-up migration; for now
+      // these reports are localStorage-only (which is acceptable for the
+      // Cloudflare Free tier and matches the existing pattern for resumes
+      // and JDs).
+      addReviewReport: (r) => {
+        set((s) => ({ reviewReports: [r, ...s.reviewReports] }));
+        if (typeof localStorage !== "undefined") {
+          try {
+            const existing = JSON.parse(localStorage.getItem("resumeai-review-reports-backup") || "[]");
+            localStorage.setItem("resumeai-review-reports-backup", JSON.stringify([r, ...existing.filter((x: any) => x.id !== r.id)].slice(0, 30)));
+          } catch {}
+        }
+      },
+      updateReviewReport: (id, patch) => {
+        set((s) => ({
+          reviewReports: s.reviewReports.map((r) =>
+            r.id === id ? { ...r, ...patch, updatedAt: new Date().toISOString() } : r
+          ),
+        }));
+        if (typeof localStorage !== "undefined") {
+          try {
+            const existing = JSON.parse(localStorage.getItem("resumeai-review-reports-backup") || "[]");
+            const updated = existing.map((r: any) => r.id === id ? { ...r, ...patch, updatedAt: new Date().toISOString() } : r);
+            localStorage.setItem("resumeai-review-reports-backup", JSON.stringify(updated));
+          } catch {}
+        }
+      },
+      removeReviewReport: (id) => {
+        set((s) => ({ reviewReports: s.reviewReports.filter((r) => r.id !== id) }));
+        if (typeof localStorage !== "undefined") {
+          try {
+            const existing = JSON.parse(localStorage.getItem("resumeai-review-reports-backup") || "[]");
+            localStorage.setItem("resumeai-review-reports-backup", JSON.stringify(existing.filter((x: any) => x.id !== id)));
           } catch {}
         }
       },

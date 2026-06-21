@@ -211,6 +211,124 @@ export interface ATSReport {
   createdAt: string;
 }
 
+// ============================================================================
+// ResumeReviewReport — comprehensive multi-module AI Resume Review Platform
+// Stores the full output of all 10 modules in a single JSON blob per review.
+// Persisted to localStorage (`resumeai-review-reports-backup`) and best-effort
+// synced to the existing ats_reports D1 table (extra metadata in
+// recommendations_json until a dedicated column is added).
+// ============================================================================
+
+/** Module 1 — ATS Review */
+export interface ReviewATSModule {
+  atsScore: number;             // 0-100
+  keywordMatch: number;         // 0-100
+  missingKeywords: string[];
+  formattingIssues: string[];
+  sectionDetection: { section: string; detected: boolean; confidence: number }[];
+  parsingRisks: string[];
+  graphicsRisks: string[];
+  tablesRisks: string[];
+  fileCompatibility: string[];  // e.g. ["PDF: ✓", "DOCX: ✓", "ATS-friendly: ✓"]
+  passProbability: number;      // 0-100 — probability of passing ATS screening
+  recommendations: string[];
+}
+
+/** Module 2 — Recruiter Review */
+export interface ReviewSectionFeedback {
+  section: string;              // "Headline" | "Summary" | "Experience" | ...
+  score: number;                // 0-10
+  strengths: string[];
+  weaknesses: string[];
+  recommendations: string[];
+}
+export interface ReviewRecruiterModule {
+  overallScore: number;         // 0-10
+  sections: ReviewSectionFeedback[];
+}
+
+/** Module 3 — Job Match Review (only when a JD is present) */
+export type ReviewJobMatchModule = {
+  overallMatch: number;         // 0-100
+  atsMatch: number;             // 0-100
+  experienceMatch: number;      // 0-100
+  skillMatch: number;           // 0-100
+  educationMatch: number;       // 0-100
+  industryMatch: number;        // 0-100
+  missingSkills: string[];
+  missingKeywords: string[];
+  missingCertifications: string[];
+} | null;                       // null when no JD available
+
+/** Module 4 — Industry Benchmark */
+export interface ReviewBenchmarkModule {
+  industry: string;
+  role: string;
+  seniority: string;            // "Entry" | "Mid" | "Senior" | "Lead" | "Executive"
+  country: string;
+  industryReadinessScore: number;  // 0-100
+  benchmarkComparisons: { metric: string; candidate: number; industryAverage: number; topPercentile: number }[];
+  insights: string[];
+}
+
+/** Module 5 — Resume Improvements */
+export interface ReviewImprovementsModule {
+  betterSummary: string;
+  betterHeadlines: string[];    // 3 alternatives
+  betterSkills: string[];       // suggested additions
+  betterBulletPoints: { original: string; improved: string }[];
+  betterAchievements: string[];
+  actionVerbs: string[];
+  metrics: string[];            // suggested metrics to add
+  highValueKeywords: string[];
+}
+
+/** Module 6 — Priority Action Plan */
+export interface ReviewActionPlanModule {
+  criticalFixes: { fix: string; impact: string }[];
+  highPriorityFixes: { fix: string; impact: string }[];
+  optionalImprovements: { fix: string; impact: string }[];
+  expectedAtsIncrease: number;  // estimated points gained if all fixes applied
+}
+
+/** Module 8 — Interview Readiness */
+export interface ReviewInterviewReadinessModule {
+  likelyQuestions: string[];
+  weakAreas: string[];
+  talkingPoints: string[];
+  preparationAdvice: string[];
+}
+
+/** Composite report — all 10 modules in one blob */
+export interface ResumeReviewReport {
+  id: string;
+  userId: string;
+  resumeId: string;             // primary resume reviewed
+  optimizedResumeId?: string;   // optional optimized resume
+  jdId?: string;                // optional job description
+  companyName?: string;
+  industryProfile: string;      // detected industry label
+  createdAt: string;
+  updatedAt: string;
+  // Module data
+  ats: ReviewATSModule;
+  recruiter: ReviewRecruiterModule;
+  jobMatch: ReviewJobMatchModule;
+  benchmark: ReviewBenchmarkModule;
+  improvements: ReviewImprovementsModule;
+  actionPlan: ReviewActionPlanModule;
+  interviewReadiness: ReviewInterviewReadinessModule;
+  // Aggregate dashboard scores (denormalized for quick UI access)
+  dashboard: {
+    atsScore: number;
+    recruiterScore: number;
+    jobMatch: number | null;
+    formattingScore: number;
+    readabilityScore: number;
+    industryBenchmark: number;
+  };
+}
+
 export type AIProviderType =
   | "puter"
   | "openai"

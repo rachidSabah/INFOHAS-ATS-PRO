@@ -35,9 +35,10 @@ import {
   LinkedinImport, ResumeVersioning, MultiLanguage, ResumeSharing, AbTesting,
   BulkGenerator, ResumeAnalytics, AppTracker, SalaryInsights, SkillGap,
   CareerPath, CompanyResearch, JobAlerts, CertTracker, Networking,
-  AiCoach, AiMockInterview, AiSalaryCoach, AiEmailWriter, AiResumeReview,
+  AiCoach, AiMockInterview, AiSalaryCoach, AiEmailWriter,
   AiJobMatch, AiAchievement, Integrations,
 } from "./modules/CareerTools";
+import { ResumeReviewPlatform } from "./modules/ResumeReviewPlatform";
 import type { ViewKey } from "@/lib/types";
 
 const VIEW_COMPONENTS: Record<ViewKey, React.FC> = {
@@ -88,7 +89,7 @@ const VIEW_COMPONENTS: Record<ViewKey, React.FC> = {
   "ai-mock-interview": AiMockInterview,
   "ai-salary-coach": AiSalaryCoach,
   "ai-email-writer": AiEmailWriter,
-  "ai-resume-review": AiResumeReview,
+  "ai-resume-review": ResumeReviewPlatform,
   "ai-job-match": AiJobMatch,
   "ai-achievement": AiAchievement,
   "integrations": Integrations,
