@@ -105,6 +105,17 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Only http/https URLs are supported" }, { status: 400 });
     }
 
+    // === SSRF PROTECTION ===
+    // Block requests to private / loopback / link-local / reserved IP ranges
+    // and common metadata-service hostnames. This prevents an attacker from
+    // using the scraper as a proxy to reach internal services or cloud
+    // metadata endpoints (e.g. http://169.254.169.254/latest/meta-data/).
+    const hostname = parsedUrl.hostname.toLowerCase();
+    const ssrfError = checkSsrf(hostname);
+    if (ssrfError) {
+      return NextResponse.json({ error: ssrfError }, { status: 400 });
+    }
+
     // === Check cache first ===
     const cached = getCached(url);
     if (cached) {
@@ -247,6 +258,57 @@ export async function POST(req: NextRequest) {
     }
     return NextResponse.json({ error: msg }, { status: 500 });
   }
+}
+
+/**
+ * SSRF guard — returns an error message if the hostname is a private /
+ * loopback / link-local / reserved address or a known metadata endpoint,
+ * otherwise returns null (allowed).
+ *
+ * Covers IPv4 dotted-quad, IPv6 (incl. ::1, fc00::/7, fe80::/10), and
+ * common hostnames (localhost, metadata.google.internal, etc.).
+ */
+function checkSsrf(hostname: string): string | null {
+  // Block obvious hostnames
+  const blockedHosts = [
+    "localhost",
+    "metadata.google.internal",
+    "metadata",
+    "169.254.169.254", // AWS / Azure / GCP metadata IP
+    "metadata.azure.com",
+  ];
+  if (blockedHosts.includes(hostname)) {
+    return "URLs pointing to internal/metadata endpoints are blocked.";
+  }
+
+  // Block IPv4 in private ranges
+  const ipv4Match = hostname.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
+  if (ipv4Match) {
+    const [, a, b] = ipv4Match.map(Number) as unknown as number[];
+    if (
+      a === 10 ||                                  // 10.0.0.0/8
+      (a === 172 && b >= 16 && b <= 31) ||         // 172.16.0.0/12
+      (a === 192 && b === 168) ||                  // 192.168.0.0/16
+      a === 127 ||                                 // 127.0.0.0/8 (loopback)
+      (a === 169 && b === 254) ||                  // 169.254.0.0/16 (link-local)
+      a === 0 ||                                   // 0.0.0.0/8
+      a >= 224                                     // 224.0.0.0/4 (multicast) + 240.0.0.0/4 (reserved)
+    ) {
+      return "URLs pointing to private or reserved IP ranges are blocked.";
+    }
+  }
+
+  // Block IPv6 loopback / link-local / unique-local
+  if (hostname === "::1" || hostname === "0:0:0:0:0:0:0:1") {
+    return "URLs pointing to loopback addresses are blocked.";
+  }
+  if (hostname.startsWith("fc") || hostname.startsWith("fd") ||
+      hostname.startsWith("fe80:") || hostname.startsWith("fe9") ||
+      hostname.startsWith("fea") || hostname.startsWith("feb")) {
+    return "URLs pointing to link-local or unique-local IPv6 addresses are blocked.";
+  }
+
+  return null;
 }
 
 function htmlToText(html: string): string {

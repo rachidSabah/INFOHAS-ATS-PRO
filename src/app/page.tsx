@@ -32,9 +32,15 @@ export default function Home() {
   useEffect(() => {
     if (isAuthed && !synced && user) {
       setUserId(user.id); // Restore user ID for API calls (important after refresh)
-      syncAllFromCloud(useApp).then(() => {
-        useApp.setState({ synced: true });
-      });
+      // Use .finally() so `synced` is set even if syncAllFromCloud rejects.
+      // Otherwise a sync failure would leave `synced=false` forever, blocking
+      // future sync attempts and leaving the user with stale seed data.
+      syncAllFromCloud(useApp)
+        .then(() => useApp.setState({ synced: true }))
+        .catch((e) => {
+          console.warn("[syncAllFromCloud] failed (non-fatal):", e);
+          useApp.setState({ synced: true });
+        });
       // Also migrate old localStorage data if present
       migrateLocalStorageToCloud(useApp);
     }

@@ -287,6 +287,23 @@ export function Optimizer() {
         }
       }
 
+      // === FATAL FAILURE HANDLING ===
+      // The orchestrator returns status:"failed" (instead of throwing) when
+      // a fatal step (Step 2 ATS-Before or Step 3 Optimizer) fails. We must
+      // NOT show a success toast or transition to "done" — that would lie to
+      // the user and charge a usage credit for nothing.
+      if (result.status === "failed" || !result.optimizedResume) {
+        const failedStepsFatal = result.steps.filter((s) => s.status === "failed");
+        const fatalStep = failedStepsFatal.find((s) => s.error) || failedStepsFatal[0];
+        const errMsg = fatalStep?.error || fatalStep?.log || "Optimization pipeline failed. Please try again.";
+        setPipelineError(errMsg);
+        setAiLog((l) => [...l, `✗ Pipeline failed: ${errMsg}`]);
+        setAiThinking(false);
+        // Stay on the optimize step so the user can retry
+        toast.error(`Optimization failed: ${errMsg.slice(0, 120)}`);
+        return;
+      }
+
       // Check for partial failures (some steps failed but pipeline continued)
       const failedSteps = result.steps.filter((s) => s.status === "failed");
       if (failedSteps.length > 0 && result.optimizedResume) {

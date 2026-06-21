@@ -274,8 +274,15 @@ function clearSession() {
   } catch {}
 }
 
-// Try to restore session on module load (before React renders)
+// Try to restore session on module load (before React renders).
+// IMPORTANT: also restore the user-id into sessionStorage immediately so
+// any cloud-API call made between module load and page.tsx's useEffect
+// carries the correct X-User-Id header (otherwise resumes/JDs/interviews
+// created in that window would be mis-attributed to "anonymous").
 const _restoredUser = restoreSession();
+if (_restoredUser && typeof window !== "undefined") {
+  try { setUserId(_restoredUser.id); } catch {}
+}
 
 export const useApp = create<AppState>()(
     (set, get) => ({
@@ -392,6 +399,11 @@ export const useApp = create<AppState>()(
         }
         const now = new Date().toISOString();
         const updatedUser = { ...existing, lastLoginAt: now, lastActiveAt: now };
+        // RACE-FIX: call setUserId BEFORE set() so any cloud-API call
+        // triggered by synchronous store subscribers carries the correct
+        // X-User-Id header (otherwise logs/usage are mis-attributed).
+        setUserId(updatedUser.id);
+        persistSession(updatedUser);
         set((s) => ({
           users: s.users.map((u) => (u.id === existing.id ? updatedUser : u)),
           user: updatedUser,
@@ -400,8 +412,6 @@ export const useApp = create<AppState>()(
           view: "dashboard",
           synced: false,
         }));
-        setUserId(updatedUser.id);
-        persistSession(updatedUser);
         useApp.getState().log({ actor: normalizedEmail, action: "User signed in", category: "auth", details: "Provider: email", severity: "info" });
         return { ok: true, user: updatedUser };
       },
@@ -433,9 +443,11 @@ export const useApp = create<AppState>()(
         set((s) => ({ users: [...s.users, newUser] }));
         useApp.getState().log({ actor: normalizedEmail, action: "User registered (pending approval)", category: "auth", details: `Name: ${newUser.name}`, severity: "warning" });
         // Auto-sign-in the new user (they'll see the pending approval screen)
-        set({ user: newUser, isAuthed: true, authOpen: false, view: "dashboard", synced: false });
+        // RACE-FIX: setUserId BEFORE set() so cloud-API calls carry the
+        // correct X-User-Id header.
         setUserId(newUser.id);
         persistSession(newUser);
+        set({ user: newUser, isAuthed: true, authOpen: false, view: "dashboard", synced: false });
         return { ok: true, user: newUser };
       },
 
@@ -490,6 +502,9 @@ export const useApp = create<AppState>()(
               avatarUrl: puterUser?.photo || existing.avatarUrl,
               updatedAt: (shouldAutoApprove || roleChanged) ? now : existing.updatedAt,
             };
+            // RACE-FIX: setUserId BEFORE set()
+            setUserId(updatedUser.id);
+            persistSession(updatedUser);
             set((s) => ({
               users: s.users.map((u) => (u.id === existing.id ? updatedUser : u)),
               user: updatedUser,
@@ -498,8 +513,6 @@ export const useApp = create<AppState>()(
               view: "dashboard",
               synced: false,
             }));
-            setUserId(updatedUser.id);
-            persistSession(updatedUser);
             if (shouldAutoApprove) {
               useApp.getState().log({ actor: puterEmail, action: "Puter user auto-approved on sign-in", category: "auth", details: `Name: ${updatedUser.name}`, severity: "info" });
             } else {
@@ -530,9 +543,11 @@ export const useApp = create<AppState>()(
               lastLoginAt: now,
               usage: { resumesGenerated: 0, atsChecks: 0, coverLetters: 0, interviewPreps: 0, downloads: 0 },
             };
-            set((s) => ({ users: [...s.users, newUser], user: newUser, isAuthed: true, authOpen: false, view: "dashboard", synced: false }));
+            // RACE-FIX: setUserId BEFORE set() so cloud-API calls during the
+            // synchronous store update carry the correct X-User-Id header.
             setUserId(newUser.id);
             persistSession(newUser);
+            set((s) => ({ users: [...s.users, newUser], user: newUser, isAuthed: true, authOpen: false, view: "dashboard", synced: false }));
             useApp.getState().log({ actor: puterEmail, action: "User registered via Puter (auto-approved)", category: "auth", details: `Name: ${newUser.name}`, severity: "info" });
             return { ok: true, user: newUser };
           }

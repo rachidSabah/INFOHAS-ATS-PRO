@@ -345,93 +345,115 @@ export function BulkGenerator() {
 
   const updateJob = (id: string, patch: Partial<BulkJobEntry>) => setJobs((j) => j.map((job) => job.id === id ? { ...job, ...patch } : job));
 
-  // === Process all jobs ===
+  // === Process a single job end-to-end ===
+  // This is the canonical per-job processor. Both processAll() and retryJob()
+  // call this so retry actually re-runs all 5 steps (parse JD → detect industry
+  // → optimize resume → cover letter → interview prep) instead of just setting
+  // a "Queued…" status.
+  const processOne = async (job: BulkJobEntry) => {
+    if (!resume) { toast.error("Create a resume first."); return; }
+    try {
+      // Step 1: Parse JD
+      updateJob(job.id, { status: "analyzing", statusLabel: "Analyzing JD…" });
+      const jdParseResult = await callAI({
+        systemPrompt: "You are a job description parser. Return ONLY valid JSON.",
+        userPrompt: `Extract from this job description:\n${job.value.slice(0, 3000)}\n\nReturn JSON: { "title": "...", "company": "...", "location": "...", "requiredSkills": [...], "keywords": [...] }`,
+        maxTokens: 1000, taskCategory: "document",
+      });
+      let jdData: any;
+      try { jdData = extractJSON<any>(jdParseResult.text); } catch { jdData = { title: "Role", company: "", keywords: [] }; }
+      const company = job.company || jdData.company || "";
+      const title = job.title || jdData.title || "Role";
+
+      // Step 2: Detect industry
+      const detection = detectIndustry(job.value, `${resume.name} ${resume.headline ?? ""} ${resume.summary ?? ""}`);
+      const industryProfile = INDUSTRY_PROFILES[detection.industryId] || INDUSTRY_PROFILES.generic;
+      updateJob(job.id, { status: "optimizing", statusLabel: `Optimizing (${industryProfile.label})…`, industry: industryProfile.label, company, title });
+
+      // Step 3: Optimize resume
+      const optResult = await callAI({
+        systemPrompt: `You are a Senior ATS Optimization Expert. Optimize the resume for the job description using ${industryProfile.label} industry keywords. Return ONLY JSON with: name, headline, summary, skills [{name, category}], experience [{title, company, location, startDate, endDate, bullets[]}], missingKeywordsAdded, bulletsRewritten.\n\nINDUSTRY KEYWORDS: ${industryProfile.keywordBank}`,
+        userPrompt: `SOURCE RESUME:\n${JSON.stringify({ name: resume.name, headline: resume.headline, summary: resume.summary, experience: resume.experience.map((e) => ({ title: e.title, company: e.company, bullets: e.bullets })), skills: resume.skills.map((s) => s.name) })}\n\nJOB DESCRIPTION:\n${job.value.slice(0, 2000)}\n\nOptimize for maximum ATS match. NEVER fabricate experience. Return JSON only.`,
+        maxTokens: 3000, temperature: 0.4, taskCategory: "document",
+      });
+      let optData: any;
+      try { optData = extractJSON<any>(optResult.text); } catch { throw new Error("AI returned non-JSON for resume optimization"); }
+      const optimized: ResumeData = {
+        ...resume, id: uid("r"),
+        headline: optData.headline || resume.headline,
+        summary: optData.summary || resume.summary,
+        skills: (optData.skills ?? []).map((s: any) => typeof s === "string" ? { id: uid("s"), name: s, category: "Skills" } : { id: uid("s"), ...s }),
+        experience: (optData.experience ?? []).map((e: any) => ({ id: uid("e"), title: e.title || "", company: e.company || "", location: e.location || "", startDate: e.startDate || "", endDate: e.endDate || "Present", bullets: e.bullets ?? [] })),
+        template: "infohas-pro", accentColor: "#0563C1",
+        createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
+        source: "ai-optimized", fileName: `${company || "resume"}_${title}.pdf`,
+      };
+      addResume(optimized);
+      const atsScore = Math.min(95, 60 + (optData.missingKeywordsAdded?.length ?? 3) * 5 + Math.floor(Math.random() * 15));
+      updateJob(job.id, { status: "cover-letter", statusLabel: "Generating cover letter…", optimizedResumeId: optimized.id, atsScore, matchScore: Math.round(atsScore * 0.9) });
+
+      // Step 4: Generate cover letter
+      const clResult = await callAI({
+        systemPrompt: `You are an expert cover letter writer. Write a ${industryProfile.label} industry cover letter (~400 words). Plain text only. Sound human, professional, recruiter-grade.`,
+        userPrompt: `Candidate: ${optimized.name}, ${optimized.headline}\nExperience: ${optimized.experience.map((e) => `${e.title} at ${e.company}`).join(", ")}\nSkills: ${optimized.skills.map((s) => s.name).join(", ")}\n\nJob: ${title} at ${company}\nJD: ${job.value.slice(0, 1000)}\n\nWrite the cover letter now.`,
+        maxTokens: 1000, taskCategory: "document",
+      });
+      const cl = { id: uid("cl"), title: `Cover Letter — ${company}`, template: "modern" as const, content: clResult.text, resumeId: optimized.id, company, role: title, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
+      addCoverLetter(cl);
+      updateJob(job.id, { status: "interview", statusLabel: "Generating interview prep…", coverLetterId: cl.id });
+
+      // Step 5: Generate interview prep (condensed — 9 questions)
+      const ivResult = await callAI({
+        systemPrompt: `You are an expert interview coach for ${industryProfile.label}. Return ONLY JSON.`,
+        userPrompt: `Candidate resume: ${JSON.stringify({ name: optimized.name, experience: optimized.experience.map((e) => ({ title: e.title, company: e.company, bullets: e.bullets })), skills: optimized.skills.map((s) => s.name) })}\n\nJob: ${title} at ${company}\nJD: ${job.value.slice(0, 1500)}\n\nGenerate 9 interview questions (3 technical, 3 behavioral, 2 situational, 1 company). Return JSON: { "questions": [{ "category": "...", "question": "...", "difficulty": "easy|medium|hard", "recommendedAnswer": "...", "talkingPoints": [...], "followUps": [...] }] }`,
+        maxTokens: 3000, taskCategory: "document",
+      });
+      let ivData: any;
+      try { ivData = extractJSON<any>(ivResult.text); } catch { ivData = { questions: [] }; }
+      const ivPkg = { id: uid("iv"), resumeId: optimized.id, company, role: title, questions: (ivData.questions ?? []).map((q: any) => ({ id: uid("q"), ...q })), createdAt: new Date().toISOString() };
+      addInterview(ivPkg);
+      updateJob(job.id, { status: "completed", statusLabel: "Completed", interviewId: ivPkg.id });
+      incUsage("resumesGenerated"); incUsage("coverLetters"); incUsage("interviewPreps");
+      log({ actor: "you", action: `Bulk package: ${title} at ${company}`, category: "ai", details: `ATS ${atsScore} · ${industryProfile.label} · via ${optResult.provider}`, severity: "info" });
+    } catch (e: any) {
+      updateJob(job.id, { status: "failed", statusLabel: "Failed", error: e?.message || "Unknown error" });
+    }
+  };
+
+  // === Process all jobs sequentially (sequential avoids AI rate limits) ===
   const processAll = async () => {
     if (!resume) { toast.error("Create a resume first."); return; }
     if (jobs.length === 0) { toast.error("Add at least one job."); return; }
     setProcessing(true);
 
-    for (const job of jobs) {
-      if (job.status === "completed" || job.status === "failed") continue;
-      try {
-        // Step 1: Parse JD
-        updateJob(job.id, { status: "analyzing", statusLabel: "Analyzing JD…" });
-        const jdParseResult = await callAI({
-          systemPrompt: "You are a job description parser. Return ONLY valid JSON.",
-          userPrompt: `Extract from this job description:\n${job.value.slice(0, 3000)}\n\nReturn JSON: { "title": "...", "company": "...", "location": "...", "requiredSkills": [...], "keywords": [...] }`,
-          maxTokens: 1000, taskCategory: "document",
-        });
-        let jdData: any;
-        try { jdData = extractJSON<any>(jdParseResult.text); } catch { jdData = { title: "Role", company: "", keywords: [] }; }
-        const company = job.company || jdData.company || "";
-        const title = job.title || jdData.title || "Role";
+    // Snapshot jobs to process
+    const toProcess = jobs.filter((j) => j.status !== "completed" && j.status !== "failed");
+    const initialFailed = jobs.filter((j) => j.status === "failed").length;
 
-        // Step 2: Detect industry
-        const detection = detectIndustry(job.value, `${resume.name} ${resume.headline ?? ""} ${resume.summary ?? ""}`);
-        const industryProfile = INDUSTRY_PROFILES[detection.industryId] || INDUSTRY_PROFILES.generic;
-        updateJob(job.id, { status: "optimizing", statusLabel: `Optimizing (${industryProfile.label})…`, industry: industryProfile.label });
-
-        // Step 3: Optimize resume
-        const optResult = await callAI({
-          systemPrompt: `You are a Senior ATS Optimization Expert. Optimize the resume for the job description using ${industryProfile.label} industry keywords. Return ONLY JSON with: name, headline, summary, skills [{name, category}], experience [{title, company, location, startDate, endDate, bullets[]}], missingKeywordsAdded, bulletsRewritten.\n\nINDUSTRY KEYWORDS: ${industryProfile.keywordBank}`,
-          userPrompt: `SOURCE RESUME:\n${JSON.stringify({ name: resume.name, headline: resume.headline, summary: resume.summary, experience: resume.experience.map((e) => ({ title: e.title, company: e.company, bullets: e.bullets })), skills: resume.skills.map((s) => s.name) })}\n\nJOB DESCRIPTION:\n${job.value.slice(0, 2000)}\n\nOptimize for maximum ATS match. NEVER fabricate experience. Return JSON only.`,
-          maxTokens: 3000, temperature: 0.4, taskCategory: "document",
-        });
-        let optData: any;
-        try { optData = extractJSON<any>(optResult.text); } catch { throw new Error("AI returned non-JSON for resume optimization"); }
-        const optimized: ResumeData = {
-          ...resume, id: uid("r"),
-          headline: optData.headline || resume.headline,
-          summary: optData.summary || resume.summary,
-          skills: (optData.skills ?? []).map((s: any) => typeof s === "string" ? { id: uid("s"), name: s, category: "Skills" } : { id: uid("s"), ...s }),
-          experience: (optData.experience ?? []).map((e: any) => ({ id: uid("e"), title: e.title || "", company: e.company || "", location: e.location || "", startDate: e.startDate || "", endDate: e.endDate || "Present", bullets: e.bullets ?? [] })),
-          template: "infohas-pro", accentColor: "#0563C1",
-          createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
-          source: "ai-optimized", fileName: `${company || "resume"}_${title}.pdf`,
-        };
-        addResume(optimized);
-        const atsScore = Math.min(95, 60 + (optData.missingKeywordsAdded?.length ?? 3) * 5 + Math.floor(Math.random() * 15));
-        updateJob(job.id, { status: "cover-letter", statusLabel: "Generating cover letter…", optimizedResumeId: optimized.id, atsScore, matchScore: Math.round(atsScore * 0.9) });
-
-        // Step 4: Generate cover letter
-        const clResult = await callAI({
-          systemPrompt: `You are an expert cover letter writer. Write a ${industryProfile.label} industry cover letter (~400 words). Plain text only. Sound human, professional, recruiter-grade.`,
-          userPrompt: `Candidate: ${optimized.name}, ${optimized.headline}\nExperience: ${optimized.experience.map((e) => `${e.title} at ${e.company}`).join(", ")}\nSkills: ${optimized.skills.map((s) => s.name).join(", ")}\n\nJob: ${title} at ${company}\nJD: ${job.value.slice(0, 1000)}\n\nWrite the cover letter now.`,
-          maxTokens: 1000, taskCategory: "document",
-        });
-        const cl = { id: uid("cl"), title: `Cover Letter — ${company}`, template: "modern" as const, content: clResult.text, resumeId: optimized.id, company, role: title, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
-        addCoverLetter(cl);
-        updateJob(job.id, { status: "interview", statusLabel: "Generating interview prep…", coverLetterId: cl.id });
-
-        // Step 5: Generate interview prep (condensed — 9 questions)
-        const ivResult = await callAI({
-          systemPrompt: `You are an expert interview coach for ${industryProfile.label}. Return ONLY JSON.`,
-          userPrompt: `Candidate resume: ${JSON.stringify({ name: optimized.name, experience: optimized.experience.map((e) => ({ title: e.title, company: e.company, bullets: e.bullets })), skills: optimized.skills.map((s) => s.name) })}\n\nJob: ${title} at ${company}\nJD: ${job.value.slice(0, 1500)}\n\nGenerate 9 interview questions (3 technical, 3 behavioral, 2 situational, 1 company). Return JSON: { "questions": [{ "category": "...", "question": "...", "difficulty": "easy|medium|hard", "recommendedAnswer": "...", "talkingPoints": [...], "followUps": [...] }] }`,
-          maxTokens: 3000, taskCategory: "document",
-        });
-        let ivData: any;
-        try { ivData = extractJSON<any>(ivResult.text); } catch { ivData = { questions: [] }; }
-        const ivPkg = { id: uid("iv"), resumeId: optimized.id, company, role: title, questions: (ivData.questions ?? []).map((q: any) => ({ id: uid("q"), ...q })), createdAt: new Date().toISOString() };
-        addInterview(ivPkg);
-        updateJob(job.id, { status: "completed", statusLabel: "Completed", interviewId: ivPkg.id });
-        incUsage("resumesGenerated"); incUsage("coverLetters"); incUsage("interviewPreps");
-        log({ actor: "you", action: `Bulk package: ${title} at ${company}`, category: "ai", details: `ATS ${atsScore} · ${industryProfile.label} · via ${optResult.provider}`, severity: "info" });
-      } catch (e: any) {
-        updateJob(job.id, { status: "failed", statusLabel: "Failed", error: e?.message || "Unknown error" });
-      }
+    for (const job of toProcess) {
+      await processOne(job);
     }
     setProcessing(false);
-    toast.success("Bulk processing complete!");
+    // Honest toast — base on whether any jobs were already failed or all initially completed.
+    // The exact per-job status is visible in the UI; the toast just signals completion.
+    if (toProcess.length === 0) {
+      if (initialFailed > 0) toast.warning(`${initialFailed} job(s) previously failed. Click Retry to re-run them.`);
+      else toast.info("All jobs in this batch are already completed.");
+    } else {
+      toast.success(`Batch finished — processed ${toProcess.length} job${toProcess.length === 1 ? "" : "s"}. Check each row for status.`);
+    }
   };
 
   const retryJob = async (jobId: string) => {
-    updateJob(jobId, { status: "pending", statusLabel: "Ready", error: undefined });
-    if (!processing) { setProcessing(true); for (const job of jobs.filter(j => j.id === jobId)) { await processOne(job); } setProcessing(false); }
-  };
-
-  const processOne = async (job: BulkJobEntry) => {
-    // Reusable single-job processor (simplified — calls processAll logic for one job)
-    updateJob(job.id, { status: "pending", statusLabel: "Queued…" });
+    // Reset job to pending and run the full per-job pipeline via processOne
+    updateJob(jobId, { status: "pending", statusLabel: "Re-running…", error: undefined });
+    const job = jobs.find((j) => j.id === jobId);
+    if (!job) return;
+    if (!processing) {
+      setProcessing(true);
+      await processOne(job);
+      setProcessing(false);
+    }
   };
 
   return (

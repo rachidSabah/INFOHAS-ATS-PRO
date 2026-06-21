@@ -31,20 +31,34 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "company or jobTitle is required" }, { status: 400 });
     }
 
+    // === INPUT SANITIZATION ===
+    // Trim, cap length, and strip control characters from each input so a
+    // malicious or accidental long string can't slow/break the Z.ai call.
+    const sanitize = (v: any): string => {
+      if (typeof v !== "string") return "";
+      return v
+        .replace(/[\x00-\x1F\x7F]/g, "") // control chars
+        .trim()
+        .slice(0, 200);
+    };
+    const safeCompany = sanitize(company);
+    const safeJobTitle = sanitize(jobTitle);
+    const safeIndustry = sanitize(industry);
+
     // Build search queries — parallel for speed
     const queries: string[] = [];
-    if (company) {
-      queries.push(`${company} interview questions`);
-      queries.push(`${company} interview process`);
-      if (jobTitle) queries.push(`${company} ${jobTitle} interview`);
-      queries.push(`${company} Glassdoor interview`);
-      queries.push(`${company} values engineering culture`);
+    if (safeCompany) {
+      queries.push(`${safeCompany} interview questions`);
+      queries.push(`${safeCompany} interview process`);
+      if (safeJobTitle) queries.push(`${safeCompany} ${safeJobTitle} interview`);
+      queries.push(`${safeCompany} Glassdoor interview`);
+      queries.push(`${safeCompany} values engineering culture`);
     }
-    if (jobTitle && !company) {
-      queries.push(`${jobTitle} interview questions`);
+    if (safeJobTitle && !safeCompany) {
+      queries.push(`${safeJobTitle} interview questions`);
     }
-    if (industry) {
-      queries.push(`${industry} interview questions`);
+    if (safeIndustry) {
+      queries.push(`${safeIndustry} interview questions`);
     }
 
     // Limit to 5 queries to avoid excessive API calls
@@ -71,6 +85,11 @@ export async function POST(req: NextRequest) {
       try {
         // Use z-ai CLI via child_process is not available in Edge Runtime.
         // Instead, we use the Z.ai REST API directly.
+        // SECURITY: prefer the server-only ZAI_API_KEY env var. Fall back to
+        // NEXT_PUBLIC_ZAI_API_KEY ONLY for backward compat — note that any
+        // NEXT_PUBLIC_ var is inlined into the client bundle and visible to
+        // every visitor, so production deployments should set ZAI_API_KEY
+        // (without the NEXT_PUBLIC_ prefix) on Cloudflare Pages.
         const zaiApiKey = process.env.ZAI_API_KEY || process.env.NEXT_PUBLIC_ZAI_API_KEY;
         if (!zaiApiKey) {
           // Skip web search if no API key — fall back to AI-only generation
@@ -94,12 +113,21 @@ export async function POST(req: NextRequest) {
           const searchData = await searchResponse.json();
           const results = Array.isArray(searchData) ? searchData : (searchData?.output ?? []);
           for (const r of results.slice(0, 5)) {
+            // Defensive: r.url may be missing or relative — wrap separately so
+            // one bad result doesn't discard the entire query's results.
+            let source = "unknown";
+            try {
+              if (r.url) source = new URL(r.url).hostname;
+              else if (r.host_name) source = r.host_name;
+            } catch {
+              source = r.host_name || "unknown";
+            }
             allResults.push({
               query,
               title: r.name || r.title || "",
               url: r.url || "",
               snippet: r.snippet || "",
-              source: r.host_name || new URL(r.url || "https://unknown.com").hostname,
+              source,
             });
           }
         }

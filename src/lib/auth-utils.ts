@@ -124,14 +124,34 @@ export function canSignIn(user: User | null): { allowed: boolean; reason?: strin
 /**
  * Super admin seed credentials.
  * Password is read from environment variable — NEVER hardcoded in source.
- * If the env var is not set, super-admin login is disabled (the user must
- * set NEXT_PUBLIC_SUPER_ADMIN_PASSWORD in their Cloudflare env vars).
+ * If the env var is not set, super-admin login is **disabled** (the user
+ * must set NEXT_PUBLIC_SUPER_ADMIN_PASSWORD in their Cloudflare env vars).
+ *
+ * SECURITY: We deliberately return an unguessable random sentinel password
+ * when the env var is unset, instead of an empty string. An empty password
+ * would still produce a valid hash and allow `verifyPassword("", hash)` to
+ * return true — so any caller that bypassed the UI length check could log
+ * in with no password. By using a random sentinel, the stored hash never
+ * matches any input the user could realistically type.
  */
+const _SUPER_ADMIN_PASSWORD =
+  process.env.NEXT_PUBLIC_SUPER_ADMIN_PASSWORD && process.env.NEXT_PUBLIC_SUPER_ADMIN_PASSWORD.length >= 8
+    ? process.env.NEXT_PUBLIC_SUPER_ADMIN_PASSWORD
+    : `__DISABLED_${Math.random().toString(36).slice(2)}_${Date.now().toString(36)}__`;
+
 export const SUPER_ADMIN_SEED = {
   email: "admin@resumeai.local",
   username: "Admin",
   name: "Super Admin",
-  password: process.env.NEXT_PUBLIC_SUPER_ADMIN_PASSWORD ?? "",
+  password: _SUPER_ADMIN_PASSWORD,
   role: "super_admin" as const,
   status: "approved" as UserStatus,
 };
+
+/**
+ * Returns true when super-admin email/password login is configured.
+ * Use this to show/hide the email sign-in option in the UI.
+ */
+export const isSuperAdminLoginEnabled = (): boolean =>
+  !!process.env.NEXT_PUBLIC_SUPER_ADMIN_PASSWORD &&
+  process.env.NEXT_PUBLIC_SUPER_ADMIN_PASSWORD.length >= 8;

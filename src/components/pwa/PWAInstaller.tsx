@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Button } from "@/components/ui/button";
 import { Icon } from "@/components/shared";
@@ -20,13 +20,37 @@ import { toast } from "sonner";
  *   - Dismissible (X button) — won't show again until cleared
  */
 export function PWAInstaller() {
+  // Lazy initializers — compute once on first render instead of in useEffect
+  // (avoids the React 19 "setState in effect" warning and the resulting
+  // cascading-render performance penalty).
+  const [isInstalled, setIsInstalled] = useState<boolean>(() => {
+    if (typeof window === "undefined") return false;
+    return (
+      window.matchMedia("(display-mode: standalone)").matches ||
+      (window.navigator as any).standalone === true
+    );
+  });
+  const [isIOS, setIsIOS] = useState<boolean>(() => {
+    if (typeof navigator === "undefined") return false;
+    return (
+      /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+      (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1)
+    );
+  });
   const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
   const [showBanner, setShowBanner] = useState(false);
-  const [isInstalled, setIsInstalled] = useState(false);
-  const [isIOS, setIsIOS] = useState(false);
+
+  // Refs for proper listener cleanup (prevents memory leaks on unmount)
+  const swMessageHandlerRef = useRef<((e: MessageEvent) => void) | null>(null);
+  const swControllerChangeHandlerRef = useRef<(() => void) | null>(null);
+  const beforeInstallHandlerRef = useRef<((e: Event) => void) | null>(null);
+  const appInstalledHandlerRef = useRef<(() => void) | null>(null);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
+
+    // Trackers for proper cleanup (avoids memory leaks when component unmounts)
+    let updateInterval: ReturnType<typeof setInterval> | null = null;
 
     // === Register the service worker ===
     if ("serviceWorker" in navigator) {
@@ -34,14 +58,14 @@ export function PWAInstaller() {
         .register("/sw.js", { scope: "/" })
         .then((registration) => {
           // Check for updates every 60 seconds
-          setInterval(() => {
+          updateInterval = setInterval(() => {
             registration.update().catch(() => {});
           }, 60000);
         })
         .catch(() => {});
 
       // === Listen for SW update messages ===
-      navigator.serviceWorker.addEventListener("message", (event) => {
+      const handleMessage = (event: MessageEvent) => {
         if (event.data?.type === "SW_UPDATED" || event.data?.type === "CONTENT_UPDATED") {
           // New content available — show a toast with a reload action
           toast.info("Update available", {
@@ -61,63 +85,80 @@ export function PWAInstaller() {
             },
           });
         }
-      });
+      };
+      navigator.serviceWorker.addEventListener("message", handleMessage);
 
       // === Listen for controller change (new SW took over) ===
-      navigator.serviceWorker.addEventListener("controllerchange", () => {
+      const handleControllerChange = () => {
         // The new SW has taken control — if we haven't shown a toast yet,
         // reload the page to get the new content
         if (!sessionStorage.getItem("sw-reloaded")) {
           sessionStorage.setItem("sw-reloaded", "1");
           window.location.reload();
         }
-      });
+      };
+      navigator.serviceWorker.addEventListener("controllerchange", handleControllerChange);
+
+      // Store handlers for cleanup
+      swMessageHandlerRef.current = handleMessage;
+      swControllerChangeHandlerRef.current = handleControllerChange;
     }
 
     // === Detect if already installed (standalone mode) ===
-    const standalone =
-      window.matchMedia("(display-mode: standalone)").matches ||
-      // iOS Safari
-      (window.navigator as any).standalone === true;
-    if (standalone) {
-      setIsInstalled(true);
-      return; // No need to show install prompt if already installed
+    // (isInstalled was already computed in the lazy useState initializer —
+    // no need to call setIsInstalled(true) here, which would trigger the
+    // React 19 "setState in effect" cascading-render warning.)
+    if (!isInstalled) {
+      // === Listen for beforeinstallprompt (Chrome/Edge/Android) ===
+      // (isIOS was already computed in the lazy useState initializer.)
+      void isIOS; // referenced for completeness; UI uses it directly
+
+      const handleBeforeInstallPrompt = (e: Event) => {
+        e.preventDefault(); // Prevent the default browser mini-infobar
+        setDeferredPrompt(e);
+
+        // Check if the user previously dismissed the banner
+        const dismissed = localStorage.getItem("pwa-install-dismissed") === "true";
+        if (!dismissed) {
+          // Show the banner after a short engagement delay (30s)
+          setTimeout(() => setShowBanner(true), 30000);
+        }
+      };
+      window.addEventListener("beforeinstallprompt", handleBeforeInstallPrompt);
+
+      // === Listen for successful install ===
+      const handleAppInstalled = () => {
+        setIsInstalled(true);
+        setShowBanner(false);
+        setDeferredPrompt(null);
+        toast.success("ResumeAI Pro installed! Find it on your home screen.");
+        console.info("[PWA] App installed successfully");
+      };
+      window.addEventListener("appinstalled", handleAppInstalled);
+
+      beforeInstallHandlerRef.current = handleBeforeInstallPrompt;
+      appInstalledHandlerRef.current = handleAppInstalled;
     }
 
-    // === Detect iOS (no beforeinstallprompt support) ===
-    const isIOSDevice = /iPad|iPhone|iPod/.test(navigator.userAgent) ||
-      (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
-    setIsIOS(isIOSDevice);
-
-    // === Listen for beforeinstallprompt (Chrome/Edge/Android) ===
-    const handleBeforeInstallPrompt = (e: Event) => {
-      e.preventDefault(); // Prevent the default browser mini-infobar
-      setDeferredPrompt(e);
-
-      // Check if the user previously dismissed the banner
-      const dismissed = localStorage.getItem("pwa-install-dismissed") === "true";
-      if (!dismissed) {
-        // Show the banner after a short engagement delay (30s)
-        setTimeout(() => setShowBanner(true), 30000);
+    return () => {
+      // === Cleanup all intervals + listeners to prevent memory leaks ===
+      if (updateInterval) clearInterval(updateInterval);
+      if (typeof navigator !== "undefined" && "serviceWorker" in navigator) {
+        if (swMessageHandlerRef.current) {
+          navigator.serviceWorker.removeEventListener("message", swMessageHandlerRef.current);
+        }
+        if (swControllerChangeHandlerRef.current) {
+          navigator.serviceWorker.removeEventListener("controllerchange", swControllerChangeHandlerRef.current);
+        }
+      }
+      if (beforeInstallHandlerRef.current) {
+        window.removeEventListener("beforeinstallprompt", beforeInstallHandlerRef.current);
+      }
+      if (appInstalledHandlerRef.current) {
+        window.removeEventListener("appinstalled", appInstalledHandlerRef.current);
       }
     };
-    window.addEventListener("beforeinstallprompt", handleBeforeInstallPrompt);
-
-    // === Listen for successful install ===
-    const handleAppInstalled = () => {
-      setIsInstalled(true);
-      setShowBanner(false);
-      setDeferredPrompt(null);
-      toast.success("ResumeAI Pro installed! Find it on your home screen.");
-      console.info("[PWA] App installed successfully");
-    };
-    window.addEventListener("appinstalled", handleAppInstalled);
-
-    return () => {
-      window.removeEventListener("beforeinstallprompt", handleBeforeInstallPrompt);
-      window.removeEventListener("appinstalled", handleAppInstalled);
-    };
-  }, []);
+  }, [isInstalled]);
 
   // === iOS instruction toast (one-time) ===
   useEffect(() => {
