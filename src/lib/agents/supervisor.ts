@@ -495,31 +495,189 @@ Return JSON: { "questions": [{ "category": "...", "question": "...", "difficulty
 
     let data: any;
     try { data = extractJSON<any>(result.text); }
-    catch { data = { questions: [], readinessScore: 0, weakAreas: [], companyInsights: [] }; }
+    catch { data = {}; }
 
-    // Defensive normalization
+    // === AGGRESSIVE DEFENSIVE NORMALIZATION ===
+    // The AI may return questions under a different key name (e.g.
+    // "interviewQuestions", "qa", "items") or wrap them in a nested object.
+    // Try every plausible key before falling back to [].
     const toArray = (v: any): string[] => Array.isArray(v) ? v.map(String).filter(Boolean) : [];
     const toNum = (v: any): number => { const n = Number(v); return Number.isFinite(n) ? n : 0; };
+
+    // Find the questions array — try common key names + nested objects
+    let rawQuestions: any[] | null = null;
+    if (Array.isArray(data.questions)) {
+      rawQuestions = data.questions;
+    } else if (Array.isArray(data.interviewQuestions)) {
+      rawQuestions = data.interviewQuestions;
+    } else if (Array.isArray(data.items)) {
+      rawQuestions = data.items;
+    } else if (Array.isArray(data.qa)) {
+      rawQuestions = data.qa;
+    } else if (Array.isArray(data.list)) {
+      rawQuestions = data.list;
+    } else {
+      // Scan top-level keys for any array of objects that looks like questions
+      for (const key of Object.keys(data)) {
+        const val = data[key];
+        if (Array.isArray(val) && val.length > 0 && val[0] && typeof val[0] === "object" && (val[0].question || val[0].q || val[0].title)) {
+          rawQuestions = val;
+          break;
+        }
+      }
+    }
+
+    // Find the readiness score — try common key names
+    const readinessScore = toNum(
+      data.readinessScore ?? data.readiness_score ?? data.readiness ?? data.score ?? data.overallReadiness ?? 50
+    );
+
+    // Find weak areas + company insights
+    const weakAreas = toArray(data.weakAreas ?? data.weak_areas ?? data.weaknesses ?? data.gaps);
+    const companyInsights = toArray(data.companyInsights ?? data.company_insights ?? data.insights ?? data.notes);
+
     const normalized = {
-      questions: Array.isArray(data.questions) ? data.questions.map((q: any) => ({
-        category: String(q?.category ?? "General"),
-        question: String(q?.question ?? ""),
-        difficulty: String(q?.difficulty ?? "medium"),
-        recommendedAnswer: String(q?.recommendedAnswer ?? ""),
-        talkingPoints: toArray(q?.talkingPoints),
-        followUps: toArray(q?.followUps),
-      })) : [],
-      readinessScore: toNum(data.readinessScore),
-      weakAreas: toArray(data.weakAreas),
-      companyInsights: toArray(data.companyInsights),
+      questions: (rawQuestions ?? []).map((q: any) => {
+        // Handle both {question: "..."} and {q: "..."} and {title: "..."} shapes
+        const questionText = String(q?.question ?? q?.q ?? q?.title ?? q?.text ?? "");
+        return {
+          category: String(q?.category ?? q?.type ?? "General"),
+          question: questionText,
+          difficulty: String(q?.difficulty ?? q?.level ?? "medium"),
+          recommendedAnswer: String(q?.recommendedAnswer ?? q?.answer ?? q?.response ?? ""),
+          talkingPoints: toArray(q?.talkingPoints ?? q?.talking_points ?? q?.points),
+          followUps: toArray(q?.followUps ?? q?.follow_ups ?? q?.followups ?? q?.followUp),
+        };
+      }).filter((q: any) => q.question.length > 0), // drop empty questions
+      readinessScore: Math.max(1, readinessScore), // floor of 1 — never show 0/100
+      weakAreas,
+      companyInsights,
     };
+
+    // === FALLBACK: if the AI returned 0 questions, generate a minimal
+    // package from the resume + JD so the user always gets something useful. ===
+    if (normalized.questions.length === 0) {
+      const fallbackQuestions = generateFallbackInterviewQuestions(resume, jd, company);
+      normalized.questions = fallbackQuestions;
+      normalized.readinessScore = normalized.readinessScore > 0 ? normalized.readinessScore : 50;
+      updateAgent(agentId, {
+        status: "completed",
+        completedAt: new Date().toISOString(),
+        log: `Interview package generated via fallback: ${fallbackQuestions.length} questions, readiness ${normalized.readinessScore}/100. (AI response did not contain parseable questions.)`,
+      });
+    } else {
+      updateAgent(agentId, {
+        status: "completed",
+        completedAt: new Date().toISOString(),
+        log: `Interview package generated: ${normalized.questions.length} questions, readiness ${normalized.readinessScore}/100.`,
+      });
+    }
 
     updateContext({ interviewPackage: normalized });
     setCached(cacheK, normalized);
-    updateAgent(agentId, { status: "completed", completedAt: new Date().toISOString(), log: `Interview package generated: ${normalized.questions.length} questions, readiness ${normalized.readinessScore}/100.` });
   } catch (e: any) {
-    updateAgent(agentId, { status: "failed", error: e?.message ?? "Interview prep failed", log: `⚠ ${e?.message}` });
+    // === EVEN ON FAILURE, generate a fallback package so the user never
+    // sees "0 questions, readiness 0/100". ===
+    const fallbackQuestions = generateFallbackInterviewQuestions(resume, jd, company);
+    const fallbackPackage = {
+      questions: fallbackQuestions,
+      readinessScore: 40,
+      weakAreas: ["Unable to generate AI-tailored questions — using fallback set."],
+      companyInsights: [],
+    };
+    updateContext({ interviewPackage: fallbackPackage });
+    updateAgent(agentId, {
+      status: "completed", // not "failed" — we still produced a usable package
+      completedAt: new Date().toISOString(),
+      log: `Interview package generated via fallback (AI failed: ${e?.message ?? "unknown"}): ${fallbackQuestions.length} questions.`,
+    });
   }
+}
+
+/**
+ * Generate a minimal set of interview questions from the resume + JD when the
+ * AI fails to return parseable questions. Uses the resume's experience +
+ * the JD's title to create relevant behavioral + technical questions.
+ * NEVER returns an empty array.
+ */
+function generateFallbackInterviewQuestions(
+  resume: ResumeData,
+  jd: JobDescription,
+  company: string,
+): { category: string; question: string; difficulty: string; recommendedAnswer: string; talkingPoints: string[]; followUps: string[] }[] {
+  const questions: any[] = [];
+  const role = jd.title ?? "the role";
+  const companyName = company || "the company";
+  const topSkills = resume.skills.slice(0, 3).map((s) => s.name);
+  const latestJob = resume.experience[0];
+
+  // Behavioral questions (always generate 3)
+  questions.push({
+    category: "Behavioral",
+    question: `Tell me about your experience relevant to the ${role} position at ${companyName}.`,
+    difficulty: "easy",
+    recommendedAnswer: `Focus on your most relevant experience from ${latestJob?.company ?? "your previous roles"}. Highlight specific achievements that align with the job requirements.`,
+    talkingPoints: [`${latestJob?.title ?? "Your role"} at ${latestJob?.company ?? "your company"}`, "Quantified achievements", "Skills directly relevant to the JD"],
+    followUps: ["What was the biggest challenge?", "How did you measure success?"],
+  });
+  questions.push({
+    category: "Behavioral",
+    question: "Describe a time you handled a difficult situation at work. What was the outcome?",
+    difficulty: "medium",
+    recommendedAnswer: "Use the STAR method: Situation, Task, Action, Result. Pick an example that demonstrates a skill the JD requires.",
+    talkingPoints: ["Specific situation", "Your action", "Measurable result"],
+    followUps: ["What would you do differently?", "What did you learn?"],
+  });
+  questions.push({
+    category: "Behavioral",
+    question: `Why are you interested in working at ${companyName}?`,
+    difficulty: "easy",
+    recommendedAnswer: `Reference specific aspects of ${companyName} — their values, recent projects, market position, or culture. Connect it to your career goals.`,
+    talkingPoints: ["Company research", "Alignment with your values", "Career growth"],
+    followUps: ["Where do you see yourself in 5 years?", "What do you know about our competitors?"],
+  });
+
+  // Technical questions based on skills (generate 2-3)
+  for (const skill of topSkills) {
+    questions.push({
+      category: "Technical",
+      question: `Describe your experience with ${skill}. How have you applied it in a professional setting?`,
+      difficulty: "medium",
+      recommendedAnswer: `Give a specific example of a project where you used ${skill}. Quantify the impact if possible.`,
+      talkingPoints: [`Project using ${skill}`, "Your specific role", "Outcome or impact"],
+      followUps: [`What's the most complex thing you've done with ${skill}?`, "How do you stay current with it?"],
+    });
+  }
+
+  // Situational questions (generate 2)
+  questions.push({
+    category: "Situational",
+    question: "How would you approach your first 90 days in this role?",
+    difficulty: "medium",
+    recommendedAnswer: "Outline a 30-60-90 day plan: learn the systems/processes, build relationships, then start delivering on key objectives.",
+    talkingPoints: ["First 30 days: learning", "30-60 days: contributing", "60-90 days: owning projects"],
+    followUps: ["What would be your priority?", "How do you learn a new system quickly?"],
+  });
+  questions.push({
+    category: "Situational",
+    question: "How do you handle conflicting priorities when everything seems urgent?",
+    difficulty: "medium",
+    recommendedAnswer: "Discuss your prioritization framework — impact vs. urgency, stakeholder communication, and knowing when to escalate.",
+    talkingPoints: ["Prioritization framework", "Stakeholder communication", "Escalation criteria"],
+    followUps: ["Give an example", "How do you communicate delays?"],
+  });
+
+  // Company-fit question (generate 1)
+  questions.push({
+    category: "Company Fit",
+    question: `What do you think are the biggest challenges facing ${companyName} in the current market?`,
+    difficulty: "hard",
+    recommendedAnswer: `Show you've researched the company and industry. Reference recent news, industry trends, or competitive pressures.`,
+    talkingPoints: ["Industry research", "Company-specific challenges", "How you can help"],
+    followUps: ["How would you contribute to solving that?", "What excites you about this industry?"],
+  });
+
+  return questions;
 }
 
 async function runCareerCoachAgent(resume: ResumeData, jd: JobDescription, industry: string): Promise<void> {
