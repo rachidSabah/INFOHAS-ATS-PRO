@@ -595,9 +595,16 @@ Rules:
   // ============================================================================
   const goToOptimizer = () => {
     if (!resume) { toast.error("No resume selected."); return; }
-    // Set the active resume + JD so the Optimizer picks them up automatically
+    // Set the active resume + JD so the Optimizer picks them up automatically.
+    // IMPORTANT: always set BOTH — if no JD is selected, explicitly clear
+    // activeJdId so the Optimizer doesn't pick up a stale JD from a previous
+    // navigation (which would auto-load the wrong job description).
     setActiveResume(resume.id);
-    if (jd) setActiveJD(jd.id);
+    if (jd) {
+      setActiveJD(jd.id);
+    } else {
+      setActiveJD(null);
+    }
     log({
       actor: user?.email || "you",
       action: "Optimize Resume clicked from AI Resume Review",

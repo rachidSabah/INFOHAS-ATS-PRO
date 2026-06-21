@@ -420,7 +420,7 @@ Return ONLY valid JSON.`,
                   <div className="border-b-2 pb-3 mb-4" style={{ borderColor: "#1154A3" }}>
                     <div className="text-[14pt] font-bold text-slate-900">{active.title}</div>
                     {active.role && active.company && <div className="text-[10pt] text-slate-600 mt-0.5">{active.role} at {active.company}</div>}
-                    <div className="text-[9pt] text-slate-500 mt-1">{new Date().toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" })}</div>
+                    <div className="text-[9pt] text-slate-500 mt-1" suppressHydrationWarning>{new Date().toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" })}</div>
                   </div>
                   {active.content.split(/\n\s*\n/).map((p, i) => (
                     <p key={i} className="mb-3 text-pretty">{p.trim()}</p>

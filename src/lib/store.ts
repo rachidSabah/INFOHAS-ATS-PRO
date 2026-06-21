@@ -101,8 +101,12 @@ interface AppState {
   theme: "light" | "dark";
   sidebarCollapsed: boolean;
   synced: boolean; // whether cloud data has been loaded
+  // True when localStorage had a session at module load and rehydrateSession()
+  // needs to be called from a useEffect to apply it (avoids hydration mismatch).
+  _needsRehydrate: boolean;
 
   // actions
+  rehydrateSession: () => void;
   setView: (v: ViewKey) => void;
   openAuth: () => void;
   closeAuth: () => void;
@@ -286,21 +290,39 @@ function clearSession() {
   } catch {}
 }
 
-// Try to restore session on module load (before React renders).
-// IMPORTANT: also restore the user-id into sessionStorage immediately so
-// any cloud-API call made between module load and page.tsx's useEffect
-// carries the correct X-User-Id header (otherwise resumes/JDs/interviews
-// created in that window would be mis-attributed to "anonymous").
+// === Hydration-safe session restore ===
+// On the server (typeof window === "undefined"), restoreSession() returns
+// null. On the client, it reads localStorage. If we initialized the store
+// with the restored user at module load, the server render would have
+// user=null+view="landing" while the first client render would have
+// user=<restored>+view="dashboard" → React 19 hydration mismatch.
+//
+// Fix: initialize the store with SSR-safe empty values (user=null,
+// view="landing", theme="light", reviewReports=[]), then call
+// rehydrateSession() from a useEffect on the client. The first client
+// render matches SSR, then the effect rehydrates and triggers a re-render
+// with the restored state. This is the same pattern Next.js recommends
+// for any client-persisted state.
 const _restoredUser = restoreSession();
+// Set the user-id for API calls immediately (pure side-effect, no React state)
 if (_restoredUser && typeof window !== "undefined") {
   try { setUserId(_restoredUser.id); } catch {}
 }
+// Flag the store that we have a pending rehydration — page.tsx will call
+// rehydrateSession() in a useEffect to apply the restored user/theme/reports
+// AFTER the first client render matches SSR.
+const _hasPendingRehydration = !!_restoredUser;
 
 export const useApp = create<AppState>()(
     (set, get) => ({
-      // Restore session from localStorage if available (survives browser refresh)
-      user: _restoredUser,
-      isAuthed: !!_restoredUser,
+      // === SSR-SAFE INITIAL STATE ===
+      // On the server AND the first client render, user is null and view
+      // is "landing". This matches the server-rendered HTML so React 19
+      // hydration succeeds. rehydrateSession() (called from page.tsx's
+      // useEffect) then applies the restored user/theme/reports from
+      // localStorage and triggers a re-render with the real state.
+      user: null,
+      isAuthed: false,
       authOpen: false,
 
       // User registry — seeded with the super admin
@@ -323,7 +345,9 @@ export const useApp = create<AppState>()(
         return [sa];
       })(),
 
-      view: _restoredUser ? "dashboard" : "landing",
+      // SSR-safe: always start on "landing" — rehydrateSession() will switch
+      // to "dashboard" after hydration if a session was restored.
+      view: "landing" as ViewKey,
       activeResumeId: SEED_RESUMES[0]?.id ?? null,
       activeJdId: SEED_JDS[0]?.id ?? null,
       activeCoverLetterId: SEED_COVER_LETTERS[0]?.id ?? null,
@@ -335,14 +359,8 @@ export const useApp = create<AppState>()(
       coverLetters: SEED_COVER_LETTERS,
       interviews: SEED_INTERVIEW,
       atsReports: SEED_ATS_REPORTS,
-      // Restore review reports from localStorage backup so they survive
-      // refresh / logout / login cycles even when the cloud is unreachable.
-      reviewReports: (() => {
-        if (typeof localStorage === "undefined") return [];
-        try {
-          return JSON.parse(localStorage.getItem("resumeai-review-reports-backup") || "[]");
-        } catch { return []; }
-      })(),
+      // SSR-safe: start empty — rehydrateSession() restores from localStorage.
+      reviewReports: [],
 
       providers: SEED_PROVIDERS,
       providerLogs: SEED_PROVIDER_LOGS,
@@ -361,14 +379,48 @@ export const useApp = create<AppState>()(
       aiRollbacks: SEED_AI_ROLLBACKS,
       logs: SEED_LOGS,
 
-      theme: (typeof localStorage !== "undefined" && localStorage.getItem("resumeai-theme") === "dark") ? "dark" : "light",
+      // SSR-safe: always start "light" — rehydrateSession() restores the real theme.
+      theme: "light" as "light" | "dark",
       sidebarCollapsed: false,
       synced: false,
 
-      // If session was restored, set the user ID for API calls + trigger cloud sync
-      ...(_restoredUser ? { _needsRestore: true } : {}),
+      // Flag: true when a session was found in localStorage at module load
+      // and needs to be applied via rehydrateSession() after hydration.
+      _needsRehydrate: _hasPendingRehydration,
 
       setView: (v) => set({ view: v, landingSection: null }),
+
+      // === SSR-SAFE REHYDRATION ===
+      // Called from page.tsx's useEffect on the client. Applies the restored
+      // user/theme/reports from localStorage AFTER the first client render
+      // has matched the server HTML. This prevents React 19 hydration
+      // mismatches while still preserving the "login survives refresh" UX.
+      rehydrateSession: () => {
+        const restored = restoreSession();
+        if (restored) {
+          // Apply the dark theme class BEFORE setting state so there's no flash
+          if (typeof document !== "undefined") {
+            const savedTheme = localStorage.getItem("resumeai-theme");
+            if (savedTheme === "dark") document.documentElement.classList.add("dark");
+          }
+          // Restore review reports from localStorage backup
+          let restoredReports: any[] = [];
+          try {
+            restoredReports = JSON.parse(localStorage.getItem("resumeai-review-reports-backup") || "[]");
+          } catch { restoredReports = []; }
+          const savedTheme = (typeof localStorage !== "undefined" && localStorage.getItem("resumeai-theme") === "dark") ? "dark" as const : "light" as const;
+          set({
+            user: restored,
+            isAuthed: true,
+            view: "dashboard",
+            theme: savedTheme,
+            reviewReports: restoredReports,
+            _needsRehydrate: false,
+          });
+        } else {
+          set({ _needsRehydrate: false });
+        }
+      },
       openAuth: () => set({ authOpen: true }),
       closeAuth: () => set({ authOpen: false }),
 
@@ -397,7 +449,19 @@ export const useApp = create<AppState>()(
         }
         clearUserId();
         clearSession(); // Clear persisted session on explicit sign-out
-        set({ user: null, isAuthed: false, view: "landing", synced: false });
+        // Reset active*Id fields so a different user signing in next doesn't
+        // inherit the previous user's resume/JD/cover-letter/interview selection
+        // (which could cause the Optimizer to auto-load the wrong JD, etc.).
+        set({
+          user: null,
+          isAuthed: false,
+          view: "landing",
+          synced: false,
+          activeResumeId: null,
+          activeJdId: null,
+          activeCoverLetterId: null,
+          activeInterviewId: null,
+        });
       },
 
       // === Email/Password Sign In ===

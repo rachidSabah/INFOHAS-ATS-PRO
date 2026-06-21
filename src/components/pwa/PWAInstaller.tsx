@@ -51,6 +51,7 @@ export function PWAInstaller() {
 
     // Trackers for proper cleanup (avoids memory leaks when component unmounts)
     let updateInterval: ReturnType<typeof setInterval> | null = null;
+    let bannerTimeout: ReturnType<typeof setTimeout> | null = null;
 
     // === Register the service worker ===
     if ("serviceWorker" in navigator) {
@@ -120,8 +121,10 @@ export function PWAInstaller() {
         // Check if the user previously dismissed the banner
         const dismissed = localStorage.getItem("pwa-install-dismissed") === "true";
         if (!dismissed) {
-          // Show the banner after a short engagement delay (30s)
-          setTimeout(() => setShowBanner(true), 30000);
+          // Show the banner after a short engagement delay (30s).
+          // Store the timeout ID so it can be cleared on unmount (otherwise
+          // it fires after unmount and calls setState on an unmounted component).
+          bannerTimeout = setTimeout(() => setShowBanner(true), 30000);
         }
       };
       window.addEventListener("beforeinstallprompt", handleBeforeInstallPrompt);
@@ -143,6 +146,7 @@ export function PWAInstaller() {
     return () => {
       // === Cleanup all intervals + listeners to prevent memory leaks ===
       if (updateInterval) clearInterval(updateInterval);
+      if (bannerTimeout) clearTimeout(bannerTimeout);
       if (typeof navigator !== "undefined" && "serviceWorker" in navigator) {
         if (swMessageHandlerRef.current) {
           navigator.serviceWorker.removeEventListener("message", swMessageHandlerRef.current);

@@ -81,38 +81,30 @@ export async function POST(req: NextRequest) {
       source: string;
     }> = [];
 
-    for (const query of limitedQueries) {
-      try {
-        // Use z-ai CLI via child_process is not available in Edge Runtime.
-        // Instead, we use the Z.ai REST API directly.
-        // SECURITY: prefer the server-only ZAI_API_KEY env var. Fall back to
-        // NEXT_PUBLIC_ZAI_API_KEY ONLY for backward compat — note that any
-        // NEXT_PUBLIC_ var is inlined into the client bundle and visible to
-        // every visitor, so production deployments should set ZAI_API_KEY
-        // (without the NEXT_PUBLIC_ prefix) on Cloudflare Pages.
-        const zaiApiKey = process.env.ZAI_API_KEY || process.env.NEXT_PUBLIC_ZAI_API_KEY;
-        if (!zaiApiKey) {
-          // Skip web search if no API key — fall back to AI-only generation
-          continue;
-        }
-
-        const searchResponse = await fetch("https://api.z.ai/api/paas/v4/functions", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "Authorization": `Bearer ${zaiApiKey}`,
-          },
-          body: JSON.stringify({
-            name: "web_search",
-            arguments: { query, num: 5 },
-          }),
-          signal: AbortSignal.timeout(10000),
-        });
-
-        if (searchResponse.ok) {
+    // === PARALLEL SEARCH ===
+    // Run all queries in parallel via Promise.all to avoid the sequential
+    // 5×10s=50s worst-case. Each query is wrapped in its own try/catch so
+    // one failure doesn't discard the others.
+    const zaiApiKey = process.env.ZAI_API_KEY || process.env.NEXT_PUBLIC_ZAI_API_KEY;
+    if (zaiApiKey) {
+      const searchOne = async (query: string) => {
+        try {
+          const searchResponse = await fetch("https://api.z.ai/api/paas/v4/functions", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "Authorization": `Bearer ${zaiApiKey}`,
+            },
+            body: JSON.stringify({
+              name: "web_search",
+              arguments: { query, num: 5 },
+            }),
+            signal: AbortSignal.timeout(10000),
+          });
+          if (!searchResponse.ok) return [];
           const searchData = await searchResponse.json();
           const results = Array.isArray(searchData) ? searchData : (searchData?.output ?? []);
-          for (const r of results.slice(0, 5)) {
+          return results.slice(0, 5).map((r: any) => {
             // Defensive: r.url may be missing or relative — wrap separately so
             // one bad result doesn't discard the entire query's results.
             let source = "unknown";
@@ -122,17 +114,21 @@ export async function POST(req: NextRequest) {
             } catch {
               source = r.host_name || "unknown";
             }
-            allResults.push({
+            return {
               query,
               title: r.name || r.title || "",
               url: r.url || "",
               snippet: r.snippet || "",
               source,
-            });
-          }
+            };
+          });
+        } catch {
+          return [];
         }
-      } catch {
-        // Silently skip failed searches — don't block the interview prep
+      };
+      const parallelResults = await Promise.all(limitedQueries.map(searchOne));
+      for (const batch of parallelResults) {
+        allResults.push(...batch);
       }
     }
 

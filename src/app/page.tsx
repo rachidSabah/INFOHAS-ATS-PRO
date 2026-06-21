@@ -20,8 +20,22 @@ export default function Home() {
   const signOut = useApp((s) => s.signOut);
   const setView = useApp((s) => s.setView);
   const synced = useApp((s) => s.synced);
+  const needsRehydrate = useApp((s) => s._needsRehydrate);
+  const rehydrateSession = useApp((s) => s.rehydrateSession);
 
-  // Apply theme class
+  // === SSR-SAFE REHYDRATION ===
+  // On the server and the first client render, the store has user=null and
+  // view="landing" (matching the server HTML). After hydration, this effect
+  // applies the restored user/theme/reports from localStorage so the user
+  // stays logged in across refreshes — without triggering a React 19
+  // hydration mismatch.
+  useEffect(() => {
+    if (needsRehydrate) {
+      rehydrateSession();
+    }
+  }, [needsRehydrate, rehydrateSession]);
+
+  // Apply theme class (runs after rehydrateSession sets the real theme)
   useEffect(() => {
     if (typeof document !== "undefined") {
       document.documentElement.classList.toggle("dark", theme === "dark");
@@ -41,8 +55,8 @@ export default function Home() {
           console.warn("[syncAllFromCloud] failed (non-fatal):", e);
           useApp.setState({ synced: true });
         });
-      // Also migrate old localStorage data if present
-      migrateLocalStorageToCloud(useApp);
+      // Also migrate old localStorage data if present — guard against rejection
+      migrateLocalStorageToCloud(useApp).catch((e) => console.warn("[migrateLocalStorageToCloud] failed (non-fatal):", e));
     }
   }, [isAuthed, synced, user]);
 

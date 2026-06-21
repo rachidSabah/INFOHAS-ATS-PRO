@@ -43,7 +43,7 @@ export function LandingNav() {
           <Logo size={34} />
         </Link>
 
-        <nav className="hidden md:flex items-center gap-1" aria-label="Main">
+        <nav className="hidden lg:flex items-center gap-1" aria-label="Main">
           {NAV.map((n) => (
             <a
               key={n.href}
@@ -55,7 +55,7 @@ export function LandingNav() {
           ))}
         </nav>
 
-        <div className="hidden md:flex items-center gap-2">
+        <div className="hidden lg:flex items-center gap-2">
           <Button variant="ghost" size="sm" onClick={goApp} className="text-sm">
             Sign in
           </Button>
@@ -66,7 +66,7 @@ export function LandingNav() {
         </div>
 
         <button
-          className="md:hidden p-2 rounded-md hover:bg-secondary"
+          className="lg:hidden p-2 rounded-md hover:bg-secondary"
           onClick={() => setOpen((v) => !v)}
           aria-label="Toggle menu"
           aria-expanded={open}
@@ -79,7 +79,7 @@ export function LandingNav() {
         <motion.div
           initial={{ opacity: 0, y: -8 }}
           animate={{ opacity: 1, y: 0 }}
-          className="md:hidden glass border-t border-border"
+          className="lg:hidden glass border-t border-border"
         >
           <nav className="px-4 py-3 flex flex-col gap-1" aria-label="Mobile">
             {NAV.map((n) => (

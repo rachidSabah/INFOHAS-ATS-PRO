@@ -14,6 +14,7 @@ import { Badge, Icon } from "@/components/shared";
 import { useApp, uid } from "@/lib/store";
 import { callAI, extractJSON } from "@/lib/ai";
 import { detectIndustry, INDUSTRY_PROFILES } from "@/lib/industry-ats";
+import { scoreATS } from "@/lib/ats";
 import { exportResumePDF } from "@/lib/exporter";
 import { toast } from "sonner";
 import type { ResumeData } from "@/lib/types";
@@ -389,8 +390,31 @@ export function BulkGenerator() {
         source: "ai-optimized", fileName: `${company || "resume"}_${title}.pdf`,
       };
       addResume(optimized);
-      const atsScore = Math.min(95, 60 + (optData.missingKeywordsAdded?.length ?? 3) * 5 + Math.floor(Math.random() * 15));
-      updateJob(job.id, { status: "cover-letter", statusLabel: "Generating cover letter…", optimizedResumeId: optimized.id, atsScore, matchScore: Math.round(atsScore * 0.9) });
+      // === REAL ATS SCORE ===
+      // Use the actual scoreATS() function (same scorer used by the ATS Checker
+      // and Optimizer) instead of a fabricated random formula. Build a minimal
+      // JD object from the parsed job data so scoreATS can compute keyword match.
+      const fakeJd = {
+        id: uid("jd"),
+        title: title || "Role",
+        company: company || undefined,
+        location: undefined,
+        employmentType: undefined,
+        salary: undefined,
+        responsibilities: [],
+        requiredSkills: Array.isArray(jdData.requiredSkills) ? jdData.requiredSkills.map(String) : [],
+        preferredSkills: [],
+        technologies: [],
+        experienceYears: undefined,
+        education: undefined,
+        keywords: Array.isArray(jdData.keywords) ? jdData.keywords.map(String) : [],
+        rawText: job.value,
+        source: "text" as const,
+        createdAt: new Date().toISOString(),
+      };
+      const atsReport = scoreATS(optimized, fakeJd);
+      const atsScore = atsReport.scores.ats;
+      updateJob(job.id, { status: "cover-letter", statusLabel: "Generating cover letter…", optimizedResumeId: optimized.id, atsScore, matchScore: atsReport.jdMatchPercent ?? Math.round(atsScore * 0.9) });
 
       // Step 4: Generate cover letter
       const clResult = await callAI({
