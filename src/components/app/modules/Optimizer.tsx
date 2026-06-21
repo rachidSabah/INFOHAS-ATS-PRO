@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useEffect, useCallback } from "react";
+import { useState, useRef, useEffect, useCallback, Suspense, lazy } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -22,6 +22,11 @@ import { PipelineResults } from "@/components/optimizer/PipelineResults";
 import { InterviewPrepSuite } from "@/components/interview/InterviewPrepSuite";
 import { toast } from "sonner";
 import type { ResumeData, JobDescription, ResumeSkill } from "@/lib/types";
+
+// Lazy-load the V3 Pipeline Dashboard so it doesn't bloat the initial bundle
+const PipelineDashboardLazy = lazy(() =>
+  import("@/components/optimizer/PipelineDashboard").then((m) => ({ default: m.PipelineDashboard })),
+);
 
 type Step = "upload" | "jd" | "analyze" | "optimize" | "done";
 
@@ -243,10 +248,15 @@ export function Optimizer() {
 
     setAiLog((l) => [...l, `Directive source: ${usingOverride ? "CUSTOM OVERRIDE (from Optimizer Directive settings)" : "GENERATED (from structured config)"}`]);
     setAiLog((l) => [...l, `Mode: ${industryMode ? `Industry ATS (${INDUSTRY_PROFILES[industryId]?.label ?? "Generic"})` : "Standard"}`]);
-    setAiLog((l) => [...l, "Starting 5-agent pipeline…"]);
+    setAiLog((l) => [...l, "Starting 6-agent pipeline (V2) + post-optimization agents (V3)…"]);
 
     try {
-      const result = await runOptimizationPipeline({
+      // === V3: Delegate to the Supervisor, which wraps the existing V2
+      // pipeline AND triggers post-optimization agents (CoverLetter,
+      // Interview, CareerCoach) in parallel after optimization completes.
+      // The Supervisor also caches results + manages the shared context. ===
+      const { handleOptimizationRequested } = await import("@/lib/agents/supervisor");
+      const result = await handleOptimizationRequested({
         resume,
         jd: jdParsed,
         userDirectives: directiveConfig?.customDirectiveOverride?.trim() || undefined,
@@ -254,7 +264,6 @@ export function Optimizer() {
           ? { airlineProfile: industryId, settings: industrySettings }
           : undefined,
         enableReflection: true,
-        checkExport: false,
         onProgress: (progress) => {
           if (controller.signal.aborted) return;
           setPipelineProgress(progress);
@@ -265,6 +274,13 @@ export function Optimizer() {
       });
 
       if (controller.signal.aborted) return;
+      if (!result) {
+        // Supervisor returned null — optimization failed
+        setPipelineError("Optimization failed. Please try again.");
+        setAiLog((l) => [...l, "✗ Pipeline failed."]);
+        setAiThinking(false);
+        return;
+      }
 
       setPipelineResult(result);
 
@@ -775,6 +791,13 @@ export function Optimizer() {
             {/* === 5-agent pipeline results (before/after ATS, keyword improvements, recommendations, confidence, reflection) === */}
             {pipelineResult && (
               <PipelineResults result={pipelineResult} />
+            )}
+
+            {/* === V3: Pipeline Dashboard — shows ALL agent statuses (Supervisor, Memory, CoverLetter, Interview, CareerCoach, etc.) === */}
+            {pipelineResult && (
+              <Suspense fallback={null}>
+                <PipelineDashboardLazy />
+              </Suspense>
             )}
 
             {/* Live-editable InfoHAS Pro preview */}

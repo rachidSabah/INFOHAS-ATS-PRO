@@ -1,21 +1,70 @@
 // ============================================================================
-// Agents module — barrel export for the 5-agent pipeline.
+// Agents module — barrel export for the Unified AI Career Operating System (V3).
+//
+// V3 adds a Supervisor + Memory + post-optimization agents on top of the
+// existing V2 6-agent pipeline. The existing runOptimizationPipeline() is
+// preserved unchanged — the Supervisor wraps it.
 //
 // Agents:
-//   1. Resume Parser Agent    — src/lib/parser.ts (existing, unchanged)
-//   2. Job Intelligence Agent — src/lib/job-intelligence.ts (existing, unchanged)
-//   3. ATS Analysis Agent     — src/lib/agents/ats-analysis.ts (upgraded)
-//   4. Resume Optimizer Agent — src/lib/agents/orchestrator.ts (new, unified)
-//   5. Quality Assurance Agent — src/lib/agents/qa-agent.ts (upgraded)
-//   + Reflection Agent (optional) — src/lib/agents/orchestrator.ts (new)
-//
-// The orchestrator (src/lib/agents/orchestrator.ts) coordinates all 5 agents
-// as a pipeline. It's the single entry point for resume optimization.
+//   - Supervisor           — supervisors.ts (V3) — orchestrates everything
+//   - Memory               — memory-agent.ts (V3) — persists user profile
+//   - Resume Parser        — parser.ts (existing)
+//   - Job Intelligence     — job-intelligence.ts (existing)
+//   - Company Intelligence — company-skill-agents.ts (V2)
+//   - Skill Gap            — company-skill-agents.ts (V2)
+//   - ATS Analysis         — ats-analysis.ts (existing)
+//   - Resume Optimizer     — orchestrator.ts (existing V2 6-agent pipeline)
+//   - Quality Assurance    — qa-agent.ts (existing)
+//   - Reflection           — orchestrator.ts (existing)
+//   - Cover Letter         — supervisor.ts (V3, post-optimization)
+//   - Interview            — supervisor.ts (V3, post-optimization)
+//   - Career Coach         — supervisor.ts (V3, post-optimization)
 // ============================================================================
 
 export { analyzeATS, type ATSAnalysisResult, type ATSRecommendation, type ATSScoreBreakdown } from "./ats-analysis";
 export { runQA, type QAResult, type FactualConsistencyResult, type ExportQualityResult, type ProfessionalToneResult } from "./qa-agent";
 export { runOptimizationPipeline, runReflectionAgent, type PipelineInput, type PipelineResult, type PipelineStep, type PipelineProgress, type ReflectionResult } from "./orchestrator";
+
+// V2 agents
+export { analyzeCompanyIntelligence, analyzeSkillGap, type CompanyIntelligence, type SkillGapIntelligence } from "./company-skill-agents";
+
+// V3 — Supervisor + Memory + shared context
+export {
+  getSupervisorState,
+  subscribeToSupervisor,
+  setContext,
+  handleResumeUploaded,
+  handleOptimizationRequested,
+  getCurrentContext,
+  getCurrentProfile,
+  resetSupervisor,
+  type SupervisorState,
+} from "./supervisor";
+export {
+  loadUserProfile,
+  saveUserProfile,
+  ingestResumeIntoMemory,
+  ingestJobIntoMemory,
+  recordOptimization,
+  recordApplication,
+  recordInterview,
+  type UserProfile,
+  type ApplicationEntry,
+  type OptimizationEntry,
+  type InterviewEntry,
+} from "./memory-agent";
+export {
+  createEmptyContext,
+  serializeContext,
+  type GlobalPipelineContext,
+  type AgentState,
+  type AgentId,
+  type AgentStatus,
+  type PipelineEvent,
+  type PipelineEventType,
+  type InterviewPackage,
+  type CareerRecommendations,
+} from "./pipeline-context";
 
 // Re-export existing agents for convenience
 export { parseResumeFile, extractResumeFromText, blankResume } from "../parser";

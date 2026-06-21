@@ -449,6 +449,11 @@ export const useApp = create<AppState>()(
         }
         clearUserId();
         clearSession(); // Clear persisted session on explicit sign-out
+        // === V3: Reset the Supervisor + all agent states ===
+        // (imported lazily to avoid a circular dependency at module load)
+        try {
+          import("./agents/supervisor").then(({ resetSupervisor }) => resetSupervisor());
+        } catch {}
         // Reset active*Id fields so a different user signing in next doesn't
         // inherit the previous user's resume/JD/cover-letter/interview selection
         // (which could cause the Optimizer to auto-load the wrong JD, etc.).
