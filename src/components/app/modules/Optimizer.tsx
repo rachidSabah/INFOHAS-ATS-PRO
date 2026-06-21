@@ -10,6 +10,7 @@ import { Badge, Icon, ScoreRing } from "@/components/shared";
 import { useApp, uid } from "@/lib/store";
 import { parseResumeFile } from "@/lib/parser";
 import { scoreATS } from "@/lib/ats";
+import { analyzeATS } from "@/lib/agents/ats-analysis";
 import { callAI, extractJSON } from "@/lib/ai";
 import { validateResumeForExport } from "@/lib/ai-response-processor";
 import { exportResumePDF, exportResumeDOCX, exportResumeTXT, exportResumeDOC } from "@/lib/exporter";
@@ -52,6 +53,13 @@ export function Optimizer() {
   const [jdText, setJdText] = useState("");
   const [jdParsed, setJdParsed] = useState<JobDescription | null>(null);
   const [beforeReport, setBeforeReport] = useState<ReturnType<typeof scoreATS> | null>(null);
+  // === UNIFIED SCORING ===
+  // beforeAnalyzed is the V2 analyzeATS() result (richer scorer with semantic
+  // + readability). We compute it alongside the legacy scoreATS() so the
+  // "optimize" step and the "done" step show the SAME "before" score.
+  // Without this, the optimize step showed 84 (legacy) while the done step
+  // showed 67 (V2) — confusing the user.
+  const [beforeAnalyzed, setBeforeAnalyzed] = useState<ReturnType<typeof analyzeATS> | null>(null);
   const [optimizedResume, setOptimizedResume] = useState<ResumeData | null>(null);
   const [afterReport, setAfterReport] = useState<ReturnType<typeof scoreATS> | null>(null);
   const [aiThinking, setAiThinking] = useState(false);
@@ -190,6 +198,10 @@ export function Optimizer() {
     const r = scoreATS(resume, safeJd);
     setBeforeReport(r);
     addATS(r);
+    // === Also compute the V2 analyzeATS() score so the "optimize" step
+    // shows the SAME number the "done" step will show. ===
+    const analyzed = analyzeATS(resume, safeJd);
+    setBeforeAnalyzed(analyzed);
 
     // === Auto-detect industry from JD + resume ===
     const jdText = safeJd.rawText || safeJd.keywords.join(" ");
@@ -401,6 +413,7 @@ export function Optimizer() {
     setJdText("");
     setJdParsed(null);
     setBeforeReport(null);
+    setBeforeAnalyzed(null);
     setOptimizedResume(null);
     setAfterReport(null);
   };
@@ -578,7 +591,12 @@ export function Optimizer() {
           <motion.div key="optimize" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} className="grid lg:grid-cols-3 gap-4">
             <Card className="lg:col-span-1">
               <CardContent className="flex flex-col items-center pt-6">
-                <ScoreRing value={beforeReport.scores.ats} size={140} label="Current ATS" />
+                {/* === UNIFIED SCORING ===
+                    Use the V2 analyzeATS() score (beforeAnalyzed) so the
+                    "optimize" step shows the SAME number the "done" step
+                    will show. Falls back to legacy scoreATS() if analyzeATS
+                    hasn't been computed yet. */}
+                <ScoreRing value={beforeAnalyzed?.scores.ats ?? beforeReport.scores.ats} size={140} label="Current ATS" />
                 <div className="mt-3 text-sm text-muted-foreground text-center">
                   {beforeReport.missingKeywords.length} missing keywords · {beforeReport.matchedKeywords.length} matched
                 </div>
