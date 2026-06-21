@@ -195,6 +195,42 @@ interface AppState {
 
 const uid = (p = "id") => `${p}_${Math.random().toString(36).slice(2, 9)}${Date.now().toString(36).slice(-4)}`;
 
+/**
+ * Normalize a JobDescription so every expected array field is a real array
+ * and every expected string is a string. Prevents React-render crashes
+ * ("Cannot read properties of undefined (reading 'length')") when a JD
+ * arrives from a stale localStorage backup, an older D1 row, or an older
+ * client code path that didn't populate all fields.
+ *
+ * This is a defensive, idempotent transform — calling it on an already-well-
+ * formed JD returns an equivalent JD.
+ */
+export function normalizeJD<T extends Record<string, any>>(jd: T): T {
+  if (!jd || typeof jd !== "object") return jd;
+  const toArray = (v: any): any[] => Array.isArray(v) ? v : [];
+  const toStr = (v: any): string | undefined => (v === null || v === undefined) ? undefined : String(v);
+  return {
+    ...jd,
+    id: jd.id || uid("jd"),
+    title: typeof jd.title === "string" ? jd.title : (jd.title ? String(jd.title) : "Untitled role"),
+    company: toStr(jd.company),
+    location: toStr(jd.location),
+    employmentType: toStr(jd.employmentType),
+    salary: toStr(jd.salary),
+    experienceYears: toStr(jd.experienceYears),
+    education: toStr(jd.education),
+    rawText: toStr(jd.rawText),
+    url: toStr(jd.url),
+    source: typeof jd.source === "string" ? jd.source : "text",
+    createdAt: jd.createdAt || new Date().toISOString(),
+    responsibilities: toArray(jd.responsibilities),
+    requiredSkills: toArray(jd.requiredSkills),
+    preferredSkills: toArray(jd.preferredSkills),
+    technologies: toArray(jd.technologies),
+    keywords: toArray(jd.keywords),
+  } as T;
+}
+
 // === Session persistence — survives browser refresh ===
 // The user object is saved to localStorage on sign-in and restored on page load.
 // This prevents the "login again on refresh" bug.
@@ -629,14 +665,19 @@ export const useApp = create<AppState>()(
       setActiveResume: (id) => set({ activeResumeId: id }),
 
       addJD: (j) => {
-        set((s) => ({ jobDescriptions: [j, ...s.jobDescriptions] }));
-        cloudApiSafe(createJobDescription)(j).catch(() => {});
+        // Defensive: normalize the JD so every array field exists as a real
+        // array and every expected string is a string. Prevents downstream
+        // crashes (Optimizer render, scoreATS) when the JD comes from a
+        // stale source with missing fields.
+        const safeJ = normalizeJD(j);
+        set((s) => ({ jobDescriptions: [safeJ, ...s.jobDescriptions] }));
+        cloudApiSafe(createJobDescription)(safeJ).catch(() => {});
         // Defensive localStorage backup so parsed JDs survive browser refresh
         // even when the Cloudflare Worker / D1 is unreachable or returns empty.
         if (typeof localStorage !== "undefined") {
           try {
             const existing = JSON.parse(localStorage.getItem("resumeai-jds-backup") || "[]");
-            localStorage.setItem("resumeai-jds-backup", JSON.stringify([j, ...existing.filter((x: any) => x.id !== j.id)].slice(0, 100)));
+            localStorage.setItem("resumeai-jds-backup", JSON.stringify([safeJ, ...existing.filter((x: any) => x.id !== safeJ.id)].slice(0, 100)));
           } catch {}
         }
       },

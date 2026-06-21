@@ -2,6 +2,36 @@
 // All data flows through this client → Cloudflare Worker → D1
 // The browser is NEVER the permanent storage location for business data.
 
+// Defensive JD normalization — same impl as store.ts (imported lazily to avoid
+// a circular dependency). Guarantees every JD has all expected array fields
+// as real arrays so downstream React renders and scoreATS() never crash on
+// undefined.length / undefined.map.
+function normalizeJD<T extends Record<string, any>>(jd: T): T {
+  if (!jd || typeof jd !== "object") return jd;
+  const toArray = (v: any): any[] => Array.isArray(v) ? v : [];
+  const toStr = (v: any): string | undefined => (v === null || v === undefined) ? undefined : String(v);
+  return {
+    ...jd,
+    id: jd.id || `jd_${Math.random().toString(36).slice(2, 9)}`,
+    title: typeof jd.title === "string" ? jd.title : (jd.title ? String(jd.title) : "Untitled role"),
+    company: toStr(jd.company),
+    location: toStr(jd.location),
+    employmentType: toStr(jd.employmentType),
+    salary: toStr(jd.salary),
+    experienceYears: toStr(jd.experienceYears),
+    education: toStr(jd.education),
+    rawText: toStr(jd.rawText),
+    url: toStr(jd.url),
+    source: typeof jd.source === "string" ? jd.source : "text",
+    createdAt: jd.createdAt || new Date().toISOString(),
+    responsibilities: toArray(jd.responsibilities),
+    requiredSkills: toArray(jd.requiredSkills),
+    preferredSkills: toArray(jd.preferredSkills),
+    technologies: toArray(jd.technologies),
+    keywords: toArray(jd.keywords),
+  } as T;
+}
+
 const API_BASE = "https://resumeai-pro-api.rachidelsabah.workers.dev";
 
 // Session user ID — stored in sessionStorage (temporary, not business data)
@@ -206,7 +236,7 @@ export async function syncAllFromCloud(store: any): Promise<void> {
     // Hydrate store with cloud data — ALWAYS set arrays even if empty
     const resumes = (resumesRes.resumes || []).map(parseDbResume);
     const coverLetters = (clsRes.coverLetters || []).map(parseDbCoverLetter);
-    const jobDescriptions = (jdsRes.jobDescriptions || []).map(parseDbJD);
+    const jobDescriptions = (jdsRes.jobDescriptions || []).map(parseDbJD).map(normalizeJD);
     const interviews = (ivsRes.interviews || []).map(parseDbInterview);
     const atsReports = (atsRes.atsReports || []).map(parseDbATS);
     const providers = (providersRes.providers || []).map(parseDbProvider);
@@ -247,9 +277,12 @@ export async function syncAllFromCloud(store: any): Promise<void> {
         try {
           const backup = JSON.parse(localStorage.getItem("resumeai-jds-backup") || "[]");
           if (backup.length > 0) {
-            store.setState({ jobDescriptions: backup });
+            // Normalize every JD so missing fields can never crash downstream
+            // renders (e.g. Optimizer's jdParsed.keywords.length access).
+            const safeBackup = backup.map(normalizeJD);
+            store.setState({ jobDescriptions: safeBackup });
             // Best-effort: re-sync backup JDs to the cloud so future loads work.
-            for (const jd of backup) {
+            for (const jd of safeBackup) {
               api.createJobDescription(jd).catch(() => {});
             }
           }

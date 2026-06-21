@@ -29,10 +29,13 @@ export function scoreATS(resume: ResumeData, jd?: JobDescription): ATSReport {
   const missingKeywords: string[] = [];
   const matchedKeywords: string[] = [];
 
-  // Missing keywords
+  // Missing keywords — defensive against jd.keywords being undefined/null
+  // (can happen with JDs from stale localStorage backups or older D1 rows).
   if (jd) {
+    const jdKeywords = Array.isArray(jd.keywords) ? jd.keywords : [];
     const resumeText = resumeToText(resume).toLowerCase();
-    for (const k of jd.keywords) {
+    for (const k of jdKeywords) {
+      if (typeof k !== "string") continue;
       if (resumeText.includes(k.toLowerCase())) matchedKeywords.push(k);
       else missingKeywords.push(k);
     }
@@ -150,7 +153,7 @@ export function scoreATS(resume: ResumeData, jd?: JobDescription): ATSReport {
   if (resume.education.length === 0) weakSections.push("Education");
 
   const jdMatchPercent = jd
-    ? Math.round((matchedKeywords.length / Math.max(1, jd.keywords.length)) * 100)
+    ? Math.round((matchedKeywords.length / Math.max(1, (Array.isArray(jd.keywords) ? jd.keywords : []).length)) * 100)
     : undefined;
 
   return {
@@ -196,8 +199,10 @@ function scoreKeywords(r: ResumeData, jd?: JobDescription): number {
     return clamp(Math.round((hits / COMMON_ATS_KEYWORDS.length) * 100));
   }
   const text = resumeToText(r).toLowerCase();
-  const hits = jd.keywords.filter((k) => text.includes(k.toLowerCase())).length;
-  return clamp(Math.round((hits / Math.max(1, jd.keywords.length)) * 100));
+  // Defensive: jd.keywords may be undefined/null on JDs from stale sources.
+  const jdKeywords = Array.isArray(jd.keywords) ? jd.keywords : [];
+  const hits = jdKeywords.filter((k) => typeof k === "string" && text.includes(k.toLowerCase())).length;
+  return clamp(Math.round((hits / Math.max(1, jdKeywords.length)) * 100));
 }
 
 function scoreContent(r: ResumeData): number {

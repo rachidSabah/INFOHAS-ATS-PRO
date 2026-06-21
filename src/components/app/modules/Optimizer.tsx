@@ -163,18 +163,30 @@ export function Optimizer() {
 
   const analyze = () => {
     if (!resume || !jdParsed) return;
-    const r = scoreATS(resume, jdParsed);
+    // Defensive: clone the JD with normalized array fields so scoreATS and
+    // detectIndustry never throw on undefined.length / undefined.join.
+    const safeJd = {
+      ...jdParsed,
+      keywords: Array.isArray(jdParsed.keywords) ? jdParsed.keywords : [],
+      requiredSkills: Array.isArray(jdParsed.requiredSkills) ? jdParsed.requiredSkills : [],
+      preferredSkills: Array.isArray(jdParsed.preferredSkills) ? jdParsed.preferredSkills : [],
+      technologies: Array.isArray(jdParsed.technologies) ? jdParsed.technologies : [],
+      responsibilities: Array.isArray(jdParsed.responsibilities) ? jdParsed.responsibilities : [],
+      rawText: typeof jdParsed.rawText === "string" ? jdParsed.rawText : "",
+    };
+    setJdParsed(safeJd);
+    const r = scoreATS(resume, safeJd);
     setBeforeReport(r);
     addATS(r);
 
     // === Auto-detect industry from JD + resume ===
-    const jdText = jdParsed.rawText ?? jdParsed.keywords.join(" ");
+    const jdText = safeJd.rawText || safeJd.keywords.join(" ");
     const resumeText = `${resume.name} ${resume.headline ?? ""} ${resume.summary ?? ""} ${resume.experience.map((e) => e.title + " " + e.company).join(" ")}`;
     const detection = detectIndustry(jdText, resumeText);
     setIndustryDetection(detection);
     setIndustryId(detection.industryId);
     // Auto-populate employer from JD company
-    if (jdParsed.company) setEmployer(jdParsed.company);
+    if (safeJd.company) setEmployer(safeJd.company);
     // Auto-enable industry mode if confidence is high enough
     if (detection.confidence >= 20) {
       setIndustryMode(true);
@@ -410,12 +422,25 @@ export function Optimizer() {
                   <div className="flex gap-2">
                     {jds.length > 0 && (
                       <select
-                        onChange={(e) => { const j = jds.find((x) => x.id === e.target.value); if (j) { setJdText(j.rawText ?? j.keywords.join(", ")); setJdParsed(j); setStep("analyze"); } }}
+                        onChange={(e) => {
+                          const j = jds.find((x) => x.id === e.target.value);
+                          if (j) {
+                            // Defensive: every array field is guaranteed by
+                            // normalizeJD, but use optional chaining as belt-
+                            // and-suspenders so a malformed JD can never
+                            // crash the page.
+                            const kws = Array.isArray(j.keywords) ? j.keywords : [];
+                            const raw = typeof j.rawText === "string" ? j.rawText : "";
+                            setJdText(raw || kws.join(", "));
+                            setJdParsed(j);
+                            setStep("analyze");
+                          }
+                        }}
                         className="h-9 px-3 rounded-md border border-input bg-background text-sm"
                         value=""
                       >
                         <option value="">Or load saved JD…</option>
-                        {jds.map((j) => <option key={j.id} value={j.id}>{j.title}</option>)}
+                        {jds.map((j) => <option key={j.id} value={j.id}>{j.title || "Untitled role"}</option>)}
                       </select>
                     )}
                     <Button onClick={parseJD} disabled={aiThinking || jdText.length < 30} className="bg-brand hover:bg-brand-dark text-white gap-2">
@@ -448,15 +473,15 @@ export function Optimizer() {
               <CardContent>
                 <div className="grid sm:grid-cols-2 gap-4">
                   <div className="space-y-2 text-sm">
-                    <div><span className="text-muted-foreground">Title:</span> <span className="font-semibold">{jdParsed.title}</span></div>
+                    <div><span className="text-muted-foreground">Title:</span> <span className="font-semibold">{jdParsed.title || "Untitled role"}</span></div>
                     {jdParsed.company && <div><span className="text-muted-foreground">Company:</span> {jdParsed.company}</div>}
                     {jdParsed.location && <div><span className="text-muted-foreground">Location:</span> {jdParsed.location}</div>}
                     {jdParsed.experienceYears && <div><span className="text-muted-foreground">Experience:</span> {jdParsed.experienceYears}</div>}
                   </div>
                   <div className="space-y-2">
                     <div>
-                      <div className="text-xs font-semibold text-muted-foreground uppercase mb-1">Keywords ({jdParsed.keywords.length})</div>
-                      <div className="flex flex-wrap gap-1">{jdParsed.keywords.map((k) => <Badge key={k} variant="outline" className="text-[10px]">{k}</Badge>)}</div>
+                      <div className="text-xs font-semibold text-muted-foreground uppercase mb-1">Keywords ({(jdParsed.keywords ?? []).length})</div>
+                      <div className="flex flex-wrap gap-1">{(jdParsed.keywords ?? []).map((k, i) => <Badge key={`${k}-${i}`} variant="outline" className="text-[10px]">{k}</Badge>)}</div>
                     </div>
                   </div>
                 </div>
