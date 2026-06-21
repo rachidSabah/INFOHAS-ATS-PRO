@@ -717,39 +717,171 @@ export function SalaryInsights() {
 }
 
 // ============================================================================
-// Skill Gap Analysis
+// Skill Gap Analysis → AI Skill Intelligence
 // ============================================================================
 
+interface SkillGapReport {
+  overallMatch: number;
+  technicalMatch: number;
+  softSkillMatch: number;
+  leadershipMatch: number;
+  certificationMatch: number;
+  industryMatch: number;
+  criticalGaps: string[];
+  importantGaps: string[];
+  niceToHaveGaps: string[];
+  skillsToLearn: string[];
+  certifications: string[];
+  courses: string[];
+  projects: string[];
+  resumeRecommendations: string[];
+  interviewTopics: string[];
+  likelyQuestions: string[];
+  day30: string;
+  day60: string;
+  day90: string;
+  month6: string;
+}
+
 export function SkillGap() {
-  const resume = useResume();
+  const resumes = useApp((s) => s.resumes);
   const jds = useApp((s) => s.jobDescriptions);
   const [jdId, setJdId] = useState("");
   const [loading, setLoading] = useState(false);
-  const [output, setOutput] = useState("");
+  const [report, setReport] = useState<SkillGapReport | null>(null);
+
+  const resume = resumes[0] ?? null;
+  const selectedJd = jds.find((j) => j.id === jdId) ?? null;
 
   const analyze = async () => {
-    const jd = jds.find((j) => j.id === jdId);
-    if (!resume || !jd) { toast.error("Select a resume and JD"); return; }
-    setLoading(true); setOutput("");
+    if (!resume) { toast.error("Create a resume first."); return; }
+    if (!selectedJd) { toast.error("Select a job description."); return; }
+    setLoading(true); setReport(null);
     try {
       const result = await callAI({
-        systemPrompt: "You are a career advisor. Compare the candidate's skills to the job requirements and identify gaps.",
-        userPrompt: `Candidate skills: ${resume.skills.map((s) => s.name).join(", ")}\n\nJob requirements: ${jd.requiredSkills?.join(", ") || jd.keywords?.join(", ") || "N/A"}\n\nProvide: 1) Matched skills, 2) Missing skills (gaps), 3) Recommended actions to close gaps, 4) Courses/certifications to consider.`,
-        maxTokens: 1500, taskCategory: "document",
+        systemPrompt: `You are an Expert Career Advisor and Skills Analyst. You deeply analyze the gap between a candidate's resume and a job description, then generate actionable learning roadmaps. NEVER fabricate — only reference real skills from the resume. Return ONLY valid JSON.`,
+        userPrompt: `CANDIDATE RESUME:
+${JSON.stringify({ name: resume.name, headline: resume.headline, summary: resume.summary, skills: resume.skills.map((s) => s.name), experience: resume.experience.map((e) => ({ title: e.title, company: e.company, bullets: e.bullets.slice(0, 2) })), education: resume.education.map((ed) => ({ degree: ed.degree, institution: ed.institution })), certifications: resume.certifications.map((c) => c.name) })}
+
+JOB DESCRIPTION:
+${selectedJd.rawText?.slice(0, 2000) ?? JSON.stringify({ title: selectedJd.title, company: selectedJd.company, requiredSkills: selectedJd.requiredSkills, keywords: selectedJd.keywords })}
+
+COMPANY: ${selectedJd.company || "N/A"}
+JOB TITLE: ${selectedJd.title || "N/A"}
+
+Analyze the skill gap between the candidate and the job. Return JSON:
+{
+  "overallMatch": 75,
+  "technicalMatch": 80,
+  "softSkillMatch": 70,
+  "leadershipMatch": 60,
+  "certificationMatch": 50,
+  "industryMatch": 85,
+  "criticalGaps": ["skill1", "skill2"],
+  "importantGaps": ["skill1"],
+  "niceToHaveGaps": ["skill1"],
+  "skillsToLearn": ["skill1", "skill2"],
+  "certifications": ["cert1"],
+  "courses": ["course1"],
+  "projects": ["project idea1"],
+  "resumeRecommendations": ["improve section X", "highlight skill Y"],
+  "interviewTopics": ["topic1", "topic2"],
+  "likelyQuestions": ["question1", "question2"],
+  "day30": "30-day learning plan",
+  "day60": "60-day plan",
+  "day90": "90-day plan",
+  "month6": "6-month plan"
+}`,
+        maxTokens: 2500, temperature: 0.3, taskCategory: "document",
       });
-      setOutput(result.text);
-    } catch (e: any) { toast.error(e?.message || "Failed"); }
+
+      let data: SkillGapReport;
+      try { data = extractJSON<SkillGapReport>(result.text); }
+      catch { throw new Error("Failed to parse AI response. Please try again."); }
+      setReport(data);
+      toast.success(`Skill analysis complete — ${data.overallMatch}% overall match`);
+    } catch (e: any) { toast.error(e?.message || "Analysis failed."); }
     finally { setLoading(false); }
   };
 
+  const scoreColor = (s: number) => s >= 75 ? "#10B981" : s >= 50 ? "#F59E0B" : "#DC2626";
+
   return (
     <div className="space-y-6">
-      <div><h1 className="font-display text-2xl font-bold flex items-center gap-2"><Icon name="GitCompare" className="w-6 h-6 text-brand" /> Skill Gap Analysis</h1><p className="text-sm text-muted-foreground mt-1">Compare your skills to a target job and identify what's missing.</p></div>
+      <div><h1 className="font-display text-2xl font-bold flex items-center gap-2"><Icon name="GitCompare" className="w-6 h-6 text-brand" /> Skill Intelligence</h1><p className="text-sm text-muted-foreground mt-1">AI-powered skill gap analysis with learning roadmap and interview preparation.</p></div>
+
       <Card><CardContent className="p-4 space-y-3">
-        <div><Label>Target Job Description</Label><select value={jdId} onChange={(e) => setJdId(e.target.value)} className="w-full h-9 px-3 rounded-md border border-input bg-background text-sm mt-1"><option value="">Select...</option>{jds.map((j) => <option key={j.id} value={j.id}>{j.title} — {j.company || "N/A"}</option>)}</select></div>
-        <Button onClick={analyze} disabled={loading || !resume || !jdId} className="bg-brand hover:bg-brand-dark text-white gap-2"><Icon name={loading ? "Loader2" : "GitCompare"} className={`w-4 h-4 ${loading ? "animate-spin" : ""}`} /> {loading ? "Analyzing..." : "Analyze Skill Gaps"}</Button>
+        <div className="grid sm:grid-cols-2 gap-3">
+          <div><Label>Resume</Label><div className="text-sm font-semibold mt-1">{resume?.name ?? "No resume"}</div></div>
+          <div><Label>Target Job</Label><select value={jdId} onChange={(e) => setJdId(e.target.value)} className="w-full h-9 px-3 rounded-md border border-input bg-background text-sm mt-1"><option value="">Select...</option>{jds.map((j) => <option key={j.id} value={j.id}>{j.title} — {j.company || "N/A"}</option>)}</select></div>
+        </div>
+        <Button onClick={analyze} disabled={loading || !resume || !jdId} className="bg-brand hover:bg-brand-dark text-white gap-2"><Icon name={loading ? "Loader2" : "GitCompare"} className={`w-4 h-4 ${loading ? "animate-spin" : ""}`} /> {loading ? "Analyzing…" : "Analyze Skill Gaps"}</Button>
       </CardContent></Card>
-      <AIOutput output={output} loading={loading} />
+
+      {loading && <Card><CardContent className="p-4"><div className="flex items-center gap-2"><Icon name="Loader2" className="w-4 h-4 animate-spin text-brand" /><span className="text-sm text-muted-foreground">Analyzing skills, gaps, and generating learning roadmap…</span></div></CardContent></Card>}
+
+      {report && (
+        <>
+          {/* Match Scores */}
+          <Card><CardContent className="p-4">
+            <div className="flex items-center gap-4 mb-4">
+              <div className="text-center"><div className="text-3xl font-bold font-display" style={{ color: scoreColor(report.overallMatch) }}>{report.overallMatch}%</div><div className="text-[10px] text-muted-foreground uppercase">Overall Match</div></div>
+              <div className="flex-1 grid grid-cols-2 sm:grid-cols-5 gap-2 text-xs">
+                {[
+                  { label: "Technical", val: report.technicalMatch },
+                  { label: "Soft Skills", val: report.softSkillMatch },
+                  { label: "Leadership", val: report.leadershipMatch },
+                  { label: "Certs", val: report.certificationMatch },
+                  { label: "Industry", val: report.industryMatch },
+                ].map((s) => (
+                  <div key={s.label}><div className="text-[10px] uppercase text-muted-foreground">{s.label}</div>
+                    <div className="h-1.5 bg-secondary rounded-full overflow-hidden mt-0.5"><div className="h-full rounded-full" style={{ width: `${s.val}%`, background: scoreColor(s.val) }} /></div>
+                    <div className="text-[10px] font-bold mt-0.5" style={{ color: scoreColor(s.val) }}>{s.val}%</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </CardContent></Card>
+
+          {/* Gap Categorization */}
+          <div className="grid md:grid-cols-3 gap-4">
+            <Card><CardHeader className="pb-2"><CardTitle className="text-sm text-red-600">Critical Gaps</CardTitle></CardHeader><CardContent className="pt-0">{report.criticalGaps?.length > 0 ? <ul className="space-y-0.5">{report.criticalGaps.map((g, i) => <li key={i} className="text-xs flex gap-1"><span className="text-red-500">!</span> {g}</li>)}</ul> : <p className="text-xs text-muted-foreground">None</p>}</CardContent></Card>
+            <Card><CardHeader className="pb-2"><CardTitle className="text-sm text-amber-600">Important Gaps</CardTitle></CardHeader><CardContent className="pt-0">{report.importantGaps?.length > 0 ? <ul className="space-y-0.5">{report.importantGaps.map((g, i) => <li key={i} className="text-xs flex gap-1"><span className="text-amber-500">→</span> {g}</li>)}</ul> : <p className="text-xs text-muted-foreground">None</p>}</CardContent></Card>
+            <Card><CardHeader className="pb-2"><CardTitle className="text-sm text-blue-500">Nice-to-Have</CardTitle></CardHeader><CardContent className="pt-0">{report.niceToHaveGaps?.length > 0 ? <ul className="space-y-0.5">{report.niceToHaveGaps.map((g, i) => <li key={i} className="text-xs flex gap-1"><span className="text-blue-400">+</span> {g}</li>)}</ul> : <p className="text-xs text-muted-foreground">None</p>}</CardContent></Card>
+          </div>
+
+          {/* Recommendations */}
+          <div className="grid md:grid-cols-2 gap-4">
+            <Card><CardHeader className="pb-2"><CardTitle className="text-sm">Learning Recommendations</CardTitle></CardHeader><CardContent className="pt-0 text-xs space-y-2">
+              {report.skillsToLearn?.length > 0 && <div><div className="font-semibold mb-0.5">Skills to Learn:</div><div className="flex flex-wrap gap-1">{report.skillsToLearn.map((s, i) => <Badge key={i} variant="brand" className="text-[9px]">{s}</Badge>)}</div></div>}
+              {report.certifications?.length > 0 && <div><div className="font-semibold mb-0.5 mt-2">Certifications:</div><ul className="space-y-0.5">{report.certifications.map((c, i) => <li key={i} className="flex gap-1"><span className="text-brand">›</span> {c}</li>)}</ul></div>}
+              {report.courses?.length > 0 && <div><div className="font-semibold mb-0.5 mt-2">Courses:</div><ul className="space-y-0.5">{report.courses.map((c, i) => <li key={i} className="flex gap-1"><span className="text-brand">›</span> {c}</li>)}</ul></div>}
+              {report.projects?.length > 0 && <div><div className="font-semibold mb-0.5 mt-2">Practice Projects:</div><ul className="space-y-0.5">{report.projects.map((p, i) => <li key={i} className="flex gap-1"><span className="text-emerald-600">✓</span> {p}</li>)}</ul></div>}
+            </CardContent></Card>
+            <Card><CardHeader className="pb-2"><CardTitle className="text-sm">Resume & Interview Recommendations</CardTitle></CardHeader><CardContent className="pt-0 text-xs space-y-2">
+              {report.resumeRecommendations?.length > 0 && <div><div className="font-semibold mb-0.5">Resume Improvements:</div><ul className="space-y-0.5">{report.resumeRecommendations.map((r, i) => <li key={i} className="flex gap-1"><span className="text-amber-500">→</span> {r}</li>)}</ul></div>}
+              {report.interviewTopics?.length > 0 && <div><div className="font-semibold mb-0.5 mt-2">Interview Topics to Study:</div><div className="flex flex-wrap gap-1">{report.interviewTopics.map((t, i) => <Badge key={i} variant="warning" className="text-[9px]">{t}</Badge>)}</div></div>}
+              {report.likelyQuestions?.length > 0 && <div><div className="font-semibold mb-0.5 mt-2">Likely Questions:</div><ul className="space-y-0.5">{report.likelyQuestions.map((q, i) => <li key={i} className="flex gap-1"><span className="text-gold">?</span> {q}</li>)}</ul></div>}
+            </CardContent></Card>
+          </div>
+
+          {/* Learning Roadmap */}
+          <Card><CardHeader className="pb-2"><CardTitle className="text-sm flex items-center gap-2"><Icon name="Map" className="w-4 h-4 text-brand" /> Learning Roadmap</CardTitle></CardHeader>
+          <CardContent className="pt-0 space-y-3">
+            {[
+              { label: "30-Day Plan", content: report.day30, color: "#10B981" },
+              { label: "60-Day Plan", content: report.day60, color: "#1154A3" },
+              { label: "90-Day Plan", content: report.day90, color: "#8B5CF6" },
+              { label: "6-Month Plan", content: report.month6, color: "#F59E0B" },
+            ].map((phase) => (
+              <div key={phase.label} className="rounded-lg border-l-4 p-3" style={{ borderColor: phase.color }}>
+                <div className="text-xs font-semibold mb-1" style={{ color: phase.color }}>{phase.label}</div>
+                <p className="text-xs text-foreground/80 text-pretty">{phase.content}</p>
+              </div>
+            ))}
+          </CardContent></Card>
+        </>
+      )}
     </div>
   );
 }
@@ -794,36 +926,216 @@ export function CareerPath() {
 }
 
 // ============================================================================
-// Company Research
+// Company Research → AI Company Intelligence Platform
 // ============================================================================
 
+interface CompanyIntel {
+  overview: string;
+  mission: string;
+  vision: string;
+  values: string[];
+  culture: string;
+  products: string[];
+  employeeCount: string;
+  headquarters: string;
+  leadership: string;
+  recentNews: string[];
+  hiringTrends: string;
+  interviewProcess: string;
+  interviewDifficulty: string;
+  commonQuestions: string[];
+  valuesQuestions: string[];
+  fitScore: number;
+  fitStrengths: string[];
+  fitWeaknesses: string[];
+  fitOpportunities: string[];
+  fitRisks: string[];
+  interviewFocusAreas: string[];
+  atsVendor: string;
+  screeningCriteria: string[];
+  atsRecommendations: string[];
+  networkingRecommendations: string[];
+  departmentsToTarget: string[];
+  linkedinStrategy: string;
+}
+
 export function CompanyResearch() {
-  const [company, setCompany] = useState("");
+  const resumes = useApp((s) => s.resumes);
+  const jds = useApp((s) => s.jobDescriptions);
+  const [companyName, setCompanyName] = useState("");
   const [loading, setLoading] = useState(false);
-  const [output, setOutput] = useState("");
+  const [intel, setIntel] = useState<CompanyIntel | null>(null);
+  const [webResults, setWebResults] = useState<any[]>([]);
+
+  const resume = resumes[0] ?? null;
+  const jd = jds[0] ?? null;
+
+  // Auto-detect company from JD
+  const detectedCompany = jd?.company || "";
 
   const research = async () => {
-    if (!company) { toast.error("Enter a company name"); return; }
-    setLoading(true); setOutput("");
+    const targetCompany = companyName.trim() || detectedCompany;
+    if (!targetCompany) { toast.error("Enter a company name or add a job description first."); return; }
+    setLoading(true); setIntel(null); setWebResults([]);
     try {
+      // Parallel: web search + AI intelligence
+      const webPromise = fetch("/api/web-search", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ company: targetCompany, jobTitle: jd?.title || "", industry: "" }),
+      }).then((r) => r.json()).catch(() => ({ results: [] }));
+
+      const resumeContext = resume ? JSON.stringify({
+        name: resume.name, headline: resume.headline, summary: resume.summary,
+        experience: resume.experience.map((e) => ({ title: e.title, company: e.company, bullets: e.bullets.slice(0, 2) })),
+        skills: resume.skills.map((s) => s.name),
+      }) : "(no resume)";
+
+      const jdContext = jd?.rawText ?? jd?.keywords?.join(", ") ?? "(no JD)";
+
       const result = await callAI({
-        systemPrompt: "You are a company research analyst. Provide comprehensive company profiles for job seekers.",
-        userPrompt: `Provide a comprehensive profile for: ${company}\n\nInclude: 1) Company overview, 2) Culture & values, 3) Typical interview process, 4) Common interview questions, 5) Salary ranges, 6) Pros & cons from employee reviews, 7) Recent news/developments.`,
-        maxTokens: 2000, taskCategory: "document",
+        systemPrompt: `You are an Expert Company Intelligence Analyst and Senior Recruiter. Generate a comprehensive company intelligence report for job seekers. NEVER fabricate information — if you don't know something, say "Information not available". Return ONLY valid JSON.`,
+        userPrompt: `COMPANY: ${targetCompany}
+${jd ? `JOB TITLE: ${jd.title || "N/A"}\nJOB DESCRIPTION: ${jdContext.slice(0, 1500)}` : ""}
+${resume ? `CANDIDATE RESUME: ${resumeContext}` : ""}
+
+Generate a comprehensive company intelligence report. Return JSON:
+{
+  "overview": "Company overview (2-3 sentences)",
+  "mission": "Company mission statement",
+  "vision": "Company vision",
+  "values": ["value1", "value2", "value3"],
+  "culture": "Culture description (2-3 sentences)",
+  "products": ["product1", "product2"],
+  "employeeCount": "approximate employee count",
+  "headquarters": "HQ location",
+  "leadership": "CEO or key leadership",
+  "recentNews": ["news1", "news2"],
+  "hiringTrends": "Current hiring trends (2-3 sentences)",
+  "interviewProcess": "Typical interview process (stages, timeline)",
+  "interviewDifficulty": "Easy/Medium/Hard + brief explanation",
+  "commonQuestions": ["question1", "question2", "question3"],
+  "valuesQuestions": ["values-based question1", "question2"],
+  "fitScore": 75,
+  "fitStrengths": ["strength1", "strength2"],
+  "fitWeaknesses": ["weakness1"],
+  "fitOpportunities": ["opportunity1"],
+  "fitRisks": ["risk1"],
+  "interviewFocusAreas": ["area1", "area2"],
+  "atsVendor": "Workday/Greenhouse/Taleo or Unknown",
+  "screeningCriteria": ["criteria1", "criteria2"],
+  "atsRecommendations": ["recommendation1"],
+  "networkingRecommendations": ["strategy1"],
+  "departmentsToTarget": ["dept1", "dept2"],
+  "linkedinStrategy": "LinkedIn networking strategy (2-3 sentences)"
+}
+
+If you don't know specific information, use "Information not available" — never fabricate.`,
+        maxTokens: 3000, temperature: 0.3, taskCategory: "document",
       });
-      setOutput(result.text);
-    } catch (e: any) { toast.error(e?.message || "Failed"); }
-    finally { setLoading(false); }
+
+      let data: CompanyIntel;
+      try { data = extractJSON<CompanyIntel>(result.text); }
+      catch { throw new Error("Failed to parse AI response. Please try again."); }
+
+      setIntel(data);
+      const webData = await webPromise;
+      setWebResults(webData.results || []);
+      toast.success(`Company intelligence generated for ${targetCompany}`);
+    } catch (e: any) {
+      toast.error(e?.message || "Research failed.");
+    } finally { setLoading(false); }
   };
 
   return (
     <div className="space-y-6">
-      <div><h1 className="font-display text-2xl font-bold flex items-center gap-2"><Icon name="Building2" className="w-6 h-6 text-brand" /> Company Research</h1><p className="text-sm text-muted-foreground mt-1">AI-powered company profiles, culture insights, and interview prep.</p></div>
+      <div><h1 className="font-display text-2xl font-bold flex items-center gap-2"><Icon name="Building2" className="w-6 h-6 text-brand" /> Company Intelligence</h1><p className="text-sm text-muted-foreground mt-1">AI-powered company profiles, culture insights, interview intelligence, and fit analysis.</p></div>
+
       <Card><CardContent className="p-4 space-y-3">
-        <div><Label>Company Name</Label><Input value={company} onChange={(e) => setCompany(e.target.value)} placeholder="Emirates" className="mt-1" /></div>
-        <Button onClick={research} disabled={loading} className="bg-brand hover:bg-brand-dark text-white gap-2"><Icon name={loading ? "Loader2" : "Search"} className={`w-4 h-4 ${loading ? "animate-spin" : ""}`} /> {loading ? "Researching..." : "Research Company"}</Button>
+        <div className="grid sm:grid-cols-2 gap-3">
+          <div><Label>Company Name</Label><Input value={companyName} onChange={(e) => setCompanyName(e.target.value)} placeholder={detectedCompany || "Emirates"} className="mt-1" /></div>
+          <div className="flex items-end gap-2 text-xs">
+            {detectedCompany && <Badge variant="brand" className="mb-2">Auto-detected: {detectedCompany}</Badge>}
+            {resume && <Badge variant="outline" className="mb-2">Resume: {resume.name}</Badge>}
+            {jd && <Badge variant="outline" className="mb-2">JD: {jd.title}</Badge>}
+          </div>
+        </div>
+        <Button onClick={research} disabled={loading} className="bg-brand hover:bg-brand-dark text-white gap-2"><Icon name={loading ? "Loader2" : "Search"} className={`w-4 h-4 ${loading ? "animate-spin" : ""}`} /> {loading ? "Researching…" : "Generate Intelligence Report"}</Button>
       </CardContent></Card>
-      <AIOutput output={output} loading={loading} />
+
+      {loading && <Card><CardContent className="p-4"><div className="flex items-center gap-2"><Icon name="Loader2" className="w-4 h-4 animate-spin text-brand" /><span className="text-sm text-muted-foreground">Analyzing company, culture, interview process, and fit…</span></div></CardContent></Card>}
+
+      {intel && (
+        <>
+          {/* Fit Score */}
+          <Card><CardContent className="p-4 flex items-center gap-4 flex-wrap">
+            <div className="text-center"><div className="text-3xl font-bold font-display text-brand">{intel.fitScore}</div><div className="text-[10px] text-muted-foreground uppercase">Fit Score</div></div>
+            <div className="flex-1 min-w-0 grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
+              <div><div className="text-[10px] uppercase text-muted-foreground">ATS Vendor</div><div className="font-semibold">{intel.atsVendor || "Unknown"}</div></div>
+              <div><div className="text-[10px] uppercase text-muted-foreground">Difficulty</div><div className="font-semibold">{intel.interviewDifficulty?.split(" ")[0] || "—"}</div></div>
+              <div><div className="text-[10px] uppercase text-muted-foreground">Employees</div><div className="font-semibold">{intel.employeeCount || "—"}</div></div>
+              <div><div className="text-[10px] uppercase text-muted-foreground">HQ</div><div className="font-semibold truncate">{intel.headquarters || "—"}</div></div>
+            </div>
+          </CardContent></Card>
+
+          {/* Overview + Mission + Values */}
+          <div className="grid md:grid-cols-2 gap-4">
+            <Card><CardHeader className="pb-2"><CardTitle className="text-sm">Overview</CardTitle></CardHeader><CardContent className="pt-0"><p className="text-sm text-foreground/80 text-pretty">{intel.overview}</p>
+              {intel.mission && <p className="text-xs text-muted-foreground mt-2"><span className="font-semibold">Mission:</span> {intel.mission}</p>}
+              {intel.vision && <p className="text-xs text-muted-foreground mt-1"><span className="font-semibold">Vision:</span> {intel.vision}</p>}
+            </CardContent></Card>
+            <Card><CardHeader className="pb-2"><CardTitle className="text-sm">Culture & Values</CardTitle></CardHeader><CardContent className="pt-0">
+              <p className="text-sm text-foreground/80 text-pretty mb-2">{intel.culture}</p>
+              {intel.values?.length > 0 && <div className="flex flex-wrap gap-1">{intel.values.map((v, i) => <Badge key={i} variant="outline" className="text-[10px]">{v}</Badge>)}</div>}
+            </CardContent></Card>
+          </div>
+
+          {/* Fit Analysis */}
+          <Card><CardHeader className="pb-2"><CardTitle className="text-sm flex items-center gap-2"><Icon name="Target" className="w-4 h-4 text-brand" /> Fit Analysis</CardTitle></CardHeader>
+          <CardContent className="pt-0 grid sm:grid-cols-2 gap-3 text-xs">
+            <div><div className="font-semibold text-emerald-600 mb-1">Strengths</div><ul className="space-y-0.5">{intel.fitStrengths?.map((s, i) => <li key={i} className="flex gap-1"><span className="text-emerald-600">✓</span> {s}</li>)}</ul></div>
+            <div><div className="font-semibold text-amber-600 mb-1">Weaknesses</div><ul className="space-y-0.5">{intel.fitWeaknesses?.map((w, i) => <li key={i} className="flex gap-1"><span className="text-amber-600">→</span> {w}</li>)}</ul></div>
+            <div><div className="font-semibold text-brand mb-1">Opportunities</div><ul className="space-y-0.5">{intel.fitOpportunities?.map((o, i) => <li key={i} className="flex gap-1"><span className="text-brand">+</span> {o}</li>)}</ul></div>
+            <div><div className="font-semibold text-red-500 mb-1">Risks</div><ul className="space-y-0.5">{intel.fitRisks?.map((r, i) => <li key={i} className="flex gap-1"><span className="text-red-500">!</span> {r}</li>)}</ul></div>
+          </CardContent></Card>
+
+          {/* Interview Intelligence */}
+          <Card><CardHeader className="pb-2"><CardTitle className="text-sm flex items-center gap-2"><Icon name="MessagesSquare" className="w-4 h-4 text-brand" /> Interview Intelligence</CardTitle></CardHeader>
+          <CardContent className="pt-0 space-y-2 text-xs">
+            <div><span className="font-semibold">Process:</span> {intel.interviewProcess}</div>
+            <div><span className="font-semibold">Difficulty:</span> {intel.interviewDifficulty}</div>
+            {intel.commonQuestions?.length > 0 && <div><div className="font-semibold mt-1">Common Questions:</div><ul className="space-y-0.5">{intel.commonQuestions.map((q, i) => <li key={i} className="flex gap-1"><span className="text-gold">?</span> {q}</li>)}</ul></div>}
+            {intel.valuesQuestions?.length > 0 && <div><div className="font-semibold mt-1">Values Questions:</div><ul className="space-y-0.5">{intel.valuesQuestions.map((q, i) => <li key={i} className="flex gap-1"><span className="text-brand">★</span> {q}</li>)}</ul></div>}
+            {intel.interviewFocusAreas?.length > 0 && <div className="mt-1"><span className="font-semibold">Focus Areas:</span> {intel.interviewFocusAreas.join(", ")}</div>}
+          </CardContent></Card>
+
+          {/* ATS + Networking */}
+          <div className="grid md:grid-cols-2 gap-4">
+            <Card><CardHeader className="pb-2"><CardTitle className="text-sm">ATS Intelligence</CardTitle></CardHeader><CardContent className="pt-0 text-xs space-y-1">
+              <div><span className="font-semibold">Vendor:</span> {intel.atsVendor}</div>
+              {intel.screeningCriteria?.length > 0 && <div><div className="font-semibold mt-1">Screening Criteria:</div><ul className="space-y-0.5">{intel.screeningCriteria.map((c, i) => <li key={i} className="flex gap-1"><span className="text-brand">›</span> {c}</li>)}</ul></div>}
+              {intel.atsRecommendations?.length > 0 && <div><div className="font-semibold mt-1">Recommendations:</div><ul className="space-y-0.5">{intel.atsRecommendations.map((r, i) => <li key={i} className="flex gap-1"><span className="text-emerald-600">✓</span> {r}</li>)}</ul></div>}
+            </CardContent></Card>
+            <Card><CardHeader className="pb-2"><CardTitle className="text-sm">Networking Strategy</CardTitle></CardHeader><CardContent className="pt-0 text-xs space-y-1">
+              {intel.departmentsToTarget?.length > 0 && <div><div className="font-semibold">Departments to Target:</div><div className="flex flex-wrap gap-1 mt-0.5">{intel.departmentsToTarget.map((d, i) => <Badge key={i} variant="outline" className="text-[9px]">{d}</Badge>)}</div></div>}
+              {intel.networkingRecommendations?.length > 0 && <div><div className="font-semibold mt-1">Recommendations:</div><ul className="space-y-0.5">{intel.networkingRecommendations.map((n, i) => <li key={i} className="flex gap-1"><span className="text-brand">›</span> {n}</li>)}</ul></div>}
+              {intel.linkedinStrategy && <div className="mt-1"><span className="font-semibold">LinkedIn:</span> {intel.linkedinStrategy}</div>}
+            </CardContent></Card>
+          </div>
+
+          {/* Web Research Results */}
+          {webResults.length > 0 && (
+            <Card><CardHeader className="pb-2"><CardTitle className="text-xs flex items-center gap-1.5"><Icon name="Globe" className="w-3.5 h-3.5 text-brand" /> Live Web Research</CardTitle></CardHeader>
+            <CardContent className="pt-0"><div className="space-y-1.5 max-h-40 overflow-y-auto">
+              {webResults.slice(0, 8).map((r, i) => (
+                <a key={i} href={r.url} target="_blank" rel="noreferrer noopener" className="block rounded-lg p-2 hover:bg-secondary/50 transition">
+                  <div className="text-xs font-medium text-brand truncate">{r.title}</div>
+                  <div className="text-[10px] text-muted-foreground truncate">{r.source} — {r.snippet?.slice(0, 100)}</div>
+                </a>
+              ))}
+            </div></CardContent></Card>
+          )}
+        </>
+      )}
     </div>
   );
 }
