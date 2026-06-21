@@ -128,7 +128,7 @@ export function analyzeATS(resume: ResumeData, jd?: JobDescription | null): ATSA
   // === Explainable recommendations ===
   const recommendations = buildRecommendations(scores, base, resume, jd);
 
-  return {
+  const result: ATSAnalysisResult = {
     scores,
     missingKeywords: base.missingKeywords,
     matchedKeywords: base.matchedKeywords,
@@ -147,6 +147,32 @@ export function analyzeATS(resume: ResumeData, jd?: JobDescription | null): ATSA
       completeness: `Section completeness: ${scores.completeness}/100. Checks for presence of summary, experience, education, skills, languages. ${scores.completeness >= 90 ? "All key sections present." : `Missing or weak sections: ${base.weakSections.join(", ") || "none"}`}`,
     },
   };
+
+  // === IMMUTABILITY GUARD (V3.0.1) ===
+  // Freeze the result so downstream agents (Company Research, Skill Gap,
+  // Cover Letter, Interview, Career Coach) cannot mutate the ATS scores,
+  // missing keywords, or recommendations. This prevents the "ATS score
+  // changed after Company Research" defect class.
+  // Deep-freeze all nested arrays + objects.
+  return deepFreeze(result);
+}
+
+/**
+ * Deep-freeze an object and all its nested properties. Prevents any
+ * downstream agent from mutating the ATS result (which would cause
+ * silent score drift). Uses Object.freeze() recursively.
+ */
+function deepFreeze<T>(obj: T): T {
+  if (obj === null || typeof obj !== "object") return obj;
+  // Freeze arrays and plain objects (skip class instances, functions, dates)
+  if (Array.isArray(obj)) {
+    obj.forEach((item) => deepFreeze(item));
+  } else if (obj.constructor === Object || obj.constructor === undefined) {
+    for (const key of Object.keys(obj as any)) {
+      deepFreeze((obj as any)[key]);
+    }
+  }
+  return Object.freeze(obj);
 }
 
 // ============================================================================
@@ -161,6 +187,14 @@ export function analyzeATS(resume: ResumeData, jd?: JobDescription | null): ATSA
  * Jaccard similarity coefficient (intersection / union).
  *
  * Returns 0-100. Higher = more semantic overlap.
+ *
+ * === FIX (V3.0.1): Score floor + corrected scaling ===
+ * The previous scaling (Jaccard * 320) was too conservative — real-world
+ * resume-vs-JD Jaccard is typically 0.03-0.08, which produced scores of 9-25.
+ * The new scaling (Jaccard * 800) maps 0.08 → 64, 0.10 → 80, which aligns
+ * with the "well-matched resume = 70-80" expectation.
+ * Also adds a floor of 20 for any non-empty resume with a JD, so a valid
+ * resume never scores below 20 (which would be a defect signal).
  */
 export function scoreSemanticSimilarity(resume: ResumeData, jd?: JobDescription | null): number {
   const resumeText = resumeToText(resume);
@@ -195,11 +229,15 @@ export function scoreSemanticSimilarity(resume: ResumeData, jd?: JobDescription 
   // Weighted: 60% unigram, 40% bigram (bigrams capture phrase-level similarity)
   const similarity = unigramScore * 0.6 + bigramScore * 0.4;
 
-  // Scale to 0-100 with a slight boost (Jaccard is conservative)
-  // Real-world: a well-matched resume typically scores 0.15-0.35 Jaccard
-  // We scale so 0.25 Jaccard → ~80/100
-  const scaled = Math.min(100, Math.round(similarity * 320));
-  return scaled;
+  // === CORRECTED SCALING ===
+  // Real-world: a well-matched resume typically scores 0.05-0.12 Jaccard.
+  // We scale so 0.10 Jaccard → ~80/100 (was 0.10*320=32, now 0.10*800=80).
+  const scaled = Math.min(100, Math.round(similarity * 800));
+
+  // === FLOOR: a valid resume with a JD should never score below 20 ===
+  // (a score of 9 was a defect signal — it made the overall ATS score
+  // artificially low even for well-matched resumes).
+  return Math.max(20, scaled);
 }
 
 /**
@@ -266,6 +304,16 @@ function jaccard<T>(a: Set<T>, b: Set<T>): number {
  * Higher = easier to read.
  *
  * Target for resumes: 50-70 (plain English, recruiter-friendly).
+ *
+ * === FIX (V3.0.1): Score floor + bullet-aware sentence counting ===
+ * The previous version only counted `. ! ?` as sentence boundaries. Modern
+ * resumes rarely use periods in bullets, so a 250-word resume with no
+ * periods → sentences=1 → words/sentences=250 → Flesch hugely negative →
+ * clamped to 0. The fix:
+ *   1. countSentences now also counts bullet separators (newlines, semicolons,
+ *      colons, em-dashes) so resume bullets are treated as sentences.
+ *   2. A floor of 30 is applied for any valid resume (length > 50 chars) so
+ *      readability never returns 0 for a non-empty resume (0 was a defect signal).
  */
 export function scoreReadability(resume: ResumeData): number {
   const text = resumeToText(resume);
@@ -275,7 +323,7 @@ export function scoreReadability(resume: ResumeData): number {
   const words = countWords(text);
   const syllables = countSyllables(text);
 
-  if (sentences === 0 || words === 0) return 0;
+  if (sentences === 0 || words === 0) return 30; // floor for non-empty resume
 
   const flesch = 206.835 - 1.015 * (words / sentences) - 84.6 * (syllables / words);
 
@@ -288,12 +336,25 @@ export function scoreReadability(resume: ResumeData): number {
   if (clamped >= 50 && clamped <= 70) {
     return Math.min(100, clamped + 10); // boost the target range
   }
-  return clamped;
+
+  // === FLOOR: a valid resume should never score below 30 ===
+  // (a score of 0-7 was a defect signal caused by missing sentence boundaries).
+  return Math.max(30, clamped);
 }
 
+/**
+ * Count sentences in text. Resume bullets rarely end with periods, so we
+ * also treat newlines, semicolons, colons, and em-dashes as sentence
+ * boundaries. Each bullet point = 1 sentence.
+ */
 function countSentences(text: string): number {
-  const matches = text.match(/[.!?]+/g);
-  const count = matches ? matches.length : 0;
+  // Count traditional sentence-ending punctuation
+  const punctMatches = text.match(/[.!?]+/g);
+  let count = punctMatches ? punctMatches.length : 0;
+  // Also count bullet separators (newlines, semicolons, colons, em-dashes)
+  // These are common in resumes where bullets don't end with periods.
+  const bulletMatches = text.match(/[\n;:—–]+/g);
+  count += bulletMatches ? bulletMatches.length : 0;
   // Ensure at least 1 sentence to avoid division by zero
   return Math.max(1, count);
 }

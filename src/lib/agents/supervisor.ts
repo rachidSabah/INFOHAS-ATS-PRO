@@ -160,10 +160,38 @@ function logEvent(type: PipelineEvent["type"], payload?: any): void {
 }
 
 function updateContext(patch: Partial<GlobalPipelineContext>): void {
+  // === IMMUTABILITY GUARD (V3.0.1) ===
+  // Deep-clone any resume/JD objects before storing them in the context,
+  // so downstream agents (CoverLetter, Interview, CareerCoach) cannot
+  // mutate the original resume/JD references. This prevents the "ATS score
+  // changed after Company Research" defect class caused by shared references.
+  const safePatch: Partial<GlobalPipelineContext> = { ...patch };
+  if (safePatch.originalResume) {
+    safePatch.originalResume = deepClone(safePatch.originalResume);
+  }
+  if (safePatch.optimizedResume) {
+    safePatch.optimizedResume = deepClone(safePatch.optimizedResume);
+  }
+  if (safePatch.jobDescription) {
+    safePatch.jobDescription = deepClone(safePatch.jobDescription);
+  }
   setState((prev) => ({
     ...prev,
-    context: { ...prev.context, ...patch, updatedAt: new Date().toISOString() },
+    context: { ...prev.context, ...safePatch, updatedAt: new Date().toISOString() },
   }));
+}
+
+/**
+ * Deep-clone an object using structuredClone (available in all modern
+ * browsers and Node 17+). Falls back to JSON parse/stringify for older
+ * environments. Ensures the context never shares references with the
+ * original objects.
+ */
+function deepClone<T>(obj: T): T {
+  if (typeof structuredClone === "function") {
+    try { return structuredClone(obj); } catch { /* fall through */ }
+  }
+  return JSON.parse(JSON.stringify(obj));
 }
 
 // ============================================================================
