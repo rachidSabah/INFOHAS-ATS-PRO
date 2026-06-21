@@ -324,6 +324,27 @@ export async function handleOptimizationRequested(
       reflection: cachedResult.reflection,
       atsScore: cachedResult.afterATS?.scores.ats ?? null,
     });
+
+    // === RE-RUN post-optimization agents if they're missing or empty ===
+    // The cache stores the V2 pipeline result, but the post-optimization
+    // agents (CoverLetter, Interview, CareerCoach) run AFTER the pipeline
+    // and their results are stored in the Supervisor context — NOT in the
+    // V2 PipelineResult. So when serving from cache, we need to re-run
+    // any post-optimization agent whose result is missing or empty.
+    // This fixes the "0 questions, readiness 0/100" bug where a stale
+    // cached run produced an empty interview package.
+    if (cachedResult.optimizedResume) {
+      const ctx = state.context;
+      const needsCoverLetter = !ctx.coverLetter;
+      const needsInterview = !ctx.interviewPackage || ctx.interviewPackage.questions.length === 0;
+      const needsCareerCoach = !ctx.careerRecommendations;
+      if (needsCoverLetter || needsInterview || needsCareerCoach) {
+        const company = cachedResult.companyIntelligence?.companyName ?? jd.company ?? "";
+        await runPostOptimizationAgents(cachedResult, jd);
+        void company; // used inside runPostOptimizationAgents
+      }
+    }
+
     setState((prev) => ({ ...prev, isRunning: false }));
     return cachedResult;
   }
@@ -470,14 +491,17 @@ async function runInterviewAgent(
   try {
     const cacheK = cacheKey("interview", resume.id, jd.id);
     const cached = getCached<any>(cacheK);
-    if (cached) {
+    // === NEVER serve a cached package with 0 questions ===
+    // The old bug produced cached packages with 0 questions + readiness 0.
+    // If we find one, ignore it and regenerate.
+    if (cached && cached.questions && cached.questions.length > 0) {
       updateContext({ interviewPackage: cached });
       updateAgent(agentId, { status: "completed", completedAt: new Date().toISOString(), log: "Interview package served from cache.", cached: true });
       return;
     }
 
     const result = await withRetry(() => callAI({
-      systemPrompt: "You are an expert interview coach. Generate a tailored interview package based on the candidate's resume and the target job. Return ONLY valid JSON.",
+      systemPrompt: "You are an expert interview coach. Generate a tailored interview package based on the candidate's resume and the target job. You MUST return ONLY valid JSON — no prose, no markdown fences, no explanations. The JSON must have a top-level 'questions' array.",
       userPrompt: `CANDIDATE RESUME: ${JSON.stringify({ name: resume.name, headline: resume.headline, experience: resume.experience.map((e) => ({ title: e.title, company: e.company, bullets: e.bullets.slice(0, 2) })), skills: resume.skills.map((s) => s.name) })}
 
 JOB: ${jd.title ?? "Role"} at ${company || "the company"}
@@ -486,16 +510,24 @@ JD: ${jd.rawText?.slice(0, 1500) ?? jd.keywords.join(", ")}
 ${companyIntel ? `COMPANY INTELLIGENCE: values=${companyIntel.values?.join(", ")}, valued competencies=${companyIntel.valuedCompetencies?.join(", ")}` : ""}
 ${skillGap ? `SKILL GAPS (focus questions here): critical=${skillGap.missingSkills?.critical?.join(", ")}` : ""}
 
-Generate 9-12 interview questions (mix of technical, behavioral, situational, company-fit). For each, provide a recommended answer, talking points, and follow-up questions. Also compute a readiness score (0-100), list weak areas, and provide company insights.
+Generate exactly 9 interview questions (3 behavioral, 3 technical, 2 situational, 1 company-fit). For each question, provide a recommended answer, 3 talking points, and 2 follow-up questions.
 
-Return JSON: { "questions": [{ "category": "...", "question": "...", "difficulty": "easy|medium|hard", "recommendedAnswer": "...", "talkingPoints": ["..."], "followUps": ["..."] }], "readinessScore": <0-100>, "weakAreas": ["..."], "companyInsights": ["..."] }`,
+CRITICAL: Return ONLY this exact JSON shape (no other text):
+{"questions":[{"category":"Behavioral","question":"...","difficulty":"medium","recommendedAnswer":"...","talkingPoints":["...","...","..."],"followUps":["...","..."]}],"readinessScore":75,"weakAreas":["..."],"companyInsights":["..."]}
+
+The 'questions' array MUST contain exactly 9 objects. The 'readinessScore' MUST be a number between 1 and 100. Do NOT wrap the questions in any other key — use 'questions' as the top-level array.`,
       maxTokens: 3000,
       taskCategory: "document",
     }), 1, "interview");
 
     let data: any;
     try { data = extractJSON<any>(result.text); }
-    catch { data = {}; }
+    catch {
+      // The AI returned non-JSON (prose, markdown, or empty). Log it so we
+      // can debug, then fall through to the fallback generator below.
+      console.warn("[InterviewAgent] AI did not return JSON. Response preview:", result.text?.slice(0, 200));
+      data = {};
+    }
 
     // === AGGRESSIVE DEFENSIVE NORMALIZATION ===
     // The AI may return questions under a different key name (e.g.
