@@ -827,8 +827,67 @@ Analyze the skill gap between the candidate and the job. Return JSON:
       let data: SkillGapReport;
       try { data = extractJSON<SkillGapReport>(result.text); }
       catch { throw new Error("Failed to parse AI response. Please try again."); }
-      setReport(data);
-      toast.success(`Skill analysis complete — ${data.overallMatch}% overall match`);
+
+      // === DEFENSIVE NORMALIZATION ===
+      // The AI sometimes returns array elements as objects (e.g.
+      // {goal, actions, resources}) or numbers instead of strings, which
+      // crashes React with error #31 ("Objects are not valid as a React
+      // child") when we render {item} inside <li>. Coerce every field to
+      // its expected type so the render is always safe.
+      const toArray = (v: any): string[] => {
+        if (!Array.isArray(v)) {
+          if (typeof v === "string" && v.trim()) return v.split(/[,\n]/).map((s) => s.trim()).filter(Boolean);
+          return [];
+        }
+        return v.map((item) => {
+          if (item === null || item === undefined) return "";
+          if (typeof item === "string") return item;
+          if (typeof item === "number" || typeof item === "boolean") return String(item);
+          // Object — serialize to a readable string so no info is lost
+          try {
+            const vals = Object.values(item as any);
+            // If all values are strings/numbers, join them with " — "
+            if (vals.length > 0 && vals.every((x) => typeof x === "string" || typeof x === "number")) {
+              return vals.map(String).join(" — ");
+            }
+            return JSON.stringify(item);
+          } catch { return String(item); }
+        }).filter((s) => s.length > 0);
+      };
+      const toStr = (v: any): string => {
+        if (v === null || v === undefined) return "";
+        if (typeof v === "string") return v;
+        if (typeof v === "number" || typeof v === "boolean") return String(v);
+        try { return JSON.stringify(v); } catch { return String(v); }
+      };
+      const toNum = (v: any): number => {
+        const n = Number(v);
+        return Number.isFinite(n) ? n : 0;
+      };
+      const normalized: SkillGapReport = {
+        overallMatch: toNum(data.overallMatch),
+        technicalMatch: toNum(data.technicalMatch),
+        softSkillMatch: toNum(data.softSkillMatch),
+        leadershipMatch: toNum(data.leadershipMatch),
+        certificationMatch: toNum(data.certificationMatch),
+        industryMatch: toNum(data.industryMatch),
+        criticalGaps: toArray(data.criticalGaps),
+        importantGaps: toArray(data.importantGaps),
+        niceToHaveGaps: toArray(data.niceToHaveGaps),
+        skillsToLearn: toArray(data.skillsToLearn),
+        certifications: toArray(data.certifications),
+        courses: toArray(data.courses),
+        projects: toArray(data.projects),
+        resumeRecommendations: toArray(data.resumeRecommendations),
+        interviewTopics: toArray(data.interviewTopics),
+        likelyQuestions: toArray(data.likelyQuestions),
+        day30: toStr(data.day30),
+        day60: toStr(data.day60),
+        day90: toStr(data.day90),
+        month6: toStr(data.month6),
+      };
+      setReport(normalized);
+      toast.success(`Skill analysis complete — ${normalized.overallMatch}% overall match`);
     } catch (e: any) { toast.error(e?.message || "Analysis failed."); }
     finally { setLoading(false); }
   };

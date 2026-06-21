@@ -315,13 +315,149 @@ Rules:
         throw new Error("AI response missing required modules. Please try again.");
       }
 
+      // === DEFENSIVE NORMALIZATION ===
+      // The AI may return array elements as objects (e.g. {goal, actions, resources})
+      // instead of plain strings, which crashes React with error #31
+      // ("Objects are not valid as a React child") when we render {item} inside
+      // <li>/<Badge>. Coerce every array field to string[] and every scalar to
+      // its expected type so the render is always safe.
+      const toArray = (v: any): string[] => {
+        if (!Array.isArray(v)) {
+          if (typeof v === "string" && v.trim()) return v.split(/[,\n]/).map((s) => s.trim()).filter(Boolean);
+          return [];
+        }
+        return v.map((item) => {
+          if (item === null || item === undefined) return "";
+          if (typeof item === "string") return item;
+          if (typeof item === "number" || typeof item === "boolean") return String(item);
+          try {
+            const vals = Object.values(item as any);
+            if (vals.length > 0 && vals.every((x) => typeof x === "string" || typeof x === "number")) {
+              return vals.map(String).join(" — ");
+            }
+            return JSON.stringify(item);
+          } catch { return String(item); }
+        }).filter((s) => s.length > 0);
+      };
+      const toStr = (v: any): string => {
+        if (v === null || v === undefined) return "";
+        if (typeof v === "string") return v;
+        if (typeof v === "number" || typeof v === "boolean") return String(v);
+        try { return JSON.stringify(v); } catch { return String(v); }
+      };
+      const toNum = (v: any): number => {
+        const n = Number(v);
+        return Number.isFinite(n) ? n : 0;
+      };
+      // Preserve object-shaped array elements (like betterBulletPoints {original, improved}
+      // and benchmarkComparisons {metric, candidate, ...}) but only if they're objects.
+      const toObjArray = <T,>(v: any): T[] => Array.isArray(v) ? v.filter((x) => x && typeof x === "object") : [];
+      // Section detection array — each item is {section, detected, confidence}
+      const toSectionArray = (v: any) => {
+        if (!Array.isArray(v)) return [];
+        return v.map((item) => ({
+          section: toStr(item?.section),
+          detected: !!item?.detected,
+          confidence: toNum(item?.confidence),
+        }));
+      };
+      // Fix items — each is {fix, impact}
+      const toFixArray = (v: any) => {
+        if (!Array.isArray(v)) return [];
+        return v.map((item) => ({
+          fix: toStr(item?.fix),
+          impact: toStr(item?.impact),
+        }));
+      };
+      // Section feedback — each is {section, score, strengths[], weaknesses[], recommendations[]}
+      const toSectionFeedback = (v: any) => {
+        if (!Array.isArray(v)) return [];
+        return v.map((item) => ({
+          section: toStr(item?.section),
+          score: toNum(item?.score),
+          strengths: toArray(item?.strengths),
+          weaknesses: toArray(item?.weaknesses),
+          recommendations: toArray(item?.recommendations),
+        }));
+      };
+
+      // Normalize each module
+      const normAts = {
+        atsScore: toNum(data.ats.atsScore),
+        keywordMatch: toNum(data.ats.keywordMatch),
+        missingKeywords: toArray(data.ats.missingKeywords),
+        formattingIssues: toArray(data.ats.formattingIssues),
+        sectionDetection: toSectionArray(data.ats.sectionDetection),
+        parsingRisks: toArray(data.ats.parsingRisks),
+        graphicsRisks: toArray(data.ats.graphicsRisks),
+        tablesRisks: toArray(data.ats.tablesRisks),
+        fileCompatibility: toArray(data.ats.fileCompatibility),
+        passProbability: toNum(data.ats.passProbability),
+        recommendations: toArray(data.ats.recommendations),
+      };
+      const normRecruiter = {
+        overallScore: toNum(data.recruiter.overallScore),
+        sections: toSectionFeedback(data.recruiter.sections),
+      };
+      const normJobMatch = data.jobMatch ? {
+        overallMatch: toNum(data.jobMatch.overallMatch),
+        atsMatch: toNum(data.jobMatch.atsMatch),
+        experienceMatch: toNum(data.jobMatch.experienceMatch),
+        skillMatch: toNum(data.jobMatch.skillMatch),
+        educationMatch: toNum(data.jobMatch.educationMatch),
+        industryMatch: toNum(data.jobMatch.industryMatch),
+        missingSkills: toArray(data.jobMatch.missingSkills),
+        missingKeywords: toArray(data.jobMatch.missingKeywords),
+        missingCertifications: toArray(data.jobMatch.missingCertifications),
+      } : null;
+      const normBenchmark = {
+        industry: toStr(data.benchmark.industry),
+        role: toStr(data.benchmark.role),
+        seniority: toStr(data.benchmark.seniority),
+        country: toStr(data.benchmark.country),
+        industryReadinessScore: toNum(data.benchmark.industryReadinessScore),
+        benchmarkComparisons: toObjArray<any>(data.benchmark.benchmarkComparisons).map((b) => ({
+          metric: toStr(b.metric),
+          candidate: toNum(b.candidate),
+          industryAverage: toNum(b.industryAverage),
+          topPercentile: toNum(b.topPercentile),
+        })),
+        insights: toArray(data.benchmark.insights),
+      };
+      const normImprovements = {
+        betterSummary: toStr(data.improvements.betterSummary),
+        betterHeadlines: toArray(data.improvements.betterHeadlines),
+        betterSkills: toArray(data.improvements.betterSkills),
+        betterBulletPoints: toObjArray<any>(data.improvements.betterBulletPoints).map((b) => ({
+          original: toStr(b.original),
+          improved: toStr(b.improved),
+        })),
+        betterAchievements: toArray(data.improvements.betterAchievements),
+        actionVerbs: toArray(data.improvements.actionVerbs),
+        metrics: toArray(data.improvements.metrics),
+        highValueKeywords: toArray(data.improvements.highValueKeywords),
+      };
+      const normActionPlan = {
+        criticalFixes: toFixArray(data.actionPlan.criticalFixes),
+        highPriorityFixes: toFixArray(data.actionPlan.highPriorityFixes),
+        optionalImprovements: toFixArray(data.actionPlan.optionalImprovements),
+        expectedAtsIncrease: toNum(data.actionPlan.expectedAtsIncrease),
+      };
+      const normInterview = {
+        likelyQuestions: toArray(data.interviewReadiness.likelyQuestions),
+        weakAreas: toArray(data.interviewReadiness.weakAreas),
+        talkingPoints: toArray(data.interviewReadiness.talkingPoints),
+        preparationAdvice: toArray(data.interviewReadiness.preparationAdvice),
+      };
+
       // Compute dashboard aggregate scores
-      const formattingScore = data.ats.atsScore && data.ats.formattingIssues
-        ? Math.max(0, 100 - data.ats.formattingIssues.length * 8) : data.ats.atsScore || 0;
+      const formattingScore = normAts.formattingIssues.length > 0
+        ? Math.max(0, 100 - normAts.formattingIssues.length * 8)
+        : normAts.atsScore;
       const readabilityScore = Math.round(
-        (data.recruiter.sections.find((s: any) => s.section === "Summary")?.score ?? 5) * 10
+        (normRecruiter.sections.find((s) => s.section === "Summary")?.score ?? 5) * 10
       );
-      const recruiterScore = data.recruiter.overallScore || 0;
+      const recruiterScore = normRecruiter.overallScore;
 
       const newReport: ResumeReviewReport = {
         id: uid("rr"),
@@ -333,20 +469,20 @@ Rules:
         industryProfile: industryProfile?.label ?? "Generic",
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
-        ats: data.ats,
-        recruiter: data.recruiter,
-        jobMatch: data.jobMatch ?? null,
-        benchmark: data.benchmark,
-        improvements: data.improvements,
-        actionPlan: data.actionPlan,
-        interviewReadiness: data.interviewReadiness,
+        ats: normAts,
+        recruiter: normRecruiter,
+        jobMatch: normJobMatch,
+        benchmark: normBenchmark,
+        improvements: normImprovements,
+        actionPlan: normActionPlan,
+        interviewReadiness: normInterview,
         dashboard: {
-          atsScore: data.ats.atsScore ?? 0,
+          atsScore: normAts.atsScore,
           recruiterScore,
-          jobMatch: data.jobMatch?.overallMatch ?? null,
+          jobMatch: normJobMatch?.overallMatch ?? null,
           formattingScore,
           readabilityScore,
-          industryBenchmark: data.benchmark.industryReadinessScore ?? 0,
+          industryBenchmark: normBenchmark.industryReadinessScore,
         },
       };
 
