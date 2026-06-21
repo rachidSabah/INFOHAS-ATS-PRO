@@ -1094,9 +1094,52 @@ If you don't know specific information, use "Information not available" — neve
       try { data = extractJSON<CompanyIntel>(result.text); }
       catch { throw new Error("Failed to parse AI response. Please try again."); }
 
-      setIntel(data);
+      // === DEFENSIVE NORMALIZATION ===
+      // The AI may return array fields as strings (or omit them entirely),
+      // which would crash the render when we call .map() / .join() on them.
+      // Coerce every field to its expected type so the render is always safe.
+      const toArray = (v: any): string[] => {
+        if (Array.isArray(v)) return v.map((x) => String(x));
+        if (typeof v === "string" && v.trim()) return v.split(/[,\n]/).map((s) => s.trim()).filter(Boolean);
+        return [];
+      };
+      const toStr = (v: any): string => (v === null || v === undefined) ? "" : String(v);
+      const toNum = (v: any): number => {
+        const n = Number(v);
+        return Number.isFinite(n) ? n : 0;
+      };
+      const normalized: CompanyIntel = {
+        overview: toStr(data.overview),
+        mission: toStr(data.mission),
+        vision: toStr(data.vision),
+        values: toArray(data.values),
+        culture: toStr(data.culture),
+        products: toArray(data.products),
+        employeeCount: toStr(data.employeeCount),
+        headquarters: toStr(data.headquarters),
+        leadership: toStr(data.leadership),
+        recentNews: toArray(data.recentNews),
+        hiringTrends: toStr(data.hiringTrends),
+        interviewProcess: toStr(data.interviewProcess),
+        interviewDifficulty: toStr(data.interviewDifficulty),
+        commonQuestions: toArray(data.commonQuestions),
+        valuesQuestions: toArray(data.valuesQuestions),
+        fitScore: toNum(data.fitScore),
+        fitStrengths: toArray(data.fitStrengths),
+        fitWeaknesses: toArray(data.fitWeaknesses),
+        fitOpportunities: toArray(data.fitOpportunities),
+        fitRisks: toArray(data.fitRisks),
+        interviewFocusAreas: toArray(data.interviewFocusAreas),
+        atsVendor: toStr(data.atsVendor),
+        screeningCriteria: toArray(data.screeningCriteria),
+        atsRecommendations: toArray(data.atsRecommendations),
+        networkingRecommendations: toArray(data.networkingRecommendations),
+        departmentsToTarget: toArray(data.departmentsToTarget),
+        linkedinStrategy: toStr(data.linkedinStrategy),
+      };
+      setIntel(normalized);
       const webData = await webPromise;
-      setWebResults(webData.results || []);
+      setWebResults(Array.isArray(webData?.results) ? webData.results : []);
       toast.success(`Company intelligence generated for ${targetCompany}`);
     } catch (e: any) {
       toast.error(e?.message || "Research failed.");
@@ -1183,12 +1226,19 @@ If you don't know specific information, use "Information not available" — neve
           {webResults.length > 0 && (
             <Card><CardHeader className="pb-2"><CardTitle className="text-xs flex items-center gap-1.5"><Icon name="Globe" className="w-3.5 h-3.5 text-brand" /> Live Web Research</CardTitle></CardHeader>
             <CardContent className="pt-0"><div className="space-y-1.5 max-h-40 overflow-y-auto">
-              {webResults.slice(0, 8).map((r, i) => (
-                <a key={i} href={r.url} target="_blank" rel="noreferrer noopener" className="block rounded-lg p-2 hover:bg-secondary/50 transition">
-                  <div className="text-xs font-medium text-brand truncate">{r.title}</div>
-                  <div className="text-[10px] text-muted-foreground truncate">{r.source} — {r.snippet?.slice(0, 100)}</div>
-                </a>
-              ))}
+              {webResults.slice(0, 8).map((r, i) => {
+                // Defensive: r may be missing url/title/source/snippet
+                const url = typeof r?.url === "string" ? r.url : "#";
+                const title = typeof r?.title === "string" ? r.title : "(untitled)";
+                const source = typeof r?.source === "string" ? r.source : "unknown";
+                const snippet = typeof r?.snippet === "string" ? r.snippet.slice(0, 100) : "";
+                return (
+                  <a key={i} href={url} target="_blank" rel="noreferrer noopener" className="block rounded-lg p-2 hover:bg-secondary/50 transition">
+                    <div className="text-xs font-medium text-brand truncate">{title}</div>
+                    <div className="text-[10px] text-muted-foreground truncate">{source}{snippet ? ` — ${snippet}` : ""}</div>
+                  </a>
+                );
+              })}
             </div></CardContent></Card>
           )}
         </>

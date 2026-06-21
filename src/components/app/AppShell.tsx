@@ -39,6 +39,7 @@ import {
   AiJobMatch, AiAchievement, Integrations,
 } from "./modules/CareerTools";
 import { ResumeReviewPlatform } from "./modules/ResumeReviewPlatform";
+import { SafeRender } from "./SafeRender";
 import type { ViewKey } from "@/lib/types";
 
 const VIEW_COMPONENTS: Record<ViewKey, React.FC> = {
@@ -164,6 +165,8 @@ export function AppShell() {
 
   // If the view is restricted, render the dashboard while the redirect effect runs
   const effectiveView = canAccessView(view, role) ? view : "dashboard";
+  // Build a friendly label for the error boundary based on the view
+  const viewLabel = effectiveView.replace(/-/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
   const ActiveView = VIEW_COMPONENTS[effectiveView] ?? Dashboard;
 
   return (
@@ -180,7 +183,9 @@ export function AppShell() {
               exit={{ opacity: 0, y: -4 }}
               transition={{ duration: 0.2 }}
             >
-              <ActiveView />
+              <SafeRender label={viewLabel}>
+                <ActiveView />
+              </SafeRender>
             </motion.div>
           </AnimatePresence>
         </main>
