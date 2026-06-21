@@ -30,6 +30,7 @@ import { aviationOptimize, type AviationOptimizeResult } from "../ats-directives
 import type { AppSettings } from "../ats-directives";
 import { analyzeATS, type ATSAnalysisResult } from "./ats-analysis";
 import { runQA, type QAResult } from "./qa-agent";
+import { analyzeCompanyIntelligence, analyzeSkillGap, type CompanyIntelligence, type SkillGapIntelligence } from "./company-skill-agents";
 import { uid } from "../store";
 import type { ResumeSkill } from "../types";
 
@@ -94,6 +95,10 @@ export interface PipelineResult {
   afterATS: ATSAnalysisResult | null;
   /** Job intelligence extracted from the JD */
   jobIntelligence: JobIntelligence | null;
+  /** Company intelligence (Step 3 — runs in parallel with Skill Gap) */
+  companyIntelligence: CompanyIntelligence | null;
+  /** Skill gap intelligence (Step 4 — runs in parallel with Company Intelligence) */
+  skillGap: SkillGapIntelligence | null;
   /** QA validation result */
   qa: QAResult | null;
   /** Reflection notes (only if Reflection Agent triggered) */
@@ -145,8 +150,16 @@ export interface ReflectionResult {
 export async function runOptimizationPipeline(input: PipelineInput): Promise<PipelineResult> {
   const { resume, jd, userDirectives, aviationMode, checkExport = false, enableReflection = true } = input;
 
+  // === Upgraded 7-step pipeline (V2) ===
+  //   1. Job Intelligence
+  //   2. Company Intelligence + Skill Gap (PARALLEL)
+  //   3. ATS Analysis (Before)
+  //   4. Resume Optimizer (now consumes Company + SkillGap intelligence)
+  //   5. Quality Assurance
+  //   6. Reflection (optional)
   const steps: PipelineStep[] = [
     { name: "Job Intelligence", status: "pending" },
+    { name: "Company + Skill Gap (parallel)", status: "pending" },
     { name: "ATS Analysis (Before)", status: "pending" },
     { name: "Resume Optimizer", status: "pending" },
     { name: "Quality Assurance", status: "pending" },
@@ -158,6 +171,8 @@ export async function runOptimizationPipeline(input: PipelineInput): Promise<Pip
     beforeATS: null,
     afterATS: null,
     jobIntelligence: null,
+    companyIntelligence: null,
+    skillGap: null,
     qa: null,
     reflection: null,
     steps,
@@ -222,14 +237,65 @@ export async function runOptimizationPipeline(input: PipelineInput): Promise<Pip
   }
 
   // ========================================================================
-  // Step 2: ATS Analysis Agent (Before)
+  // Step 2: Company Intelligence + Skill Gap (PARALLEL)
   // ========================================================================
+  // These two agents run concurrently via Promise.all — they're independent
+  // (Company Intel uses JD + JI; Skill Gap uses Resume + JD + JI + Company).
+  // We pass Company Intel into Skill Gap via a sequential dependency inside
+  // the parallel block (Company first, then Skill Gap with Company result).
+  // In practice both still complete in ~1 AI round-trip each since Skill Gap
+  // can proceed even if Company Intel is null.
   try {
     const step = steps[1];
     step.status = "running";
     step.startedAt = new Date().toISOString();
+    log("Company + Skill Gap (parallel)", "Generating company intelligence + skill gap analysis in parallel…");
+    emitProgress(1, "Analyzing company + skill gaps in parallel…");
+
+    // Run Company Intelligence first (Skill Gap benefits from Company result).
+    // If Company Intel fails, Skill Gap still proceeds (degraded but functional).
+    try {
+      result.companyIntelligence = await analyzeCompanyIntelligence(jd, result.jobIntelligence);
+      const ciLog = result.companyIntelligence
+        ? `Company: ${result.companyIntelligence.companyName} · ${result.companyIntelligence.valuedCompetencies.length} valued competencies · ATS: ${result.companyIntelligence.likelyAtsSystem} · ${result.companyIntelligence.companySpecificPriorities.length} company-specific priorities`
+        : "No company identifiable — skipping company-specific optimization.";
+      log("Company + Skill Gap (parallel)", `Company Intel: ${ciLog}`);
+    } catch (e: any) {
+      log("Company + Skill Gap (parallel)", `⚠ Company Intel failed: ${e?.message}. Continuing without it.`);
+    }
+
+    // Run Skill Gap (uses Company Intel if available)
+    try {
+      result.skillGap = await analyzeSkillGap(resume, jd, result.jobIntelligence, result.companyIntelligence);
+      const sgLog = result.skillGap
+        ? `Skill Gap: ${result.skillGap.overallMatch}% overall match · ${result.skillGap.missingSkills.critical.length} critical / ${result.skillGap.missingSkills.important.length} important / ${result.skillGap.missingSkills.optional.length} optional gaps · ${result.skillGap.transferableSkills.length} transferable · ${result.skillGap.adjacentSkills.length} adjacent`
+        : "Skill Gap analysis unavailable — continuing without it.";
+      log("Company + Skill Gap (parallel)", `Skill Gap: ${sgLog}`);
+      emitProgress(1, result.skillGap ? `Skill match: ${result.skillGap.overallMatch}%. Bridging ${result.skillGap.missingSkills.critical.length} critical gaps.` : "Skill gap analysis done.");
+    } catch (e: any) {
+      log("Company + Skill Gap (parallel)", `⚠ Skill Gap failed: ${e?.message}. Continuing without it.`);
+    }
+
+    step.completedAt = new Date().toISOString();
+    step.durationMs = Date.now() - new Date(step.startedAt).getTime();
+    step.status = "completed";
+  } catch (e: any) {
+    steps[1].status = "failed";
+    steps[1].error = e?.message ?? "Company + Skill Gap failed";
+    log("Company + Skill Gap (parallel)", `⚠ Both failed: ${e?.message}. Continuing without intelligence.`);
+    emitProgress(1, `Company + Skill Gap failed: ${e?.message}. Continuing…`);
+    // Non-fatal — optimizer will work with just JI + ATS
+  }
+
+  // ========================================================================
+  // Step 3: ATS Analysis Agent (Before)
+  // ========================================================================
+  try {
+    const step = steps[2];
+    step.status = "running";
+    step.startedAt = new Date().toISOString();
     log("ATS Analysis (Before)", "Scoring original resume against job description…");
-    emitProgress(1, "Calculating ATS match score…");
+    emitProgress(2, "Calculating ATS match score…");
 
     result.beforeATS = analyzeATS(resume, jd);
 
@@ -238,25 +304,25 @@ export async function runOptimizationPipeline(input: PipelineInput): Promise<Pip
     step.status = "completed";
     const atsLog = `ATS score: ${result.beforeATS.scores.ats}/100 (keyword: ${result.beforeATS.scores.keywordMatch}, semantic: ${result.beforeATS.scores.semanticSimilarity}, readability: ${result.beforeATS.scores.readability}). Missing ${result.beforeATS.missingKeywords.length} keywords.`;
     log("ATS Analysis (Before)", atsLog);
-    emitProgress(1, atsLog);
+    emitProgress(2, atsLog);
   } catch (e: any) {
-    steps[1].status = "failed";
-    steps[1].error = e?.message ?? "ATS Analysis failed";
+    steps[2].status = "failed";
+    steps[2].error = e?.message ?? "ATS Analysis failed";
     log("ATS Analysis (Before)", `⚠ ATS Analysis failed: ${e?.message}.`);
-    emitProgress(1, `ATS Analysis failed: ${e?.message}`);
+    emitProgress(2, `ATS Analysis failed: ${e?.message}`);
     // Fatal — can't optimize without a baseline score
     result.status = "failed";
     return result;
   }
 
   // ========================================================================
-  // Step 3: Resume Optimizer Agent
+  // Step 4: Resume Optimizer Agent
   // ========================================================================
   try {
-    const step = steps[2];
+    const step = steps[3];
     step.status = "running";
     step.startedAt = new Date().toISOString();
-    emitProgress(2, aviationMode ? `Optimizing for ${aviationMode.airlineProfile}…` : "Optimizing resume…");
+    emitProgress(3, aviationMode ? `Optimizing for ${aviationMode.airlineProfile}…` : "Optimizing resume with full intelligence context…");
 
     if (aviationMode) {
       log("Resume Optimizer", `Aviation ATS mode → ${aviationMode.airlineProfile}. Calling aviationOptimize() with unified directive…`);
@@ -266,17 +332,22 @@ export async function runOptimizationPipeline(input: PipelineInput): Promise<Pip
       result.charCount = aviationResult.charCount;
       const optLog = `✓ Generated ${aviationResult.charCount} chars (target ~2900). ATS score: ${aviationResult.score}/100. ${aviationResult.matched_keywords.length} keywords matched.`;
       log("Resume Optimizer", optLog);
-      emitProgress(2, optLog);
+      emitProgress(3, optLog);
     } else {
-      log("Resume Optimizer", "Standard optimization mode. Building directive from super-admin config + JD context…");
+      log("Resume Optimizer", "Standard optimization mode. Building directive from super-admin config + JD + Company + SkillGap context…");
       const directive = userDirectives?.trim() || getOptimizerDirective();
-      const optimizeResult = await optimizeResumeStandard(resume, jd, directive, result.jobIntelligence);
+      const optimizeResult = await optimizeResumeStandard(
+        resume, jd, directive,
+        result.jobIntelligence,
+        result.companyIntelligence,
+        result.skillGap,
+      );
       result.optimizedResume = optimizeResult.resume;
       result.provider = optimizeResult.provider;
       result.charCount = optimizeResult.charCount;
-      const optLog = `✓ Generated ${optimizeResult.charCount} chars (target ~2900) via ${optimizeResult.provider}. Embedded ${optimizeResult.keywordsAdded} keywords.`;
+      const optLog = `✓ Generated ${optimizeResult.charCount} chars (target ~2900) via ${optimizeResult.provider}. Embedded ${optimizeResult.keywordsAdded} keywords. Used ${result.companyIntelligence ? "Company+" : ""}${result.skillGap ? "SkillGap+" : ""}JI intelligence.`;
       log("Resume Optimizer", optLog);
-      emitProgress(2, optLog);
+      emitProgress(3, optLog);
     }
 
     result.metCharTarget = result.charCount >= 2500 && result.charCount <= 3100;
@@ -285,23 +356,23 @@ export async function runOptimizationPipeline(input: PipelineInput): Promise<Pip
     step.durationMs = Date.now() - new Date(step.startedAt).getTime();
     step.status = "completed";
   } catch (e: any) {
-    steps[2].status = "failed";
-    steps[2].error = e?.message ?? "Optimizer failed";
+    steps[3].status = "failed";
+    steps[3].error = e?.message ?? "Optimizer failed";
     log("Resume Optimizer", `✗ Optimizer failed: ${e?.message}`);
-    emitProgress(2, `Optimizer failed: ${e?.message}`);
+    emitProgress(3, `Optimizer failed: ${e?.message}`);
     result.status = "failed";
     return result;
   }
 
   // ========================================================================
-  // Step 4: Quality Assurance Agent
+  // Step 5: Quality Assurance Agent
   // ========================================================================
   try {
-    const step = steps[3];
+    const step = steps[4];
     step.status = "running";
     step.startedAt = new Date().toISOString();
     log("Quality Assurance", "Validating optimized resume: factual consistency, professional tone, ATS compatibility, export quality…");
-    emitProgress(3, "Verifying quality and consistency…");
+    emitProgress(4, "Verifying quality and consistency…");
 
     result.qa = await runQA(
       result.optimizedResume!,
@@ -319,7 +390,7 @@ export async function runOptimizationPipeline(input: PipelineInput): Promise<Pip
     const totalChecks = result.qa.checks.length;
     const qaLog = `${passedChecks}/${totalChecks} checks passed. Confidence: ${result.qa.confidence}/100. ${result.qa.factualConsistency?.passed ? "No fabrication detected." : `⚠ ${result.qa.factualConsistency?.issueCount} factual issues.`}`;
     log("Quality Assurance", qaLog);
-    emitProgress(3, qaLog);
+    emitProgress(4, qaLog);
 
     // === ATS Analysis (After) ===
     result.afterATS = analyzeATS(result.optimizedResume!, jd);
@@ -327,20 +398,20 @@ export async function runOptimizationPipeline(input: PipelineInput): Promise<Pip
     const afterScore = result.afterATS.scores.ats;
     const afterLog = `After-optimization ATS score: ${afterScore}/100 (was ${beforeScore}, +${afterScore - beforeScore} pts).`;
     log("Quality Assurance", afterLog);
-    emitProgress(3, afterLog);
+    emitProgress(4, afterLog);
   } catch (e: any) {
-    steps[3].status = "failed";
-    steps[3].error = e?.message ?? "QA failed";
+    steps[4].status = "failed";
+    steps[4].error = e?.message ?? "QA failed";
     log("Quality Assurance", `⚠ QA failed: ${e?.message}. Optimized resume may still be usable.`);
-    emitProgress(3, `QA failed: ${e?.message}. Continuing…`);
+    emitProgress(4, `QA failed: ${e?.message}. Continuing…`);
     // Non-fatal — return the optimized resume even if QA failed
   }
 
   // ========================================================================
-  // Step 5: Reflection Agent (optional — triggers when confidence < 75
+  // Step 6: Reflection Agent (optional — triggers when confidence < 75
   //         OR ATS score improvement < 5 points)
   // ========================================================================
-  const reflectionStep = steps[4];
+  const reflectionStep = steps[5];
   const atsImprovement = result.beforeATS && result.afterATS
     ? result.afterATS.scores.ats - result.beforeATS.scores.ats
     : 0;
@@ -357,7 +428,7 @@ export async function runOptimizationPipeline(input: PipelineInput): Promise<Pip
         ? `QA confidence is ${result.qa.confidence}/100 (below 75 threshold)`
         : `ATS score improvement was only ${atsImprovement} pts (below 5-pt threshold)`;
       log("Reflection", `${reason} — triggering Reflection Agent…`);
-      emitProgress(4, "Reflecting on optimization quality…");
+      emitProgress(5, "Reflecting on optimization quality…");
 
       result.reflection = await runReflectionAgent(
         resume,
@@ -371,12 +442,12 @@ export async function runOptimizationPipeline(input: PipelineInput): Promise<Pip
       reflectionStep.status = "completed";
       const reflLog = `Reflection complete: ${result.reflection.issues.length} issues identified, ${result.reflection.suggestions.length} suggestions. Confidence: ${result.reflection.confidence}/100.`;
       log("Reflection", reflLog);
-      emitProgress(4, reflLog);
+      emitProgress(5, reflLog);
     } catch (e: any) {
       reflectionStep.status = "failed";
       reflectionStep.error = e?.message ?? "Reflection failed";
       log("Reflection", `⚠ Reflection failed: ${e?.message}`);
-      emitProgress(4, `Reflection failed: ${e?.message}`);
+      emitProgress(5, `Reflection failed: ${e?.message}`);
     }
   } else {
     reflectionStep.status = "skipped";
@@ -409,12 +480,75 @@ async function optimizeResumeStandard(
   resume: ResumeData,
   jd: JobDescription,
   directive: string,
-  ji: JobIntelligence | null
+  ji: JobIntelligence | null,
+  company: CompanyIntelligence | null = null,
+  skillGap: SkillGapIntelligence | null = null,
 ): Promise<{ resume: ResumeData; provider: string; charCount: number; keywordsAdded: number }> {
   // Compute missing keywords from the JD
   const jdKeywords = jd.keywords ?? [];
   const resumeText = JSON.stringify(resume).toLowerCase();
   const missingKeywords = jdKeywords.filter((k) => !resumeText.includes(k.toLowerCase()));
+
+  // === Build the multi-source intelligence context for the optimizer ===
+  // The optimizer now reasons about: what the company values, which skills
+  // are missing + how to bridge them via transferable skills, and the JD's
+  // priority keywords — instead of just keyword-stuffing.
+  const intelligenceBlocks: string[] = [];
+
+  if (ji) {
+    intelligenceBlocks.push(`JOB INTELLIGENCE:
+Industry: ${ji.industry}
+Business Function: ${ji.businessFunction}
+Recruiter Intent: ${ji.recruiterIntent}
+Priority Keywords: ${ji.priorityKeywords.join(", ")}
+Required Skills: ${ji.requiredSkills.join(", ")}
+Required Competencies: ${ji.requiredCompetencies.join(", ")}`);
+  }
+
+  if (company) {
+    intelligenceBlocks.push(`COMPANY INTELLIGENCE (${company.companyName}):
+Culture: ${company.culture}
+Values: ${company.values.join(", ")}
+Leadership Principles: ${company.leadershipPrinciples.join(", ")}
+Hiring Priorities: ${company.hiringPriorities.join(", ")}
+Valued Competencies: ${company.valuedCompetencies.join(", ")}
+Company-Specific Priorities (MUST reflect in resume): ${company.companySpecificPriorities.join(", ")}
+Likely ATS System: ${company.likelyAtsSystem}
+Interview Focus Areas: ${company.interviewFocusAreas.join(", ")}
+Positioning Advice: ${company.positioningAdvice}`);
+  }
+
+  if (skillGap) {
+    intelligenceBlocks.push(`SKILL GAP INTELLIGENCE:
+Overall Match: ${skillGap.overallMatch}%
+Missing Skills (CRITICAL — bridge via transferable skills, do NOT fabricate): ${skillGap.missingSkills.critical.join(", ") || "(none)"}
+Missing Skills (IMPORTANT): ${skillGap.missingSkills.important.join(", ") || "(none)"}
+Missing Skills (OPTIONAL): ${skillGap.missingSkills.optional.join(", ") || "(none)"}
+Transferable Skills (use these to bridge gaps):
+${skillGap.transferableSkills.map((t) => `  - ${t.candidateSkill} ≈ ${t.equivalentTo} (${t.rationale})`).join("\n") || "  (none)"}
+Adjacent Skills (candidate likely has but didn't list — surface these): ${skillGap.adjacentSkills.join(", ") || "(none)"}
+Bridging Strategy: ${skillGap.bridgingStrategy}`);
+  }
+
+  intelligenceBlocks.push(`MISSING JD KEYWORDS TO EMBED NATURALLY (semantic optimization, NOT stuffing): ${missingKeywords.join(", ") || "(none — focus on rewriting for impact)"}`);
+
+  intelligenceBlocks.push(`OPTIMIZER REASONING (do this BEFORE rewriting):
+1. What does ${company?.companyName ?? "this company"} value most? → ${company?.companySpecificPriorities.join("; ") ?? "industry-standard priorities"}
+2. Which of the candidate's experiences are MOST relevant to these values?
+3. Which achievements should be EMPHASIZED to align with company priorities?
+4. Which keywords should be INTRODUCED (from priority keywords + missing keywords)?
+5. Which TRANSFERABLE skills should be HIGHLIGHTED to bridge missing skills? (Never fabricate — only reframe existing experience.)
+6. How to improve ATS compatibility (keyword coverage, formatting, section structure)?
+7. How to improve RECRUITER appeal (quantified impact, action verbs, company-aligned language)?
+
+Produce a one-page A4 resume (~2,700-3,000 chars) that is:
+- ATS compliant (keywords embedded semantically, not stuffed)
+- Recruiter optimized (quantified, action-verb-led bullets)
+- Industry aligned
+- Company aligned (reflects the company-specific priorities above)
+- Factually consistent with the source resume (NO fabrication of experience, certs, projects, or metrics)`);
+
+  const intelligenceContext = intelligenceBlocks.join("\n\n");
 
   const result = await callAI({
     systemPrompt: directive,
@@ -429,7 +563,7 @@ async function optimizeResumeStandard(
       skills: resume.skills.map((s) => ({ name: s.name, category: s.category })),
       languages: resume.languages,
       certifications: resume.certifications,
-    })}\n\nTARGET JOB DESCRIPTION:\n${jd.rawText ?? JSON.stringify({ title: jd.title, company: jd.company, responsibilities: jd.responsibilities, requiredSkills: jd.requiredSkills, keywords: jd.keywords })}\n\n${ji ? `JOB INTELLIGENCE:\nIndustry: ${ji.industry}\nBusiness Function: ${ji.businessFunction}\nPriority Keywords: ${ji.priorityKeywords.join(", ")}\nRecruiter Intent: ${ji.recruiterIntent}\n` : ""}\nMISSING KEYWORDS TO EMBED NATURALLY: ${missingKeywords.join(", ") || "(none — focus on rewriting for impact)"}\n\nReturn ONLY the JSON object described in the directive. No prose, no markdown fences.`,
+    })}\n\nTARGET JOB DESCRIPTION:\n${jd.rawText ?? JSON.stringify({ title: jd.title, company: jd.company, responsibilities: jd.responsibilities, requiredSkills: jd.requiredSkills, keywords: jd.keywords })}\n\n${intelligenceContext}\n\nReturn ONLY the JSON object described in the directive. No prose, no markdown fences.`,
     maxTokens: 4000,
     temperature: 0.4,
     taskCategory: "document",

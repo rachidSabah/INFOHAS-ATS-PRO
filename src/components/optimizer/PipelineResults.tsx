@@ -24,7 +24,7 @@ interface PipelineResultsProps {
 }
 
 export function PipelineResults({ result }: PipelineResultsProps) {
-  const { beforeATS, afterATS, qa, reflection, steps, charCount, metCharTarget, provider } = result;
+  const { beforeATS, afterATS, qa, reflection, steps, charCount, metCharTarget, provider, jobIntelligence, companyIntelligence, skillGap } = result;
 
   if (!beforeATS || !afterATS) return null;
 
@@ -69,6 +69,91 @@ export function PipelineResults({ result }: PipelineResultsProps) {
           </div>
         </CardContent>
       </Card>
+
+      {/* === Intelligence Sources (V2 upgrade) === */}
+      {(companyIntelligence || skillGap || jobIntelligence) && (
+        <Card className="border-2 border-brand/20 bg-gradient-to-br from-brand/5 to-emerald-500/5 dark:from-brand/10 dark:to-emerald-500/10">
+          <CardHeader className="pb-3">
+            <CardTitle className="text-sm flex items-center gap-2">
+              <Icon name="Brain" className="w-4 h-4 text-brand" /> Optimization powered by
+            </CardTitle>
+            <CardDescription className="text-xs">
+              This optimization used {[
+                jobIntelligence && "Job Intelligence",
+                companyIntelligence && "Company Intelligence",
+                skillGap && "Skill Gap Intelligence",
+                "ATS Intelligence",
+                "Resume Intelligence",
+              ].filter(Boolean).join(" · ")}
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="pt-0 space-y-3">
+            {/* Company Intelligence summary */}
+            {companyIntelligence && (
+              <div className="rounded-lg border border-border bg-card/50 p-3">
+                <div className="flex items-center gap-2 mb-2">
+                  <Icon name="Building2" className="w-3.5 h-3.5 text-brand" />
+                  <span className="text-xs font-semibold">Company Intelligence · {companyIntelligence.companyName}</span>
+                  <Badge variant="outline" className="text-[9px] ml-auto">{companyIntelligence.likelyAtsSystem}</Badge>
+                </div>
+                <div className="grid sm:grid-cols-2 gap-2 text-[11px]">
+                  {companyIntelligence.companySpecificPriorities.length > 0 && (
+                    <div>
+                      <div className="text-muted-foreground uppercase text-[9px] mb-0.5">Company Priorities (reflected in resume)</div>
+                      <div className="flex flex-wrap gap-1">{companyIntelligence.companySpecificPriorities.slice(0, 5).map((p, i) => <Badge key={i} variant="brand" className="text-[9px]">{p}</Badge>)}</div>
+                    </div>
+                  )}
+                  {companyIntelligence.valuedCompetencies.length > 0 && (
+                    <div>
+                      <div className="text-muted-foreground uppercase text-[9px] mb-0.5">Valued Competencies</div>
+                      <div className="flex flex-wrap gap-1">{companyIntelligence.valuedCompetencies.slice(0, 5).map((c, i) => <Badge key={i} variant="outline" className="text-[9px]">{c}</Badge>)}</div>
+                    </div>
+                  )}
+                </div>
+                {companyIntelligence.positioningAdvice && (
+                  <p className="text-[11px] text-muted-foreground mt-2 italic">"{companyIntelligence.positioningAdvice}"</p>
+                )}
+              </div>
+            )}
+
+            {/* Skill Gap Intelligence summary */}
+            {skillGap && (
+              <div className="rounded-lg border border-border bg-card/50 p-3">
+                <div className="flex items-center gap-2 mb-2">
+                  <Icon name="GitCompare" className="w-3.5 h-3.5 text-brand" />
+                  <span className="text-xs font-semibold">Skill Gap Intelligence · {skillGap.overallMatch}% match</span>
+                  <Badge variant={skillGap.overallMatch >= 70 ? "success" : skillGap.overallMatch >= 50 ? "warning" : "danger"} className="text-[9px] ml-auto">
+                    {skillGap.missingSkills.critical.length} critical gaps bridged
+                  </Badge>
+                </div>
+                <div className="grid sm:grid-cols-3 gap-2 text-[11px]">
+                  {skillGap.missingSkills.critical.length > 0 && (
+                    <div>
+                      <div className="text-red-600 uppercase text-[9px] mb-0.5 font-semibold">Critical (bridged)</div>
+                      <div className="flex flex-wrap gap-1">{skillGap.missingSkills.critical.slice(0, 4).map((s, i) => <Badge key={i} variant="danger" className="text-[9px]">{s}</Badge>)}</div>
+                    </div>
+                  )}
+                  {skillGap.transferableSkills.length > 0 && (
+                    <div>
+                      <div className="text-emerald-600 uppercase text-[9px] mb-0.5 font-semibold">Transferable Used</div>
+                      <div className="flex flex-wrap gap-1">{skillGap.transferableSkills.slice(0, 4).map((t, i) => <Badge key={i} variant="success" className="text-[9px]">{t.candidateSkill}→{t.equivalentTo}</Badge>)}</div>
+                    </div>
+                  )}
+                  {skillGap.adjacentSkills.length > 0 && (
+                    <div>
+                      <div className="text-blue-600 uppercase text-[9px] mb-0.5 font-semibold">Adjacent Surfaced</div>
+                      <div className="flex flex-wrap gap-1">{skillGap.adjacentSkills.slice(0, 4).map((s, i) => <Badge key={i} variant="outline" className="text-[9px]">{s}</Badge>)}</div>
+                    </div>
+                  )}
+                </div>
+                {skillGap.bridgingStrategy && (
+                  <p className="text-[11px] text-muted-foreground mt-2 italic">Bridging: {skillGap.bridgingStrategy}</p>
+                )}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
 
       {/* === Score Breakdown === */}
       <Card>

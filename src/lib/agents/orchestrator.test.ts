@@ -303,7 +303,8 @@ describe("Orchestrator (runOptimizationPipeline)", () => {
 
     expect(result).toBeDefined();
     expect(result.status).toBe("completed");
-    expect(result.steps).toHaveLength(5);
+    // V2 pipeline: 6 steps (JI, Company+SkillGap, ATS-before, Optimizer, QA, Reflection)
+    expect(result.steps).toHaveLength(6);
     expect(result.optimizedResume).toBeTruthy();
     expect(result.beforeATS).toBeTruthy();
     expect(result.afterATS).toBeTruthy();

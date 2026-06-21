@@ -35,15 +35,17 @@ interface PipelineProgressViewProps {
   onRetry?: () => void;
 }
 
-// 7 steps per spec — step 1 (Parsing) + step 7 (Export Prep) wrap the 5-agent pipeline
+// 8 steps per V2 spec — step 1 (Parsing) + step 8 (Export Prep) wrap the
+// 6-agent pipeline (Job Intel, Company+SkillGap parallel, ATS, Optimizer, QA, Reflection).
 const ALL_STEPS = [
   { id: 0, name: "Parsing Resume", icon: "FileText", agent: "parser" },
-  { id: 1, name: "Job Analysis", icon: "Search", agent: "Job Intelligence" },
-  { id: 2, name: "ATS Analysis", icon: "ScanText", agent: "ATS Analysis (Before)" },
-  { id: 3, name: "Resume Optimization", icon: "Wand2", agent: "Resume Optimizer" },
-  { id: 4, name: "Quality Assurance", icon: "ShieldCheck", agent: "Quality Assurance" },
-  { id: 5, name: "Reflection", icon: "Brain", agent: "Reflection" },
-  { id: 6, name: "Export Preparation", icon: "Download", agent: "Export" },
+  { id: 1, name: "Job Intelligence", icon: "Search", agent: "Job Intelligence" },
+  { id: 2, name: "Company + Skill Gap", icon: "Building2", agent: "Company + Skill Gap (parallel)" },
+  { id: 3, name: "ATS Analysis", icon: "ScanText", agent: "ATS Analysis (Before)" },
+  { id: 4, name: "Resume Optimization", icon: "Wand2", agent: "Resume Optimizer" },
+  { id: 5, name: "Quality Assurance", icon: "ShieldCheck", agent: "Quality Assurance" },
+  { id: 6, name: "Reflection", icon: "Brain", agent: "Reflection" },
+  { id: 7, name: "Export Preparation", icon: "Download", agent: "Export" },
 ];
 
 export function PipelineProgressView({ progress, isRunning, result, error, onRetry }: PipelineProgressViewProps) {
@@ -54,24 +56,24 @@ export function PipelineProgressView({ progress, isRunning, result, error, onRet
   const currentStep = progress?.stepNumber ?? 0;
   const logLine = progress?.log ?? (error ? `Error: ${error}` : "Starting…");
 
-  // Map the orchestrator's 5 agent steps to our 7-step display.
-  // Orchestrator step indices: 0=JI, 1=ATS-before, 2=Optimizer, 3=QA, 4=Reflection
-  // Our display: 0=Parsing, 1=JI, 2=ATS, 3=Optim, 4=QA, 5=Reflection, 6=Export
+  // Map the orchestrator's 6 agent steps to our 8-step display.
+  // Orchestrator step indices: 0=JI, 1=Company+SkillGap, 2=ATS-before, 3=Optimizer, 4=QA, 5=Reflection
+  // Our display: 0=Parsing, 1=JI, 2=Company+SkillGap, 3=ATS, 4=Optim, 5=QA, 6=Reflection, 7=Export
   const getStepStatus = (displayStepIndex: number): PipelineStep["status"] => {
     if (result) {
       // Pipeline complete — derive status from the result
       if (displayStepIndex === 0) return "completed"; // Parsing always done
-      if (displayStepIndex === 6) return "completed"; // Export prep done
+      if (displayStepIndex === 7) return "completed"; // Export prep done
       const agentStep = result.steps[displayStepIndex - 1];
       return agentStep?.status ?? "skipped";
     }
     if (!isRunning) return "pending";
     // Map current progress step to display step
-    // Orchestrator stepNumber is 1-based: 1=JI, 2=ATS, 3=Optim, 4=QA, 5=Reflection
-    // Display step: 1=Parsing(done first), 2=JI, 3=ATS, 4=Optim, 5=QA, 6=Reflection, 7=Export
+    // Orchestrator stepNumber is 1-based: 1=JI, 2=Company+SkillGap, 3=ATS, 4=Optim, 5=QA, 6=Reflection
+    // Display step: 1=Parsing(done first), 2=JI, 3=Company+SkillGap, 4=ATS, 5=Optim, 6=QA, 7=Reflection, 8=Export
     if (displayStepIndex === 0) return "completed"; // Parsing done before pipeline
-    if (displayStepIndex === 6) return "pending"; // Export prep not started
-    const agentStepIndex = displayStepIndex - 1; // 0=JI, 1=ATS, 2=Optim, 3=QA, 4=Reflection
+    if (displayStepIndex === 7) return "pending"; // Export prep not started
+    const agentStepIndex = displayStepIndex - 1; // 0=JI, 1=Company+SkillGap, 2=ATS, 3=Optim, 4=QA, 5=Reflection
     const orchestratorStepNumber = currentStep; // 1-based from orchestrator
     if (agentStepIndex < orchestratorStepNumber - 1) return "completed";
     if (agentStepIndex === orchestratorStepNumber - 1) return "running";
@@ -80,14 +82,14 @@ export function PipelineProgressView({ progress, isRunning, result, error, onRet
 
   const getStepDuration = (displayStepIndex: number): number | undefined => {
     if (!result) return undefined;
-    if (displayStepIndex === 0 || displayStepIndex === 6) return undefined;
+    if (displayStepIndex === 0 || displayStepIndex === 7) return undefined;
     const agentStep = result.steps[displayStepIndex - 1];
     return agentStep?.durationMs;
   };
 
   const getStepError = (displayStepIndex: number): string | undefined => {
     if (!result) return undefined;
-    if (displayStepIndex === 0 || displayStepIndex === 6) return undefined;
+    if (displayStepIndex === 0 || displayStepIndex === 7) return undefined;
     const agentStep = result.steps[displayStepIndex - 1];
     return agentStep?.error;
   };
@@ -111,7 +113,7 @@ export function PipelineProgressView({ progress, isRunning, result, error, onRet
             {error ? "Optimization failed" : isRunning ? "Optimization in progress" : result ? "Optimization complete" : "Starting…"}
           </h3>
           <p className="text-xs text-muted-foreground mt-0.5">
-            {error ? "An error occurred — you can retry" : isRunning ? `Step ${Math.min(currentStep + 1, 7)} of 7: ${ALL_STEPS[Math.min(currentStep, 6)]?.name ?? "Processing"}` : "Pipeline finished"}
+            {error ? "An error occurred — you can retry" : isRunning ? `Step ${Math.min(currentStep + 1, 8)} of 8: ${ALL_STEPS[Math.min(currentStep, 7)]?.name ?? "Processing"}` : "Pipeline finished"}
           </p>
         </div>
         {isRunning && etaSeconds > 0 && (
