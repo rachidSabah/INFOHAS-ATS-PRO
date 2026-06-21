@@ -35,6 +35,23 @@ export default function Home() {
     }
   }, [needsRehydrate, rehydrateSession]);
 
+  // === V3.0.3: Restore pipeline snapshot on app load ===
+  // After rehydration, restore the Supervisor's pipeline state from
+  // localStorage so the user's in-progress optimization survives refresh,
+  // logout/login, and browser crash. Any agent that was "running" when the
+  // snapshot was taken is marked "pending" (since we can't resume an
+  // in-flight AI call) — the user can re-trigger it.
+  useEffect(() => {
+    if (isAuthed) {
+      import("@/lib/agents/supervisor").then(({ restoreFromSnapshot }) => {
+        const restored = restoreFromSnapshot();
+        if (restored) {
+          console.info("[pipeline] Restored pipeline state from snapshot.");
+        }
+      }).catch(() => {});
+    }
+  }, [isAuthed]);
+
   // Apply theme class (runs after rehydrateSession sets the real theme)
   useEffect(() => {
     if (typeof document !== "undefined") {

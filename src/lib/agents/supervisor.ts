@@ -31,6 +31,7 @@ import {
   type GlobalPipelineContext,
   type AgentState,
   type AgentId,
+  type AgentStatus,
   type PipelineEvent,
   createEmptyContext,
 } from "./pipeline-context";
@@ -42,6 +43,15 @@ import {
   ingestJobIntoMemory,
   recordOptimization,
 } from "./memory-agent";
+import {
+  saveSnapshot,
+  loadSnapshot,
+  clearSnapshot,
+  clearAllPipelineStateIncludingMetrics,
+  recordAgentMetric,
+  appendTimelineEntry,
+  type TimelineEntry,
+} from "./persistence";
 
 // ============================================================================
 // Cache (in-memory, per-session)
@@ -128,11 +138,14 @@ for (const def of AGENT_DEFINITIONS) {
 }
 
 // ============================================================================
-// State management
+// State management — with auto-persistence
 // ============================================================================
 
 function setState(updater: (prev: SupervisorState) => SupervisorState): void {
   state = updater(state);
+  // === AUTO-PERSIST: save a snapshot after every state change so the
+  // pipeline survives browser refresh, logout/login, and crash. ===
+  saveSnapshot(state);
   for (const listener of listeners) {
     try { listener(state); } catch {}
   }
@@ -147,7 +160,50 @@ export function subscribeToSupervisor(listener: (state: SupervisorState) => void
   return () => listeners.delete(listener);
 }
 
+/**
+ * Update an agent's status. Automatically:
+ *   - Records a timeline entry (start/complete/retry/fail)
+ *   - Records aggregate metrics (success/failure/retry count + duration)
+ *   - Persists the snapshot to localStorage
+ */
 function updateAgent(id: AgentId, patch: Partial<AgentState>): void {
+  const prevAgent = state.agents[id];
+  const prevStatus = prevAgent?.status;
+  const newStatus = patch.status ?? prevStatus;
+
+  // === Record timeline + metrics on status transitions ===
+  if (newStatus && newStatus !== prevStatus) {
+    const agentName = prevAgent?.name ?? id;
+    const now = new Date().toISOString();
+
+    if (newStatus === "running") {
+      appendTimelineEntry({
+        timestamp: now, agentId: id, agentName, event: "start",
+        message: patch.log ?? `${agentName} started.`,
+      });
+    } else if (newStatus === "completed" || newStatus === "cached") {
+      appendTimelineEntry({
+        timestamp: now, agentId: id, agentName, event: "complete",
+        durationMs: patch.durationMs,
+        message: patch.log ?? `${agentName} completed.`,
+      });
+      // Record success metric
+      if (prevStatus === "running") {
+        recordAgentMetric(id, "success", patch.durationMs);
+      }
+    } else if (newStatus === "failed") {
+      appendTimelineEntry({
+        timestamp: now, agentId: id, agentName, event: "fail",
+        durationMs: patch.durationMs, error: patch.error,
+        message: patch.log ?? `${agentName} failed: ${patch.error ?? "unknown"}`,
+      });
+      // Record failure metric
+      if (prevStatus === "running") {
+        recordAgentMetric(id, "failure", patch.durationMs);
+      }
+    }
+  }
+
   setState((prev) => ({
     ...prev,
     agents: { ...prev.agents, [id]: { ...prev.agents[id], ...patch } },
@@ -324,15 +380,44 @@ function finalizeSupervisorStatus(): void {
 // Retry helper
 // ============================================================================
 
-async function withRetry<T>(fn: () => Promise<T>, maxRetries = 1, label = "agent"): Promise<T> {
+/**
+ * Retry wrapper — 3 retries with 1s/5s/15s exponential backoff.
+ * Does NOT retry validation errors or user errors (they'll fail the same way).
+ * Records retry metrics + timeline entries.
+ */
+async function withRetry<T>(fn: () => Promise<T>, maxRetries = 3, label = "agent"): Promise<T> {
+  const retryDelays = [1000, 5000, 15000]; // 1s, 5s, 15s
   let lastError: any;
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     try {
       return await fn();
     } catch (e: any) {
       lastError = e;
+      // === Don't retry validation/user errors — they'll fail the same way ===
+      const msg = (e?.message ?? "").toLowerCase();
+      if (
+        msg.includes("validation") ||
+        msg.includes("invalid") ||
+        msg.includes("too short") ||
+        msg.includes("minimum") ||
+        msg.includes("not authorized") ||
+        msg.includes("forbidden") ||
+        msg.includes("unauthorized")
+      ) {
+        throw e;
+      }
       if (attempt < maxRetries) {
-        await new Promise((r) => setTimeout(r, 1000 * Math.pow(2, attempt)));
+        const delay = retryDelays[attempt] ?? 15000;
+        // Record retry metric + timeline
+        recordAgentMetric(label, "retry");
+        appendTimelineEntry({
+          timestamp: new Date().toISOString(),
+          agentId: label as AgentId,
+          agentName: label,
+          event: "retry",
+          message: `${label} retrying (attempt ${attempt + 1}/${maxRetries}) after ${delay}ms: ${e?.message ?? "error"}`,
+        });
+        await new Promise((r) => setTimeout(r, delay));
       }
     }
   }
@@ -986,10 +1071,68 @@ export function getCurrentProfile(): UserProfile {
 }
 
 /**
+ * Restore the Supervisor state from a localStorage snapshot.
+ * Called on app load (from page.tsx's useEffect) to recover pipeline state
+ * after browser refresh, logout/login, network interruption, or crash.
+ *
+ * If the snapshot has a pipeline that was still Running when the snapshot
+ * was taken, the Supervisor marks those agents as "pending" (since we can't
+ * resume an in-flight AI call) and logs a "recover" timeline entry.
+ *
+ * Returns true if a snapshot was restored, false otherwise.
+ */
+export function restoreFromSnapshot(): boolean {
+  const snapshot = loadSnapshot();
+  if (!snapshot) return false;
+
+  const restoredState = snapshot.state;
+
+  // === Recovery logic: if the pipeline was still running when the snapshot
+  // was taken, we can't resume the in-flight AI calls. Mark any "running"
+  // agents as "pending" so the user can re-trigger them. Log a "recover"
+  // timeline entry so the user sees what happened. ===
+  const recoveredAgents: Record<string, AgentState> = {};
+  for (const [id, agent] of Object.entries(restoredState.agents)) {
+    if (agent.status === "running") {
+      recoveredAgents[id] = {
+        ...agent,
+        status: "pending" as AgentStatus,
+        log: `Recovered from snapshot (was running at ${snapshot.timestamp}). Re-run to resume.`,
+      };
+      appendTimelineEntry({
+        timestamp: new Date().toISOString(),
+        agentId: id as AgentId,
+        agentName: agent.name,
+        event: "recover",
+        message: `${agent.name} recovered from snapshot — was running, now pending.`,
+      });
+    } else {
+      recoveredAgents[id] = agent;
+    }
+  }
+
+  state = {
+    context: { ...createEmptyContext(), ...restoredState.context },
+    profile: loadUserProfile(), // always reload the profile fresh
+    agents: recoveredAgents as Record<AgentId, AgentState>,
+    events: restoredState.events,
+    isRunning: false, // never restore isRunning=true — the user must re-trigger
+  };
+
+  // Notify listeners
+  for (const listener of listeners) {
+    try { listener(state); } catch {}
+  }
+  return true;
+}
+
+/**
  * Reset the supervisor state (e.g. on sign-out).
+ * Clears the snapshot, timeline, and metrics so the next user starts fresh.
  */
 export function resetSupervisor(): void {
   cache.clear();
+  clearAllPipelineStateIncludingMetrics();
   state = {
     context: createEmptyContext(),
     profile: loadUserProfile(),
