@@ -366,9 +366,14 @@ app.get("/api/settings/branding", async (c) => {
 app.put("/api/settings/branding", async (c) => {
   const body = await parseBody(c.req.raw);
   const now = new Date().toISOString();
+  // === Persist provider settings alongside branding ===
+  // The provider_settings_json column stores the AI routing config
+  // (defaultProviderId, defaultModel, fallbackProviderIds) so it survives
+  // refresh/logout/login cycles.
+  const providerSettingsJson = body.providerSettings ? JSON.stringify(body.providerSettings) : null;
   await c.env.DB.prepare(
-    "UPDATE branding SET app_name = ?, tagline = ?, primary_color = ?, accent_color = ?, logo_url = ?, email_from_name = ?, email_from_address = ?, pdf_footer_text = ?, updated_at = ? WHERE id = 1"
-  ).bind(body.appName, body.tagline, body.primaryColor, body.accentColor, body.logoUrl, body.emailFromName, body.emailFromAddress, body.pdfFooterText, now).run();
+    "UPDATE branding SET app_name = ?, tagline = ?, primary_color = ?, accent_color = ?, logo_url = ?, email_from_name = ?, email_from_address = ?, pdf_footer_text = ?, provider_settings_json = ?, updated_at = ? WHERE id = 1"
+  ).bind(body.appName, body.tagline, body.primaryColor, body.accentColor, body.logoUrl, body.emailFromName, body.emailFromAddress, body.pdfFooterText, providerSettingsJson, now).run();
   return c.json({ ok: true });
 });
 

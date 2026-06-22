@@ -351,6 +351,24 @@ export async function syncAllFromCloud(store: any): Promise<void> {
       if (bd.aiDevSettings && typeof bd.aiDevSettings === "object") {
         store.setState({ aiDevSettings: { ...store.getState().aiDevSettings, ...bd.aiDevSettings } });
       }
+
+      // === RESTORE provider settings from D1 ===
+      // The provider_settings_json column stores the AI routing config
+      // (defaultProviderId, defaultModel, fallbackProviderIds). Without this,
+      // the store always reverts to the seed (Puter + claude-sonnet-4) on refresh.
+      const rawProviderSettings = bd.provider_settings_json || bd.providerSettings;
+      if (rawProviderSettings) {
+        let ps: any = null;
+        if (typeof rawProviderSettings === "string") {
+          try { ps = JSON.parse(rawProviderSettings); } catch {}
+        } else if (typeof rawProviderSettings === "object") {
+          ps = rawProviderSettings;
+        }
+        if (ps && (ps.defaultProviderId || ps.defaultModel || ps.fallbackProviderIds)) {
+          console.info("[syncAllFromCloud] Restoring providerSettings from D1:", ps.defaultProviderId, ps.defaultModel);
+          store.setState({ providerSettings: { ...store.getState().providerSettings, ...ps } });
+        }
+      }
     }
     if (flagsRes.flags) store.setState({ flags: flagsRes.flags });
   } catch (e) {

@@ -98,7 +98,7 @@ export class ProviderManager {
           const t0 = performance.now();
           const resp = await window.puter.ai.chat(
             [{ role: "user", content: "Reply with exactly: OK" }],
-            { model: provider.modelName || "claude-sonnet-4", max_tokens: 10 }
+            { model: provider.modelName || "gpt-4o-mini", max_tokens: 10 }
           );
           const latencyMs = Math.round(performance.now() - t0);
           const text = typeof resp === "string" ? resp : (resp?.message?.content ?? resp?.text ?? "OK");

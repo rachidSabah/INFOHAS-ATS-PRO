@@ -1073,7 +1073,14 @@ export const useApp = create<AppState>()(
         })),
       updateProviderSettings: (patch) => {
         set((s) => ({ providerSettings: { ...s.providerSettings, ...patch } }));
-        // Also sync the provider settings to D1 via branding/settings endpoint
+        // === PERSIST provider settings to D1 via the branding endpoint ===
+        // Previously this was a comment with no code — settings were only
+        // in-memory and reverted to the seed (Puter + claude-sonnet-4) on
+        // refresh. Now we send the full providerSettings object to D1.
+        const settings = get().providerSettings;
+        cloudApiSafe(updateBranding)({
+          providerSettings: settings,
+        }).catch(() => {});
       },
 
       addPrompt: (p) => {
