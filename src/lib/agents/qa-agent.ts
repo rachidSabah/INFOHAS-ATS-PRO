@@ -235,6 +235,20 @@ export function checkFactualConsistency(
   const originalCertifications = new Set(
     original.certifications.map((c) => c.name.toLowerCase().trim()).filter(Boolean)
   );
+  // === NEW: locked fields — locations, languages, contact info ===
+  const originalLocations = new Set(
+    [
+      original.contact.location?.toLowerCase().trim(),
+      ...original.experience.map((e) => e.location?.toLowerCase().trim()),
+      ...original.education.map((e) => e.location?.toLowerCase().trim()),
+    ].filter(Boolean)
+  );
+  const originalLanguages = new Set(
+    original.languages.map((l) => l.name.toLowerCase().trim()).filter(Boolean)
+  );
+  const originalEmail = original.contact.email?.toLowerCase().trim();
+  const originalPhone = original.contact.phone?.toLowerCase().trim();
+  const originalName = original.name?.toLowerCase().trim();
 
   // Extract all numbers/metrics from original (e.g. "40M+", "23%", "$1.2M", "200+")
   const originalText = JSON.stringify(original);
@@ -247,7 +261,6 @@ export function checkFactualConsistency(
   for (const e of optimized.experience) {
     const employer = e.company.toLowerCase().trim();
     if (!employer) continue;
-    // Fuzzy match: check if any original employer contains this one or vice versa
     const found = Array.from(originalEmployers).some(
       (orig) => orig.includes(employer) || employer.includes(orig) || levenshtein(employer, orig) <= 3
     );
@@ -276,42 +289,82 @@ export function checkFactualConsistency(
     if (!found) fabricatedCertifications.push(c.name);
   }
 
+  // === NEW: Check locations ===
+  const fabricatedLocations: string[] = [];
+  const optLocations = [
+    optimized.contact.location?.toLowerCase().trim(),
+    ...optimized.experience.map((e) => e.location?.toLowerCase().trim()),
+    ...optimized.education.map((e) => e.location?.toLowerCase().trim()),
+  ].filter(Boolean);
+  for (const loc of optLocations) {
+    if (!loc) continue;
+    const found = Array.from(originalLocations).some(
+      (orig) => typeof orig === "string" && (orig.includes(loc) || loc.includes(orig))
+    );
+    if (!found) fabricatedLocations.push(loc);
+  }
+
+  // === NEW: Check languages ===
+  const fabricatedLanguages: string[] = [];
+  for (const l of optimized.languages) {
+    const name = l.name.toLowerCase().trim();
+    if (!name) continue;
+    if (!originalLanguages.has(name)) {
+      fabricatedLanguages.push(l.name);
+    }
+  }
+
+  // === NEW: Check contact info ===
+  const fabricatedContact: string[] = [];
+  if (optimized.contact.email && originalEmail && optimized.contact.email.toLowerCase().trim() !== originalEmail) {
+    fabricatedContact.push(`Email changed: ${originalEmail} → ${optimized.contact.email}`);
+  }
+  if (optimized.contact.phone && originalPhone && optimized.contact.phone.toLowerCase().trim() !== originalPhone) {
+    fabricatedContact.push(`Phone changed: ${originalPhone} → ${optimized.contact.phone}`);
+  }
+  if (optimized.name && originalName && optimized.name.toLowerCase().trim() !== originalName) {
+    fabricatedContact.push(`Name changed: ${originalName} → ${optimized.name}`);
+  }
+
   // Check optimized bullets for metrics not in original
   const fabricatedMetrics: string[] = [];
   const optimizedText = JSON.stringify(optimized);
   const optimizedMetricMatches = optimizedText.match(/\d+(?:\.\d+)?[%×xMKB+]?/g) ?? [];
   for (const metric of optimizedMetricMatches) {
     const lower = metric.toLowerCase();
-    // Skip small numbers (years, counts under 10) — likely safe
     if (/^\d{4}$/.test(metric)) continue; // year
     if (parseInt(metric) < 5) continue; // small count
     if (!originalMetrics.has(lower)) {
-      // Check if it's close to an original metric (e.g. "23%" vs "23")
       const found = Array.from(originalMetrics).some((o) => o.includes(lower) || lower.includes(o));
       if (!found) fabricatedMetrics.push(metric);
     }
   }
-  // Dedupe
   const uniqueFabricatedMetrics = [...new Set(fabricatedMetrics)].slice(0, 10);
 
   const issueCount =
     fabricatedEmployers.length +
     fabricatedEducation.length +
     fabricatedCertifications.length +
-    uniqueFabricatedMetrics.length;
+    uniqueFabricatedMetrics.length +
+    fabricatedLocations.length +
+    fabricatedLanguages.length +
+    fabricatedContact.length;
 
   const passed = issueCount === 0;
 
   let explanation: string;
   if (passed) {
-    explanation = "All employers, education, certifications, and metrics in the optimized resume match the original. No fabrication detected.";
+    explanation = "All employers, education, certifications, metrics, locations, languages, and contact info in the optimized resume match the original. No fabrication detected.";
   } else {
     const parts: string[] = [];
-    if (fabricatedEmployers.length) parts.push(`${fabricatedEmployers.length} employer(s)`);
-    if (fabricatedEducation.length) parts.push(`${fabricatedEducation.length} education entry/entries`);
-    if (fabricatedCertifications.length) parts.push(`${fabricatedCertifications.length} certification(s)`);
-    if (uniqueFabricatedMetrics.length) parts.push(`${uniqueFabricatedMetrics.length} metric(s)`);
-    explanation = `Potential fabrication detected: ${parts.join(", ")} in the optimized resume do not appear in the original. The AI may have invented information.`;
+    if (fabricatedEmployers.length) parts.push(`${fabricatedEmployers.length} employer(s): ${fabricatedEmployers.join(", ")}`);
+    if (fabricatedEducation.length) parts.push(`${fabricatedEducation.length} education: ${fabricatedEducation.join(", ")}`);
+    if (fabricatedCertifications.length) parts.push(`${fabricatedCertifications.length} cert(s): ${fabricatedCertifications.join(", ")}`);
+    if (fabricatedLocations.length) parts.push(`${fabricatedLocations.length} location(s): ${fabricatedLocations.join(", ")}`);
+    if (fabricatedLanguages.length) parts.push(`${fabricatedLanguages.length} language(s): ${fabricatedLanguages.join(", ")}`);
+    if (fabricatedContact.length) parts.push(`${fabricatedContact.length} contact: ${fabricatedContact.join("; ")}`);
+    if (uniqueFabricatedMetrics.length) parts.push(`${uniqueFabricatedMetrics.length} metric(s): ${uniqueFabricatedMetrics.join(", ")}`);
+    explanation = `Hallucination detected: ${parts.join("; ")}`;
   }
 
   return {

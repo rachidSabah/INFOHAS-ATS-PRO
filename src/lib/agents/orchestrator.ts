@@ -39,6 +39,83 @@ import type { ResumeSkill } from "../types";
 // ============================================================================
 
 /**
+ * Enforce locked fields — force-restore factual data from the original resume
+ * that the AI may have changed (despite being told not to).
+ *
+ * LOCKED fields (always restored from original):
+ *   - name, email, phone, location (contact info)
+ *   - experience[].company (employer names)
+ *   - experience[].location (work locations)
+ *   - experience[].startDate, endDate (dates)
+ *   - education[].institution (school names)
+ *   - education[].location
+ *   - languages[] (same set as original)
+ *   - certifications[] (same set as original)
+ *
+ * ALLOWED to change (not locked):
+ *   - headline, summary (rewritten for ATS)
+ *   - experience[].title (can be refined for ATS)
+ *   - experience[].bullets (rewritten for impact)
+ *   - skills (reordered, categories improved)
+ *   - education[].degree, field (minor wording)
+ */
+function enforceLockedFields(optimized: ResumeData, original: ResumeData): ResumeData {
+  // Lock contact info
+  const locked: ResumeData = {
+    ...optimized,
+    name: original.name, // NEVER change the name
+    contact: {
+      ...optimized.contact,
+      email: original.contact.email, // NEVER change email
+      phone: original.contact.phone, // NEVER change phone
+      location: original.contact.location, // NEVER change location
+    },
+  };
+
+  // Lock experience: restore company, location, dates from original
+  // (but keep the AI's improved title + bullets)
+  if (optimized.experience.length > 0 && original.experience.length > 0) {
+    locked.experience = optimized.experience.map((e, i) => {
+      const orig = original.experience[i] ?? original.experience[0];
+      return {
+        ...e,
+        company: orig?.company ?? e.company, // NEVER change employer
+        location: orig?.location ?? e.location, // NEVER change work location
+        startDate: orig?.startDate ?? e.startDate, // NEVER change dates
+        endDate: orig?.endDate ?? e.endDate,
+      };
+    });
+  }
+
+  // Lock education: restore institution + location from original
+  if (optimized.education.length > 0 && original.education.length > 0) {
+    locked.education = optimized.education.map((ed, i) => {
+      const orig = original.education[i] ?? original.education[0];
+      return {
+        ...ed,
+        institution: orig?.institution ?? ed.institution, // NEVER change school
+        location: orig?.location ?? ed.location, // NEVER change school location
+      };
+    });
+  }
+
+  // Lock languages: use the ORIGINAL set (no additions/removals)
+  if (original.languages.length > 0) {
+    locked.languages = original.languages; // NEVER change language set
+  }
+
+  // Lock certifications: use the ORIGINAL set
+  if (original.certifications.length > 0) {
+    // Merge: keep original certs, allow AI to reorder but not add/remove
+    const origCertNames = new Set(original.certifications.map((c) => c.name.toLowerCase()));
+    const aiCerts = optimized.certifications.filter((c) => origCertNames.has(c.name.toLowerCase()));
+    locked.certifications = aiCerts.length > 0 ? aiCerts : original.certifications;
+  }
+
+  return locked;
+}
+
+/**
  * Flatten a value that might be an object into a string.
  * Handles: strings, numbers, booleans, null/undefined, arrays, objects.
  * - { city: "Doha", country: "Qatar" } → "Doha, Qatar"
@@ -594,7 +671,29 @@ Produce a one-page A4 resume (~2,700-3,000 chars) that is:
 - Recruiter optimized (quantified, action-verb-led bullets)
 - Industry aligned
 - Company aligned (reflects the company-specific priorities above)
-- Factually consistent with the source resume (NO fabrication of experience, certs, projects, or metrics)`);
+- Factually consistent with the source resume (NO fabrication of experience, certs, projects, or metrics)
+
+LOCKED FIELDS (CRITICAL — you may NEVER modify these):
+- name: MUST be exactly "${resume.name}"
+- email: MUST be exactly "${resume.contact.email}"
+- phone: MUST be exactly "${resume.contact.phone}"
+- location: MUST be exactly "${resume.contact.location ?? ""}"
+- experience[].company: MUST match the original employers exactly
+- experience[].location: MUST match the original locations exactly
+- experience[].startDate/endDate: MUST match the original dates exactly
+- education[].institution: MUST match the original institutions exactly
+- languages[]: MUST be the same set as the original (same names, same proficiency)
+- certifications[]: MUST be the same set as the original
+
+ALLOWED CHANGES (you may only do these):
+- Rewrite bullet points (improve wording, add action verbs, quantify achievements)
+- Improve the summary/headline (better ATS keywords, stronger positioning)
+- Reorder skills (put JD-relevant skills first)
+- Add JD keywords to bullets naturally (semantic optimization, not stuffing)
+- Improve formatting (section headers, bullet structure)
+
+If information is missing from the original, LEAVE IT BLANK. Never invent.
+Never change a city, country, employer, school, language, date, email, or phone.`);
 
   const intelligenceContext = intelligenceBlocks.join("\n\n");
 
@@ -725,17 +824,24 @@ Produce a one-page A4 resume (~2,700-3,000 chars) that is:
   const contentCheck = validateResumeContent(optimized);
   const finalResume = contentCheck.cleanedResume ?? optimized;
 
+  // === POST-OPTIMIZATION FACTUAL LOCK ===
+  // Force-restore locked fields from the original resume. Even if the AI
+  // changed them (despite the prompt telling it not to), we correct them
+  // here so the optimized resume is ALWAYS factually consistent with the
+  // original. This is the definitive guard against hallucination.
+  const lockedResume = enforceLockedFields(finalResume, resume);
+
   // Compute char count
   const charCount = JSON.stringify({
-    summary: finalResume.summary,
-    experience: finalResume.experience,
-    skills: finalResume.skills,
-    education: finalResume.education,
-    languages: finalResume.languages,
+    summary: lockedResume.summary,
+    experience: lockedResume.experience,
+    skills: lockedResume.skills,
+    education: lockedResume.education,
+    languages: lockedResume.languages,
   }).length;
 
   return {
-    resume: finalResume,
+    resume: lockedResume,
     provider: result.provider,
     charCount,
     keywordsAdded: data.missingKeywordsAdded?.length ?? 0,
