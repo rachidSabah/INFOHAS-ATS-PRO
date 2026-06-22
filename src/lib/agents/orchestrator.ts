@@ -72,31 +72,106 @@ function enforceLockedFields(optimized: ResumeData, original: ResumeData): Resum
     },
   };
 
-  // Lock experience: restore company, location, dates from original
-  // (but keep the AI's improved title + bullets)
+  // === Build lookup sets from original for hallucination detection ===
+  const originalCompanies = new Set(
+    original.experience.map((e) => e.company?.toLowerCase().trim()).filter(Boolean)
+  );
+  const originalInstitutions = new Set(
+    original.education.map((e) => e.institution?.toLowerCase().trim()).filter(Boolean)
+  );
+
+  // === PLACEHOLDER DETECTION — reject AI-invented entries ===
+  const PLACEHOLDER_PATTERNS = [
+    /projected\s*role/i,
+    /previous\s*employer/i,
+    /institution\s*name/i,
+    /company\s*name/i,
+    /xxx/i,
+    /^n\/?a$/i,
+    /placeholder/i,
+    /example\s*company/i,
+    /your\s*company/i,
+    /sample/i,
+  ];
+  const isPlaceholder = (text: string): boolean => {
+    if (!text) return true;
+    return PLACEHOLDER_PATTERNS.some((p) => p.test(text));
+  };
+
+  // === Lock experience: filter out hallucinated entries + restore locked fields ===
   if (optimized.experience.length > 0 && original.experience.length > 0) {
-    locked.experience = optimized.experience.map((e, i) => {
-      const orig = original.experience[i] ?? original.experience[0];
-      return {
-        ...e,
-        company: orig?.company ?? e.company, // NEVER change employer
-        location: orig?.location ?? e.location, // NEVER change work location
-        startDate: orig?.startDate ?? e.startDate, // NEVER change dates
-        endDate: orig?.endDate ?? e.endDate,
-      };
-    });
+    locked.experience = optimized.experience
+      .filter((e) => {
+        // Remove entries with placeholder companies
+        if (isPlaceholder(e.company)) return false;
+        // Remove entries whose company doesn't match ANY original company
+        // (this is a hallucination — the AI invented a new employer)
+        const companyLower = e.company?.toLowerCase().trim();
+        if (companyLower && !originalCompanies.has(companyLower)) {
+          // Check fuzzy match (partial contains)
+          const fuzzyMatch = Array.from(originalCompanies).some(
+            (orig) => orig.includes(companyLower) || companyLower.includes(orig)
+          );
+          if (!fuzzyMatch) {
+            console.warn(`[enforceLockedFields] Removing hallucinated experience entry: "${e.company}" (not in original resume)`);
+            return false;
+          }
+        }
+        return true;
+      })
+      .map((e, i) => {
+        // Match to original by company name (not by index — the AI may reorder)
+        const orig = original.experience.find(
+          (o) => o.company?.toLowerCase().trim() === e.company?.toLowerCase().trim()
+        ) ?? original.experience[i] ?? original.experience[0];
+        return {
+          ...e,
+          company: orig?.company ?? e.company, // NEVER change employer
+          location: orig?.location ?? e.location, // NEVER change work location
+          startDate: orig?.startDate ?? e.startDate, // NEVER change dates
+          endDate: orig?.endDate ?? e.endDate,
+        };
+      });
+
+    // If all AI entries were filtered out (extreme hallucination), use original
+    if (locked.experience.length === 0) {
+      locked.experience = original.experience;
+    }
   }
 
-  // Lock education: restore institution + location from original
+  // === Lock education: filter out hallucinated entries + restore institution ===
   if (optimized.education.length > 0 && original.education.length > 0) {
-    locked.education = optimized.education.map((ed, i) => {
-      const orig = original.education[i] ?? original.education[0];
-      return {
-        ...ed,
-        institution: orig?.institution ?? ed.institution, // NEVER change school
-        location: orig?.location ?? ed.location, // NEVER change school location
-      };
-    });
+    locked.education = optimized.education
+      .filter((ed) => {
+        if (isPlaceholder(ed.institution)) return false;
+        const instLower = ed.institution?.toLowerCase().trim();
+        if (instLower && !originalInstitutions.has(instLower)) {
+          const fuzzyMatch = Array.from(originalInstitutions).some(
+            (orig) => orig.includes(instLower) || instLower.includes(orig)
+          );
+          if (!fuzzyMatch) {
+            console.warn(`[enforceLockedFields] Removing hallucinated education entry: "${ed.institution}" (not in original resume)`);
+            return false;
+          }
+        }
+        return true;
+      })
+      .map((ed, i) => {
+        const orig = original.education.find(
+          (o) => o.institution?.toLowerCase().trim() === ed.institution?.toLowerCase().trim()
+        ) ?? original.education[i] ?? original.education[0];
+        return {
+          ...ed,
+          institution: orig?.institution ?? ed.institution, // NEVER change school
+          location: orig?.location ?? ed.location, // NEVER change school location
+          startDate: orig?.startDate ?? ed.startDate, // restore dates
+          endDate: orig?.endDate ?? ed.endDate,
+        };
+      });
+
+    if (locked.education.length === 0) {
+      locked.education = original.education;
+    }
   }
 
   // Lock languages: use the ORIGINAL set (no additions/removals)
@@ -106,7 +181,6 @@ function enforceLockedFields(optimized: ResumeData, original: ResumeData): Resum
 
   // Lock certifications: use the ORIGINAL set
   if (original.certifications.length > 0) {
-    // Merge: keep original certs, allow AI to reorder but not add/remove
     const origCertNames = new Set(original.certifications.map((c) => c.name.toLowerCase()));
     const aiCerts = optimized.certifications.filter((c) => origCertNames.has(c.name.toLowerCase()));
     locked.certifications = aiCerts.length > 0 ? aiCerts : original.certifications;
@@ -695,7 +769,24 @@ ALLOWED CHANGES (you may only do these):
 - Improve formatting (section headers, bullet structure)
 
 If information is missing from the original, LEAVE IT BLANK. Never invent.
-Never change a city, country, employer, school, language, date, email, or phone.`);
+Never change a city, country, employer, school, language, date, email, or phone.
+
+PROHIBITED PHRASES (never use these in any field):
+- "Projected Role" — never invent experience entries
+- "Previous Employer" — use the actual employer name from the resume
+- "Institution Name" — use the actual school name from the resume
+- "City, Country" — use the actual location from the resume
+- "XXX", "N/A", "Placeholder", "Sample", "Example" — never use these
+
+CONTENT REQUIREMENTS:
+- Generate a FULL resume — target 2,700-3,000 characters of body content
+- Include ALL experience entries from the original resume (do not drop any)
+- Each experience entry MUST have: title, company, startDate, endDate, and at least 2 bullets
+- Each bullet should be 110-180 characters with action verbs and metrics
+- Include ALL education entries from the original with institution + degree + dates
+- Include ALL languages from the original
+- Include ALL certifications from the original
+- Skills section should have 8-15 skills grouped by category`);
 
   const intelligenceContext = intelligenceBlocks.join("\n\n");
 
