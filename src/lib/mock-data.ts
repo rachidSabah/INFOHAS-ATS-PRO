@@ -84,7 +84,7 @@ export const SEED_PROVIDERS: AIProvider[] = [
     retryAttempts: 2,
     rateLimitPerMinute: 60,
     modelName: "deepseek-v4-flash-free",
-    enabledModels: ["deepseek-v4-flash-free", "mimo-v2.5-free", "minimax-m3-free", "nemotron-3-ultra-free", "north-mini-code-free", "claude-sonnet-4", "gpt-5", "gemini-3-flash", "claude-opus-4-8", "gpt-5.5"],
+    enabledModels: ["deepseek-v4-flash-free", "mimo-v2.5-free", "minimax-m3-free", "nemotron-3-ultra-free", "north-mini-code-free", "claude-sonnet-4-5", "gpt-5", "gemini-3-flash", "claude-opus-4-8", "gpt-5.5"],
     streamingEnabled: true,
     authType: "bearer",
     costPerInputToken: 0,
@@ -290,7 +290,7 @@ export const SEED_PROVIDER_LOGS: AIProviderLog[] = [
     providerId: "p_puter",
     providerName: "Puter.js (Free, user-auth)",
     requestType: "chat",
-    modelName: "claude-sonnet-4",
+    modelName: "gpt-4o-mini",
     status: "success",
     latencyMs: 1842,
     inputTokens: 1240,
@@ -304,7 +304,7 @@ export const SEED_PROVIDER_LOGS: AIProviderLog[] = [
     providerId: "p_puter",
     providerName: "Puter.js (Free, user-auth)",
     requestType: "chat",
-    modelName: "claude-sonnet-4",
+    modelName: "gpt-4o-mini",
     status: "rate_limited",
     latencyMs: 120,
     errorMessage: "429 Too Many Requests — Puter free quota exceeded for this hour",
@@ -330,7 +330,7 @@ export const SEED_PROVIDER_LOGS: AIProviderLog[] = [
     providerId: "p_puter",
     providerName: "Puter.js (Free, user-auth)",
     requestType: "test",
-    modelName: "claude-sonnet-4",
+    modelName: "gpt-4o-mini",
     status: "success",
     latencyMs: 412,
     inputTokens: 12,
@@ -354,8 +354,8 @@ export const SEED_PROVIDER_LOGS: AIProviderLog[] = [
 ];
 
 export const SEED_PROVIDER_SETTINGS: AIProviderSettings = {
-  defaultProviderId: "p_puter",
-  defaultModel: "claude-sonnet-4",
+  defaultProviderId: null, // No hardcoded default — user must configure
+  defaultModel: "", // No hardcoded model — user must configure
   fallbackProviderIds: ["p_zai"],
   retryAttempts: 2,
   timeout: 30000,

@@ -17,7 +17,7 @@ export class PuterProvider implements AIProviderAdapter {
       }
     } catch { /* anonymous OK for some endpoints */ }
 
-    const model = req.model || config.modelName || "claude-sonnet-4";
+    const model = req.model || config.modelName || undefined; // Let Puter pick its default
     const resp = await window.puter.ai.chat(
       req.messages.map((m) => ({ role: m.role, content: m.content })),
       { model, max_tokens: req.maxTokens ?? config.maxTokens, temperature: req.temperature ?? config.temperature, stream: false }
@@ -32,7 +32,7 @@ export class PuterProvider implements AIProviderAdapter {
     return {
       text: typeof text === "string" ? text : String(text),
       provider: "puter",
-      model,
+      model: model || "puter-default",
       latencyMs: Math.round(performance.now() - t0),
       inputTokens: undefined, // Puter doesn't return usage
       outputTokens: undefined,
@@ -50,7 +50,7 @@ export class PuterProvider implements AIProviderAdapter {
   }
 
   async listModels(config: ProviderConfig): Promise<string[]> {
-    return config.enabledModels ?? ["claude-sonnet-4", "gpt-4o", "gemini-2.0-flash", "llama-3.3-70b", "mistral-large"];
+    return config.enabledModels ?? ["gpt-4o-mini", "gpt-4o", "deepseek-chat", "claude-3-5-sonnet", "gemini-2.0-flash", "llama-3.3-70b", "mistral-large"];
   }
 }
 
