@@ -243,6 +243,27 @@ function computeFactualDiff(original: ResumeData, optimized: ResumeData): Factua
   // Compare bullet counts per entry
   const originalBullets = original.experience.map((e) => e.bullets.length);
   const optimizedBullets = optimized.experience.map((e) => e.bullets.length);
+
+  // === Build a fuzzy company lookup from the ORIGINAL resume ===
+  // When comparing original vs optimized by index, the AI may have REORDERED
+  // entries (e.g. put a more recent role first). Comparing by index would then
+  // produce false positives ("company changed from A to B") even when both A
+  // and B exist somewhere in the original.
+  //
+  // To detect a REAL company change, we check whether the optimized entry's
+  // company matches ANY original entry by substring. Only if it matches NONE
+  // do we flag it as a company change.
+  const originalCompaniesList = original.experience
+    .map((e) => e.company?.toLowerCase().trim())
+    .filter(Boolean);
+  const matchesAnyOriginalCompany = (company: string): boolean => {
+    const c = company?.toLowerCase().trim();
+    if (!c) return true; // empty company — don't flag
+    return originalCompaniesList.some(
+      (orig) => orig === c || orig.includes(c) || c.includes(orig)
+    );
+  };
+
   for (let i = 0; i < Math.min(originalExpCount, optimizedExpCount); i++) {
     if (optimizedBullets[i] < originalBullets[i]) {
       messages.push(`Experience #${i + 1} ("${original.experience[i]?.company}"): ${originalBullets[i]} → ${optimizedBullets[i]} bullets (lost ${originalBullets[i] - optimizedBullets[i]})`);
@@ -262,15 +283,21 @@ function computeFactualDiff(original: ResumeData, optimized: ResumeData): Factua
         datesChanged.push({ index: i, field: "endDate", original: orig.endDate || "", optimized: opt.endDate });
       }
       if (opt.company && opt.company !== orig.company) {
-        // === DON'T FLAG as a company change if the optimized company is a
-        // SUBSTRING of the original (or vice versa) — the AI may have cleaned
-        // up the company name (e.g. removed "| Rabat, Morocco" suffix that
-        // was accidentally merged into the company field during parsing).
-        // Only flag if the company is COMPLETELY different.
-        const origLower = orig.company.toLowerCase().trim();
-        const optLower = opt.company.toLowerCase().trim();
+        // === DON'T FLAG as a company change if:
+        //   (a) the optimized company is a SUBSTRING of the original (or vice versa)
+        //       — the AI may have cleaned up the company name (e.g. removed
+        //       "| Rabat, Morocco" suffix that was accidentally merged into the
+        //       company field during parsing).
+        //   (b) the optimized company matches ANY original entry's company by
+        //       substring — the AI may have REORDERED entries (e.g. put a more
+        //       recent role first), so a per-index comparison would produce
+        //       false positives.
+        // Only flag if the company is COMPLETELY different from ALL original entries.
+        const origLower = orig.company?.toLowerCase().trim() ?? "";
+        const optLower = opt.company?.toLowerCase().trim() ?? "";
         const isSubstring = origLower.includes(optLower) || optLower.includes(origLower);
-        if (!isSubstring) {
+        const matchesAny = matchesAnyOriginalCompany(opt.company);
+        if (!isSubstring && !matchesAny) {
           companiesChanged.push({ index: i, original: orig.company, optimized: opt.company });
           messages.push(`BUG: Experience #${i + 1} company changed from "${orig.company}" to "${opt.company}"`);
         }

@@ -330,6 +330,13 @@ function syncCoreAgentStatusesFromPipeline(result: PipelineResult): void {
  *   - "completed" if all agents are Completed/Skipped
  *   - "failed" if any required agent Failed (but the pipeline still produced an optimized resume)
  *   - "running" otherwise (should not happen at this point, but defensive)
+ *
+ * CRITICAL: The Supervisor itself is EXCLUDED from the "still running" check.
+ * Without this exclusion, the Supervisor would be waiting for itself to complete
+ * — a self-referential deadlock that produces the user-reported bug:
+ *   "Waiting for 1 agent(s): Supervisor"
+ * (The Supervisor is in "running" state while computing whether to mark itself
+ * "completed", so including it in stillRunning would always be true.)
  */
 function finalizeSupervisorStatus(): void {
   const agentList = Object.values(state.agents);
@@ -348,8 +355,9 @@ function finalizeSupervisorStatus(): void {
 
   // Check if any PIPELINE agent is still in a non-terminal state
   // (exclude non-pipeline agents like Application Tracker, Salary, Job Search)
+  // AND exclude the Supervisor itself (otherwise it would wait for itself).
   const pipelineAgents = agentList.filter(
-    (a) => !nonPipelineAgents.includes(a.id),
+    (a) => !nonPipelineAgents.includes(a.id) && a.id !== "supervisor",
   );
   const stillRunning = pipelineAgents.filter(
     (a) => a.status === "pending" || a.status === "running",

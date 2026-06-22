@@ -127,8 +127,11 @@ export function extractResumeFromText(text: string, fileName: string): ResumeDat
   const website = urlMatches.find((u) => !/linkedin|github/i.test(u));
 
   // Try to find a location pattern near the top
-  const locationLine = lines.slice(0, 12).find((l) => /\b([A-Z][a-zA-Z]+,\s?[A-Z]{2})\b/.test(l));
-  const location = locationLine?.match(/\b([A-Z][a-zA-Z]+,\s?[A-Z]{2})\b/)?.[1];
+  // Allow 1-3 capitalized words before the comma (e.g. "San Francisco, CA",
+  // "New York City, NY", "Kuala Lumpur, MY"). The previous regex only matched
+  // a single capitalized word, so "San Francisco, CA" was extracted as "Francisco, CA".
+  const locationLine = lines.slice(0, 12).find((l) => /\b([A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+){0,2},\s?[A-Z]{2})\b/.test(l));
+  const location = locationLine?.match(/\b([A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+){0,2},\s?[A-Z]{2})\b/)?.[1];
 
   // Sections — match common headers
   const sectionIndex = (labels: string[]) =>
@@ -238,6 +241,86 @@ export function extractResumeFromText(text: string, fileName: string): ResumeDat
 
 const DATE_RANGE_RE = /(?:(?:\w+\s+\d{4})|(?:\d{4}))\s*(?:[\-–—]|\bto\b)\s*(?:present|(?:\w+\s+\d{4})|(?:\d{4}))|(?:\w+\s*(?:[\-–—]|\bto\b)\s*\w+\s+\d{4})/i;
 
+/**
+ * Common title-ending keywords. When the left side of "Title Company | Location"
+ * contains one of these, the company likely starts right after it.
+ *
+ * Examples:
+ *   "Senior Customer Experience Specialist Vercel" → split after "Specialist"
+ *   "Customer Experience Associate Airbnb"          → split after "Associate"
+ *   "Technical Support Specialist University of ..." → split after "Specialist"
+ *
+ * The list is ordered roughly by specificity (rarer endings first).
+ */
+const TITLE_END_KEYWORDS = [
+  // Senior-level / leadership
+  "Manager", "Director", "Lead", "Head", "Chief", "Officer", "President",
+  "VP", "SVP", "EVP", "CFO", "CEO", "CTO", "COO", "CIO", "CMO",
+  // Individual contributors
+  "Engineer", "Developer", "Designer", "Architect", "Analyst", "Consultant",
+  "Specialist", "Associate", "Assistant", "Coordinator", "Administrator",
+  "Representative", "Agent", "Intern", "Trainee", "Apprentice",
+  // Industry-specific
+  "Pilot", "Captain", "Lieutenant", "Sergeant", "Officer", "Marshal",
+  "Nurse", "Therapist", "Technician", "Mechanic", "Electrician",
+  "Teacher", "Professor", "Lecturer", "Instructor", "Tutor",
+  "Accountant", "Auditor", "Banker", "Trader", "Broker",
+  "Lawyer", "Attorney", "Paralegal", "Judge",
+  "Writer", "Editor", "Reporter", "Journalist",
+  "Chef", "Cook", "Baker", "Host", "Hostess", "Waiter", "Waitress",
+];
+
+/**
+ * Try to split "Title Company" into { title, company } by looking for a
+ * title-ending keyword. The company is everything after the keyword.
+ *
+ * Returns null if no keyword is found.
+ *
+ * Examples:
+ *   "Senior Customer Experience Specialist Vercel"
+ *     → { title: "Senior Customer Experience Specialist", company: "Vercel" }
+ *
+ *   "Technical Support Specialist University of California, Berkeley"
+ *     → { title: "Technical Support Specialist",
+ *         company: "University of California, Berkeley" }
+ *
+ *   "Customer Experience Associate Airbnb"
+ *     → { title: "Customer Experience Associate", company: "Airbnb" }
+ */
+function splitTitleAndCompany(combined: string): { title: string; company: string } | null {
+  const trimmed = combined.trim();
+  if (!trimmed) return null;
+
+  // Try each keyword — find the FIRST one that appears as a whole word.
+  // We use word boundaries to avoid matching "Manager" inside "Management".
+  for (const kw of TITLE_END_KEYWORDS) {
+    // Build a regex that matches the keyword as a whole word, case-insensitive.
+    // Allow a trailing period (e.g. "Mgr." — though we don't have that in the list).
+    const re = new RegExp(`\\b${kw.replace(/\./g, "\\.")}\\b`, "i");
+    const match = trimmed.match(re);
+    if (!match) continue;
+    if (match.index === undefined) continue;
+
+    const endPos = match.index + match[0].length;
+    const title = trimmed.slice(0, endPos).trim();
+    const company = trimmed.slice(endPos).trim();
+
+    // Sanity: company should be non-empty AND not just punctuation.
+    // If there's nothing after the keyword, this isn't a valid split.
+    if (!company || !/[A-Za-z0-9]/.test(company)) continue;
+
+    // Sanity: title should be at least 2 words (avoid matching single-word titles
+    // like "Manager" alone — those usually mean the entire line is just the title).
+    // EXCEPTION: if the title is exactly the keyword (e.g. "Manager"), allow it.
+    const titleWords = title.split(/\s+/);
+    if (titleWords.length < 2 && title.toLowerCase() !== kw.toLowerCase()) continue;
+
+    return { title, company };
+  }
+
+  return null;
+}
+
 function parseExperiences(lines: string[]): ResumeData["experience"] {
   if (!lines.length) return [];
   const out: ResumeData["experience"] = [];
@@ -260,34 +343,91 @@ function parseExperiences(lines: string[]): ResumeData["experience"] {
       let company = "";
       let location = "";
 
-      const separators = [/\s+AT\s+/i, /\s+at\s+/i, /\s*–\s*/, /\s*\-\s*/, /\s*\|\s*/];
-      let splitSuccess = false;
-      for (const sep of separators) {
-        const parts = cleanLine.split(sep);
-        if (parts.length >= 2) {
-          title = parts[0].trim();
-          company = parts[1].trim();
-          if (parts.length > 2) {
-            location = parts.slice(2).join(', ').trim();
+      // === Strategy 1: Split on " | " — left side is "Title Company", right side is "Location" ===
+      // This is the most common modern resume format:
+      //   "Senior Customer Experience Specialist Vercel | Remote Mar 2022 – Present"
+      // After dateStr removal: "Senior Customer Experience Specialist Vercel | Remote"
+      // We then need to split the LEFT side into title + company.
+      const pipeParts = cleanLine.split(/\s*\|\s*/);
+      if (pipeParts.length >= 2) {
+        const leftSide = pipeParts[0].trim();
+        const rightSide = pipeParts.slice(1).join(" | ").trim();
+
+        // The right side is the LOCATION (not the company).
+        // The left side contains both title and company — try to split them.
+        const split = splitTitleAndCompany(leftSide);
+        if (split) {
+          title = split.title;
+          company = split.company;
+          location = rightSide;
+        } else {
+          // Couldn't split left side — assume the entire left is the title and
+          // the right side might be the company (legacy fallback).
+          title = leftSide;
+          company = rightSide;
+          location = "";
+        }
+      } else {
+        // === Strategy 2: Split on " at " / " AT " ===
+        // Format: "Title at Company Location Dates" (after date removal: "Title at Company Location")
+        const atMatch = cleanLine.match(/^(.+?)\s+(?:at|AT|@)\s+(.+)$/);
+        if (atMatch) {
+          title = atMatch[1].trim();
+          const rest = atMatch[2].trim();
+          // The rest could be "Company Location" — try to find the location (last comma-separated part)
+          const commaParts = rest.split(/,/);
+          if (commaParts.length >= 2) {
+            // Last comma-part is likely "City, State" or just "State" — combine the last 1-2 parts as location
+            company = commaParts.slice(0, -1).join(",").trim();
+            location = commaParts.slice(-1)[0].trim();
+            // If location looks like a 2-letter state code, also include the previous part
+            if (/^[A-Z]{2}$/.test(location) && commaParts.length >= 3) {
+              company = commaParts.slice(0, -2).join(",").trim();
+              location = commaParts.slice(-2).join(",").trim();
+            }
           } else {
-            const compParts = company.split(/[,|]/);
-            if (compParts.length >= 2) {
-              company = compParts[0].trim();
-              location = compParts.slice(1).join(', ').trim();
+            // No comma — try title-end keyword split
+            const split = splitTitleAndCompany(rest);
+            if (split) {
+              company = split.title; // everything before the keyword becomes the "company" — but that's wrong
+              // Actually, "at" already split title from company. So `rest` is just "Company Location".
+              // Try title-end keyword on `rest` to extract location.
+              company = rest;
+              location = "";
+            } else {
+              company = rest;
+              location = "";
             }
           }
-          splitSuccess = true;
-          break;
-        }
-      }
-
-      if (!splitSuccess) {
-        const commaParts = cleanLine.split(',');
-        if (commaParts.length >= 2) {
-          title = commaParts[0].trim();
-          company = commaParts[1].trim();
-          if (commaParts.length > 2) {
-            location = commaParts.slice(2).join(', ').trim();
+        } else {
+          // === Strategy 3: No " | " and no " at " — try title-end keyword split on the whole line ===
+          // Format: "Title Company Location Dates" — after date removal: "Title Company Location"
+          const split = splitTitleAndCompany(cleanLine);
+          if (split) {
+            title = split.title;
+            // `split.company` may contain "Company Location" — try to extract location (last comma part)
+            const compParts = split.company.split(/,/);
+            if (compParts.length >= 2) {
+              company = compParts.slice(0, -1).join(",").trim();
+              location = compParts.slice(-1)[0].trim();
+              if (/^[A-Z]{2}$/.test(location) && compParts.length >= 3) {
+                company = compParts.slice(0, -2).join(",").trim();
+                location = compParts.slice(-2).join(",").trim();
+              }
+            } else {
+              company = split.company;
+              location = "";
+            }
+          } else {
+            // === Strategy 4: Legacy comma split ===
+            const commaParts = cleanLine.split(',');
+            if (commaParts.length >= 2) {
+              title = commaParts[0].trim();
+              company = commaParts[1].trim();
+              if (commaParts.length > 2) {
+                location = commaParts.slice(2).join(', ').trim();
+              }
+            }
           }
         }
       }
@@ -398,30 +538,96 @@ function parseEducation(lines: string[]): ResumeData["education"] {
     let field = "";
     const highlights: string[] = [];
 
+    // === Institution keyword detection ===
+    // Common patterns: "University of X", "X University", "X College", "X Institute",
+    // "X School of Y". When the degree line contains one of these, the institution
+    // name is likely embedded in the same line (e.g. "B.S. in Computer Science
+    // University of California, Berkeley | 2014 – 2018").
+    const INST_KEYWORDS = /\b(University|College|Institute|School|Academy|Polytechnic|Conservatory)\b/i;
+
     for (let i = 0; i < entryLines.length; i++) {
       const l = entryLines[i];
-      if (!degree && degreePattern.test(l)) {
+      // Strip leading bullet markers and pipe characters
+      const cleanedLine = l.replace(/^[•\-\*·▪◦\s|]+/, "").trim();
+      if (!cleanedLine) continue;
+
+      if (!degree && degreePattern.test(cleanedLine)) {
         // Extract degree + field (e.g. "B.S. in Computer Science")
-        degree = l;
-        const fieldMatch = l.match(/\bin\s+(.+)$/i);
+        // First, strip the trailing " | YEAR – YEAR" or " | YEAR" suffix that
+        // wasn't removed by parseExperiences (this is parseEducation).
+        const lineWithoutDate = cleanedLine
+          .replace(/\s*\|\s*\d{4}\s*[–\-]\s*\d{4}\s*$/, "")
+          .replace(/\s*\|\s*\d{4}\s*[–\-]\s*present\s*$/i, "")
+          .replace(/\s*\|\s*\d{4}\s*$/, "")
+          .replace(/\s*\|\s*$/, "")
+          .trim();
+
+        degree = lineWithoutDate;
+        const fieldMatch = lineWithoutDate.match(/\bin\s+(.+)$/i);
         if (fieldMatch) {
           field = fieldMatch[1].trim();
-          degree = l.replace(/\s+in\s+.+$/i, "").trim();
+          degree = lineWithoutDate.replace(/\s+in\s+.+$/i, "").trim();
         }
-      } else if (!institution && !degreePattern.test(l) && !yearRangePattern.test(l)) {
-        institution = l;
-      } else if (i > 1 && !yearRangePattern.test(l)) {
-        highlights.push(l);
+
+        // === Try to extract institution from the same line ===
+        // Pattern: "B.S. in Computer Science University of California, Berkeley | 2014 – 2018"
+        // After date removal: "B.S. in Computer Science University of California, Berkeley"
+        //
+        // Strategy: look for an institution keyword (University, College, etc.) in
+        // the lineWithoutDate. If found, everything from that keyword onwards is
+        // the institution name. The "field" gets shortened to exclude the institution.
+        const instMatch = lineWithoutDate.match(INST_KEYWORDS);
+        if (instMatch && instMatch.index !== undefined) {
+          const instStart = instMatch.index;
+          institution = lineWithoutDate.slice(instStart).trim();
+          // Remove the institution from the field
+          if (field) {
+            const fieldInstIdx = field.toLowerCase().indexOf(instMatch[0].toLowerCase());
+            if (fieldInstIdx >= 0) {
+              field = field.slice(0, fieldInstIdx).trim();
+            }
+          }
+        } else if (field) {
+          // No institution keyword — try to split field by comma. The part after
+          // the last comma might be the institution (e.g. "Computer Science, Berkeley"
+          // → field="Computer Science", institution="Berkeley"). But this is fragile,
+          // so we only do it if there are 2+ comma parts AND the last part looks like
+          // a proper noun (starts with uppercase).
+          const fieldCommaParts = field.split(/,/);
+          if (fieldCommaParts.length >= 2) {
+            const lastPart = fieldCommaParts[fieldCommaParts.length - 1].trim();
+            if (lastPart && /^[A-Z]/.test(lastPart) && lastPart.length >= 2) {
+              institution = lastPart;
+              field = fieldCommaParts.slice(0, -1).join(",").trim();
+            }
+          }
+        }
+      } else if (!institution && !degreePattern.test(cleanedLine) && !yearRangePattern.test(cleanedLine) && !/^[•\-\*·▪◦]/.test(cleanedLine)) {
+        // Only use this line as institution if we haven't already extracted one
+        // from the degree line, AND it's not a bullet line.
+        institution = cleanedLine;
+      } else if (i > 0 && !yearRangePattern.test(cleanedLine)) {
+        // Highlight (bullet) line
+        const highlightText = cleanedLine.replace(/^[•\-\*·▪◦\s]+/, "").trim();
+        if (highlightText && !degreePattern.test(highlightText)) {
+          highlights.push(highlightText);
+        }
       }
     }
 
     // Fallback: if no degree found, use first line as institution, second as degree
     if (!degree && !institution) {
-      institution = entryLines[0] || "Institution";
-      degree = entryLines[1] || "Degree";
-      highlights.push(...entryLines.slice(2, 4));
+      const firstNonBullet = entryLines.find((l) => !/^[•\-\*·▪◦]/.test(l.trim())) || entryLines[0] || "Institution";
+      institution = firstNonBullet.replace(/^[•\-\*·▪◦\s|]+/, "").trim() || "Institution";
+      degree = entryLines[1]?.replace(/^[•\-\*·▪◦\s|]+/, "").trim() || "Degree";
+      highlights.push(...entryLines.slice(2, 4).map((l) => l.replace(/^[•\-\*·▪◦\s|]+/, "").trim()).filter(Boolean));
     } else if (!institution) {
-      institution = entryLines.find((l) => l !== degree && !degreePattern.test(l) && !yearRangePattern.test(l)) || "Institution";
+      // Last-resort fallback: look for any non-degree, non-year, non-bullet line
+      const fallbackInst = entryLines.find((l) => {
+        const c = l.replace(/^[•\-\*·▪◦\s|]+/, "").trim();
+        return c && l !== degree && !degreePattern.test(c) && !yearRangePattern.test(c) && !/^[•\-\*·▪◦]/.test(l.trim());
+      });
+      institution = fallbackInst?.replace(/^[•\-\*·▪◦\s|]+/, "").trim() || "Institution";
     }
 
     return {

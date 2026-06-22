@@ -272,7 +272,13 @@ export function EditableA4Preview({ resume, onChange, scale = 0.7, className }: 
                   >
                     <div style={{ marginBottom: "1.5mm" }}>
                       <div style={{ marginBottom: "0.3mm", lineHeight: 1.2, display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: "2mm" }}>
-                        <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                        {/* minWidth: 0 is CRITICAL here — without it, flex items default to
+                            min-width: auto, which means the title span won't shrink below
+                            its content's intrinsic width. The date span (flexShrink: 0) then
+                            gets pushed past the right edge of the page and clipped by the
+                            parent's overflow: hidden. Setting minWidth: 0 lets the title span
+                            shrink so the date span stays fully visible. */}
+                        <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                           <span style={{ fontWeight: 700, color: BLACK }}>{String(e.title || "")}</span>
                           {e.company && <span style={{ color: BLACK }}> | {String(e.company)}</span>}
                           {e.location && <span style={{ color: BLACK }}> | {safeRender(e.location)}</span>}
