@@ -140,6 +140,22 @@ export function ProviderEditor({ provider, onClose, onSave }: {
                   variant="outline"
                   size="sm"
                   onClick={async () => {
+                    // === PUTER: use static built-in models, not API fetch ===
+                    if (form.type === "puter") {
+                      setFetchingModels(true);
+                      const result = await ProviderManager.fetchModels({
+                        type: "puter",
+                        isActive: true,
+                      } as any);
+                      setFetchingModels(false);
+                      if (result.ok && result.models.length > 0) {
+                        setFetchedModels(result.models);
+                        toast.success(`Loaded ${result.models.length} built-in Puter models.`);
+                      } else {
+                        toast.error("Failed to load Puter models.");
+                      }
+                      return;
+                    }
                     if (!form.baseUrl) { toast.error("Enter a Base URL first."); return; }
                     setFetchingModels(true);
                     setFetchedModels([]);
@@ -159,11 +175,11 @@ export function ProviderEditor({ provider, onClose, onSave }: {
                       toast.error(result.error || "No models returned. Check the API key and Base URL.");
                     }
                   }}
-                  disabled={fetchingModels || !form.baseUrl}
+                  disabled={fetchingModels || (form.type !== "puter" && !form.baseUrl)}
                   className="gap-1.5 shrink-0"
                 >
                   {fetchingModels ? <Icon name="Loader2" className="w-3.5 h-3.5 animate-spin" /> : <Icon name="DownloadCloud" className="w-3.5 h-3.5" />}
-                  Fetch
+                  {form.type === "puter" ? "Built-in" : "Fetch"}
                 </Button>
               </div>
               {fetchedModels.length > 0 && (

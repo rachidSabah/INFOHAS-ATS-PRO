@@ -32,24 +32,24 @@ export const SEED_PROVIDERS: AIProvider[] = [
     supportsJsonMode: true,
     requiresBrowserAuth: true,
     requiresApiKey: false,
-    apiUrl: "https://api.puter.com",
-    baseUrl: "https://api.puter.com",
+    apiUrl: "", // Puter has NO REST API — it uses window.puter.ai.chat() in the browser
+    baseUrl: "", // Same — no base URL
     priority: 1,
     isActive: true,
-    isDefault: false,  // Not default for document tasks — API providers only
+    isDefault: false,
     isFallback: true,
     isBuiltIn: true,
     allowedForRegularUsers: true,
-    timeout: 30000,
+    timeout: 45000, // Puter can be slow on cold starts
     maxTokens: 4096,
     temperature: 0.7,
-    retryAttempts: 2,
+    retryAttempts: 1,
     rateLimitPerMinute: 60,
     applicationId: "resumeai-pro-app",
     clientId: "resumeai-pro-client",
     redirectUri: "https://resumeai.pro/auth/puter/callback",
-    enabledModels: ["gpt-5-nano", "gpt-4o-mini", "claude-sonnet-4-5", "gemini-2.5-flash"],
-    modelName: "gpt-5-nano",
+    enabledModels: ["gpt-5-nano", "gpt-4o-mini", "gpt-4o", "claude-sonnet-4-5", "claude-3-5-sonnet", "gemini-2.5-flash", "deepseek-chat", "mistral-large-latest"],
+    modelName: "gpt-5-nano", // Puter's documented default
     streamingEnabled: false,
     authType: "none",
     costPerInputToken: 0,
