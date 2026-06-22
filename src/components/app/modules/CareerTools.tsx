@@ -5,6 +5,7 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
+import ReactMarkdown from "react-markdown";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -39,7 +40,28 @@ function AIOutput({ output, loading }: { output: string; loading: boolean }) {
           <Icon name="Copy" className="w-3.5 h-3.5" /> Copy
         </Button>
       </div>
-      <pre className="whitespace-pre-wrap text-sm font-sans text-foreground/90 text-pretty">{output}</pre>
+      {/* === MARKDOWN RENDERING ===
+          The AI often returns markdown (##, **, |, ✅) which was previously
+          rendered as raw text inside a <pre> tag. Now we use react-markdown
+          to render it as proper HTML (headings, bold, tables, lists). */}
+      <div className="prose prose-sm dark:prose-invert max-w-none text-foreground/90
+        [&_h1]:text-lg [&_h1]:font-bold [&_h1]:mt-3 [&_h1]:mb-1
+        [&_h2]:text-base [&_h2]:font-bold [&_h2]:mt-3 [&_h2]:mb-1
+        [&_h3]:text-sm [&_h3]:font-semibold [&_h3]:mt-2 [&_h3]:mb-1
+        [&_p]:text-sm [&_p]:leading-relaxed [&_p]:mb-2
+        [&_ul]:text-sm [&_ul]:ml-4 [&_ul]:mb-2 [&_ul]:list-disc
+        [&_ol]:text-sm [&_ol]:ml-4 [&_ol]:mb-2 [&_ol]:list-decimal
+        [&_li]:mb-0.5
+        [&_strong]:font-semibold
+        [&_table]:w-full [&_table]:text-xs [&_table]:border-collapse [&_table]:my-2
+        [&_th]:border [&_th]:border-border [&_th]:p-1.5 [&_th]:bg-secondary [&_th]:font-semibold [&_th]:text-left
+        [&_td]:border [&_td]:border-border [&_td]:p-1.5 [&_td]:text-left
+        [&_code]:bg-secondary [&_code]:px-1 [&_code]:py-0.5 [&_code]:rounded [&_code]:text-xs [&_code]:font-mono
+        [&_pre]:bg-secondary [&_pre]:p-2 [&_pre]:rounded [&_pre]:overflow-x-auto [&_pre]:text-xs
+        [&_blockquote]:border-l-4 [&_blockquote]:border-brand [&_blockquote]:pl-3 [&_blockquote]:italic [&_blockquote]:text-muted-foreground
+      ">
+        <ReactMarkdown>{output}</ReactMarkdown>
+      </div>
     </div>
   );
 }
@@ -2057,8 +2079,8 @@ export function AiJobMatch() {
     setLoading(true); setOutput("");
     try {
       const result = await callAI({
-        systemPrompt: "You are an ATS system. Score the resume against the job description. Be precise and data-driven.",
-        userPrompt: `Resume: ${JSON.stringify({ name: resume.name, headline: resume.headline, summary: resume.summary, experience: resume.experience, skills: resume.skills })}\n\nJob URL: ${jdUrl}\n\nProvide: 1) Match score /100, 2) Keyword match analysis, 3) Missing keywords, 4) Experience alignment, 5) Recommendations to improve match.`,
+        systemPrompt: "You are an ATS system. Score the resume against the job description. Be precise and data-driven. Use markdown formatting (##, **, |, ✅) for readability. NEVER score any individual category above its maximum (e.g. if a category is out of 25, the max score is 25 — never 26/25). Clamp all scores to their maximums.",
+        userPrompt: `Resume: ${JSON.stringify({ name: resume.name, headline: resume.headline, summary: resume.summary, experience: resume.experience, skills: resume.skills })}\n\nJob URL: ${jdUrl}\n\nProvide: 1) Match score /100 (clamped to 100 max), 2) Keyword match analysis (as a markdown table), 3) Missing keywords, 4) Experience alignment, 5) Recommendations to improve match.\n\nIMPORTANT: No individual sub-score may exceed its maximum. If a category is /25, the score must be ≤ 25. If /30, ≤ 30. The overall score must be ≤ 100.`,
         maxTokens: 1500, taskCategory: "document",
       });
       setOutput(result.text);
