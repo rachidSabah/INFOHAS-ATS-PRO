@@ -252,6 +252,50 @@ export const SEED_PROVIDERS: AIProvider[] = [
     status: "untested",
     usage: { requests: 0, tokens: 0, errors: 0, avgLatencyMs: 0, cost: 0 },
   },
+  {
+    id: "p_google_gemini",
+    name: "Google AI Studio (Gemini)",
+    type: "gemini",
+    providerCategory: "api",
+    supportsServerSide: true,
+    supportsClientSide: true,
+    supportsStreaming: true,
+    supportsFunctionCalling: true,
+    supportsJsonMode: true,
+    requiresBrowserAuth: false,
+    requiresApiKey: true,
+    // CRITICAL: Google's OpenAI-compatible endpoint uses /v1beta/openai/ as the
+    // base path. Do NOT add /v1 — Google's path handles the version natively.
+    // The callUserProvider() function appends /chat/completions to this URL,
+    // producing: https://generativelanguage.googleapis.com/v1beta/openai/chat/completions
+    apiUrl: "https://generativelanguage.googleapis.com/v1beta/openai/",
+    baseUrl: "https://generativelanguage.googleapis.com/v1beta/openai/",
+    priority: 8,
+    isActive: false,  // User activates by adding their Google AI Studio API key
+    isBuiltIn: false,
+    allowedForRegularUsers: false,
+    timeout: 30000,
+    maxTokens: 8192,
+    temperature: 0.7,
+    retryAttempts: 3,
+    rateLimitPerMinute: 60,
+    modelName: "gemini-2.5-flash",
+    enabledModels: [
+      "gemini-2.5-flash",
+      "gemini-2.5-flash-lite",
+      "gemini-2.5-pro",
+      "gemini-2.0-flash",
+      "gemini-2.0-flash-lite",
+      "gemini-1.5-flash",
+      "gemini-1.5-pro",
+    ],
+    streamingEnabled: true,
+    authType: "bearer",  // Google's OpenAI-compatible endpoint uses Bearer auth
+    costPerInputToken: 0,
+    costPerOutputToken: 0,
+    status: "untested",
+    usage: { requests: 0, tokens: 0, errors: 0, avgLatencyMs: 0, cost: 0 },
+  },
 ];
 
 // === NVIDIA NIM provider (free Llama models) ===
