@@ -271,12 +271,13 @@ export function EditableA4Preview({ resume, onChange, scale = 0.7, className }: 
                     isTouch={isTouch}
                   >
                     <div style={{ marginBottom: "1.5mm" }}>
-                      <div style={{ marginBottom: "0.3mm", lineHeight: 1.2 }}>
-                        <span style={{ fontWeight: 700, color: BLACK }}>{String(e.title || "")}</span>
-                        {e.company && <span style={{ color: BLACK }}> | {String(e.company)}</span>}
-                        {e.location && <span style={{ color: BLACK }}> | {safeRender(e.location)}</span>}
-                        {"  "}
-                        <span style={{ color: BLACK }}>{fmtDateInfohas(e.startDate)} – {fmtDateInfohas(e.endDate)}</span>
+                      <div style={{ marginBottom: "0.3mm", lineHeight: 1.2, display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: "2mm" }}>
+                        <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                          <span style={{ fontWeight: 700, color: BLACK }}>{String(e.title || "")}</span>
+                          {e.company && <span style={{ color: BLACK }}> | {String(e.company)}</span>}
+                          {e.location && <span style={{ color: BLACK }}> | {safeRender(e.location)}</span>}
+                        </span>
+                        <span style={{ color: BLACK, whiteSpace: "nowrap", flexShrink: 0 }}>{fmtDateInfohas(e.startDate)}{e.endDate ? ` – ${fmtDateInfohas(e.endDate)}` : ""}</span>
                       </div>
                       <ul style={{ margin: 0, paddingLeft: "4mm", listStyleType: "•", lineHeight: 1.2 }}>
                         {e.bullets.map((b, i) => (

@@ -1095,13 +1095,18 @@ CONTENT REQUIREMENTS:
     dateOfBirth: data.dateOfBirth || resume.dateOfBirth,
     summary: String(data.summary || ""),
     experience: (data.experience ?? []).length > 0
-      ? data.experience.map((e: any) => ({
+      ? data.experience.map((e: any, i: number) => ({
           id: uid("e"),
           title: String(e.title || ""),
           company: String(e.company || ""),
           location: flattenLocation(e.location) || "",
-          startDate: String(e.startDate || ""),
-          endDate: String(e.endDate || "Present"),
+          // === PRESERVE ORIGINAL DATES — never default to "Present" ===
+          // If the AI returned empty dates, use the original resume's dates
+          // for this entry (by index). The enforceLockedFields function will
+          // also restore by company-name match, but this prevents "Present"
+          // from appearing in the intermediate step.
+          startDate: String(e.startDate || resume.experience[i]?.startDate || ""),
+          endDate: String(e.endDate || resume.experience[i]?.endDate || ""),
           bullets: Array.isArray(e.bullets) ? e.bullets.map((b: any) => flattenValue(b)) : [],
         }))
       : resume.experience,
