@@ -471,6 +471,13 @@ export interface FeatureFlags {
   enableDonations: boolean;
   enableAds: boolean;
   maintenanceMode: boolean;
+  /**
+   * P3: Real-time pipeline updates via WebSocket.
+   * When true, the dashboard subscribes to a Durable Object and receives
+   * push events for agent status changes (instead of polling every 2s).
+   * Default: false — requires the pipeline worker to be deployed.
+   */
+  pipeline_websocket_enabled?: boolean;
 }
 
 /**

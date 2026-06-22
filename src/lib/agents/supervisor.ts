@@ -208,6 +208,150 @@ function updateAgent(id: AgentId, patch: Partial<AgentState>): void {
     ...prev,
     agents: { ...prev.agents, [id]: { ...prev.agents[id], ...patch } },
   }));
+
+  // === P3: Report to the Pipeline Durable Object (real-time WebSocket push) ===
+  // Fire-and-forget — if the DO is unreachable, we don't want to break the pipeline.
+  // The DO will only be contacted if:
+  //   1. A pipelineId has been set (via initPipelineWebsocket())
+  //   2. The feature flag pipeline_websocket_enabled is true
+  //   3. We're in a browser context (not SSR)
+  if (newStatus && newStatus !== prevStatus) {
+    reportAgentStatusToDO(id, newStatus, patch).catch(() => {});
+  }
+}
+
+// ============================================================================
+// P3: Pipeline Durable Object reporter
+// ============================================================================
+// These functions report agent status changes to the PipelineDurableObject,
+// which broadcasts them to subscribed WebSocket clients.
+//
+// The reporter is OFF by default. It's enabled by:
+//   1. The feature flag `pipeline_websocket_enabled` being true (in the Zustand store)
+//   2. Calling initPipelineWebsocket(pipelineId) at the start of a pipeline run
+//
+// All calls are fire-and-forget — failures are silently swallowed so the
+// pipeline never blocks on the DO being unreachable.
+
+const PIPELINE_DO_BASE_URL =
+  typeof window !== "undefined" && window.location.hostname === "localhost"
+    ? "http://localhost:8787"
+    : "https://resumeai-pro-pipeline.rachidelsabah.workers.dev";
+
+let activePipelineId: string | null = null;
+
+/**
+ * Initialize the pipeline DO for a new optimization run.
+ * Call this at the start of runOptimizationPipeline() when the feature flag is on.
+ */
+export async function initPipelineWebsocket(pipelineId: string): Promise<void> {
+  activePipelineId = pipelineId;
+  if (typeof window === "undefined") return;
+
+  // Check the feature flag from localStorage (the Zustand store may not be hydrated yet)
+  let flagEnabled = false;
+  try {
+    const flagsRaw = localStorage.getItem("resumeai-feature-flags");
+    if (flagsRaw) {
+      const flags = JSON.parse(flagsRaw);
+      flagEnabled = !!flags.pipeline_websocket_enabled;
+    }
+  } catch {}
+
+  if (!flagEnabled) return;
+
+  try {
+    // Initialize the DO with the agent list
+    const agentList = Object.values(state.agents).map((a) => ({ id: a.id, name: a.name }));
+    await fetch(`${PIPELINE_DO_BASE_URL}/api/pipeline/${pipelineId}/init`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        pipelineId,
+        optimizationId: state.context.optimizationId,
+        resumeId: state.context.resumeId,
+        jobId: state.context.jobId,
+        companyName: state.context.companyName,
+        jobTitle: state.context.jobTitle,
+        agents: agentList,
+      }),
+    });
+  } catch (e) {
+    console.warn("[Supervisor] Failed to init pipeline DO:", e);
+  }
+}
+
+/**
+ * Report an agent status change to the DO. Fire-and-forget.
+ */
+async function reportAgentStatusToDO(
+  agentId: AgentId,
+  status: AgentStatus,
+  patch: Partial<AgentState>,
+): Promise<void> {
+  if (typeof window === "undefined") return;
+  if (!activePipelineId) return;
+
+  // Check the feature flag
+  let flagEnabled = false;
+  try {
+    const flagsRaw = localStorage.getItem("resumeai-feature-flags");
+    if (flagsRaw) {
+      const flags = JSON.parse(flagsRaw);
+      flagEnabled = !!flags.pipeline_websocket_enabled;
+    }
+  } catch {}
+  if (!flagEnabled) return;
+
+  try {
+    await fetch(`${PIPELINE_DO_BASE_URL}/api/pipeline/${activePipelineId}/update`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        agentId,
+        status,
+        log: patch.log,
+        error: patch.error,
+        resultSummary: patch.log ? patch.log.slice(0, 200) : undefined,
+        metrics: patch.durationMs ? { durationMs: patch.durationMs } : undefined,
+      }),
+    });
+  } catch (e) {
+    // Silent fail — don't pollute the console with DO errors
+  }
+}
+
+/**
+ * Mark the pipeline as complete in the DO. Fire-and-forget.
+ */
+export async function completePipelineWebsocket(
+  finalStatus: "completed" | "failed",
+  summary: string,
+  durationMs: number,
+): Promise<void> {
+  if (typeof window === "undefined" || !activePipelineId) return;
+
+  let flagEnabled = false;
+  try {
+    const flagsRaw = localStorage.getItem("resumeai-feature-flags");
+    if (flagsRaw) {
+      const flags = JSON.parse(flagsRaw);
+      flagEnabled = !!flags.pipeline_websocket_enabled;
+    }
+  } catch {}
+  if (!flagEnabled) return;
+
+  try {
+    await fetch(`${PIPELINE_DO_BASE_URL}/api/pipeline/${activePipelineId}/complete`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ finalStatus, summary, durationMs }),
+    });
+  } catch (e) {
+    console.warn("[Supervisor] Failed to complete pipeline DO:", e);
+  } finally {
+    activePipelineId = null;
+  }
 }
 
 function logEvent(type: PipelineEvent["type"], payload?: any): void {

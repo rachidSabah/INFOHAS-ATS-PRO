@@ -108,6 +108,99 @@ app.get("/api/health", async (c) => {
   });
 });
 
+// ============================================================================
+// P4: Edge Caching via Cloudflare Cache API
+// ============================================================================
+// The Cache API caches responses at the Cloudflare edge — meaning subsequent
+// requests for the same URL are served from the edge POP (typically <20ms
+// latency) instead of going all the way to the Worker + D1 (typically
+// 100-300ms from a distant region).
+//
+// Strategy:
+//   - GET endpoints that return global (non-user-specific) data are cached.
+//   - Cache TTL: 60s (s-maxage) + 5min stale-while-revalidate.
+//   - On write (PUT/POST/DELETE), the cache is purged for the affected URL.
+//   - User-specific endpoints (resumes, cover letters, etc.) are NOT cached
+//     because they depend on the X-User-Id header.
+//
+// Cached endpoints:
+//   - GET /api/settings/branding
+//   - GET /api/settings/flags
+//   - GET /api/providers (global, not user-specific)
+//   - GET /api/prompts (global)
+//
+// NOT cached:
+//   - GET /api/resumes (depends on X-User-Id)
+//   - GET /api/cover-letters (depends on X-User-Id)
+//   - GET /api/job-descriptions (depends on X-User-Id)
+//   - GET /api/interviews (depends on X-User-Id)
+//   - GET /api/ats-reports (depends on X-User-Id)
+//   - GET /api/users (admin-only — small cache benefit, and we don't want
+//     admin-only data cached at the edge where it could be served to a
+//     non-admin if the auth header changes)
+//   - GET /api/downloads (depends on X-User-Id)
+//   - GET /api/audit-logs (admin-only)
+
+/**
+ * Try to serve a cached response. Returns null on cache miss.
+ * The cache key is the full URL — this means queries with different params
+ * get separate cache entries (which is correct for our use case).
+ */
+async function getCached(c: any, url: string): Promise<Response | null> {
+  try {
+    const cache = caches.default;
+    const cacheKey = new Request(url, { method: "GET" });
+    const cached = await cache.match(cacheKey);
+    if (cached) {
+      // Clone the response and add a header so we can observe cache hits
+      const resp = new Response(cached.body, cached);
+      resp.headers.set("X-Cache-Status", "HIT");
+      return resp;
+    }
+  } catch {
+    // Cache API not available in some environments (e.g. local dev)
+  }
+  return null;
+}
+
+/**
+ * Cache a response. The response is cloned so the original can still be
+ * returned to the client. Sets s-maxage + stale-while-revalidate headers.
+ */
+async function setCached(c: any, url: string, response: Response, maxAgeSec = 60, swrSec = 300): Promise<void> {
+  try {
+    const cache = caches.default;
+    const cacheKey = new Request(url, { method: "GET" });
+    const cached = new Response(response.body, response);
+    cached.headers.set("Cache-Control", `s-maxage=${maxAgeSec}, stale-while-revalidate=${swrSec}`);
+    cached.headers.set("X-Cache-Status", "MISS");
+    // waitUntil ensures the cache write completes even if the request ends first
+    c.executionCtx.waitUntil(cache.put(cacheKey, cached.clone()));
+  } catch {
+    // Cache API not available
+  }
+}
+
+/**
+ * Purge the cache for a specific URL. Call this after any write that would
+ * invalidate the cached response.
+ */
+async function purgeCached(c: any, url: string): Promise<void> {
+  try {
+    const cache = caches.default;
+    const cacheKey = new Request(url, { method: "GET" });
+    c.executionCtx.waitUntil(cache.delete(cacheKey));
+  } catch {
+    // Cache API not available
+  }
+}
+
+/** Build the full URL from a path (uses the request's host). */
+function buildUrl(req: Request, path: string): string {
+  const url = new URL(path, req.url);
+  return url.toString();
+}
+
 // ============ USERS ============
 app.get("/api/users", async (c) => {
   const stmt = c.env.DB.prepare("SELECT * FROM users WHERE status != 'deleted' ORDER BY created_at DESC");
@@ -323,8 +416,16 @@ app.post("/api/ats-reports", async (c) => {
 
 // ============ AI PROVIDERS ============
 app.get("/api/providers", async (c) => {
+  // === P4: Edge cache — providers are global, cache for 60s ===
+  const fullUrl = buildUrl(c.req.raw, "/api/providers");
+  const cached = await getCached(c, fullUrl);
+  if (cached) return cached;
+
   const { results } = await c.env.DB.prepare("SELECT * FROM ai_providers ORDER BY priority ASC").all();
-  return c.json({ providers: results || [] });
+  const response = c.json({ providers: results || [] });
+  response.headers.set("X-Cache-Status", "MISS");
+  await setCached(c, fullUrl, response.clone());
+  return response;
 });
 
 app.post("/api/providers", async (c) => {
@@ -337,6 +438,8 @@ app.post("/api/providers", async (c) => {
     body.modelName || null, body.priority || 10, body.isActive ? 1 : 0, body.isDefault ? 1 : 0, body.isFallback ? 1 : 0,
     body.allowedForRegularUsers ? 1 : 0, body.timeout || 30000, body.maxTokens || 4096, body.temperature || 0.7,
     body.status || "untested", now, now).run();
+  // === P4: Purge the providers cache ===
+  await purgeCached(c, buildUrl(c.req.raw, "/api/providers"));
   return c.json({ ok: true, provider: { ...body, id } });
 });
 
@@ -354,18 +457,30 @@ app.put("/api/providers/:id", async (c) => {
   }
   values.push(id);
   await c.env.DB.prepare(`UPDATE ai_providers SET ${updates.join(", ")} WHERE id = ?`).bind(...values).run();
+  // === P4: Purge the providers cache ===
+  await purgeCached(c, buildUrl(c.req.raw, "/api/providers"));
   return c.json({ ok: true });
 });
 
 app.delete("/api/providers/:id", async (c) => {
   await c.env.DB.prepare("DELETE FROM ai_providers WHERE id = ?").bind(c.req.param("id")).run();
+  // === P4: Purge the providers cache ===
+  await purgeCached(c, buildUrl(c.req.raw, "/api/providers"));
   return c.json({ ok: true });
 });
 
 // ============ PROMPT TEMPLATES ============
 app.get("/api/prompts", async (c) => {
+  // === P4: Edge cache — prompts are global, cache for 60s ===
+  const fullUrl = buildUrl(c.req.raw, "/api/prompts");
+  const cached = await getCached(c, fullUrl);
+  if (cached) return cached;
+
   const { results } = await c.env.DB.prepare("SELECT * FROM prompt_templates ORDER BY created_at DESC").all();
-  return c.json({ prompts: results || [] });
+  const response = c.json({ prompts: results || [] });
+  response.headers.set("X-Cache-Status", "MISS");
+  await setCached(c, fullUrl, response.clone());
+  return response;
 });
 
 app.post("/api/prompts", async (c) => {
@@ -375,6 +490,8 @@ app.post("/api/prompts", async (c) => {
   await c.env.DB.prepare(
     "INSERT INTO prompt_templates (id, name, category, content, provider_id, version, is_active, variables_json, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
   ).bind(id, body.name, body.category, body.content, body.providerId || null, body.version || 1, body.isActive ? 1 : 0, JSON.stringify(body.variables || []), now, now).run();
+  // === P4: Purge the prompts cache ===
+  await purgeCached(c, buildUrl(c.req.raw, "/api/prompts"));
   return c.json({ ok: true, prompt: { ...body, id } });
 });
 
@@ -389,11 +506,15 @@ app.put("/api/prompts/:id", async (c) => {
   }
   values.push(id);
   await c.env.DB.prepare(`UPDATE prompt_templates SET ${updates.join(", ")} WHERE id = ?`).bind(...values).run();
+  // === P4: Purge the prompts cache ===
+  await purgeCached(c, buildUrl(c.req.raw, "/api/prompts"));
   return c.json({ ok: true });
 });
 
 app.delete("/api/prompts/:id", async (c) => {
   await c.env.DB.prepare("DELETE FROM prompt_templates WHERE id = ?").bind(c.req.param("id")).run();
+  // === P4: Purge the prompts cache ===
+  await purgeCached(c, buildUrl(c.req.raw, "/api/prompts"));
   return c.json({ ok: true });
 });
 
@@ -416,9 +537,18 @@ app.post("/api/audit-logs", async (c) => {
 
 // ============ SETTINGS ============
 app.get("/api/settings/branding", async (c) => {
+  // === P4: Edge cache — branding rarely changes, cache for 60s at the edge ===
+  const fullUrl = buildUrl(c.req.raw, "/api/settings/branding");
+  const cached = await getCached(c, fullUrl);
+  if (cached) return cached;
+
   try {
     const result = await c.env.DB.prepare("SELECT * FROM branding WHERE id = 1").first<any>();
-    return c.json({ branding: result || {} });
+    const response = c.json({ branding: result || {} });
+    response.headers.set("X-Cache-Status", "MISS");
+    // Cache the response (fire-and-forget via waitUntil)
+    await setCached(c, fullUrl, response.clone());
+    return response;
   } catch (e: any) {
     // Table might not exist yet (migration not applied)
     console.error("GET /api/settings/branding failed:", e?.message);
@@ -430,30 +560,28 @@ app.put("/api/settings/branding", async (c) => {
   const body = await parseBody(c.req.raw);
   const now = new Date().toISOString();
 
-  // Check whether the provider_settings_json column exists (migration 0006).
-  // If it doesn't, we skip those fields instead of failing the whole update.
-  const hasProviderSettingsCol = await columnExists(c.env.DB, "branding", "provider_settings_json");
-  const hasAIRoutingCol = await columnExists(c.env.DB, "branding", "ai_routing_settings_json");
-
+  // Migration 0006 is now applied to production, so provider_settings_json
+  // and ai_routing_settings_json always exist. We no longer need the
+  // columnExists() PRAGMA check on every PUT — that was adding ~10-30ms
+  // of latency per write.
+  //
+  // If a future deploy runs against a D1 instance that doesn't have migration
+  // 0006 applied, the UPDATE will fail with "no such column", which is caught
+  // by the try/catch below AND by the global onError handler (which returns
+  // a structured 500 with a migration hint).
   const updates: string[] = [
     "app_name = ?", "tagline = ?", "primary_color = ?", "accent_color = ?",
     "logo_url = ?", "email_from_name = ?", "email_from_address = ?",
     "pdf_footer_text = ?", "updated_at = ?",
+    "provider_settings_json = ?", "ai_routing_settings_json = ?",
   ];
   const values: any[] = [
     body.appName, body.tagline, body.primaryColor, body.accentColor,
     body.logoUrl, body.emailFromName, body.emailFromAddress,
     body.pdfFooterText, now,
+    body.providerSettings ? JSON.stringify(body.providerSettings) : null,
+    body.aiRoutingSettings ? JSON.stringify(body.aiRoutingSettings) : null,
   ];
-
-  if (hasProviderSettingsCol) {
-    updates.push("provider_settings_json = ?");
-    values.push(body.providerSettings ? JSON.stringify(body.providerSettings) : null);
-  }
-  if (hasAIRoutingCol) {
-    updates.push("ai_routing_settings_json = ?");
-    values.push(body.aiRoutingSettings ? JSON.stringify(body.aiRoutingSettings) : null);
-  }
 
   values.push("1"); // WHERE id = 1
 
@@ -461,19 +589,37 @@ app.put("/api/settings/branding", async (c) => {
     await c.env.DB.prepare(
       `UPDATE branding SET ${updates.join(", ")} WHERE id = ?`
     ).bind(...values).run();
-    return c.json({ ok: true, migrationApplied: hasProviderSettingsCol });
+    // === P4: Purge the edge cache for branding ===
+    await purgeCached(c, buildUrl(c.req.raw, "/api/settings/branding"));
+    return c.json({ ok: true });
   } catch (e: any) {
     console.error("PUT /api/settings/branding failed:", e?.message);
+    // If the error is "no such column", provide a migration hint
+    if (/no such column.*provider_settings_json/i.test(e?.message || "")) {
+      return c.json({
+        ok: false,
+        error: "Migration 0006 not yet applied. Run: npx wrangler d1 migrations apply resumeai-pro-db --remote",
+        migrationRequired: true,
+      }, 500);
+    }
     return c.json({ ok: false, error: e?.message || "Failed to update branding" }, 500);
   }
 });
 
 app.get("/api/settings/flags", async (c) => {
+  // === P4: Edge cache — flags rarely change, cache for 60s ===
+  const fullUrl = buildUrl(c.req.raw, "/api/settings/flags");
+  const cached = await getCached(c, fullUrl);
+  if (cached) return cached;
+
   try {
     const { results } = await c.env.DB.prepare("SELECT * FROM feature_flags").all<any>();
     const flags: Record<string, boolean> = {};
     for (const r of results || []) flags[r.key] = r.value === 1;
-    return c.json({ flags });
+    const response = c.json({ flags });
+    response.headers.set("X-Cache-Status", "MISS");
+    await setCached(c, fullUrl, response.clone());
+    return response;
   } catch (e: any) {
     console.error("GET /api/settings/flags failed:", e?.message);
     return c.json({ flags: {}, dbError: e?.message });
@@ -486,6 +632,8 @@ app.put("/api/settings/flags/:key", async (c) => {
   try {
     await c.env.DB.prepare("UPDATE feature_flags SET value = ?, updated_at = ? WHERE key = ?")
       .bind(body.value ? 1 : 0, new Date().toISOString(), key).run();
+    // === P4: Purge the edge cache for flags ===
+    await purgeCached(c, buildUrl(c.req.raw, "/api/settings/flags"));
     return c.json({ ok: true });
   } catch (e: any) {
     console.error("PUT /api/settings/flags failed:", e?.message);
