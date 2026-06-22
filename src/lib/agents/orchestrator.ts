@@ -190,6 +190,103 @@ function enforceLockedFields(optimized: ResumeData, original: ResumeData): Resum
   return locked;
 }
 
+// ============================================================================
+// Factual Diff Engine — compares original vs optimized resume
+// ============================================================================
+
+interface FactualDiff {
+  /** Number of experience entries in original vs optimized */
+  experienceCount: { original: number; optimized: number };
+  /** Number of bullets per experience entry (original vs optimized) */
+  bulletsPerEntry: { original: number[]; optimized: number[] };
+  /** Whether any dates were changed */
+  datesChanged: { index: number; field: "startDate" | "endDate"; original: string; optimized: string }[];
+  /** Whether any companies were changed */
+  companiesChanged: { index: number; original: string; optimized: string }[];
+  /** Missing experience entries (entries present in original but not in optimized) */
+  missingExperience: string[];
+  /** Missing education entries */
+  missingEducation: string[];
+  /** Character count */
+  charCount: { original: number; optimized: number };
+  /** Overall verdict */
+  hasRegressions: boolean;
+  /** Detailed messages */
+  messages: string[];
+}
+
+function computeFactualDiff(original: ResumeData, optimized: ResumeData): FactualDiff {
+  const messages: string[] = [];
+  const datesChanged: FactualDiff["datesChanged"] = [];
+  const companiesChanged: FactualDiff["companiesChanged"] = [];
+  const missingExperience: string[] = [];
+  const missingEducation: string[] = [];
+
+  // Compare experience counts
+  const originalExpCount = original.experience.length;
+  const optimizedExpCount = optimized.experience.length;
+  if (optimizedExpCount < originalExpCount) {
+    const missing = original.experience
+      .filter((oe) => !optimized.experience.some((oe2) => oe.company?.toLowerCase() === oe2.company?.toLowerCase()))
+      .map((e) => e.company || e.title);
+    missingExperience.push(...missing);
+    messages.push(`Missing experience entries: ${missing.join(", ")}`);
+  }
+
+  // Compare bullet counts per entry
+  const originalBullets = original.experience.map((e) => e.bullets.length);
+  const optimizedBullets = optimized.experience.map((e) => e.bullets.length);
+  for (let i = 0; i < Math.min(originalExpCount, optimizedExpCount); i++) {
+    if (optimizedBullets[i] < originalBullets[i]) {
+      messages.push(`Experience #${i + 1} ("${original.experience[i]?.company}"): ${originalBullets[i]} → ${optimizedBullets[i]} bullets (lost ${originalBullets[i] - optimizedBullets[i]})`);
+    }
+    // Check dates
+    const orig = original.experience[i];
+    const opt = optimized.experience[i];
+    if (orig && opt) {
+      if (opt.startDate && opt.startDate !== orig.startDate) {
+        datesChanged.push({ index: i, field: "startDate", original: orig.startDate || "", optimized: opt.startDate });
+      }
+      if (opt.endDate && opt.endDate !== orig.endDate) {
+        // Special case: "Present" when original has a real date
+        if (opt.endDate.toLowerCase() === "present" && orig.endDate && orig.endDate.toLowerCase() !== "present") {
+          messages.push(`BUG: Experience #${i + 1} ("${orig.company}") endDate changed from "${orig.endDate}" to "Present"`);
+        }
+        datesChanged.push({ index: i, field: "endDate", original: orig.endDate || "", optimized: opt.endDate });
+      }
+      if (opt.company && opt.company !== orig.company) {
+        companiesChanged.push({ index: i, original: orig.company, optimized: opt.company });
+        messages.push(`BUG: Experience #${i + 1} company changed from "${orig.company}" to "${opt.company}"`);
+      }
+    }
+  }
+
+  // Compare education counts
+  if (optimized.education.length < original.education.length) {
+    const missing = original.education
+      .filter((oe) => !optimized.education.some((oe2) => oe.institution?.toLowerCase() === oe2.institution?.toLowerCase()))
+      .map((e) => e.institution || e.degree);
+    missingEducation.push(...missing);
+    messages.push(`Missing education entries: ${missing.join(", ")}`);
+  }
+
+  // Char count
+  const originalChars = JSON.stringify(original.experience).length + JSON.stringify(original.education).length;
+  const optimizedChars = JSON.stringify(optimized.experience).length + JSON.stringify(optimized.education).length;
+
+  return {
+    experienceCount: { original: originalExpCount, optimized: optimizedExpCount },
+    bulletsPerEntry: { original: originalBullets, optimized: optimizedBullets },
+    datesChanged,
+    companiesChanged,
+    missingExperience,
+    missingEducation,
+    charCount: { original: originalChars, optimized: optimizedChars },
+    hasRegressions: messages.length > 0,
+    messages,
+  };
+}
+
 /**
  * Flatten a value that might be an object into a string.
  * Handles: strings, numbers, booleans, null/undefined, arrays, objects.
@@ -349,6 +446,13 @@ export interface ReflectionResult {
  */
 export async function runOptimizationPipeline(input: PipelineInput): Promise<PipelineResult> {
   const { resume, jd, userDirectives, aviationMode, checkExport = false, enableReflection = true } = input;
+
+  // ============================================================
+  // Load Optimizer Directive — Single Source of Truth
+  // ============================================================
+  const directiveText = userDirectives?.trim() || getOptimizerDirective();
+  const directiveSource = userDirectives?.trim() ? "custom-override" : "generated";
+  console.info("[OptimizationContext] Directive loaded:", { source: directiveSource, length: directiveText.length });
 
   // === Upgraded 7-step pipeline (V2) ===
   //   1. Job Intelligence
@@ -524,31 +628,55 @@ export async function runOptimizationPipeline(input: PipelineInput): Promise<Pip
     step.startedAt = new Date().toISOString();
     emitProgress(3, aviationMode ? `Optimizing for ${aviationMode.airlineProfile}…` : "Optimizing resume with full intelligence context…");
 
-    if (aviationMode) {
-      log("Resume Optimizer", `Aviation ATS mode → ${aviationMode.airlineProfile}. Calling aviationOptimize() with unified directive…`);
-      const aviationResult = await aviationOptimize(resume, jd.rawText ?? "", aviationMode.airlineProfile, aviationMode.settings);
-      result.optimizedResume = mapAviationResultToResumeData(aviationResult, resume);
-      result.provider = "aviation-ats";
-      result.charCount = aviationResult.charCount;
-      const optLog = `✓ Generated ${aviationResult.charCount} chars (target ~2900). ATS score: ${aviationResult.score}/100. ${aviationResult.matched_keywords.length} keywords matched.`;
-      log("Resume Optimizer", optLog);
-      emitProgress(3, optLog);
-    } else {
-      log("Resume Optimizer", "Standard optimization mode. Building directive from super-admin config + JD + Company + SkillGap context…");
-      const directive = userDirectives?.trim() || getOptimizerDirective();
-      const optimizeResult = await optimizeResumeStandard(
-        resume, jd, directive,
-        result.jobIntelligence,
-        result.companyIntelligence,
-        result.skillGap,
-      );
-      result.optimizedResume = optimizeResult.resume;
-      result.provider = optimizeResult.provider;
-      result.charCount = optimizeResult.charCount;
-      const optLog = `✓ Generated ${optimizeResult.charCount} chars (target ~2900) via ${optimizeResult.provider}. Embedded ${optimizeResult.keywordsAdded} keywords. Used ${result.companyIntelligence ? "Company+" : ""}${result.skillGap ? "SkillGap+" : ""}JI intelligence.`;
-      log("Resume Optimizer", optLog);
-      emitProgress(3, optLog);
+    // === AUTO-RECOVERY: retry once on failure ===
+    let optimizeAttempt = 0;
+    const maxOptimizeAttempts = 2;
+    let optimizeResult: { resume: ResumeData; provider: string; charCount: number; keywordsAdded: number } | null = null;
+    let optimizeError: string | null = null;
+
+    while (optimizeAttempt < maxOptimizeAttempts && !optimizeResult) {
+      optimizeAttempt++;
+      try {
+        if (aviationMode) {
+          log("Resume Optimizer", `Aviation ATS mode → ${aviationMode.airlineProfile}. Calling aviationOptimize() with unified directive…`);
+          const aviationResult = await aviationOptimize(resume, jd.rawText ?? "", aviationMode.airlineProfile, aviationMode.settings);
+          result.optimizedResume = mapAviationResultToResumeData(aviationResult, resume);
+          result.provider = "aviation-ats";
+          result.charCount = aviationResult.charCount;
+          const optLog = `✓ Generated ${aviationResult.charCount} chars (target ~2900). ATS score: ${aviationResult.score}/100. ${aviationResult.matched_keywords.length} keywords matched.`;
+          log("Resume Optimizer", optLog);
+          emitProgress(3, optLog);
+          optimizeResult = { resume: result.optimizedResume!, provider: "aviation-ats", charCount: result.charCount, keywordsAdded: aviationResult.matched_keywords.length };
+        } else {
+          log("Resume Optimizer", `Standard optimization mode (attempt ${optimizeAttempt}/${maxOptimizeAttempts}).`);
+          const optimizeAttemptResult = await optimizeResumeStandard(
+            resume, jd, directiveText,
+            result.jobIntelligence,
+            result.companyIntelligence,
+            result.skillGap,
+          );
+          optimizeResult = optimizeAttemptResult;
+        }
+      } catch (e: any) {
+        optimizeError = e?.message || "Unknown error";
+        log("Resume Optimizer", `Attempt ${optimizeAttempt} failed: ${optimizeError}`);
+        if (optimizeAttempt < maxOptimizeAttempts) {
+          log("Resume Optimizer", "Retrying optimization…");
+          emitProgress(3, `Optimization failed (attempt ${optimizeAttempt}). Retrying…`);
+        }
+      }
     }
+
+    if (!optimizeResult) {
+      throw new Error(`Optimization failed after ${maxOptimizeAttempts} attempts: ${optimizeError}`);
+    }
+
+    result.optimizedResume = optimizeResult.resume;
+    result.provider = optimizeResult.provider;
+    result.charCount = optimizeResult.charCount;
+    const optLog = `✓ Generated ${optimizeResult.charCount} chars (target ~2900) via ${optimizeResult.provider}. Embedded ${optimizeResult.keywordsAdded} keywords. Attempts: ${optimizeAttempt}.`;
+    log("Resume Optimizer", optLog);
+    emitProgress(3, optLog);
 
     result.metCharTarget = result.charCount >= 2500 && result.charCount <= 3100;
 
@@ -556,10 +684,12 @@ export async function runOptimizationPipeline(input: PipelineInput): Promise<Pip
     step.durationMs = Date.now() - new Date(step.startedAt).getTime();
     step.status = "completed";
   } catch (e: any) {
+    // === AUTO-RECOVERY: restore original resume when optimizer fails ===
     steps[3].status = "failed";
     steps[3].error = e?.message ?? "Optimizer failed";
-    log("Resume Optimizer", `✗ Optimizer failed: ${e?.message}`);
-    emitProgress(3, `Optimizer failed: ${e?.message}`);
+    log("Resume Optimizer", `✗ Optimizer failed: ${e?.message}. Preserving original resume.`);
+    emitProgress(3, `Optimization failed. Original resume preserved.`);
+    result.optimizedResume = resume; // Restore original
     result.status = "failed";
     return result;
   }
@@ -654,6 +784,78 @@ export async function runOptimizationPipeline(input: PipelineInput): Promise<Pip
     log("Reflection", enableReflection
       ? `Skipped — QA confidence ${result.qa?.confidence ?? "?"}/100 ≥ 75 and ATS improved ${atsImprovement} pts ≥ 5. No reflection needed.`
       : "Skipped — Reflection Agent disabled.");
+  }
+
+  // ========================================================================
+  // FACTUAL DIFF + QUALITY GATES
+  // ========================================================================
+  if (result.optimizedResume) {
+    const diff = computeFactualDiff(resume, result.optimizedResume);
+
+    // Check for regressions
+    if (diff.hasRegressions) {
+      console.warn("[OptimizationContext] Factual diffs detected:", diff.messages);
+    }
+
+    // === QUALITY GATES ===
+    const qualityErrors: string[] = [];
+
+    // Gate 1: Experience must exist
+    if (!result.optimizedResume.experience || result.optimizedResume.experience.length === 0) {
+      qualityErrors.push("Experience section is empty");
+    }
+
+    // Gate 2: Education must exist
+    if (!result.optimizedResume.education || result.optimizedResume.education.length === 0) {
+      qualityErrors.push("Education section is empty");
+    }
+
+    // Gate 3: Skills must exist
+    if (!result.optimizedResume.skills || result.optimizedResume.skills.length === 0) {
+      qualityErrors.push("Skills section is empty");
+    }
+
+    // Gate 4: Character count >= 2400
+    if (result.charCount < 2400) {
+      qualityErrors.push(`Character count ${result.charCount} < 2400 minimum`);
+    }
+
+    // Gate 5: No date regressions
+    const badDates = diff.datesChanged.filter((d) => d.optimized.toLowerCase() === "present" && d.original.toLowerCase() !== "present");
+    if (badDates.length > 0) {
+      qualityErrors.push(`${badDates.length} date(s) incorrectly set to "Present": ${badDates.map((d) => `#${d.index + 1} ${d.field}`).join(", ")}`);
+    }
+
+    // Gate 6: No company changes
+    if (diff.companiesChanged.length > 0) {
+      qualityErrors.push(`${diff.companiesChanged.length} company name(s) changed: ${diff.companiesChanged.map((c) => `"${c.original}" → "${c.optimized}"`).join(", ")}`);
+    }
+
+    if (qualityErrors.length > 0) {
+      console.warn("[OptimizationContext] Quality gates FAILED:", qualityErrors);
+      // Auto-recovery: restore original resume if quality gates fail
+      log("Quality Assurance", `⚠ Quality gates failed: ${qualityErrors.join("; ")}. Restoring original resume.`);
+      emitProgress(4, `Quality check failed. Original resume preserved.`);
+      result.optimizedResume = resume;
+    } else {
+      log("Quality Assurance", `✓ All ${6 - qualityErrors.filter((e) => e.includes("empty")).length}/6 quality gates passed.`);
+    }
+
+    // === DEBUG LOGGING ===
+    console.log({
+      directiveLoaded: true,
+      directiveSource,
+      overrideEnabled: !!userDirectives?.trim(),
+      pageTarget: "A4 · 1 page",
+      characterTarget: "2,700–3,000",
+      characterAchieved: result.charCount,
+      pageUtilization: Math.min(100, Math.round((result.charCount / 2900) * 100)) + "%",
+      preservedExperience: `${diff.experienceCount.optimized}/${diff.experienceCount.original} entries`,
+      preservedBullets: diff.bulletsPerEntry.optimized.map((c, i) => `${c}/${diff.bulletsPerEntry.original[i] || c}`).join(", "),
+      preservedDates: diff.datesChanged.length === 0 ? "✓ All preserved" : `✗ ${diff.datesChanged.length} changed`,
+      dateRegressions: badDates.length > 0 ? `✗ ${badDates.length} dates set to Present` : "✓ None",
+      sectionsRestored: qualityErrors.length > 0 ? "✓ Original restored" : "✓ None needed",
+    });
   }
 
   result.status = "completed";
