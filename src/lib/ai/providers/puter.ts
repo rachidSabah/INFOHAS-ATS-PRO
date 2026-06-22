@@ -17,7 +17,26 @@ export class PuterProvider implements AIProviderAdapter {
       }
     } catch { /* anonymous OK for some endpoints */ }
 
-    const model = req.model || config.modelName || undefined; // Let Puter pick its default
+    // Normalize model names: Puter API expects lowercase-hyphenated names like
+    // "gemini-2.0-flash" but users may have "Gemini 2.0 Flash" in their settings.
+    const MODEL_ALIASES: Record<string, string> = {
+      "gemini 2.0 flash": "gemini-2.0-flash",
+      "gemini-2.0-flash": "gemini-2.0-flash",
+      "gpt 4o mini": "gpt-4o-mini",
+      "gpt-4o-mini": "gpt-4o-mini",
+      "gpt 4o": "gpt-4o",
+      "gpt-4o": "gpt-4o",
+      "claude 3.5 sonnet": "claude-3-5-sonnet",
+      "claude-3-5-sonnet": "claude-3-5-sonnet",
+      "deepseek chat": "deepseek-chat",
+      "deepseek-chat": "deepseek-chat",
+      "llama 3.3 70b": "llama-3.3-70b",
+      "llama-3.3-70b": "llama-3.3-70b",
+      "mistral large": "mistral-large",
+      "mistral-large": "mistral-large",
+    };
+    const rawModel = req.model || config.modelName;
+    const model = MODEL_ALIASES[rawModel?.toLowerCase()] || rawModel || undefined; // Let Puter pick its default
     const resp = await window.puter.ai.chat(
       req.messages.map((m) => ({ role: m.role, content: m.content })),
       { model, max_tokens: req.maxTokens ?? config.maxTokens, temperature: req.temperature ?? config.temperature, stream: false }
