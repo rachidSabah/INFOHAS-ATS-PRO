@@ -365,15 +365,16 @@ export async function syncAllFromCloud(store: any): Promise<void> {
           ps = rawProviderSettings;
         }
         if (ps && (ps.defaultProviderId || ps.defaultModel || ps.fallbackProviderIds)) {
-          // === ONE-TIME OVERRIDE: if D1 has a stale/wrong default, force the
-          // correct default based on whether the OpenCode API key is set ===
-          const hasOpenCodeKey = !!process.env.NEXT_PUBLIC_OPENCODE_API_KEY;
-          const correctDefault = hasOpenCodeKey ? "p_opencode" : "p_puter";
-          const correctModel = hasOpenCodeKey ? "deepseek-v4-flash-free" : "gpt-5-nano";
+          // === ONE-TIME OVERRIDE: force Puter as default on next load ===
+          // The OpenCode API key is invalid (401), and previous D1 configs
+          // may have OpenCode or Mistral as default. Force Puter (always free).
+          const correctDefault = "p_puter";
+          const correctModel = "gpt-5-nano";
           if (
             ps.defaultProviderId === "p_mistral" ||
             ps.defaultModel === "mistral-large-latest" ||
-            (ps.defaultProviderId === "p_opencode" && !hasOpenCodeKey) // OpenCode key not set → fall back to Puter
+            ps.defaultProviderId === "p_opencode" ||
+            ps.defaultModel === "deepseek-v4-flash-free"
           ) {
             console.info(`[syncAllFromCloud] Overriding stale provider config → ${correctDefault} (${correctModel})`);
             ps.defaultProviderId = correctDefault;

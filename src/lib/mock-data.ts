@@ -403,10 +403,11 @@ export const SEED_PROVIDER_LOGS: AIProviderLog[] = [
 ];
 
 export const SEED_PROVIDER_SETTINGS: AIProviderSettings = {
-  // If OpenCode key is set → use it as default. Otherwise → Puter (browser-auth, always free).
-  defaultProviderId: process.env.NEXT_PUBLIC_OPENCODE_API_KEY ? "p_opencode" : "p_puter",
-  defaultModel: process.env.NEXT_PUBLIC_OPENCODE_API_KEY ? "deepseek-v4-flash-free" : "gpt-5-nano",
-  fallbackProviderIds: ["p_nvidia", "p_mistral", "p_puter"], // NVIDIA Llama → Mistral Small → Puter
+  // Default to Puter — always free, always works. OpenCode/NVIDIA/Mistral are
+  // fallbacks if the user configures valid API keys.
+  defaultProviderId: "p_puter",
+  defaultModel: "gpt-5-nano",
+  fallbackProviderIds: ["p_nvidia", "p_mistral", "p_puter"],
   retryAttempts: 2,
   timeout: 30000,
   rateLimitPerMinute: 60,
