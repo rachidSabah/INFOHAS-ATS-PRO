@@ -23,9 +23,13 @@ export async function POST(req: NextRequest) {
     if (apiKey) {
       // === SPECIAL CASE: Google Gemini ===
       // Google's OpenAI-compatible endpoint does NOT accept Bearer tokens.
-      // Use x-goog-api-key header instead.
+      // Use ?key= query parameter (most reliable method — works through all
+      // proxies and edge runtimes without header-stripping issues).
+      // The x-goog-api-key header also works but can be stripped by some
+      // edge runtime fetch implementations.
       if (baseUrl.includes("generativelanguage.googleapis.com")) {
-        headers["x-goog-api-key"] = apiKey;
+        // Key is appended as a query parameter below in the URL construction
+        // (see the Google section). Don't set any auth header here.
       } else if (authType === "header") {
         headers["x-api-key"] = apiKey;
       } else {
@@ -48,9 +52,10 @@ export async function POST(req: NextRequest) {
       };
     } else if (baseUrl.includes("generativelanguage.googleapis.com")) {
       // Google Gemini OpenAI-compatible endpoint
-      // Uses /v1beta/openai/chat/completions with x-goog-api-key header
-      // (the header is set above in the apiKey section)
-      url = `${baseUrl.replace(/\/$/, "")}/chat/completions`;
+      // Uses /v1beta/openai/chat/completions with ?key= query parameter
+      // (the query param is the most reliable auth method — works through
+      // all proxies and edge runtimes without header-stripping issues)
+      url = `${baseUrl.replace(/\/$/, "")}/chat/completions?key=${encodeURIComponent(apiKey || "")}`;
       reqBody = {
         model: model || "gemini-2.5-flash",
         messages: [{ role: "user", content: testPrompt || "Reply with exactly: OK" }],

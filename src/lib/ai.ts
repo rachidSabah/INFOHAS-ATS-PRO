@@ -970,13 +970,17 @@ async function callUserProvider(
   // === SPECIAL CASE: Google Gemini API ===
   // Google's OpenAI-compatible endpoint does NOT accept API keys as Bearer
   // tokens. It requires either:
-  //   1. x-goog-api-key header (preferred), OR
-  //   2. ?key=... query parameter
+  //   1. ?key=... query parameter (most reliable — used here), OR
+  //   2. x-goog-api-key header (can be stripped by some edge runtimes)
   // Sending `Authorization: Bearer API_KEY` produces:
   //   401 "API keys are not supported by this API. Expected OAuth2 access token"
-  // So for the gemini provider type, we always use the x-goog-api-key header.
-  if (provider.apiKey && (provider.type === "gemini" || provider.type === "google")) {
-    headers["x-goog-api-key"] = provider.apiKey;
+  // So for the gemini provider type, we use the query parameter method.
+  const isGemini = provider.type === "gemini" || provider.type === "google" ||
+    baseUrl.includes("generativelanguage.googleapis.com");
+
+  if (isGemini) {
+    // Key is appended as ?key=... below in the URL construction
+    // Don't set any auth header here
   } else if (provider.apiKey && authType === "bearer") {
     headers["Authorization"] = `Bearer ${provider.apiKey}`;
   } else if (provider.apiKey && authType === "header") {
@@ -988,8 +992,7 @@ async function callUserProvider(
       // ignore malformed headersJson
     }
   } else if (provider.apiKey && authType === "query") {
-    // query param — append to URL
-    // handled below when constructing the fetch URL
+    // query param — append to URL (handled below)
   }
   // authType === "none" → no auth header
 
@@ -1008,9 +1011,13 @@ async function callUserProvider(
     stream: false,
   };
 
-  // Build final URL (with query param if authType === "query")
+  // Build final URL (with query param for Gemini or authType === "query")
   let finalUrl = url;
-  if (authType === "query" && provider.apiKey) {
+  if (isGemini && provider.apiKey) {
+    // Google Gemini: append ?key=API_KEY (most reliable auth method)
+    const sep = finalUrl.includes("?") ? "&" : "?";
+    finalUrl = `${finalUrl}${sep}key=${encodeURIComponent(provider.apiKey)}`;
+  } else if (authType === "query" && provider.apiKey) {
     const sep = finalUrl.includes("?") ? "&" : "?";
     finalUrl = `${finalUrl}${sep}key=${encodeURIComponent(provider.apiKey)}`;
   }
