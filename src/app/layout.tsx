@@ -99,28 +99,29 @@ export default function RootLayout({
             `async` so it doesn't block page render; Puter attaches to window.puter
             and is available by the time user interactions happen. */}
         <script src="https://js.puter.com/v2/" async></script>
-        {/* Suppress Puter's "Submit this app to the Puter App Store" console banner.
-            Per https://docs.puter.com/ — set puter.quiet = true after load. */}
+        {/* Suppress Puter's console banner — set puter.quiet = true as early as possible. */}
         <script
           dangerouslySetInnerHTML={{
             __html: `
+              // Set quiet flag BEFORE Puter loads if possible
+              window.puter = window.puter || {};
+              window.puter.quiet = true;
+              // Also set it after load (Puter may overwrite the object)
               window.addEventListener('load', function() {
                 try {
                   if (window.puter) {
                     window.puter.quiet = true;
-                  } else {
-                    // Puter may load after window.load — watch for it
-                    var observer = new MutationObserver(function() {
-                      if (window.puter) {
-                        window.puter.quiet = true;
-                        observer.disconnect();
-                      }
-                    });
-                    observer.observe(document, { childList: true, subtree: true });
-                    setTimeout(function() { observer.disconnect(); }, 5000);
                   }
-                } catch (e) {}
+                } catch(e) {}
               });
+              // Watch for Puter script load and set quiet immediately
+              var _puterCheck = setInterval(function() {
+                if (window.puter) {
+                  window.puter.quiet = true;
+                  clearInterval(_puterCheck);
+                }
+              }, 50);
+              setTimeout(function() { clearInterval(_puterCheck); }, 5000);
             `,
           }}
         />

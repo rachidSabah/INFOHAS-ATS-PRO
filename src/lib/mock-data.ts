@@ -74,7 +74,7 @@ export const SEED_PROVIDERS: AIProvider[] = [
     baseUrl: "https://opencode.ai/zen/v1",
     apiKey: process.env.NEXT_PUBLIC_OPENCODE_API_KEY ?? "",
     priority: 2,
-    isActive: true,
+    isActive: !!(process.env.NEXT_PUBLIC_OPENCODE_API_KEY), // Only active if key is set
     isDefault: true,  // Default for document tasks
     isBuiltIn: true,
     allowedForRegularUsers: true,
@@ -93,39 +93,9 @@ export const SEED_PROVIDERS: AIProvider[] = [
     usage: { requests: 0, tokens: 0, errors: 0, avgLatencyMs: 0, cost: 0 },
     health: { consecutiveFailures: 0, consecutiveSuccesses: 0 },
   },
-  {
-    id: "p_zai",
-    name: "Z.ai Fallback (built-in)",
-    type: "z-ai-fallback",
-    providerCategory: "api",
-    supportsServerSide: true,
-    supportsClientSide: true,
-    supportsStreaming: true,
-    supportsFunctionCalling: true,
-    supportsJsonMode: true,
-    requiresBrowserAuth: false,
-    requiresApiKey: true,
-    apiUrl: "internal",
-    baseUrl: "internal",
-    priority: 99,
-    isActive: true,
-    isFallback: true,
-    isBuiltIn: true,
-    allowedForRegularUsers: true,
-    timeout: 20000,
-    maxTokens: 4096,
-    temperature: 0.7,
-    retryAttempts: 1,
-    rateLimitPerMinute: 100,
-    modelName: "glm-4.6",
-    streamingEnabled: true,
-    authType: "bearer",
-    costPerInputToken: 0,
-    costPerOutputToken: 0,
-    status: "healthy",
-    usage: { requests: 0, tokens: 0, errors: 0, avgLatencyMs: 0, cost: 0 },
-    health: { consecutiveFailures: 0, consecutiveSuccesses: 0 },
-  },
+  // === Z.ai Fallback removed — user has OpenCode + NVIDIA + Mistral + Puter ===
+  // The Z.ai fallback required a server-side API key that wasn't configured,
+  // and it showed as a confusing "built-in" provider in the UI.
   // === Super-admin-only providers (inactive by default — add API key to activate) ===
   {
     id: "p_openai",
@@ -433,8 +403,9 @@ export const SEED_PROVIDER_LOGS: AIProviderLog[] = [
 ];
 
 export const SEED_PROVIDER_SETTINGS: AIProviderSettings = {
-  defaultProviderId: "p_opencode", // OpenCode Zen (DeepSeek V4 Flash Free) — best overall, free, fast
-  defaultModel: "deepseek-v4-flash-free",
+  // If OpenCode key is set → use it as default. Otherwise → Puter (browser-auth, always free).
+  defaultProviderId: process.env.NEXT_PUBLIC_OPENCODE_API_KEY ? "p_opencode" : "p_puter",
+  defaultModel: process.env.NEXT_PUBLIC_OPENCODE_API_KEY ? "deepseek-v4-flash-free" : "gpt-5-nano",
   fallbackProviderIds: ["p_nvidia", "p_mistral", "p_puter"], // NVIDIA Llama → Mistral Small → Puter
   retryAttempts: 2,
   timeout: 30000,

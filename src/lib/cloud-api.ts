@@ -365,12 +365,19 @@ export async function syncAllFromCloud(store: any): Promise<void> {
           ps = rawProviderSettings;
         }
         if (ps && (ps.defaultProviderId || ps.defaultModel || ps.fallbackProviderIds)) {
-          // === ONE-TIME OVERRIDE: if D1 has the old Mistral default, force
-          // the new OpenCode Zen (DeepSeek V4 Flash Free) default ===
-          if (ps.defaultProviderId === "p_mistral" || ps.defaultModel === "mistral-large-latest") {
-            console.info("[syncAllFromCloud] Detected stale Mistral default — overriding to OpenCode Zen (DeepSeek V4 Flash Free)");
-            ps.defaultProviderId = "p_opencode";
-            ps.defaultModel = "deepseek-v4-flash-free";
+          // === ONE-TIME OVERRIDE: if D1 has a stale/wrong default, force the
+          // correct default based on whether the OpenCode API key is set ===
+          const hasOpenCodeKey = !!process.env.NEXT_PUBLIC_OPENCODE_API_KEY;
+          const correctDefault = hasOpenCodeKey ? "p_opencode" : "p_puter";
+          const correctModel = hasOpenCodeKey ? "deepseek-v4-flash-free" : "gpt-5-nano";
+          if (
+            ps.defaultProviderId === "p_mistral" ||
+            ps.defaultModel === "mistral-large-latest" ||
+            (ps.defaultProviderId === "p_opencode" && !hasOpenCodeKey) // OpenCode key not set → fall back to Puter
+          ) {
+            console.info(`[syncAllFromCloud] Overriding stale provider config → ${correctDefault} (${correctModel})`);
+            ps.defaultProviderId = correctDefault;
+            ps.defaultModel = correctModel;
             ps.fallbackProviderIds = ["p_nvidia", "p_mistral", "p_puter"];
           }
           console.info("[syncAllFromCloud] Restoring providerSettings from D1:", ps.defaultProviderId, ps.defaultModel);
