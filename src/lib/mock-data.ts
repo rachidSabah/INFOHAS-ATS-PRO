@@ -84,7 +84,7 @@ export const SEED_PROVIDERS: AIProvider[] = [
     retryAttempts: 2,
     rateLimitPerMinute: 60,
     modelName: "deepseek-v4-flash-free",
-    enabledModels: ["deepseek-v4-flash-free", "mimo-v2.5-free", "minimax-m3-free", "nemotron-3-ultra-free", "north-mini-code-free", "claude-sonnet-4-5", "gpt-5", "gemini-3-flash", "claude-opus-4-8", "gpt-5.5"],
+    enabledModels: ["deepseek-v4-flash-free", "mimo-v2.5-free", "minimax-m3-free", "nemotron-3-ultra-free", "north-mini-code-free", "big-pickle", "claude-sonnet-4-5", "gpt-5", "gemini-3-flash", "claude-opus-4-8", "gpt-5.5"],
     streamingEnabled: true,
     authType: "bearer",
     costPerInputToken: 0,
