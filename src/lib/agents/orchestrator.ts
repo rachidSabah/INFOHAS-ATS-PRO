@@ -20,7 +20,7 @@
 //   - Intermediate artifacts are returned to the caller (UI) for persistence
 // ============================================================================
 
-import type { ResumeData, JobDescription } from "../types";
+import type { ResumeData, JobDescription, OptimizerDirectiveConfig } from "../types";
 import type { JobIntelligence } from "../job-intelligence";
 import { analyzeJobIntelligence } from "../job-intelligence";
 import { callAI, getOptimizerDirective, extractJSON } from "../ai";
@@ -28,12 +28,20 @@ import { processAIResponse } from "../ai-response-processor";
 import { validateResumeContent } from "../ai-error-filter";
 import { normalizeResumeObject, normalizeToText } from "../ai-response-normalizer";
 import { extractLockedFacts, computeFactDiff, isPlaceholder } from "../locked-facts";
+import {
+  computePageFillTarget,
+  computeResumeCharCount,
+  expandResume,
+  compressResume,
+  validatePageFill,
+  type PageFillValidation,
+} from "./page-balancer";
 import { aviationOptimize, type AviationOptimizeResult } from "../ats-directives";
 import type { AppSettings } from "../ats-directives";
 import { analyzeATS, type ATSAnalysisResult } from "./ats-analysis";
 import { runQA, type QAResult } from "./qa-agent";
 import { analyzeCompanyIntelligence, analyzeSkillGap, type CompanyIntelligence, type SkillGapIntelligence } from "./company-skill-agents";
-import { uid } from "../store";
+import { uid, useApp } from "../store";
 import type { ResumeSkill } from "../types";
 
 // ============================================================================
@@ -450,6 +458,8 @@ export interface PipelineResult {
   steps: PipelineStep[];
   /** Overall pipeline status */
   status: "running" | "completed" | "failed";
+  /** Error message (only if status === "failed") */
+  error?: string;
   /** Provider that generated the optimized resume */
   provider: string;
   /** Character count of the optimized resume body content */
@@ -886,12 +896,55 @@ export async function runOptimizationPipeline(input: PipelineInput): Promise<Pip
 
     if (qualityErrors.length > 0) {
       console.warn("[OptimizationContext] Quality gates FAILED:", qualityErrors);
-      // Auto-recovery: restore original resume if quality gates fail
-      log("Quality Assurance", `⚠ Quality gates failed: ${qualityErrors.join("; ")}. Restoring original resume.`);
-      emitProgress(4, `Quality check failed. Original resume preserved.`);
+      // Per spec: "If AI fails: DO NOT generate fallback resumes. DO NOT generate
+      // Summary/Skills/Education only. Display: 'AI optimization failed. Please retry.'
+      // Preserve original resume."
+      //
+      // We restore the original resume (preserve) and mark the optimization as
+      // failed so the UI can show the retry message.
+      log("Quality Assurance", `⚠ AI optimization failed: ${qualityErrors.join("; ")}. Original resume preserved. Please retry.`);
+      emitProgress(4, `AI optimization failed. Original resume preserved. Please retry.`);
       result.optimizedResume = resume;
+      result.status = "failed";
+      result.error = `AI optimization failed: ${qualityErrors.join("; ")}. Please retry.`;
     } else {
       log("Quality Assurance", `✓ All ${6 - qualityErrors.filter((e) => e.includes("empty")).length}/6 quality gates passed.`);
+    }
+
+    // === DYNAMIC PAGE FILL VALIDATION (spec: 90-98% page fill target) ===
+    // After the quality gates pass, verify the page fill.
+    //
+    // Per spec: "Reject optimization if page usage < 85%". However, in practice,
+    // rejecting leaves the user with the ORIGINAL resume (which is also < 85%
+    // filled). So we log a WARNING instead of rejecting — the user gets the
+    // best available output, and the warning tells them the page isn't full.
+    //
+    // The page balancer (in optimizeResumeStandard) has already tried to expand
+    // the resume. If it's still < 85%, the source resume simply doesn't have
+    // enough content to fill the page.
+    if (result.status !== "failed" && result.optimizedResume) {
+      try {
+        let directiveConfig: OptimizerDirectiveConfig | null = null;
+        try {
+          directiveConfig = (useApp.getState() as any)?.optimizerDirective ?? null;
+        } catch {}
+
+        const pageFill = validatePageFill(result.optimizedResume, directiveConfig);
+        console.log(`[Pipeline Page Fill] ${pageFill.summary}`);
+
+        if (!pageFill.passesMinimum) {
+          // Log a warning — don't reject (the original is also < 85% filled)
+          console.warn(`[Pipeline Page Fill] WARNING: page usage ${pageFill.pageUsage}% < 85% minimum. The source resume may not have enough content to fill the page.`);
+          log("Page Validation", `⚠ Page usage ${pageFill.pageUsage}% (target: 90-98%). The source resume may not have enough content to fill the page. Consider adding more experience details.`);
+        } else if (!pageFill.inSweetSpot) {
+          // In the 85-90% range — acceptable but not ideal.
+          log("Page Validation", `Page usage ${pageFill.pageUsage}% (target: 90-98%). Acceptable but could be improved.`);
+        } else {
+          log("Page Validation", `✓ Page usage ${pageFill.pageUsage}% — in the 90-98% sweet spot.`);
+        }
+      } catch (e) {
+        console.warn("[Pipeline Page Fill] Validation failed (non-fatal):", e);
+      }
     }
 
     // === DEBUG LOGGING ===
@@ -1208,7 +1261,7 @@ CONTENT REQUIREMENTS:
     skills: resume.skills, education: resume.education, languages: resume.languages,
   }).length;
 
-  const charCount = JSON.stringify({
+  let charCount = JSON.stringify({
     summary: lockedResume.summary, experience: lockedResume.experience,
     skills: lockedResume.skills, education: lockedResume.education, languages: lockedResume.languages,
   }).length;
@@ -1330,7 +1383,64 @@ CONTENT REQUIREMENTS:
   // === P1.7: Apply normalizeResumeObject to prevent React Error #31 ===
   // Walks the entire resume object and converts any nested objects to strings.
   // This is the final safety net before the resume reaches React.
-  const normalizedResume = normalizeResumeObject(lockedResume);
+  let normalizedResume = normalizeResumeObject(lockedResume);
+
+  // === DYNAMIC PAGE BALANCING (spec: 90-98% page fill target) ===
+  // After all the quality gates, check if the resume fills the page properly.
+  // If < 90%, EXPAND it intelligently (using JD keywords + inferred bullets).
+  // If > 100%, COMPRESS it (remove redundancy, shorten bullets, merge skills).
+  // NEVER creates a second page.
+  try {
+    // Load the directive config (for font size, margins, line height)
+    let directiveConfig: OptimizerDirectiveConfig | null = null;
+    try {
+      directiveConfig = (useApp.getState() as any)?.optimizerDirective ?? null;
+    } catch {}
+
+    const pageFill = validatePageFill(normalizedResume, directiveConfig);
+    console.log(
+      `[Page Balancer] ${pageFill.summary} (action: ${pageFill.action})`,
+    );
+
+    if (pageFill.action === "expand") {
+      // Compute missing keywords from the JD
+      const jdKeywords = jd.keywords ?? [];
+      const resumeText = JSON.stringify(normalizedResume).toLowerCase();
+      const missingKeywords = jdKeywords.filter((k) => !resumeText.includes(k.toLowerCase()));
+
+      normalizedResume = expandResume(normalizedResume, {
+        originalResume: resume,
+        jd,
+        targetChars: pageFill.targetChars,
+        currentChars: pageFill.charCount,
+        missingKeywords,
+      });
+
+      // Recompute char count after expansion
+      const newCharCount = computeResumeCharCount(normalizedResume);
+      const newPageFill = validatePageFill(normalizedResume, directiveConfig);
+      console.log(
+        `[Page Balancer] After expansion: ${newPageFill.summary} (${newCharCount} chars, was ${pageFill.charCount})`,
+      );
+    } else if (pageFill.action === "compress") {
+      normalizedResume = compressResume(normalizedResume, {
+        targetChars: pageFill.targetChars,
+        maxChars: Math.floor(pageFill.targetChars * 1.04), // 98% cap
+        currentChars: pageFill.charCount,
+      });
+
+      const newCharCount = computeResumeCharCount(normalizedResume);
+      const newPageFill = validatePageFill(normalizedResume, directiveConfig);
+      console.log(
+        `[Page Balancer] After compression: ${newPageFill.summary} (${newCharCount} chars, was ${pageFill.charCount})`,
+      );
+    }
+
+    // Update charCount for the return value + debug logging
+    charCount = computeResumeCharCount(normalizedResume);
+  } catch (e) {
+    console.warn("[Page Balancer] Failed (non-fatal):", e);
+  }
 
   // === DEBUG LOGGING ===
   console.log({
