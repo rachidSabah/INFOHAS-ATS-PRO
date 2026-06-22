@@ -155,35 +155,205 @@ export async function discoverPuterModels(): Promise<PuterModel[]> {
 
 /**
  * Curated list of models known to work on Puter.js.
- * These are verified to be available as of the latest Puter.js docs.
+ * Updated per https://docs.puter.com/AI/chat/ (2026-06).
+ * Puter supports 500+ models from OpenAI, Anthropic, Google, xAI, Mistral,
+ * OpenRouter, and DeepSeek.
  */
 export const KNOWN_GOOD_PUTER_MODELS: PuterModel[] = [
-  // OpenAI models
-  { id: "gpt-5-nano", label: "GPT-5 Nano (default)", provider: "OpenAI" },
+  // OpenAI models (default is gpt-5-nano per the docs)
+  { id: "gpt-5-nano", label: "GPT-5 Nano (Puter default)", provider: "OpenAI" },
   { id: "gpt-5.4-nano", label: "GPT-5.4 Nano", provider: "OpenAI" },
+  { id: "gpt-5.4", label: "GPT-5.4", provider: "OpenAI" },
   { id: "gpt-4o-mini", label: "GPT-4o Mini", provider: "OpenAI" },
   { id: "gpt-4o", label: "GPT-4o", provider: "OpenAI" },
+  // OpenAI reasoning models (support reasoning_effort: none/minimal/low/medium/high/xhigh)
+  { id: "o3-mini", label: "o3-mini (reasoning)", provider: "OpenAI" },
+  { id: "o4-mini", label: "o4-mini (reasoning)", provider: "OpenAI" },
   // Anthropic models
   { id: "claude-sonnet-4-5", label: "Claude Sonnet 4.5", provider: "Anthropic" },
+  { id: "claude-opus-4-8", label: "Claude Opus 4.8", provider: "Anthropic" },
   { id: "claude-3-7-sonnet", label: "Claude 3.7 Sonnet", provider: "Anthropic" },
-  // Google models
+  // Google models (some support image generation)
   { id: "gemini-2.5-flash", label: "Gemini 2.5 Flash", provider: "Google" },
+  { id: "gemini-2.5-flash-lite", label: "Gemini 2.5 Flash Lite", provider: "Google" },
   { id: "gemini-2.0-flash", label: "Gemini 2.0 Flash", provider: "Google" },
+  { id: "gemini-2.5-flash-image", label: "Gemini 2.5 Flash (Image Gen)", provider: "Google" },
   // DeepSeek
   { id: "deepseek-chat", label: "DeepSeek Chat", provider: "DeepSeek" },
   // Mistral
   { id: "mistral-large-latest", label: "Mistral Large", provider: "Mistral" },
+  // xAI
+  { id: "grok-beta", label: "Grok Beta", provider: "xAI" },
+  // Reka (video analysis)
+  { id: "reka/reka-edge", label: "Reka Edge (Video)", provider: "Reka" },
 ];
 
 function inferProvider(modelId: string): string {
   const lower = modelId.toLowerCase();
-  if (lower.includes("gpt") || lower.includes("o1") || lower.includes("o3")) return "OpenAI";
+  if (lower.includes("gpt") || lower.includes("o1") || lower.includes("o3") || lower.includes("o4")) return "OpenAI";
   if (lower.includes("claude")) return "Anthropic";
   if (lower.includes("gemini")) return "Google";
   if (lower.includes("deepseek")) return "DeepSeek";
   if (lower.includes("mistral") || lower.includes("mixtral")) return "Mistral";
   if (lower.includes("llama")) return "Meta";
+  if (lower.includes("grok")) return "xAI";
+  if (lower.includes("reka")) return "Reka";
   return "Unknown";
+}
+
+// ============================================================================
+// Usage Monitoring (per https://docs.puter.com/Auth/getMonthlyUsage/)
+// ============================================================================
+
+export interface PuterMonthlyUsage {
+  /** The usage data returned by puter.auth.getMonthlyUsage(). */
+  [key: string]: any;
+}
+
+/**
+ * Get the user's current monthly resource usage in the Puter ecosystem.
+ * Usage data is scoped to the calling app only.
+ *
+ * Per https://docs.puter.com/Auth/getMonthlyUsage/:
+ *   "Get the user's current monthly resource usage in the Puter ecosystem.
+ *    Usage data is scoped to the calling app only."
+ *
+ * Returns null if Puter.js isn't loaded or the user isn't signed in.
+ */
+export async function getPuterMonthlyUsage(): Promise<PuterMonthlyUsage | null> {
+  if (!isPuterLoaded()) return null;
+  try {
+    const authStatus = getPuterAuthStatus();
+    if (authStatus !== "authenticated") return null;
+    if (typeof window.puter.auth.getMonthlyUsage !== "function") return null;
+    return await window.puter.auth.getMonthlyUsage();
+  } catch (e) {
+    console.warn("[Puter] getMonthlyUsage failed:", e);
+    return null;
+  }
+}
+
+/**
+ * Check if the user is likely approaching the Puter free-tier usage cap.
+ * Returns { near, remaining, message }.
+ *
+ * This is a heuristic — Puter's free-tier limits aren't publicly documented
+ * in exact numbers, but getMonthlyUsage() returns the data we need to
+ * estimate. When usage is high, we warn the user so they can either:
+ *   1. Wait for the monthly reset
+ *   2. Configure a paid API provider in Settings
+ */
+export async function checkPuterUsageStatus(): Promise<{
+  near: boolean;
+  remaining: "unknown" | "low" | "medium" | "high";
+  message: string;
+  raw: PuterMonthlyUsage | null;
+}> {
+  const usage = await getPuterMonthlyUsage();
+  if (!usage) {
+    return {
+      near: false,
+      remaining: "unknown",
+      message: "Puter usage data unavailable. Sign in to Puter to see your usage.",
+      raw: null,
+    };
+  }
+
+  // The exact shape of the usage object isn't fully documented, but it
+  // typically includes fields like:
+  //   { ai_tokens: number, ai_requests: number, storage: number, ... }
+  // We check common fields and estimate remaining capacity.
+  const aiTokens = usage.ai_tokens ?? usage.aiTokens ?? usage.tokens ?? 0;
+  const aiRequests = usage.ai_requests ?? usage.aiRequests ?? usage.requests ?? 0;
+
+  // Heuristic thresholds (adjust based on observed Puter free-tier limits)
+  // These are conservative — we warn early so the user isn't surprised.
+  const TOKEN_WARNING_THRESHOLD = 100_000;
+  const REQUEST_WARNING_THRESHOLD = 500;
+
+  const nearTokenCap = typeof aiTokens === "number" && aiTokens > TOKEN_WARNING_THRESHOLD;
+  const nearRequestCap = typeof aiRequests === "number" && aiRequests > REQUEST_WARNING_THRESHOLD;
+
+  if (nearTokenCap || nearRequestCap) {
+    return {
+      near: true,
+      remaining: "low",
+      message: `Puter usage is high (${aiRequests} requests, ${aiTokens} tokens this month). Consider configuring a paid API provider in Settings to avoid hitting the free-tier cap.`,
+      raw: usage,
+    };
+  }
+
+  return {
+    near: false,
+    remaining: "high",
+    message: `Puter usage is healthy (${aiRequests} requests, ${aiTokens} tokens this month).`,
+    raw: usage,
+  };
+}
+
+// ============================================================================
+// Streaming Support (per https://docs.puter.com/AI/chat/ — stream: true)
+// ============================================================================
+
+export interface PuterStreamChunk {
+  type: "text" | "compaction" | "error" | "image";
+  text?: string;
+  message?: string;
+  image?: { type: string; image_url: { url: string } };
+  id?: string;
+  encrypted_content?: string;
+}
+
+/**
+ * Stream a chat completion from Puter.js.
+ *
+ * Per https://docs.puter.com/AI/chat/:
+ *   const resp = await puter.ai.chat(messages, { model: 'gpt-5.4', stream: true });
+ *   for await (const part of resp) {
+ *     if (part.type === 'text') text += part.text;
+ *     else if (part.type === 'compaction') compaction = part;
+ *     else if (part.type === 'error') console.error('stream error:', part.message);
+ *   }
+ *
+ * @param messages Chat messages (system + user)
+ * @param options Model, temperature, etc. (stream: true is added automatically)
+ * @param onChunk Callback called for each text chunk
+ * @returns The full concatenated text
+ */
+export async function puterChatStreamed(
+  messages: Array<{ role: string; content: string }>,
+  options: { model?: string; maxTokens?: number; temperature?: number },
+  onChunk: (chunk: string) => void,
+): Promise<string> {
+  if (!isPuterLoaded()) {
+    throw new Error("Puter.js is not loaded. This function can only run in the browser.");
+  }
+
+  const authStatus = getPuterAuthStatus();
+  if (authStatus !== "authenticated") {
+    throw new Error(`Puter authentication required. Current status: ${authStatus}. Please sign in to Puter first.`);
+  }
+
+  const model = options.model || "gpt-5-nano";
+  const response: any = await window.puter.ai.chat(messages, {
+    model,
+    max_tokens: options.maxTokens ?? 4096,
+    temperature: options.temperature ?? 0.7,
+    stream: true,
+  });
+
+  let fullText = "";
+  for await (const part of response as AsyncIterable<any>) {
+    if (part?.type === "text" && part.text) {
+      fullText += part.text;
+      onChunk(part.text);
+    } else if (part?.type === "error") {
+      throw new Error(part.message || "Puter stream error");
+    }
+    // 'compaction' and 'image' chunks are handled by the caller if needed
+  }
+
+  return fullText;
 }
 
 /**

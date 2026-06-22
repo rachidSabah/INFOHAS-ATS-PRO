@@ -12,6 +12,16 @@
 
 import { useApp } from "./store";
 import { startAICall, truncatePromptToTokenLimit, checkTokenLimit } from "./ai-diagnostics";
+import {
+  checkPuterUsageStatus as _checkPuterUsageStatus,
+  getPuterMonthlyUsage as _getPuterMonthlyUsage,
+  type PuterMonthlyUsage,
+} from "./puter-client";
+
+// Re-export Puter usage functions for the UI
+export const checkPuterUsageStatus = _checkPuterUsageStatus;
+export const getPuterMonthlyUsage = _getPuterMonthlyUsage;
+export type { PuterMonthlyUsage };
 
 declare global {
   interface Window {
@@ -1846,6 +1856,77 @@ function extract(s: string, re: RegExp, fallback: string): string {
  * Stream-ish helper: yields chunks for typewriter UI. Returns final text.
  */
 export async function callAIStreamed(opts: AICallOptions, onChunk: (chunk: string) => void): Promise<AICallResult> {
+  const t0 = performance.now();
+
+  // === Try real streaming via Puter.js first (if available) ===
+  // Per https://docs.puter.com/AI/chat/ — stream: true returns an async iterable
+  // of chunks: { type: 'text', text: '...' } | { type: 'error', message: '...' }
+  if (!opts.preferServer && !opts.preferLocal && typeof window !== "undefined" && window.puter?.ai?.chat) {
+    // Check if Puter is in cooldown
+    if (!isPuterInCooldown()) {
+      try {
+        const messages = opts.systemPrompt
+          ? [
+              { role: "system", content: opts.systemPrompt },
+              { role: "user", content: opts.userPrompt },
+            ]
+          : [{ role: "user", content: opts.userPrompt }];
+
+        // Build options — only pass model if the user configured one
+        const chatOpts: any = {
+          max_tokens: opts.maxTokens ?? 4096,
+          temperature: opts.temperature ?? 0.7,
+          stream: true,
+        };
+        try {
+          const state: any = useApp.getState();
+          const puterProvider = (state?.providers || []).find(
+            (p: any) => p.type === "puter" && p.isActive && p.modelName,
+          );
+          if (puterProvider?.modelName) {
+            chatOpts.model = puterProvider.modelName;
+          }
+        } catch {}
+
+        const response: any = await withTimeout(
+          window.puter.ai.chat(messages, chatOpts),
+          60000, // 60s for streamed calls (longer because chunks arrive over time)
+          "Puter AI chat (streamed)",
+        );
+
+        let fullText = "";
+        for await (const part of response as AsyncIterable<any>) {
+          if (part?.type === "text" && part.text) {
+            fullText += part.text;
+            onChunk(part.text);
+          } else if (part?.type === "error") {
+            throw new Error(part.message || "Puter stream error");
+          }
+        }
+
+        if (fullText.trim().length > 0) {
+          return {
+            text: fullText,
+            provider: "Puter.js (streamed)",
+            latencyMs: Math.round(performance.now() - t0),
+            tokensEstimate: estTokens(opts.userPrompt + (opts.systemPrompt ?? "")),
+          };
+        }
+      } catch (e: any) {
+        const msg = e?.message || String(e || "");
+        // If Puter hit its usage cap, enter cooldown
+        if (isPuterQuotaError(e)) {
+          markPuterCooldown();
+          console.warn("[AI Streamed] Puter usage cap hit — entering 5-minute cooldown. Falling through to non-streamed callAI.");
+        } else if (!/auth|sign.?in|unauthor|401|403/i.test(msg)) {
+          console.warn("[AI Streamed] Puter streaming failed, falling through to non-streamed callAI:", msg);
+        }
+        // Fall through to the non-streamed path below
+      }
+    }
+  }
+
+  // === Fallback: non-streamed callAI + simulated streaming ===
   const result = await callAI(opts);
   // Simulate streaming for snappier UX
   const words = result.text.split(/(\s+)/);
