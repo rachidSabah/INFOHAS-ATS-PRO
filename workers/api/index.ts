@@ -663,6 +663,286 @@ app.post("/api/downloads", async (c) => {
   return c.json({ ok: true });
 });
 
+// ============================================================================
+// TASK TRACKING — D1-backed polling (replaces Durable Objects)
+// ============================================================================
+// These endpoints support the polling-based task tracking system.
+// The frontend polls /api/tasks/:id/status every 2 seconds.
+// No Durable Objects, no WebSockets — works on Cloudflare Free plan.
+
+// === POST /api/tasks/create — create a new task ===
+app.post("/api/tasks/create", async (c) => {
+  try {
+    const body = await parseBody(c.req.raw);
+    const type = body.type || "generic";
+    const message = body.message || "Initializing";
+
+    const id = `task_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+    const now = Date.now();
+
+    await c.env.DB.prepare(
+      `INSERT INTO ai_tasks (id, type, status, progress, message, result_json, error, created_at, updated_at)
+       VALUES (?, ?, 'queued', 0, ?, NULL, NULL, ?, ?)`,
+    ).bind(id, type, message, now, now).run();
+
+    return c.json({
+      ok: true,
+      task: {
+        id,
+        type,
+        status: "queued",
+        progress: 0,
+        message,
+        created_at: now,
+        updated_at: now,
+      },
+    });
+  } catch (e: any) {
+    console.error("POST /api/tasks/create failed:", e?.message);
+    return c.json({ ok: false, error: e?.message || "Failed to create task" }, 500);
+  }
+});
+
+// === GET /api/tasks/:id — get full task record (including result) ===
+app.get("/api/tasks/:id", async (c) => {
+  try {
+    const id = c.req.param("id");
+    const row = await c.env.DB.prepare(
+      `SELECT id, type, status, progress, message, result_json, error, created_at, updated_at
+       FROM ai_tasks WHERE id = ?`,
+    ).bind(id).first<any>();
+
+    if (!row) return c.json({ ok: false, error: "Task not found" }, 404);
+
+    // Parse result_json for the client
+    let result = null;
+    if (row.result_json) {
+      try { result = JSON.parse(row.result_json); } catch { result = row.result_json; }
+    }
+
+    return c.json({
+      ok: true,
+      task: {
+        id: row.id,
+        type: row.type,
+        status: row.status,
+        progress: row.progress,
+        message: row.message,
+        result,
+        error: row.error,
+        created_at: row.created_at,
+        updated_at: row.updated_at,
+      },
+    });
+  } catch (e: any) {
+    console.error("GET /api/tasks/:id failed:", e?.message);
+    return c.json({ ok: false, error: e?.message }, 500);
+  }
+});
+
+// === GET /api/tasks/:id/status — lightweight status poll (for 2s polling) ===
+app.get("/api/tasks/:id/status", async (c) => {
+  try {
+    const id = c.req.param("id");
+    const row = await c.env.DB.prepare(
+      `SELECT id, status, progress, message, error, updated_at FROM ai_tasks WHERE id = ?`,
+    ).bind(id).first<any>();
+
+    if (!row) return c.json({ ok: false, error: "Task not found" }, 404);
+
+    return c.json({
+      ok: true,
+      id: row.id,
+      status: row.status,
+      progress: row.progress,
+      message: row.message,
+      error: row.error,
+      updated_at: row.updated_at,
+    });
+  } catch (e: any) {
+    console.error("GET /api/tasks/:id/status failed:", e?.message);
+    return c.json({ ok: false, error: e?.message }, 500);
+  }
+});
+
+// === POST /api/tasks/:id/cancel — cancel a queued/running task ===
+app.post("/api/tasks/:id/cancel", async (c) => {
+  try {
+    const id = c.req.param("id");
+    const now = Date.now();
+    const result = await c.env.DB.prepare(
+      `UPDATE ai_tasks SET status = 'cancelled', message = 'Cancelled by user', updated_at = ?
+       WHERE id = ? AND status IN ('queued', 'running')`,
+    ).bind(now, id).run();
+
+    const changes = (result as any)?.meta?.changes ?? 0;
+    if (changes === 0) {
+      return c.json({ ok: false, error: "Task not found or already in terminal status" }, 404);
+    }
+    return c.json({ ok: true, status: "cancelled" });
+  } catch (e: any) {
+    console.error("POST /api/tasks/:id/cancel failed:", e?.message);
+    return c.json({ ok: false, error: e?.message }, 500);
+  }
+});
+
+// === PATCH /api/tasks/:id — update task progress/status (called by the worker running the task) ===
+app.patch("/api/tasks/:id", async (c) => {
+  try {
+    const id = c.req.param("id");
+    const body = await parseBody(c.req.raw);
+    const now = Date.now();
+
+    const updates: string[] = ["updated_at = ?"];
+    const values: any[] = [now];
+
+    if (body.status !== undefined) { updates.push("status = ?"); values.push(body.status); }
+    if (body.progress !== undefined) { updates.push("progress = ?"); values.push(Math.max(0, Math.min(100, body.progress))); }
+    if (body.message !== undefined) { updates.push("message = ?"); values.push(body.message); }
+    if (body.error !== undefined) { updates.push("error = ?"); values.push(body.error); }
+    if (body.result !== undefined) {
+      updates.push("result_json = ?");
+      values.push(typeof body.result === "string" ? body.result : JSON.stringify(body.result));
+    }
+
+    values.push(id);
+    await c.env.DB.prepare(
+      `UPDATE ai_tasks SET ${updates.join(", ")} WHERE id = ?`,
+    ).bind(...values).run();
+
+    return c.json({ ok: true });
+  } catch (e: any) {
+    console.error("PATCH /api/tasks/:id failed:", e?.message);
+    return c.json({ ok: false, error: e?.message }, 500);
+  }
+});
+
+// === GET /api/tasks — list recent tasks (admin dashboard) ===
+app.get("/api/tasks", async (c) => {
+  try {
+    const limit = Math.min(100, parseInt(c.req.query("limit") || "50", 10));
+    const statusFilter = c.req.query("status");
+
+    const sql = statusFilter
+      ? `SELECT id, type, status, progress, message, error, created_at, updated_at
+         FROM ai_tasks WHERE status = ? ORDER BY created_at DESC LIMIT ?`
+      : `SELECT id, type, status, progress, message, error, created_at, updated_at
+         FROM ai_tasks ORDER BY created_at DESC LIMIT ?`;
+
+    const stmt = statusFilter
+      ? c.env.DB.prepare(sql).bind(statusFilter, limit)
+      : c.env.DB.prepare(sql).bind(limit);
+
+    const { results } = await stmt.all<any>();
+    return c.json({ ok: true, tasks: results || [] });
+  } catch (e: any) {
+    console.error("GET /api/tasks failed:", e?.message);
+    return c.json({ ok: false, error: e?.message }, 500);
+  }
+});
+
+// === POST /api/tasks/purge — purge completed/failed tasks older than 30 days ===
+app.post("/api/tasks/purge", async (c) => {
+  try {
+    const maxAgeDays = parseInt(c.req.query("days") || "30", 10);
+    const cutoff = Date.now() - maxAgeDays * 24 * 60 * 60 * 1000;
+    const result = await c.env.DB.prepare(
+      `DELETE FROM ai_tasks
+       WHERE status IN ('completed', 'failed', 'cancelled') AND created_at < ?`,
+    ).bind(cutoff).run();
+
+    const changes = (result as any)?.meta?.changes ?? 0;
+    return c.json({ ok: true, purged: changes });
+  } catch (e: any) {
+    console.error("POST /api/tasks/purge failed:", e?.message);
+    return c.json({ ok: false, error: e?.message }, 500);
+  }
+});
+
+// === GET /api/tasks/:id/events — Server-Sent Events (optional SSE) ===
+// SSE is a lightweight alternative to polling. The browser opens a persistent
+// connection and the server pushes updates. No Durable Objects required.
+// If SSE is unavailable, the frontend falls back to polling automatically.
+app.get("/api/tasks/:id/events", async (c) => {
+  const id = c.req.param("id");
+
+  // Check if the task exists
+  const existing = await c.env.DB.prepare(
+    "SELECT status FROM ai_tasks WHERE id = ?",
+  ).bind(id).first<any>();
+
+  if (!existing) {
+    return c.json({ ok: false, error: "Task not found" }, 404);
+  }
+
+  // SSE headers
+  const headers = {
+    "Content-Type": "text/event-stream",
+    "Cache-Control": "no-cache",
+    "Connection": "keep-alive",
+    "Access-Control-Allow-Origin": "*",
+  };
+
+  const stream = new ReadableStream({
+    async start(controller) {
+      const encoder = new TextEncoder();
+      let lastUpdated = 0;
+      let pollCount = 0;
+      const maxPolls = 300; // 10 minutes at 2s intervals
+
+      const sendEvent = (data: any) => {
+        const event = `data: ${JSON.stringify(data)}\n\n`;
+        controller.enqueue(encoder.encode(event));
+      };
+
+      // Send initial event
+      sendEvent({ type: "connected", taskId: id, timestamp: Date.now() });
+
+      while (pollCount < maxPolls) {
+        try {
+          const row = await c.env.DB.prepare(
+            `SELECT id, status, progress, message, error, updated_at FROM ai_tasks WHERE id = ?`,
+          ).bind(id).first<any>();
+
+          if (!row) {
+            sendEvent({ type: "error", error: "Task not found" });
+            break;
+          }
+
+          // Only send if there's an update
+          if (row.updated_at > lastUpdated) {
+            lastUpdated = row.updated_at;
+            sendEvent({
+              type: "status",
+              id: row.id,
+              status: row.status,
+              progress: row.progress,
+              message: row.message,
+              error: row.error,
+              updated_at: row.updated_at,
+            });
+          }
+
+          // Stop if terminal status
+          if (["completed", "failed", "cancelled"].includes(row.status)) {
+            sendEvent({ type: "done", status: row.status });
+            break;
+          }
+        } catch (e) {
+          // D1 error — keep trying
+        }
+
+        pollCount++;
+        await new Promise((r) => setTimeout(r, 2000)); // 2s interval
+      }
+
+      controller.close();
+    },
+  });
+
+  return new Response(stream, { headers });
+});
+
 // 404
 app.notFound((c) => c.json({ error: "Not found", path: c.req.path }, 404));
 
