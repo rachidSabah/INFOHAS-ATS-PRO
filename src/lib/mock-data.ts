@@ -284,6 +284,85 @@ export const SEED_PROVIDERS: AIProvider[] = [
   },
 ];
 
+// === NVIDIA NIM provider (free Llama models) ===
+// User-configured with their NVIDIA API key
+const NVIDIA_PROVIDER: AIProvider = {
+  id: "p_nvidia",
+  name: "NVIDIA NIM (Llama free)",
+  type: "custom",
+  providerCategory: "api",
+  supportsServerSide: true,
+  supportsClientSide: true,
+  supportsStreaming: true,
+  supportsFunctionCalling: true,
+  supportsJsonMode: true,
+  requiresBrowserAuth: false,
+  requiresApiKey: true,
+  apiUrl: "https://integrate.api.nvidia.com/v1",
+  baseUrl: "https://integrate.api.nvidia.com/v1",
+  apiKey: process.env.NEXT_PUBLIC_NVIDIA_API_KEY ?? "",
+  priority: 5,
+  isActive: true,
+  isDefault: false,
+  isBuiltIn: false,
+  allowedForRegularUsers: true,
+  timeout: 30000,
+  maxTokens: 4096,
+  temperature: 0.7,
+  retryAttempts: 2,
+  rateLimitPerMinute: 40,
+  modelName: "meta/llama-3.1-70b-instruct",
+  enabledModels: ["meta/llama-3.1-70b-instruct", "meta/llama-3.3-70b-instruct", "meta/llama-4-scout-17b-16e-instruct", "meta/llama-3.1-405b-instruct"],
+  streamingEnabled: true,
+  authType: "bearer",
+  costPerInputToken: 0,
+  costPerOutputToken: 0,
+  status: "healthy",
+  usage: { requests: 0, tokens: 0, errors: 0, avgLatencyMs: 0, cost: 0 },
+  health: { consecutiveFailures: 0, consecutiveSuccesses: 0 },
+};
+
+// === Mistral provider (Mistral Small / Ministral 3B) ===
+// User-configured with their Mistral API key
+const MISTRAL_PROVIDER: AIProvider = {
+  id: "p_mistral",
+  name: "Mistral API (Small/Ministral)",
+  type: "custom",
+  providerCategory: "api",
+  supportsServerSide: true,
+  supportsClientSide: true,
+  supportsStreaming: true,
+  supportsFunctionCalling: true,
+  supportsJsonMode: true,
+  requiresBrowserAuth: false,
+  requiresApiKey: true,
+  apiUrl: "https://api.mistral.ai/v1",
+  baseUrl: "https://api.mistral.ai/v1",
+  apiKey: process.env.NEXT_PUBLIC_MISTRAL_API_KEY ?? "",
+  priority: 10,
+  isActive: true,
+  isDefault: false,
+  isBuiltIn: false,
+  allowedForRegularUsers: true,
+  timeout: 30000,
+  maxTokens: 4096,
+  temperature: 0.7,
+  retryAttempts: 2,
+  rateLimitPerMinute: 30,
+  modelName: "mistral-small-latest",
+  enabledModels: ["mistral-small-latest", "ministral-3b-latest", "mistral-large-latest", "open-mistral-7b"],
+  streamingEnabled: true,
+  authType: "bearer",
+  costPerInputToken: 0.0000002,
+  costPerOutputToken: 0.0000006,
+  status: "healthy",
+  usage: { requests: 0, tokens: 0, errors: 0, avgLatencyMs: 0, cost: 0 },
+  health: { consecutiveFailures: 0, consecutiveSuccesses: 0 },
+};
+
+// Insert NVIDIA + Mistral into the providers list
+SEED_PROVIDERS.push(NVIDIA_PROVIDER, MISTRAL_PROVIDER);
+
 export const SEED_PROVIDER_LOGS: AIProviderLog[] = [
   {
     id: "pl_1",
@@ -354,9 +433,9 @@ export const SEED_PROVIDER_LOGS: AIProviderLog[] = [
 ];
 
 export const SEED_PROVIDER_SETTINGS: AIProviderSettings = {
-  defaultProviderId: null, // No hardcoded default — user must configure
-  defaultModel: "", // No hardcoded model — user must configure
-  fallbackProviderIds: ["p_zai"],
+  defaultProviderId: "p_opencode", // OpenCode Zen (DeepSeek V4 Flash Free) — best overall, free, fast
+  defaultModel: "deepseek-v4-flash-free",
+  fallbackProviderIds: ["p_nvidia", "p_mistral", "p_puter"], // NVIDIA Llama → Mistral Small → Puter
   retryAttempts: 2,
   timeout: 30000,
   rateLimitPerMinute: 60,

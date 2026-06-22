@@ -365,6 +365,14 @@ export async function syncAllFromCloud(store: any): Promise<void> {
           ps = rawProviderSettings;
         }
         if (ps && (ps.defaultProviderId || ps.defaultModel || ps.fallbackProviderIds)) {
+          // === ONE-TIME OVERRIDE: if D1 has the old Mistral default, force
+          // the new OpenCode Zen (DeepSeek V4 Flash Free) default ===
+          if (ps.defaultProviderId === "p_mistral" || ps.defaultModel === "mistral-large-latest") {
+            console.info("[syncAllFromCloud] Detected stale Mistral default — overriding to OpenCode Zen (DeepSeek V4 Flash Free)");
+            ps.defaultProviderId = "p_opencode";
+            ps.defaultModel = "deepseek-v4-flash-free";
+            ps.fallbackProviderIds = ["p_nvidia", "p_mistral", "p_puter"];
+          }
           console.info("[syncAllFromCloud] Restoring providerSettings from D1:", ps.defaultProviderId, ps.defaultModel);
           store.setState({ providerSettings: { ...store.getState().providerSettings, ...ps } });
         }
