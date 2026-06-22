@@ -282,13 +282,21 @@ function exportInfohasProPDF(resume: ResumeData, opts: PDFOptions = {}): { ok: b
       // Stop if we're running out of space
       if (y > pageH - INFOHAS_BOTTOM_MARGIN - 30) break;
 
-      // Title Company | Location  Date — all bold, one line
+      // Title Company | Location on left, Date on right — all bold, same line
       doc.setFont("times", "bold");
       doc.setTextColor(INFOHAS_BLACK[0], INFOHAS_BLACK[1], INFOHAS_BLACK[2]);
-      const headerLine = `${exp.title} ${exp.company}${exp.location ? ` | ${exp.location}` : ""}  ${fmtInfohasDate(exp.startDate)} – ${fmtInfohasDate(exp.endDate)}`;
-      const headerLines = wrapText(headerLine, contentW);
-      for (const line of headerLines) {
-        doc.text(line, left, y + INFOHAS_FONT_SIZE * 0.352778 * 0.7);
+      const dateStr = `${fmtInfohasDate(exp.startDate)} – ${fmtInfohasDate(exp.endDate)}`;
+      const dateWidth = doc.getTextWidth(dateStr);
+      const leftSide = `${exp.title} ${exp.company}${exp.location ? ` | ${exp.location}` : ""}`;
+      const leftWidth = contentW - dateWidth - 4; // 4mm gap between text and date
+      const leftLines = doc.splitTextToSize(leftSide, leftWidth);
+
+      // Render date on the first line, right-aligned
+      doc.text(dateStr, right, y + INFOHAS_FONT_SIZE * 0.352778 * 0.7, { align: "right" });
+
+      // Render left-side text line by line
+      for (let i = 0; i < leftLines.length; i++) {
+        doc.text(leftLines[i], left, y + INFOHAS_FONT_SIZE * 0.352778 * 0.7);
         y += INFOHAS_LINE_HEIGHT_MM;
       }
 

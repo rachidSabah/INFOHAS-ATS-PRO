@@ -202,12 +202,13 @@ function InfohasProTemplate({ resume, accent }: { resume: ResumeData; accent: st
             <div style={{ display: "flex", flexDirection: "column", gap: "2mm" }}>
               {resume.experience.map((e) => (
                 <div key={e.id}>
-                  <div style={{ marginBottom: "0.5mm" }}>
-                    <span style={{ fontWeight: 700, color: "#000" }}>{e.title}</span>{" "}
-                    <span style={{ color: "#000" }}>{e.company}</span>
-                    {e.location && <span style={{ color: "#000" }}> | {e.location}</span>}
-                    {"  "}
-                    <span style={{ color: "#000" }}>{fmtDateInfohas(e.startDate)} – {fmtDateInfohas(e.endDate)}</span>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: "0.5mm" }}>
+                    <div>
+                      <span style={{ fontWeight: 700, color: "#000" }}>{e.title}</span>{" "}
+                      <span style={{ color: "#000" }}>{e.company}</span>
+                      {e.location && <span style={{ color: "#000" }}> | {e.location}</span>}
+                    </div>
+                    <span style={{ color: "#000", whiteSpace: "nowrap", marginLeft: "2mm", flexShrink: 0 }}>{fmtDateInfohas(e.startDate)} – {fmtDateInfohas(e.endDate)}</span>
                   </div>
                   <ul style={{ margin: 0, paddingLeft: "5mm", listStyleType: "•" }}>
                     {e.bullets.map((b, i) => (

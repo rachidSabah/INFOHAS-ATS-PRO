@@ -236,59 +236,99 @@ export function extractResumeFromText(text: string, fileName: string): ResumeDat
   };
 }
 
+const DATE_RANGE_RE = /(?:(?:\w+\s+\d{4})|(?:\d{4}))\s*(?:[\-–—]|\bto\b)\s*(?:present|(?:\w+\s+\d{4})|(?:\d{4}))|(?:\w+\s*(?:[\-–—]|\bto\b)\s*\w+\s+\d{4})/i;
+
 function parseExperiences(lines: string[]): ResumeData["experience"] {
   if (!lines.length) return [];
   const out: ResumeData["experience"] = [];
   let current: ResumeData["experience"][number] | null = null;
 
-  // Try to detect a "Title — Company | Date" header line
-  // Also handle "Mon YYYY to Mon YYYY" and "Mon YYYY – Mon YYYY" formats
-  const headerRe = /^(.+?)[\s,—–-]+(.+?)[\s,|·]+((?:\d{4}\s*(?:[-–—]|to)\s*(?:present|\d{4}))|(?:present|\d{4})|(?:\w+\s+\d{4}\s*(?:[-–—]|to)\s*(?:present|\w+\s+\d{4}))).*$/i;
-
   for (const line of lines) {
-    const headerMatch = line.match(headerRe);
-    if (headerMatch) {
+    const trimmed = line.trim();
+    const dateMatch = trimmed.match(DATE_RANGE_RE);
+
+    if (dateMatch && trimmed.length > 20 && !trimmed.startsWith('•') && !trimmed.startsWith('-')) {
       if (current) out.push(current);
-      const [_, title, company, dates] = headerMatch;
-      const dateRange = parseDateRange(dates);
+
+      const dateStr = dateMatch[0];
+      const dateRange = parseDateRange(dateStr);
+
+      let cleanLine = trimmed.replace(dateStr, '').trim();
+      cleanLine = cleanLine.replace(/^[:\s,—–\-|·•▪◦]+/, '').replace(/[:\s,—–\-|·•▪◦]+$/, '').trim();
+
+      let title = cleanLine;
+      let company = "";
+      let location = "";
+
+      const separators = [/\s+AT\s+/i, /\s+at\s+/i, /\s*–\s*/, /\s*\-\s*/, /\s*\|\s*/];
+      let splitSuccess = false;
+      for (const sep of separators) {
+        const parts = cleanLine.split(sep);
+        if (parts.length >= 2) {
+          title = parts[0].trim();
+          company = parts[1].trim();
+          if (parts.length > 2) {
+            location = parts.slice(2).join(', ').trim();
+          } else {
+            const compParts = company.split(/[,|]/);
+            if (compParts.length >= 2) {
+              company = compParts[0].trim();
+              location = compParts.slice(1).join(', ').trim();
+            }
+          }
+          splitSuccess = true;
+          break;
+        }
+      }
+
+      if (!splitSuccess) {
+        const commaParts = cleanLine.split(',');
+        if (commaParts.length >= 2) {
+          title = commaParts[0].trim();
+          company = commaParts[1].trim();
+          if (commaParts.length > 2) {
+            location = commaParts.slice(2).join(', ').trim();
+          }
+        }
+      }
+
       current = {
         id: uid("e"),
-        title: title.trim(),
-        company: company.trim(),
+        title,
+        company,
+        location,
         startDate: dateRange.start,
         endDate: dateRange.end,
         bullets: [],
       };
     } else if (current) {
-      // Bullet or plain line
-      const cleaned = line.replace(/^[•\-*·▪◦]\s*/, "").trim();
+      const cleaned = trimmed.replace(/^[•\-*·▪◦]\s*/, "").trim();
       if (cleaned) current.bullets.push(cleaned);
     } else {
-      // First line with no header match — treat as title only
       current = {
         id: uid("e"),
-        title: line,
+        title: trimmed,
         company: "",
+        location: "",
         startDate: "",
         endDate: "Present",
         bullets: [],
       };
     }
   }
+
   if (current) out.push(current);
   return out;
 }
 
 function parseDateRange(s: string): { start: string; end: string } {
-  // Handle "Mon YYYY to Mon YYYY" or "YYYY to YYYY"
-  const toMatch = s.match(/(\w+\s+\d{4})\s+to\s+(present|\w+\s+\d{4})/i);
-  if (toMatch) return { start: toMatch[1], end: toMatch[2] };
-  // Handle "YYYY – YYYY" or "YYYY - Present"
-  const m = s.match(/(\d{4})\s*[-–—]\s*(present|\d{4})/i);
-  if (m) return { start: m[1], end: m[2] };
-  const single = s.match(/(\d{4})/);
-  if (single) return { start: single[1], end: "Present" };
-  return { start: "", end: "Present" };
+  const parts = s.split(/\s*(?:[\-–—]|\bto\b)\s*/i).filter(Boolean);
+  if (parts.length === 2) {
+    let start = parts[0].trim();
+    let end = parts[1].trim();
+    return { start, end };
+  }
+  return { start: s, end: "Present" };
 }
 
 function parseEducation(lines: string[]): ResumeData["education"] {

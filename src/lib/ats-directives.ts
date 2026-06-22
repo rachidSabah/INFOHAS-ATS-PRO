@@ -466,7 +466,7 @@ ${INDUSTRY_PROFILES[airlineProfile]?.writingGuidance || ""}
 ═══════════════════════════════════════════════════════════════
 CONTENT TARGET — ONE A4 PAGE (NON-NEGOTIABLE)
 ═══════════════════════════════════════════════════════════════
-Target: ~2,500 characters — fits one A4 page with compact margins.
+Target: ~2,900 characters — fits one A4 page with compact margins. (Aim to EXPAND weak bullets to hit this target)
 Acceptable range: 2,200 – 2,700 characters.
 - Under 2,000 chars = TOO SHORT — add 1 more skill group, expand recent role to 3 bullets.
 - Over 2,800 chars = TOO LONG — reduce older roles to 1 bullet, tighten bullets, shorten summary.

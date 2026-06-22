@@ -832,9 +832,16 @@ export async function runOptimizationPipeline(input: PipelineInput): Promise<Pip
       qualityErrors.push("Skills section is empty");
     }
 
-    // Gate 4: Character count >= 2400
-    if (result.charCount < 2400) {
-      qualityErrors.push(`Character count ${result.charCount} < 2400 minimum`);
+    // Gate 4: Character count >= 2400 (only if original was already long enough)
+    const originalCharCount = JSON.stringify({
+      summary: resume.summary,
+      experience: resume.experience,
+      skills: resume.skills,
+      education: resume.education,
+      languages: resume.languages,
+    }).length;
+    if (result.charCount < 2400 && originalCharCount >= 2000) {
+      qualityErrors.push(`Character count ${result.charCount} < 2400 minimum (original was ${originalCharCount})`);
     }
 
     // Gate 5: No date regressions

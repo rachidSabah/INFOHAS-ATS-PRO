@@ -439,7 +439,7 @@ SECTION ORDER (MANDATORY — in this exact order)
 ═══════════════════════════════════════════════════════════════
 1. PROFESSIONAL SUMMARY — ${c.summaryMinWords}-${c.summaryMaxWords} words, single paragraph, no bullets
 2. CORE COMPETENCIES & SKILLS — max ${c.skillsMaxGroups} groups, bullet format
-3. PROFESSIONAL EXPERIENCE — PRESERVE ALL original entries, PRESERVE ALL original bullets per entry
+3. PROFESSIONAL EXPERIENCE — PRESERVE ALL original entries, target ${c.experienceBulletsPerEntry} bullets per entry
 4. EDUCATION — PRESERVE ALL original entries
 5. LANGUAGES — max ${c.languagesMaxEntries} entries, one line per language
 
