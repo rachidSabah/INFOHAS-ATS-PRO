@@ -569,6 +569,9 @@ app.put("/api/settings/branding", async (c) => {
   // 0006 applied, the UPDATE will fail with "no such column", which is caught
   // by the try/catch below AND by the global onError handler (which returns
   // a structured 500 with a migration hint).
+  // Convert undefined → null for all values (D1 doesn't accept undefined)
+  const n = (v: any) => (v === undefined ? null : v);
+
   const updates: string[] = [
     "app_name = ?", "tagline = ?", "primary_color = ?", "accent_color = ?",
     "logo_url = ?", "email_from_name = ?", "email_from_address = ?",
@@ -576,9 +579,9 @@ app.put("/api/settings/branding", async (c) => {
     "provider_settings_json = ?", "ai_routing_settings_json = ?",
   ];
   const values: any[] = [
-    body.appName, body.tagline, body.primaryColor, body.accentColor,
-    body.logoUrl, body.emailFromName, body.emailFromAddress,
-    body.pdfFooterText, now,
+    n(body.appName), n(body.tagline), n(body.primaryColor), n(body.accentColor),
+    n(body.logoUrl), n(body.emailFromName), n(body.emailFromAddress),
+    n(body.pdfFooterText), now,
     body.providerSettings ? JSON.stringify(body.providerSettings) : null,
     body.aiRoutingSettings ? JSON.stringify(body.aiRoutingSettings) : null,
   ];
