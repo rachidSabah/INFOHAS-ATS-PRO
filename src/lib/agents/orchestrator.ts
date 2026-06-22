@@ -26,6 +26,8 @@ import { analyzeJobIntelligence } from "../job-intelligence";
 import { callAI, getOptimizerDirective, extractJSON } from "../ai";
 import { processAIResponse } from "../ai-response-processor";
 import { validateResumeContent } from "../ai-error-filter";
+import { normalizeResumeObject, normalizeToText } from "../ai-response-normalizer";
+import { extractLockedFacts, computeFactDiff, isPlaceholder } from "../locked-facts";
 import { aviationOptimize, type AviationOptimizeResult } from "../ats-directives";
 import type { AppSettings } from "../ats-directives";
 import { analyzeATS, type ATSAnalysisResult } from "./ats-analysis";
@@ -1270,26 +1272,86 @@ CONTENT REQUIREMENTS:
   }));
   lockedResume.headline = String(lockedResume.headline || "").replace(/\|/g, "—").trim();
 
+  // === P1.6: Gate 10 — Factual Integrity Score via LockedFacts ===
+  // Compare the original resume's locked facts against the optimized resume's
+  // locked facts. If the optimization introduced NEW facts (hallucinations)
+  // or CHANGED critical fields (name, email, phone, dates), restore the original.
+  try {
+    const originalFacts = extractLockedFacts(resume);
+    const optimizedFacts = extractLockedFacts(lockedResume);
+    const factDiff = computeFactDiff(originalFacts, optimizedFacts);
+
+    if (factDiff.factualIntegrityScore < 100) {
+      console.warn(
+        `[Quality Gate 10] Factual Integrity Score: ${factDiff.factualIntegrityScore}/100. ` +
+        `${factDiff.newFacts.length} new fact(s), ${factDiff.changed.length} changed, ${factDiff.missing.length} missing.`,
+      );
+
+      // If there are CRITICAL issues, restore the original for the affected fields
+      const criticalNewFacts = factDiff.newFacts.filter((f) => f.severity === "critical");
+      const criticalChanged = factDiff.changed.filter((c) => c.severity === "critical");
+
+      if (criticalNewFacts.some((f) => f.field === "experience.company") ||
+          criticalChanged.some((c) => c.field === "name" || c.field === "email" || c.field === "phone")) {
+        console.warn("[Quality Gate 10] CRITICAL: hallucinated companies or changed contact info. Restoring original.");
+        lockedResume.name = resume.name;
+        lockedResume.contact = resume.contact;
+        // If new companies were introduced, restore original experience
+        if (criticalNewFacts.some((f) => f.field === "experience.company")) {
+          lockedResume.experience = resume.experience;
+        }
+      }
+
+      // If new metrics were introduced (hallucinated percentages), strip them from bullets
+      const hallucinatedMetrics = criticalNewFacts
+        .filter((f) => f.field === "metrics")
+        .map((f) => f.value);
+      if (hallucinatedMetrics.length > 0) {
+        console.warn(`[Quality Gate 10] Stripping ${hallucinatedMetrics.length} hallucinated metric(s) from bullets.`);
+        lockedResume.experience = lockedResume.experience.map((e) => ({
+          ...e,
+          bullets: e.bullets.map((b) => {
+            let cleaned = b;
+            for (const metric of hallucinatedMetrics) {
+              // Remove the metric and any surrounding context that doesn't make sense without it
+              cleaned = cleaned.replace(new RegExp(`\\s*\\b${metric.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b\\s*`, "gi"), " ");
+            }
+            return cleaned.replace(/\s+/g, " ").trim();
+          }),
+        }));
+      }
+    } else {
+      console.log("[Quality Gate 10] ✓ Factual Integrity Score: 100/100");
+    }
+  } catch (e) {
+    console.warn("[Quality Gate 10] LockedFacts check failed (non-fatal):", e);
+  }
+
+  // === P1.7: Apply normalizeResumeObject to prevent React Error #31 ===
+  // Walks the entire resume object and converts any nested objects to strings.
+  // This is the final safety net before the resume reaches React.
+  const normalizedResume = normalizeResumeObject(lockedResume);
+
   // === DEBUG LOGGING ===
   console.log({
     directiveLoaded: !!directive,
     provider: result.provider,
     charCount,
     originalCharCount,
-    preservedExperience: lockedResume.experience.length,
+    preservedExperience: normalizedResume.experience.length,
     originalExperience: resume.experience.length,
-    preservedDates: lockedResume.experience.every((e, i) =>
+    preservedDates: normalizedResume.experience.every((e, i) =>
       e.startDate === (resume.experience[i]?.startDate ?? "") &&
       e.endDate === (resume.experience[i]?.endDate ?? "")
     ),
-    hasSummary: !!lockedResume.summary,
-    hasSkills: lockedResume.skills.length > 0,
-    hasEducation: lockedResume.education.length > 0,
-    hasLanguages: lockedResume.languages.length > 0,
+    hasSummary: !!normalizedResume.summary,
+    hasSkills: normalizedResume.skills.length > 0,
+    hasEducation: normalizedResume.education.length > 0,
+    hasLanguages: normalizedResume.languages.length > 0,
   });
 
   return {
-    resume: lockedResume,
+    resume: normalizedResume,
     provider: result.provider,
     charCount,
     keywordsAdded: data.missingKeywordsAdded?.length ?? 0,

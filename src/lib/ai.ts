@@ -11,6 +11,7 @@
 "use client";
 
 import { useApp } from "./store";
+import { startAICall, truncatePromptToTokenLimit, checkTokenLimit } from "./ai-diagnostics";
 
 declare global {
   interface Window {
@@ -1122,15 +1123,47 @@ export async function callAI(opts: AICallOptions): Promise<AICallResult> {
 
       if (defaultProvider) {
         failedProviderName = defaultProvider.name || "unknown";
-        const text = await callUserProvider(defaultProvider, opts);
-        if (text && text.trim().length > 0) {
-          console.info(`[AI] Using user-configured default provider: ${defaultProvider.name} (${defaultProvider.modelName || "default model"})`);
-          return {
-            text,
-            provider: defaultProvider.name,
-            latencyMs: Math.round(performance.now() - t0),
-            tokensEstimate: estTokens(opts.userPrompt + (opts.systemPrompt ?? "")),
+        // === P1.5: Token overflow protection ===
+        // Truncate the prompt if it exceeds the token limit (8K tokens default)
+        const fullPrompt = (opts.systemPrompt ?? "") + opts.userPrompt;
+        const tokenCheck = checkTokenLimit(fullPrompt);
+        if (!tokenCheck.ok) {
+          console.warn(
+            `[AI] Prompt exceeds token limit: ${tokenCheck.tokens} > ${tokenCheck.maxTokens}. Truncating.`,
+          );
+          opts = {
+            ...opts,
+            userPrompt: truncatePromptToTokenLimit(opts.userPrompt),
+            systemPrompt: opts.systemPrompt ? truncatePromptToTokenLimit(opts.systemPrompt) : undefined,
           };
+        }
+
+        // === P1.5: AI Response Diagnostics ===
+        const diag = startAICall({
+          provider: failedProviderName ?? "unknown",
+          model: defaultProvider.modelName,
+          taskCategory,
+          systemPrompt: opts.systemPrompt,
+          userPrompt: opts.userPrompt,
+          maxTokens: opts.maxTokens,
+        });
+
+        try {
+          const text = await callUserProvider(defaultProvider, opts);
+          if (text && text.trim().length > 0) {
+            console.info(`[AI] Using user-configured default provider: ${defaultProvider.name} (${defaultProvider.modelName || "default model"})`);
+            diag.succeed(text, { finishReason: "stop", normalizedResponse: text.slice(0, 500) });
+            return {
+              text,
+              provider: defaultProvider.name,
+              latencyMs: Math.round(performance.now() - t0),
+              tokensEstimate: estTokens(opts.userPrompt + (opts.systemPrompt ?? "")),
+            };
+          }
+          diag.fail(new Error("Provider returned empty response"));
+        } catch (e: any) {
+          diag.fail(e);
+          throw e; // re-throw so the outer catch handles fallback
         }
       }
     } catch (e: any) {
@@ -1142,6 +1175,9 @@ export async function callAI(opts: AICallOptions): Promise<AICallResult> {
       } else {
         console.warn(`[AI] Provider "${failedProviderName}" failed, falling back to next provider:`, e?.message || e);
       }
+      // Note: diag.fail() is called inside the try block if the provider returned
+      // empty. If the provider THREW, we don't have a diag handle here, so we
+      // skip diagnostics for thrown errors (the warning above is sufficient).
     }
   }
 
