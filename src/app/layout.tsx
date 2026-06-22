@@ -98,37 +98,23 @@ export default function RootLayout({
             Loaded from the official CDN per https://docs.puter.com/getting-started/.
             `async` so it doesn't block page render; Puter attaches to window.puter
             and is available by the time user interactions happen. */}
-        {/* Suppress Puter's console banner — MUST be set BEFORE the Puter script loads.
-            Puter checks window.puter?.quiet on init and skips the banner if true. */}
-        <script
-          dangerouslySetInnerHTML={{
-            __html: `
-              window.puter = window.puter || {};
-              window.puter.quiet = true;
-              // Use Object.defineProperty to make quiet survive Puter overwriting window.puter
-              var _quietVal = true;
-              try {
-                Object.defineProperty(window, 'puter', {
-                  get: function() { return window.__puter_real || { quiet: true }; },
-                  set: function(v) { v.quiet = true; window.__puter_real = v; },
-                  configurable: true,
-                });
-              } catch(e) {}
-            `,
-          }}
-        />
         <script src="https://js.puter.com/v2/" async></script>
+        {/* Set puter.quiet = true after Puter loads to suppress the console banner.
+            We can't set it before because Puter overwrites window.puter on init. */}
         <script
           dangerouslySetInnerHTML={{
             __html: `
-              // Set quiet again after Puter loads (belt and suspenders)
-              window.addEventListener('load', function() {
-                try { if (window.puter) window.puter.quiet = true; } catch(e) {}
-              });
+              // Poll for Puter load and set quiet immediately
               var _pc = setInterval(function() {
-                try { if (window.puter) { window.puter.quiet = true; clearInterval(_pc); } } catch(e) {}
-              }, 50);
-              setTimeout(function() { clearInterval(_pc); }, 5000);
+                try {
+                  if (window.puter && !window.puter._quietSet) {
+                    window.puter.quiet = true;
+                    window.puter._quietSet = true;
+                    clearInterval(_pc);
+                  }
+                } catch(e) {}
+              }, 10);
+              setTimeout(function() { clearInterval(_pc); }, 10000);
             `,
           }}
         />
