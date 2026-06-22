@@ -802,12 +802,59 @@ async function callUserProvider(
   if (!provider) throw new Error("No provider");
   if (!provider.isActive) throw new Error(`Provider "${provider.name}" is inactive`);
 
+  // === PUTER: use the browser SDK, NOT fetch() ===
+  // Puter has NO REST API — it only works via window.puter.ai.chat().
+  // If we try to fetch() https://api.puter.com/chat/completions, we get 404.
+  if (provider.type === "puter" || provider.providerCategory === "browser_auth") {
+    if (typeof window === "undefined" || !window.puter?.ai?.chat) {
+      throw new Error("Puter.js not loaded. Please refresh the page.");
+    }
+    const messages = opts.systemPrompt
+      ? [
+          { role: "system", content: opts.systemPrompt },
+          { role: "user", content: opts.userPrompt },
+        ]
+      : [{ role: "user", content: opts.userPrompt }];
+
+    const chatOpts: any = {
+      max_tokens: opts.maxTokens ?? 4096,
+      temperature: opts.temperature ?? 0.7,
+    };
+    if (provider.modelName) chatOpts.model = provider.modelName;
+
+    const resp: any = await withTimeout(
+      window.puter.ai.chat(messages, chatOpts),
+      45000,
+      "Puter AI chat",
+    );
+
+    let text = "";
+    if (typeof resp === "string") {
+      text = resp;
+    } else if (resp?.message?.content) {
+      text = Array.isArray(resp.message.content)
+        ? resp.message.content.map((c: any) => c?.text ?? "").join("")
+        : String(resp.message.content);
+    } else if (resp?.text) {
+      text = resp.text;
+    } else if (resp?.toString && typeof resp.toString === "function") {
+      const str = resp.toString();
+      if (str && str !== "[object Object]") text = str;
+    }
+    if (!text) {
+      try { text = JSON.stringify(resp); } catch { text = String(resp ?? ""); }
+    }
+    if (!text || !text.trim()) {
+      throw new Error("Puter returned an empty response");
+    }
+    return text;
+  }
+
+  // === All other providers: use fetch() to their REST API ===
   const baseUrl = (provider.apiUrl || provider.baseUrl || "").trim();
   if (!baseUrl) throw new Error(`Provider "${provider.name}" has no base URL`);
 
   // Build the chat-completions URL.
-  // Most providers use https://api.x.com/v1/chat/completions.
-  // If the user already included /chat/completions in the base URL, don't double it.
   const url = baseUrl.endsWith("/chat/completions")
     ? baseUrl
     : `${baseUrl.replace(/\/$/, "")}/chat/completions`;
