@@ -966,7 +966,18 @@ async function callUserProvider(
   // Build headers
   const headers: Record<string, string> = { "Content-Type": "application/json" };
   const authType = provider.authType || "bearer";
-  if (provider.apiKey && authType === "bearer") {
+
+  // === SPECIAL CASE: Google Gemini API ===
+  // Google's OpenAI-compatible endpoint does NOT accept API keys as Bearer
+  // tokens. It requires either:
+  //   1. x-goog-api-key header (preferred), OR
+  //   2. ?key=... query parameter
+  // Sending `Authorization: Bearer API_KEY` produces:
+  //   401 "API keys are not supported by this API. Expected OAuth2 access token"
+  // So for the gemini provider type, we always use the x-goog-api-key header.
+  if (provider.apiKey && (provider.type === "gemini" || provider.type === "google")) {
+    headers["x-goog-api-key"] = provider.apiKey;
+  } else if (provider.apiKey && authType === "bearer") {
     headers["Authorization"] = `Bearer ${provider.apiKey}`;
   } else if (provider.apiKey && authType === "header") {
     // Merge custom headers from headersJson

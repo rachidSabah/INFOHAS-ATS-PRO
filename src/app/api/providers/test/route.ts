@@ -21,7 +21,12 @@ export async function POST(req: NextRequest) {
       try { Object.assign(headers, JSON.parse(headersJson)); } catch {}
     }
     if (apiKey) {
-      if (authType === "header") {
+      // === SPECIAL CASE: Google Gemini ===
+      // Google's OpenAI-compatible endpoint does NOT accept Bearer tokens.
+      // Use x-goog-api-key header instead.
+      if (baseUrl.includes("generativelanguage.googleapis.com")) {
+        headers["x-goog-api-key"] = apiKey;
+      } else if (authType === "header") {
         headers["x-api-key"] = apiKey;
       } else {
         headers["Authorization"] = `Bearer ${apiKey}`;
@@ -42,11 +47,16 @@ export async function POST(req: NextRequest) {
         messages: [{ role: "user", content: testPrompt || "Reply with exactly: OK" }],
       };
     } else if (baseUrl.includes("generativelanguage.googleapis.com")) {
-      // Gemini — different API format
-      url = `${baseUrl.replace(/\/$/, "")}/models/${model || "gemini-2.0-flash"}:generateContent?key=${encodeURIComponent(apiKey || "")}`;
+      // Google Gemini OpenAI-compatible endpoint
+      // Uses /v1beta/openai/chat/completions with x-goog-api-key header
+      // (the header is set above in the apiKey section)
+      url = `${baseUrl.replace(/\/$/, "")}/chat/completions`;
       reqBody = {
-        contents: [{ parts: [{ text: testPrompt || "Reply with exactly: OK" }] }],
-        generationConfig: { maxOutputTokens: 10 },
+        model: model || "gemini-2.5-flash",
+        messages: [{ role: "user", content: testPrompt || "Reply with exactly: OK" }],
+        max_tokens: 10,
+        temperature: 0,
+        stream: false,
       };
     } else {
       // OpenAI-compatible (OpenAI, DeepSeek, Groq, OpenRouter, OpenCode, ZenCode, etc.)
