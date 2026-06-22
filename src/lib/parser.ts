@@ -242,7 +242,8 @@ function parseExperiences(lines: string[]): ResumeData["experience"] {
   let current: ResumeData["experience"][number] | null = null;
 
   // Try to detect a "Title — Company | Date" header line
-  const headerRe = /^(.+?)[\s,—–-]+(.+?)[\s,|·]+((?:\d{4}\s*[-–—]\s*(?:present|\d{4})?|(?:present|\d{4})).*)$/i;
+  // Also handle "Mon YYYY to Mon YYYY" and "Mon YYYY – Mon YYYY" formats
+  const headerRe = /^(.+?)[\s,—–-]+(.+?)[\s,|·]+((?:\d{4}\s*(?:[-–—]|to)\s*(?:present|\d{4}))|(?:present|\d{4})|(?:\w+\s+\d{4}\s*(?:[-–—]|to)\s*(?:present|\w+\s+\d{4}))).*$/i;
 
   for (const line of lines) {
     const headerMatch = line.match(headerRe);
@@ -279,6 +280,10 @@ function parseExperiences(lines: string[]): ResumeData["experience"] {
 }
 
 function parseDateRange(s: string): { start: string; end: string } {
+  // Handle "Mon YYYY to Mon YYYY" or "YYYY to YYYY"
+  const toMatch = s.match(/(\w+\s+\d{4})\s+to\s+(present|\w+\s+\d{4})/i);
+  if (toMatch) return { start: toMatch[1], end: toMatch[2] };
+  // Handle "YYYY – YYYY" or "YYYY - Present"
   const m = s.match(/(\d{4})\s*[-–—]\s*(present|\d{4})/i);
   if (m) return { start: m[1], end: m[2] };
   const single = s.match(/(\d{4})/);
