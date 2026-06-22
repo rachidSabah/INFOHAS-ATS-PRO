@@ -366,13 +366,23 @@ export async function syncAllFromCloud(store: any): Promise<void> {
         }
         if (ps && (ps.defaultProviderId || ps.defaultModel || ps.fallbackProviderIds)) {
           // === RESPECT USER'S SAVED PROVIDER SETTINGS ===
-          // The user may have configured OpenCode, NVIDIA, Mistral, or Puter
-          // as their default. We respect whatever they saved — NO overrides.
-          // (Previous code forced Puter when it detected OpenCode/Mistral,
-          // which meant the user couldn't use API providers even after
-          // configuring them in Settings.)
           console.info("[syncAllFromCloud] Restoring providerSettings from D1:", ps.defaultProviderId, ps.defaultModel);
           store.setState({ providerSettings: { ...store.getState().providerSettings, ...ps } });
+        } else {
+          // === FALLBACK: restore from localStorage backup (when D1 has no
+          // provider_settings_json — e.g. migration not applied yet) ===
+          if (typeof localStorage !== "undefined") {
+            try {
+              const localSettings = localStorage.getItem("resumeai-provider-settings");
+              if (localSettings) {
+                const ls = JSON.parse(localSettings);
+                if (ls.defaultProviderId || ls.defaultModel) {
+                  console.info("[syncAllFromCloud] Restoring providerSettings from localStorage:", ls.defaultProviderId, ls.defaultModel);
+                  store.setState({ providerSettings: { ...store.getState().providerSettings, ...ls } });
+                }
+              }
+            } catch {}
+          }
         }
       }
     }

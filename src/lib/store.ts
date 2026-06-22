@@ -366,7 +366,23 @@ export const useApp = create<AppState>()(
 
       providers: SEED_PROVIDERS,
       providerLogs: SEED_PROVIDER_LOGS,
-      providerSettings: SEED_PROVIDER_SETTINGS,
+      // === Restore provider settings from localStorage on init ===
+      // This ensures the user's chosen provider is used BEFORE syncAllFromCloud
+      // runs (which may take a few seconds). If localStorage has saved settings,
+      // they override the seed defaults immediately.
+      providerSettings: (() => {
+        if (typeof localStorage === "undefined") return SEED_PROVIDER_SETTINGS;
+        try {
+          const saved = localStorage.getItem("resumeai-provider-settings");
+          if (saved) {
+            const ls = JSON.parse(saved);
+            if (ls.defaultProviderId || ls.defaultModel) {
+              return { ...SEED_PROVIDER_SETTINGS, ...ls };
+            }
+          }
+        } catch {}
+        return SEED_PROVIDER_SETTINGS;
+      })(),
       prompts: SEED_PROMPTS,
       branding: SEED_BRANDING,
       flags: SEED_FLAGS,
@@ -1073,14 +1089,17 @@ export const useApp = create<AppState>()(
         })),
       updateProviderSettings: (patch) => {
         set((s) => ({ providerSettings: { ...s.providerSettings, ...patch } }));
-        // === PERSIST provider settings to D1 via the branding endpoint ===
-        // Previously this was a comment with no code — settings were only
-        // in-memory and reverted to the seed (Puter + claude-sonnet-4) on
-        // refresh. Now we send the full providerSettings object to D1.
+        // === PERSIST to D1 via branding endpoint ===
         const settings = get().providerSettings;
         cloudApiSafe(updateBranding)({
           providerSettings: settings,
         }).catch(() => {});
+        // === ALSO backup to localStorage (survives even when D1 is down) ===
+        if (typeof localStorage !== "undefined") {
+          try {
+            localStorage.setItem("resumeai-provider-settings", JSON.stringify(settings));
+          } catch {}
+        }
       },
 
       addPrompt: (p) => {

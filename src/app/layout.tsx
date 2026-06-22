@@ -98,30 +98,37 @@ export default function RootLayout({
             Loaded from the official CDN per https://docs.puter.com/getting-started/.
             `async` so it doesn't block page render; Puter attaches to window.puter
             and is available by the time user interactions happen. */}
-        <script src="https://js.puter.com/v2/" async></script>
-        {/* Suppress Puter's console banner — set puter.quiet = true as early as possible. */}
+        {/* Suppress Puter's console banner — MUST be set BEFORE the Puter script loads.
+            Puter checks window.puter?.quiet on init and skips the banner if true. */}
         <script
           dangerouslySetInnerHTML={{
             __html: `
-              // Set quiet flag BEFORE Puter loads if possible
               window.puter = window.puter || {};
               window.puter.quiet = true;
-              // Also set it after load (Puter may overwrite the object)
+              // Use Object.defineProperty to make quiet survive Puter overwriting window.puter
+              var _quietVal = true;
+              try {
+                Object.defineProperty(window, 'puter', {
+                  get: function() { return window.__puter_real || { quiet: true }; },
+                  set: function(v) { v.quiet = true; window.__puter_real = v; },
+                  configurable: true,
+                });
+              } catch(e) {}
+            `,
+          }}
+        />
+        <script src="https://js.puter.com/v2/" async></script>
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `
+              // Set quiet again after Puter loads (belt and suspenders)
               window.addEventListener('load', function() {
-                try {
-                  if (window.puter) {
-                    window.puter.quiet = true;
-                  }
-                } catch(e) {}
+                try { if (window.puter) window.puter.quiet = true; } catch(e) {}
               });
-              // Watch for Puter script load and set quiet immediately
-              var _puterCheck = setInterval(function() {
-                if (window.puter) {
-                  window.puter.quiet = true;
-                  clearInterval(_puterCheck);
-                }
+              var _pc = setInterval(function() {
+                try { if (window.puter) { window.puter.quiet = true; clearInterval(_pc); } } catch(e) {}
               }, 50);
-              setTimeout(function() { clearInterval(_puterCheck); }, 5000);
+              setTimeout(function() { clearInterval(_pc); }, 5000);
             `,
           }}
         />

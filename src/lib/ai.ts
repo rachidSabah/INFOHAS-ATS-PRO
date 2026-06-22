@@ -867,6 +867,7 @@ async function callUserProvider(
 
   if (!res.ok) {
     const errText = await res.text().catch(() => "");
+    console.warn(`[AI] Provider "${provider.name}" (${provider.type}) returned HTTP ${res.status} from ${finalUrl}. Response: ${errText.slice(0, 200)}`);
     throw new Error(`Provider "${provider.name}" returned HTTP ${res.status}: ${errText.slice(0, 200)}`);
   }
 
