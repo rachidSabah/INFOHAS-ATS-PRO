@@ -220,7 +220,7 @@ export function cloudApiSafe<T extends (...args: any[]) => Promise<any>>(
 // On app load, sync all data from D1 to the Zustand store
 export async function syncAllFromCloud(store: any): Promise<void> {
   try {
-    const [resumesRes, clsRes, jdsRes, ivsRes, atsRes, providersRes, promptsRes, logsRes, brandingRes, flagsRes] = await Promise.all([
+    const [resumesRes, clsRes, jdsRes, ivsRes, atsRes, providersRes, promptsRes, logsRes, brandingRes, flagsRes, usersRes] = await Promise.all([
       api.getResumes().catch(() => ({ resumes: [] })),
       api.getCoverLetters().catch(() => ({ coverLetters: [] })),
       api.getJobDescriptions().catch(() => ({ jobDescriptions: [] })),
@@ -231,6 +231,7 @@ export async function syncAllFromCloud(store: any): Promise<void> {
       api.getAuditLogs().catch(() => ({ logs: [] })),
       api.getBranding().catch(() => ({ branding: null })),
       api.getFlags().catch(() => ({ flags: null })),
+      api.getUsers().catch(() => ({ users: [] })), // === BUG FIX: sync users from D1 ===
     ]);
 
     // Hydrate store with cloud data — ALWAYS set arrays even if empty
@@ -310,6 +311,24 @@ export async function syncAllFromCloud(store: any): Promise<void> {
     if (providers.length) store.setState({ providers });
     if (prompts.length) store.setState({ prompts });
     if (logs.length) store.setState({ logs });
+
+    // === BUG FIX: Sync users from D1 ===
+    // Previously, syncAllFromCloud did NOT fetch users from D1. So Puter users
+    // (which are persisted to D1 via cloudApiSafe(createUser)) were never loaded
+    // back into the store — the admin Users + User Approval pages only showed
+    // the seed super-admin. Now we fetch all users from D1 and merge them with
+    // the existing store users (preserving the super-admin seed + any in-memory
+    // users that haven't been synced yet).
+    const cloudUsers = (usersRes.users || []).map(parseDbUser);
+    if (cloudUsers.length > 0) {
+      const existingUsers = store.getState().users || [];
+      // Merge: start with cloud users, then add any in-memory users that aren't
+      // in D1 yet (by ID) — this preserves the super-admin seed if it's not in D1.
+      const cloudUserIds = new Set(cloudUsers.map((u: any) => u.id));
+      const missingFromCloud = existingUsers.filter((u: any) => !cloudUserIds.has(u.id));
+      const mergedUsers = [...cloudUsers, ...missingFromCloud];
+      store.setState({ users: mergedUsers });
+    }
     if (brandingRes.branding && Object.keys(brandingRes.branding).length > 0) {
       const bd: any = brandingRes.branding;
       // Only restore branding fields that are actually branding (not nested settings)
@@ -458,6 +477,50 @@ function parseDbPrompt(p: any): any {
     providerId: p.provider_id, version: p.version, isActive: p.is_active === 1,
     variables: safeJson(p.variables_json, []),
   };
+}
+
+/**
+ * Parse a D1 user row into the User type expected by the store.
+ * Maps DB column names (snake_case) → JS property names (camelCase).
+ */
+function parseDbUser(u: any): any {
+  return {
+    id: u.id,
+    email: u.email || "",
+    username: u.username || u.email?.split("@")[0] || "",
+    name: u.name || "",
+    passwordHash: u.password_hash || undefined,
+    avatarUrl: u.avatar || undefined,
+    provider: u.provider || "email",
+    role: u.role || "user",
+    status: u.status || "pending",
+    createdAt: u.created_at,
+    updatedAt: u.updated_at,
+    lastActiveAt: u.updated_at,
+    lastLoginAt: u.last_login_at,
+    usage: { resumesGenerated: 0, atsChecks: 0, coverLetters: 0, interviewPreps: 0, downloads: 0 },
+  };
+}
+
+/**
+ * Force-refresh the user list from D1. Called by admin pages (Users,
+ * UserApprovals) when they mount — so the admin always sees the latest
+ * users including Puter users that were created since the last sync.
+ */
+export async function refreshUsers(store: any): Promise<void> {
+  try {
+    const res = await api.getUsers();
+    const cloudUsers = (res.users || []).map(parseDbUser);
+    if (cloudUsers.length > 0) {
+      const existingUsers = store.getState().users || [];
+      const cloudUserIds = new Set(cloudUsers.map((u: any) => u.id));
+      const missingFromCloud = existingUsers.filter((u: any) => !cloudUserIds.has(u.id));
+      const mergedUsers = [...cloudUsers, ...missingFromCloud];
+      store.setState({ users: mergedUsers });
+    }
+  } catch (e) {
+    console.warn("[refreshUsers] Failed to fetch users from D1:", e);
+  }
 }
 
 // ============ LOCALSTORAGE MIGRATION ============

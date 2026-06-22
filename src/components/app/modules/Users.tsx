@@ -1,11 +1,12 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge, Icon } from "@/components/shared";
 import { useApp } from "@/lib/store";
+import { refreshUsers } from "@/lib/cloud-api";
 import { toast } from "sonner";
 import { UserDetailModal, type ManagedUser } from "./UserDetailModal";
 import { validatePassword } from "@/lib/auth-utils";
@@ -23,6 +24,13 @@ export function Users() {
   const demoteToUser = useApp((s) => s.demoteToUser);
   const resetUserPassword = useApp((s) => s.resetUserPassword);
   const log = useApp((s) => s.log);
+
+  // === BUG FIX: Force-refresh users from D1 on mount ===
+  // This ensures the admin always sees the latest users including Puter
+  // users that were created since the last sync.
+  useEffect(() => {
+    refreshUsers(useApp);
+  }, []);
 
   const [q, setQ] = useState("");
   const [roleFilter, setRoleFilter] = useState("all");

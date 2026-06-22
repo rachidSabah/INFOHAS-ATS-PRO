@@ -4,14 +4,20 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Button } from "@/components/ui/button";
 import { Badge, Icon } from "@/components/shared";
 import { useApp } from "@/lib/store";
+import { refreshUsers } from "@/lib/cloud-api";
 import { toast } from "sonner";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 
 export function UserApprovals() {
   const users = useApp((s) => s.users);
   const approveUser = useApp((s) => s.approveUser);
   const deleteUser = useApp((s) => s.deleteUser);
   const [q, setQ] = useState("");
+
+  // === BUG FIX: Force-refresh users from D1 on mount ===
+  useEffect(() => {
+    refreshUsers(useApp);
+  }, []);
 
   const pending = users.filter((u) => u.status === "pending");
   const filtered = pending.filter((u) => `${u.name} ${u.email} ${u.username ?? ""}`.toLowerCase().includes(q.toLowerCase()));
