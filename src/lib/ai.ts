@@ -931,14 +931,23 @@ export async function callAI(opts: AICallOptions): Promise<AICallResult> {
       // For document tasks: EXCLUDE Puter (browser_auth providers)
       // For interactive/development tasks: allow any provider
       const isDocumentTask = taskCategory === "document";
+      // Check if ANY API providers are configured (non-Puter)
+      const hasApiProviders = providers.some(
+        (p) => p.isActive
+          && p.type !== "puter"
+          && p.providerCategory !== "browser_auth"
+          && (p.apiUrl || p.baseUrl)
+          && (p.apiKey || p.authType === "none"),
+      );
 
       // 1. User's configured default (if it's eligible for this task)
       if (settings.defaultProviderId) {
         const candidate = providers.find((p) => p.id === settings.defaultProviderId && p.isActive);
         if (candidate) {
-          // For document tasks, skip browser_auth providers (Puter)
+          // For document tasks: skip Puter ONLY if API providers exist.
+          // If no API providers are configured, allow Puter (better than nothing).
           const isPuter = candidate.type === "puter" || candidate.providerCategory === "browser_auth";
-          if (!isDocumentTask || !isPuter) {
+          if (!isDocumentTask || !isPuter || !hasApiProviders) {
             defaultProvider = candidate;
           }
         }
@@ -948,21 +957,20 @@ export async function callAI(opts: AICallOptions): Promise<AICallResult> {
         const candidate = providers.find((p) => p.isDefault && p.isActive);
         if (candidate) {
           const isPuter = candidate.type === "puter" || candidate.providerCategory === "browser_auth";
-          if (!isDocumentTask || !isPuter) {
+          if (!isDocumentTask || !isPuter || !hasApiProviders) {
             defaultProvider = candidate;
           }
         }
       }
-      // 3. First active API provider (skip Puter for document tasks)
+      // 3. First active API provider (skip Puter for document tasks ONLY if API providers exist)
       if (!defaultProvider) {
         defaultProvider = providers.find(
           (p) => p.isActive
             && !p.isBuiltIn
-            && p.type !== "puter"
             && p.type !== "z-ai-fallback"
-            && (isDocumentTask ? (p.providerCategory !== "browser_auth") : true)
-            && (p.apiUrl || p.baseUrl)
-            && (p.apiKey || p.authType === "none"),
+            && (isDocumentTask ? (p.providerCategory !== "browser_auth" || !hasApiProviders) : true)
+            && (p.apiUrl || p.baseUrl || p.type === "puter")
+            && (p.apiKey || p.authType === "none" || p.type === "puter"),
         );
       }
 
@@ -983,11 +991,36 @@ export async function callAI(opts: AICallOptions): Promise<AICallResult> {
     }
   }
 
-  if (!opts.preferServer && taskCategory !== "document") {
+  // === ALLOW PUTER FOR DOCUMENT TASKS AS FALLBACK ===
+  // Previously, Puter was completely excluded for document tasks (optimizer,
+  // cover letter, etc.). This caused "Optimization failed — the AI response
+  // was incomplete" when no API providers were configured, because the only
+  // fallbacks were the Z.ai server route (which may not be configured) and
+  // the local engine (which produces template output).
+  // Now: if the user default provider check above didn't use Puter (because
+  // API providers exist), we still skip Puter here. But if NO API providers
+  // are configured, we allow Puter as a last resort for document tasks.
+  const allowPuterForDocument = (() => {
+    if (typeof window === "undefined") return false;
+    try {
+      const state: any = useApp.getState();
+      const providers: any[] = state?.providers || [];
+      const hasApi = providers.some(
+        (p) => p.isActive
+          && p.type !== "puter"
+          && p.providerCategory !== "browser_auth"
+          && (p.apiUrl || p.baseUrl)
+          && (p.apiKey || p.authType === "none"),
+      );
+      return !hasApi; // allow Puter for documents only if no API providers
+    } catch { return false; }
+  })();
+
+  if (!opts.preferServer && (taskCategory !== "document" || allowPuterForDocument)) {
     // 1) Try Puter.js — the free, keyless BROWSER-AUTH provider.
     //
-    // ⚠️ Puter is ONLY used for interactive/development tasks (chat, playground,
-    // AI assistant, dev agent). It is NEVER used for document tasks (resume,
+    // Puter is used for interactive/development tasks always, and for document
+    // tasks ONLY when no API providers are configured (as a last resort).
     // ATS, cover letter, interview, PDF) — those require API providers only.
     //
     // Per https://docs.puter.com/AI/chat/:

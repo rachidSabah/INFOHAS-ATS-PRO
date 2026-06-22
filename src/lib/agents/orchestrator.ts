@@ -618,33 +618,41 @@ Produce a one-page A4 resume (~2,700-3,000 chars) that is:
   });
 
   // Process the AI response through the full leak-prevention pipeline
+  console.info(`[Optimizer] Provider: ${result.provider}, Response length: ${result.text?.length ?? 0} chars, Tokens est: ${result.tokensEstimate}`);
   const processed = processAIResponse<any>(result.text, result.provider, { expectJson: true });
   let data: any;
   if (processed.data) {
     data = processed.data;
   } else {
-    // === RETRY on incomplete/empty response ===
-    // If the AI returned an empty or non-JSON response, retry once with a
-    // simpler prompt (fewer tokens, more explicit JSON instruction).
-    // This fixes the "Optimization failed — the AI response was incomplete"
-    // error that happened when Puter returned a truncated response.
-    if (!result.text || result.text.trim().length < 50) {
-      console.warn("[Optimizer] AI returned empty/truncated response, retrying with simpler prompt...");
+    // === ERROR CLASSIFICATION + RETRY ===
+    const responseLength = result.text?.trim().length ?? 0;
+    let errorType = "Unknown";
+    if (responseLength === 0) errorType = "Provider Returned Empty Response";
+    else if (responseLength < 50) errorType = "Response Truncated";
+    else if (result.text.includes("```")) errorType = "Markdown Wrapped JSON";
+    else errorType = "Invalid JSON";
+
+    console.warn(`[Optimizer] AI response failed parsing (${errorType}). Length: ${responseLength}. Retrying with simpler prompt...`);
+    console.warn(`[Optimizer] Raw response preview: ${result.text?.slice(0, 200) ?? "(empty)"}`);
+
+    // === RETRY with a simpler prompt ===
+    if (responseLength < 200) {
       const retryResult = await callAI({
-        systemPrompt: directive,
+        systemPrompt: "You are a resume optimizer. Return ONLY a valid JSON object. No prose, no markdown fences, no explanations.",
         userPrompt: `SOURCE RESUME:\n${JSON.stringify({ name: resume.name, headline: resume.headline, contact: resume.contact, summary: resume.summary, experience: resume.experience, education: resume.education, skills: resume.skills, languages: resume.languages, certifications: resume.certifications })}\n\nJOB DESCRIPTION:\n${jd.rawText?.slice(0, 1500) ?? jd.keywords.join(", ")}\n\nOptimize this resume for the job. Return ONLY a JSON object with: name, headline, email, phone, location, summary, skills [{category, items[]}], experience [{title, company, location, startDate, endDate, bullets[]}], education [{degree, institution, field, startDate, endDate, modules}], languages [{name, proficiency}]. No prose, no markdown.`,
         maxTokens: 4000,
         temperature: 0.4,
         taskCategory: "document",
       });
+      console.info(`[Optimizer] Retry response: Provider: ${retryResult.provider}, Length: ${retryResult.text?.length ?? 0}`);
       const retryProcessed = processAIResponse<any>(retryResult.text, retryResult.provider, { expectJson: true });
       if (retryProcessed.data) {
         data = retryProcessed.data;
       } else {
-        throw new Error("AI returned non-JSON response after retry. Please try again or switch to a different AI provider.");
+        throw new Error(`${errorType} — retry also failed. Provider: ${retryResult.provider}. Please try again or configure an API provider in AI Routing Settings.`);
       }
     } else {
-      throw new Error("AI returned non-JSON response after repair attempts. Please try again or switch to a different AI provider.");
+      throw new Error(`${errorType} (response length: ${responseLength}). Provider: ${result.provider}. Please try again or configure an API provider in AI Routing Settings.`);
     }
   }
 
