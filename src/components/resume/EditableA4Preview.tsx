@@ -222,12 +222,12 @@ export function EditableA4Preview({ resume, onChange, scale = 0.7, className }: 
               <div style={{ color: DARK_RED, fontWeight: 700, fontSize: "14pt", letterSpacing: "0.3pt", marginBottom: "0.5mm", lineHeight: 1.1, textTransform: "uppercase" }}>
                 {(resume.name || "YOUR NAME").toUpperCase()}
               </div>
-              {resume.headline && <div style={{ fontSize: "10.5pt", color: BLACK, marginBottom: "0.5mm", lineHeight: 1.2 }}>{resume.headline}</div>}
+              {resume.headline && <div style={{ fontSize: "10.5pt", color: BLACK, marginBottom: "0.5mm", lineHeight: 1.2 }}>{safeRender(resume.headline)}</div>}
               <div style={{ fontSize: "10.5pt", color: BLACK, marginBottom: "0.3mm", lineHeight: 1.2 }}>
-                {[resume.contact.location, resume.contact.phone].filter(Boolean).join(" | ")}
+                {[safeRender(resume.contact.location), safeRender(resume.contact.phone)].filter(Boolean).join(" | ")}
               </div>
-              {resume.contact.email && <div style={{ fontSize: "10.5pt", color: BLACK, marginBottom: "0.3mm", lineHeight: 1.2 }}>{resume.contact.email}</div>}
-              {resume.dateOfBirth && <div style={{ fontSize: "10.5pt", color: BLACK, marginBottom: "0.3mm", lineHeight: 1.2 }}>Date of Birth: {resume.dateOfBirth}</div>}
+              {resume.contact.email && <div style={{ fontSize: "10.5pt", color: BLACK, marginBottom: "0.3mm", lineHeight: 1.2 }}>{safeRender(resume.contact.email)}</div>}
+              {resume.dateOfBirth && <div style={{ fontSize: "10.5pt", color: BLACK, marginBottom: "0.3mm", lineHeight: 1.2 }}>Date of Birth: {safeRender(resume.dateOfBirth)}</div>}
             </header>
           </EditableBlock>
 
@@ -238,7 +238,7 @@ export function EditableA4Preview({ resume, onChange, scale = 0.7, className }: 
             {resume.summary && (
               <EditableBlock isEditing={editing === "summary"} onEdit={() => setEditing("summary")} label="Edit summary" isTouch={isTouch}>
                 <InfohasSection title="PROFESSIONAL SUMMARY">
-                  <p style={{ margin: 0, textAlign: "justify", color: BLACK, lineHeight: 1.2 }}>{resume.summary}</p>
+                  <p style={{ margin: 0, textAlign: "justify", color: BLACK, lineHeight: 1.2 }}>{safeRender(resume.summary)}</p>
                 </InfohasSection>
               </EditableBlock>
             )}
@@ -250,7 +250,7 @@ export function EditableA4Preview({ resume, onChange, scale = 0.7, className }: 
                   <ul style={{ margin: 0, paddingLeft: "4mm", listStyleType: "•", lineHeight: 1.2 }}>
                     {groupSkillsByCategory(resume.skills).slice(0, 4).map((g, i) => (
                       <li key={i} style={{ marginBottom: 0, color: BLACK, lineHeight: 1.2, textAlign: "justify" }}>
-                        <span style={{ fontWeight: 700 }}>{g.category}:</span> <span>{g.items.join(", ")}.</span>
+                        <span style={{ fontWeight: 700 }}>{safeRender(g.category)}:</span> <span>{g.items.map((item: any) => safeRender(item)).join(", ")}.</span>
                       </li>
                     ))}
                   </ul>
@@ -303,8 +303,8 @@ export function EditableA4Preview({ resume, onChange, scale = 0.7, className }: 
                   >
                     <div style={{ marginBottom: "1mm", lineHeight: 1.2 }}>
                       <div style={{ lineHeight: 1.2 }}>
-                        <span style={{ fontWeight: 700, color: BLACK }}>{ed.degree}</span>
-                        {ed.institution && <span style={{ color: BLACK }}> | {ed.institution}</span>}
+                        <span style={{ fontWeight: 700, color: BLACK }}>{safeRender(ed.degree)}</span>
+                        {ed.institution && <span style={{ color: BLACK }}> | {safeRender(ed.institution)}</span>}
                         {(ed.location || ed.startDate || ed.endDate) && (
                           <span style={{ color: BLACK }}>
                             {" | "}
@@ -315,7 +315,7 @@ export function EditableA4Preview({ resume, onChange, scale = 0.7, className }: 
                   {ed.highlights && ed.highlights.length > 0 && (
                     <ul style={{ margin: "0.3mm 0 0 0", paddingLeft: "4mm", listStyleType: "•", lineHeight: 1.2 }}>
                       {ed.highlights.map((h, i) => (
-                        <li key={i} style={{ color: BLACK, lineHeight: 1.2, textAlign: "justify" }}>{h}</li>
+                        <li key={i} style={{ color: BLACK, lineHeight: 1.2, textAlign: "justify" }}>{safeRender(h)}</li>
                       ))}
                     </ul>
                   )}
@@ -331,8 +331,8 @@ export function EditableA4Preview({ resume, onChange, scale = 0.7, className }: 
                 <div style={{ display: "flex", flexDirection: "column", gap: 0, lineHeight: 1.2 }}>
                   {resume.languages.map((l) => (
                     <div key={l.id} style={{ color: BLACK, lineHeight: 1.2 }}>
-                      <span style={{ fontWeight: 700 }}>{l.name}:</span>{" "}
-                      <span style={{ textTransform: "capitalize" }}>{l.proficiency}</span>
+                      <span style={{ fontWeight: 700 }}>{safeRender(l.name)}:</span>{" "}
+                      <span style={{ textTransform: "capitalize" }}>{safeRender(l.proficiency)}</span>
                       {(l as any).note ? <span> ({(l as any).note})</span> : null}
                     </div>
                   ))}
