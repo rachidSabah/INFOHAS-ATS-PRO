@@ -951,31 +951,27 @@ export async function callAI(opts: AICallOptions): Promise<AICallResult> {
       if (settings.defaultProviderId) {
         const candidate = providers.find((p) => p.id === settings.defaultProviderId && p.isActive);
         if (candidate) {
-          // For document tasks: skip Puter ONLY if API providers exist.
-          // If no API providers are configured, allow Puter (better than nothing).
-          const isPuter = candidate.type === "puter" || candidate.providerCategory === "browser_auth";
-          if (!isDocumentTask || !isPuter || !hasApiProviders) {
-            defaultProvider = candidate;
-          }
+          // For document tasks: use the user's configured default provider
+          // REGARDLESS of whether it's Puter or an API provider.
+          // The user explicitly chose this provider — respect their choice.
+          // (Previous code skipped Puter for document tasks when API providers
+          // existed, which meant the user's choice was ignored.)
+          defaultProvider = candidate;
         }
       }
       // 2. isDefault flag
       if (!defaultProvider) {
         const candidate = providers.find((p) => p.isDefault && p.isActive);
         if (candidate) {
-          const isPuter = candidate.type === "puter" || candidate.providerCategory === "browser_auth";
-          if (!isDocumentTask || !isPuter || !hasApiProviders) {
-            defaultProvider = candidate;
-          }
+          defaultProvider = candidate;
         }
       }
-      // 3. First active API provider (skip Puter for document tasks ONLY if API providers exist)
+      // 3. First active API provider (fallback if no default is set)
       if (!defaultProvider) {
         defaultProvider = providers.find(
           (p) => p.isActive
             && !p.isBuiltIn
             && p.type !== "z-ai-fallback"
-            && (isDocumentTask ? (p.providerCategory !== "browser_auth" || !hasApiProviders) : true)
             && (p.apiUrl || p.baseUrl || p.type === "puter")
             && (p.apiKey || p.authType === "none" || p.type === "puter"),
         );
