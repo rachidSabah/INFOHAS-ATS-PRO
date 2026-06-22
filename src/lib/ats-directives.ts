@@ -241,16 +241,16 @@ export async function analyzeWithGemini(
       ═══════════════════════════════════════════════════════════
       CONTENT TARGET
       ═══════════════════════════════════════════════════════════
-      Target: ~2,900 characters. Range: 2,700-3,100. One A4 page only.
-      Each bullet: 110-180 chars. Summary: 4-6 lines (~60-90 words).
-      Use 5-7 detailed bullets for the 2 most recent roles. 3 bullets for older roles.
+      Target: ~2,500 characters. One A4 page only — STRICT.
+      Each bullet: 80-120 chars max. Summary: 2-3 lines (~30-50 words).
+      Max 2-3 bullets per role. 1-2 for older roles.
 
       ═══════════════════════════════════════════════════════════
       FACTUAL INTEGRITY (NON-NEGOTIABLE)
       ═══════════════════════════════════════════════════════════
       NEVER fabricate: experience, employers, dates, metrics, certifications, skills.
       ONLY use information from the original resume.
-      Rephrase, expand, and optimize — but never invent.
+      CRITICAL: NEVER invent percentages, metrics, or numbers. No fake numbers.
 
       RETURN JSON FORMAT ONLY:
       {
@@ -464,27 +464,26 @@ INDUSTRY WRITING GUIDANCE:
 ${INDUSTRY_PROFILES[airlineProfile]?.writingGuidance || ""}
 
 ═══════════════════════════════════════════════════════════════
-CONTENT TARGET — STRICT ENFORCEMENT (NON-NEGOTIABLE)
+CONTENT TARGET — ONE A4 PAGE (NON-NEGOTIABLE)
 ═══════════════════════════════════════════════════════════════
-Target character count: ~2,900 characters of resume body content (excluding JSON keys/structure).
-Acceptable range: 2,700 – 3,100 characters.
-- 2,100 chars = TOO SHORT — expand bullets, add measurable achievements, deepen technical context.
-- 3,200+ chars = TOO LONG — condense older roles, tighten bullets, merge similar skills.
-HOW TO HIT THE TARGET INTELLIGENTLY:
-1. PROFESSIONAL SUMMARY: 4-6 lines (~60-90 words). Embed 2-3 priority keywords naturally.
-2. EXPERIENCE: For the 2 most recent roles, write 5-7 detailed bullets each. Older roles can have 3 bullets.
-3. Each bullet must START with a strong action verb and QUANTIFY where possible (%, $, counts, time saved, team size, customer volume).
-4. Each bullet should be 110-180 characters — long enough to wrap onto 2 lines (for justified text).
-5. EXPAND weak bullets — never leave "Responsible for X". Rewrite as "Led X to achieve Y, resulting in Z% improvement".
-6. SKILLS: Group into 3-4 categories with 4-6 items each. Embed priority keywords as skill items where natural.
-7. Never produce a half-empty page — fully utilize the A4 layout.
+Target: ~2,500 characters — fits one A4 page with compact margins.
+Acceptable range: 2,200 – 2,700 characters.
+- Under 2,000 chars = TOO SHORT — add 1 more skill group, expand recent role to 3 bullets.
+- Over 2,800 chars = TOO LONG — reduce older roles to 1 bullet, tighten bullets, shorten summary.
+HOW TO HIT THE TARGET:
+1. PROFESSIONAL SUMMARY: 2-3 lines (~30-50 words). Embed 2 priority keywords naturally.
+2. EXPERIENCE: Most recent role: 2-3 bullets max. Older roles: 1-2 bullets max.
+3. Each bullet: start with action verb, 80-120 characters max (one line). Short and factual.
+4. CRITICAL: NEVER invent percentages, metrics, dollar amounts, or time savings. Only use real data from the original resume. No "20% improvement", "98% satisfaction", "100% resolution" — these are fake and damage credibility.
+5. SKILLS: Group into 2-3 categories with 3-5 items each. Embed priority keywords naturally.
+6. Never produce a half-empty page — fully utilize the A4 layout.
 
 ═══════════════════════════════════════════════════════════════
 FACTUAL INTEGRITY (NON-NEGOTIABLE)
 ═══════════════════════════════════════════════════════════════
 NEVER fabricate: experience, employers, dates, metrics, certifications, skills.
 ONLY use information from the original resume.
-Rephrase, expand, and optimize — but never invent.
+Rephrase and optimize — but never invent. No fake numbers.
 
 ═══════════════════════════════════════════════════════════════
 AIRLINE-SPECIFIC WRITING GUIDANCE
@@ -563,10 +562,10 @@ CRITICAL RULES:
 - The "resume" object MUST be a complete, professionally written resume — NOT an analysis report.
 - "summary" must be a professional paragraph ABOUT the candidate, never a critique like "The original resume lacks...".
 - "summary_critique" is a separate analysis field — it must NEVER appear in the resume output.
-- Every bullet must quantify impact where possible (%, $, counts, time saved, team size, customer volume).
+- CRITICAL: NEVER invent percentages, metrics, dollar amounts, or time savings. Only use real data from the original resume. No fake numbers.
 - NEVER include provider errors, JSON parse errors, debug messages, or system text in the resume content.
 - NEVER include analysis artifacts ("ATS score", "Matched keywords", "AI Notes", "Optimization applied").
-- The output character count of "resume" (serialized) MUST be ~2,900 chars (±200).
+- The output MUST fit on one A4 page. Target ~2,500 chars max.
 - ALL priority keywords from the airline profile MUST appear naturally in the resume content.
 `;
 
@@ -696,13 +695,13 @@ TARGET AIRLINE: ${profile.system} (${profile.focus})
 PRIORITY KEYWORDS TO EMBED NATURALLY: ${profile.priorityKeywords?.join(", ") || "(use general aviation keywords)"}
 
 INSTRUCTIONS:
-1. Rewrite the resume to FULLY UTILIZE one A4 page (~2,900 characters of body content).
+1. Rewrite the resume to fit ONE A4 page (~2,500 characters max of body content).
 2. Embed the airline's priority keywords naturally throughout summary, skills, and bullets.
-3. Expand weak bullets — quantify achievements with %, $, counts, time saved, team size, customer volume.
-4. For the 2 most recent roles: 5-7 detailed bullets each. Older roles: 3 bullets.
-5. Group skills into 3-4 categories with 4-6 items each.
+3. CRITICAL: NEVER invent percentages, metrics, or numbers. Only use real data from the original resume. No fake "20% improvement" or "98% satisfaction".
+4. Most recent role: 2-3 bullets max. Older roles: 1-2 bullets max.
+5. Group skills into 2-3 categories with 3-5 items each.
 6. Match the tone preference (${profile.tone || "Balanced"}) of the target airline.
-7. NEVER invent employers, dates, or metrics — only rephrase and expand real content.
+7. NEVER invent employers, dates, or metrics — only rephrase real content.
 
 Return ONLY the JSON object described in the directive. No prose, no markdown fences.`;
 

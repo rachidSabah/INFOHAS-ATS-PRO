@@ -235,10 +235,11 @@ SECTION ORDER (MANDATORY — in this exact order, no other sections)
 ═══════════════════════════════════════════════════════════════
 - Reverse chronological order (most recent first).
 - Format: Position Title | Company | Location | Dates (all on ONE line, bold)
-- Under each position: 3–5 achievement bullets.
-- Each bullet: starts with action verb, concise, measurable when possible.
+- Under each position: 2–3 achievement bullets (max 3).
+- Each bullet: starts with action verb, concise, 80-120 characters, one line max.
 - AVOID paragraphs — bullets only.
-- Action verbs: Led, Built, Increased, Reduced, Delivered, Executed, Managed, Designed, Implemented, Achieved, Assisted, Processed, Maintained, Handled.
+- CRITICAL: NEVER invent percentages, metrics, or numbers. Only use data from the original resume. No fake "20% improvement", "98% satisfaction", etc.
+- Action verbs: Assisted, Managed, Handled, Processed, Maintained, Supported, Coordinated, Delivered, Facilitated, Resolved, Collaborated, Trained.
 
 ═══════════════════════════════════════════════════════════════
 4. EDUCATION
@@ -333,18 +334,17 @@ Return ONLY valid JSON with this exact shape:
 
 CONTENT RULES:
 - Truthful to the source resume. Never invent employers, dates, or metrics.
+- CRITICAL: NEVER fabricate percentages, metrics, dollar amounts, or time savings. Only use real data from the original resume. No "20% improvement", "98% satisfaction", "100% resolution" — these are fake.
 - Embed target job-description keywords naturally.
-- Each bullet should be 110-180 characters — long enough to wrap onto 2 lines (which lets the justified text alignment produce a clean straight right edge), but not so long it becomes a paragraph. NEVER produce one-line bullets under 80 characters (they leave the right margin ragged and waste page space).
+- Each bullet: 80-120 characters max (one line, not two). Short and punchy.
 - Trim EVERY word that doesn't earn its place.
-- EXPAND weak bullet points with more detail and context.
-- QUANTIFY achievements whenever possible (%, $, counts, time saved).
-- Use strong action verbs (Led, Built, Increased, Reduced, Delivered, Executed, Managed, Designed, Implemented, Achieved).
+- Use action verbs from the list above (Assisted, Managed, Handled, Processed, etc.).
 - Improve readability and recruiter impact.
 - Increase keyword relevance naturally — avoid keyword stuffing.
-- Ensure the page is FULLY UTILIZED — no half-empty pages, no excessive whitespace.
-- The summary paragraph should be 4-6 lines (~60-90 words) so the justified alignment produces a clean right edge on every line except the last.
-- If content is too short: expand bullets, add more detail, include more skills.
-- If content is too long: condense older roles, merge similar skills, tighten bullets.
+- Ensure the page fits on EXACTLY one A4 page — no overflow.
+- The summary paragraph should be 2-3 lines (~30-50 words) max.
+- If content overflows: reduce older roles to 1 bullet each, tighten summary, merge skills.
+- If content is too short (under 2,000 chars): add more relevant skill groups, add soft skills, expand recent role bullets to 3 each.
 
 ONE-PAGE CONSTRAINT: The output MUST fit on exactly one A4 page. Apply the CONTENT COMPRESSION ENGINE (above) if needed. NEVER create page two. assert(pdf.pages === 1).`;
 
@@ -497,18 +497,17 @@ Return ONLY valid JSON with this exact shape:
 
 CONTENT RULES:
 - Truthful to the source resume. Never invent employers, dates, or metrics.
+- CRITICAL: NEVER fabricate percentages, metrics, dollar amounts, or time savings. Only use real data from the original resume. No "20% improvement", "98% satisfaction", "100% resolution" — these are fake.
 - Embed target job-description keywords naturally.
-- Each bullet should be 110-180 characters — long enough to wrap onto 2 lines (which lets the justified text alignment produce a clean straight right edge), but not so long it becomes a paragraph. NEVER produce one-line bullets under 80 characters (they leave the right margin ragged and waste page space).
+- Each bullet: 80-120 characters max (one line, not two). Short and punchy.
 - Trim EVERY word that doesn't earn its place.
-- EXPAND weak bullet points with more detail and context.
-- QUANTIFY achievements whenever possible (%, $, counts, time saved).
-- Use strong action verbs (Led, Built, Increased, Reduced, Delivered, Executed, Managed, Designed, Implemented, Achieved).
+- Use action verbs: Assisted, Managed, Handled, Processed, Supported, Coordinated, Delivered, Facilitated, Resolved.
 - Improve readability and recruiter impact.
 - Increase keyword relevance naturally — avoid keyword stuffing.
-- Ensure the page is FULLY UTILIZED — no half-empty pages, no excessive whitespace.
-- The summary paragraph should be 4-6 lines (~60-90 words) so the justified alignment produces a clean right edge on every line except the last.
-- If content is too short: expand bullets, add more detail, include more skills.
-- If content is too long: condense older roles, merge similar skills, tighten bullets.
+- Ensure the page fits on EXACTLY one A4 page — no overflow.
+- The summary paragraph should be 2-3 lines (~30-50 words) max.
+- If content overflows: reduce older roles to 1 bullet each, tighten summary, merge skills.
+- If content is too short (under 2,000 chars): add more relevant skill groups, add soft skills, expand recent role bullets to 3 each.
 
 ═══════════════════════════════════════════════════════════════
 DIRECTIVE HIERARCHY (MUST FOLLOW THIS ORDER)
