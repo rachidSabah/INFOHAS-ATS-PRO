@@ -37,6 +37,8 @@ const {
   createInterview,
   deleteInterview,
   createATSReport,
+  createUser,
+  updateUser,
   createProvider,
   updateProvider,
   deleteProvider,
@@ -530,6 +532,9 @@ export const useApp = create<AppState>()(
           usage: { resumesGenerated: 0, atsChecks: 0, coverLetters: 0, interviewPreps: 0, downloads: 0 },
         };
         set((s) => ({ users: [...s.users, newUser] }));
+        // === BUG 2 FIX: sync the new email/password user to D1 so they
+        // appear in the admin User Approval page. ===
+        cloudApiSafe(createUser)(newUser).catch(() => {});
         useApp.getState().log({ actor: normalizedEmail, action: "User registered (pending approval)", category: "auth", details: `Name: ${newUser.name}`, severity: "warning" });
         // Auto-sign-in the new user (they'll see the pending approval screen)
         // RACE-FIX: setUserId BEFORE set() so cloud-API calls carry the
@@ -602,6 +607,12 @@ export const useApp = create<AppState>()(
               view: "dashboard",
               synced: false,
             }));
+            // === BUG 2 FIX: sync updated Puter user to D1 (last_login + status) ===
+            cloudApiSafe(updateUser)(updatedUser.id, {
+              lastLoginAt: updatedUser.lastLoginAt,
+              status: updatedUser.status,
+              role: updatedUser.role,
+            }).catch(() => {});
             if (shouldAutoApprove) {
               useApp.getState().log({ actor: puterEmail, action: "Puter user auto-approved on sign-in", category: "auth", details: `Name: ${updatedUser.name}`, severity: "info" });
             } else {
@@ -637,6 +648,12 @@ export const useApp = create<AppState>()(
             setUserId(newUser.id);
             persistSession(newUser);
             set((s) => ({ users: [...s.users, newUser], user: newUser, isAuthed: true, authOpen: false, view: "dashboard", synced: false }));
+            // === BUG 2 FIX: sync the new Puter user to D1 so they appear in
+            // the admin Users + User Approval pages. Previously, Puter users
+            // were only stored in the Zustand `users` array (in-memory) —
+            // never persisted to D1. So when the admin pages loaded and
+            // queried D1 via api.getUsers(), the Puter user was missing. ===
+            cloudApiSafe(createUser)(newUser).catch(() => {});
             useApp.getState().log({ actor: puterEmail, action: "User registered via Puter (auto-approved)", category: "auth", details: `Name: ${newUser.name}`, severity: "info" });
             return { ok: true, user: newUser };
           }
@@ -652,36 +669,44 @@ export const useApp = create<AppState>()(
       // === Admin: User Management Actions ===
       approveUser: (userId) => {
         set((s) => ({ users: s.users.map((u) => (u.id === userId ? { ...u, status: "approved", updatedAt: new Date().toISOString() } : u)) }));
+        cloudApiSafe(updateUser)(userId, { status: "approved" }).catch(() => {});
         const u = get().users.find((x) => x.id === userId);
         useApp.getState().log({ actor: get().user?.email ?? "admin", action: "User approved", category: "admin", details: u?.email ?? userId, severity: "info" });
       },
       suspendUser: (userId) => {
         set((s) => ({ users: s.users.map((u) => (u.id === userId ? { ...u, status: "suspended", updatedAt: new Date().toISOString() } : u)) }));
+        cloudApiSafe(updateUser)(userId, { status: "suspended" }).catch(() => {});
         const u = get().users.find((x) => x.id === userId);
         useApp.getState().log({ actor: get().user?.email ?? "admin", action: "User suspended", category: "admin", details: u?.email ?? userId, severity: "warning" });
       },
       unsuspendUser: (userId) => {
         set((s) => ({ users: s.users.map((u) => (u.id === userId ? { ...u, status: "approved", updatedAt: new Date().toISOString() } : u)) }));
+        cloudApiSafe(updateUser)(userId, { status: "approved" }).catch(() => {});
         const u = get().users.find((x) => x.id === userId);
         useApp.getState().log({ actor: get().user?.email ?? "admin", action: "User unsuspended", category: "admin", details: u?.email ?? userId, severity: "info" });
       },
       deleteUser: (userId) => {
         set((s) => ({ users: s.users.map((u) => (u.id === userId ? { ...u, status: "deleted", updatedAt: new Date().toISOString() } : u)) }));
+        cloudApiSafe(updateUser)(userId, { status: "deleted" }).catch(() => {});
         const u = get().users.find((x) => x.id === userId);
         useApp.getState().log({ actor: get().user?.email ?? "admin", action: "User deleted (soft)", category: "admin", details: u?.email ?? userId, severity: "error" });
       },
       promoteToAdmin: (userId) => {
         set((s) => ({ users: s.users.map((u) => (u.id === userId ? { ...u, role: "admin", updatedAt: new Date().toISOString() } : u)) }));
+        cloudApiSafe(updateUser)(userId, { role: "admin" }).catch(() => {});
         const u = get().users.find((x) => x.id === userId);
         useApp.getState().log({ actor: get().user?.email ?? "admin", action: "User promoted to admin", category: "admin", details: u?.email ?? userId, severity: "info" });
       },
       demoteToUser: (userId) => {
         set((s) => ({ users: s.users.map((u) => (u.id === userId ? { ...u, role: "user", updatedAt: new Date().toISOString() } : u)) }));
+        cloudApiSafe(updateUser)(userId, { role: "user" }).catch(() => {});
         const u = get().users.find((x) => x.id === userId);
         useApp.getState().log({ actor: get().user?.email ?? "admin", action: "User demoted to user", category: "admin", details: u?.email ?? userId, severity: "info" });
       },
       resetUserPassword: (userId, newPassword) => {
-        set((s) => ({ users: s.users.map((u) => (u.id === userId ? { ...u, passwordHash: hashPassword(newPassword), updatedAt: new Date().toISOString() } : u)) }));
+        const hash = hashPassword(newPassword);
+        set((s) => ({ users: s.users.map((u) => (u.id === userId ? { ...u, passwordHash: hash, updatedAt: new Date().toISOString() } : u)) }));
+        cloudApiSafe(updateUser)(userId, { passwordHash: hash }).catch(() => {});
         const u = get().users.find((x) => x.id === userId);
         useApp.getState().log({ actor: get().user?.email ?? "admin", action: "Password reset by admin", category: "admin", details: u?.email ?? userId, severity: "warning" });
       },
@@ -691,29 +716,63 @@ export const useApp = create<AppState>()(
       updateUserName: (newName) => {
         const trimmed = newName.trim();
         if (trimmed.length < 2) return;
-        set((s) => (s.user ? { user: { ...s.user, name: trimmed, lastActiveAt: new Date().toISOString() } } : s));
+        const userId = get().user?.id;
+        // === BUG 1 FIX: update BOTH the user object AND the users array + sync to D1 ===
+        // Previously, only the `user` object was updated — the `users` array (which
+        // signInWithEmail checks against) still had the old name. And the D1 row was
+        // never updated. So on logout + re-login, the old credentials were used.
+        set((s) => ({
+          user: s.user ? { ...s.user, name: trimmed, lastActiveAt: new Date().toISOString() } : s.user,
+          users: s.users.map((u) => (u.id === userId ? { ...u, name: trimmed, updatedAt: new Date().toISOString() } : u)),
+        }));
+        if (userId) cloudApiSafe(updateUser)(userId, { name: trimmed }).catch(() => {});
+        // Re-persist the session so the new name survives refresh
+        const updated = get().user;
+        if (updated) persistSession(updated);
         useApp.getState().log({ actor: "you", action: "Username updated", category: "auth", details: `New name: ${trimmed}`, severity: "info" });
       },
       updateUserEmail: (newEmail) => {
         const trimmed = newEmail.trim().toLowerCase();
         if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(trimmed)) return;
-        // Re-evaluate role based on new email
         const newRole = getRoleForEmail(trimmed);
-        set((s) => (s.user ? { user: { ...s.user, email: trimmed, role: newRole, lastActiveAt: new Date().toISOString() } } : s));
+        const userId = get().user?.id;
+        // === BUG 1 FIX: update BOTH the user object AND the users array + sync to D1 ===
+        set((s) => ({
+          user: s.user ? { ...s.user, email: trimmed, role: newRole, lastActiveAt: new Date().toISOString() } : s.user,
+          users: s.users.map((u) => (u.id === userId ? { ...u, email: trimmed, role: newRole, updatedAt: new Date().toISOString() } : u)),
+        }));
+        if (userId) cloudApiSafe(updateUser)(userId, { email: trimmed }).catch(() => {});
+        // Re-persist the session so the new email survives refresh
+        const updated = get().user;
+        if (updated) persistSession(updated);
         useApp.getState().log({ actor: "you", action: "Email updated", category: "auth", details: `New email: ${trimmed} (role: ${newRole})`, severity: "info" });
       },
       changePassword: (currentPassword, newPassword) => {
         const s = get();
         if (!s.user) return { ok: false, error: "Not signed in." };
-        // Mock: in dev, accept any non-empty current password. In production, this would
-        // verify against bcrypt-hash stored in the users table via Workers + D1.
-        if (!currentPassword) return { ok: false, error: "Current password is required." };
+        // === BUG 1 FIX: verify the current password against the stored hash ===
+        // Previously, any non-empty current password was accepted. Now we verify
+        // against the actual hash so the user can't change the password without
+        // knowing the current one.
+        const userInList = s.users.find((u) => u.id === s.user!.id);
+        const storedHash = userInList?.passwordHash ?? s.user.passwordHash;
+        if (!storedHash || !verifyPassword(currentPassword, storedHash)) {
+          return { ok: false, error: "Current password is incorrect." };
+        }
         if (newPassword.length < 8) return { ok: false, error: "New password must be at least 8 characters." };
         if (!/[A-Za-z]/.test(newPassword) || !/\d/.test(newPassword)) return { ok: false, error: "New password must contain letters and numbers." };
         if (newPassword === currentPassword) return { ok: false, error: "New password must differ from current." };
-        // Persist mock hash — use hashPassword for consistency
+        // === BUG 1 FIX: update BOTH the user object AND the users array + sync to D1 ===
         const hash = hashPassword(newPassword);
-        set({ user: { ...s.user, passwordHash: hash, lastActiveAt: new Date().toISOString() } });
+        const userId = s.user.id;
+        set({
+          user: { ...s.user, passwordHash: hash, lastActiveAt: new Date().toISOString() },
+          users: s.users.map((u) => (u.id === userId ? { ...u, passwordHash: hash, updatedAt: new Date().toISOString() } : u)),
+        });
+        cloudApiSafe(updateUser)(userId, { passwordHash: hash }).catch(() => {});
+        // Re-persist the session so the new password hash survives refresh
+        const updated = get().user;
+        if (updated) persistSession(updated);
         useApp.getState().log({ actor: "you", action: "Password changed", category: "auth", details: "Password updated successfully", severity: "info" });
         return { ok: true };
       },
