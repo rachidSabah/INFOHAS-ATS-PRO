@@ -680,13 +680,15 @@ LOCKED FIELDS (CRITICAL — you may NEVER modify these):
 - location: MUST be exactly "${resume.contact.location ?? ""}"
 - experience[].company: MUST match the original employers exactly
 - experience[].location: MUST match the original locations exactly
-- experience[].startDate/endDate: MUST match the original dates exactly
+- experience[].startDate/endDate: MUST match the original dates exactly. If original endDate is "Mar 2024", output "Mar 2024", NOT "Present".
+- education[].startDate/endDate: MUST match the original dates exactly. Never use "Present" unless the original truly says "Present".
 - education[].institution: MUST match the original institutions exactly
 - languages[]: MUST be the same set as the original (same names, same proficiency)
 - certifications[]: MUST be the same set as the original
 
 ALLOWED CHANGES (you may only do these):
-- Rewrite bullet points (improve wording, add action verbs, quantify achievements)
+- Rewrite bullet points (improve wording, add action verbs)
+- CRITICAL: NEVER add percentages, metrics, dollar amounts, or numbers that aren't in the original. Only rephrase existing content.
 - Improve the summary/headline (better ATS keywords, stronger positioning)
 - Reorder skills (put JD-relevant skills first)
 - Add JD keywords to bullets naturally (semantic optimization, not stuffing)
