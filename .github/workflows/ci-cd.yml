@@ -73,6 +73,7 @@ jobs:
         env:
           NEXT_PUBLIC_APP_URL: ${{ vars.NEXT_PUBLIC_APP_URL || 'https://resumeai.pro' }}
           NEXTAUTH_SECRET: ${{ secrets.NEXTAUTH_SECRET }}
+          NEXT_PUBLIC_OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
         run: bun run build
       - name: Upload standalone build
         uses: actions/upload-artifact@v4
@@ -100,6 +101,7 @@ jobs:
       - name: Build for Pages
         env:
           NEXT_PUBLIC_APP_URL: ${{ vars.NEXT_PUBLIC_APP_URL || 'https://resumeai.pro' }}
+          NEXT_PUBLIC_OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
         run: bun run build
       - name: Deploy to Cloudflare Pages
         uses: cloudflare/wrangler-action@v3
