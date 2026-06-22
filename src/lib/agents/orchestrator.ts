@@ -99,77 +99,78 @@ function enforceLockedFields(optimized: ResumeData, original: ResumeData): Resum
   };
 
   // === Lock experience: filter out hallucinated entries + restore locked fields ===
-  if (optimized.experience.length > 0 && original.experience.length > 0) {
-    locked.experience = optimized.experience
-      .filter((e) => {
-        // Remove entries with placeholder companies
-        if (isPlaceholder(e.company)) return false;
-        // Remove entries whose company doesn't match ANY original company
-        // (this is a hallucination — the AI invented a new employer)
-        const companyLower = e.company?.toLowerCase().trim();
-        if (companyLower && !originalCompanies.has(companyLower)) {
-          // Check fuzzy match (partial contains)
-          const fuzzyMatch = Array.from(originalCompanies).some(
-            (orig) => orig.includes(companyLower) || companyLower.includes(orig)
-          );
-          if (!fuzzyMatch) {
-            console.warn(`[enforceLockedFields] Removing hallucinated experience entry: "${e.company}" (not in original resume)`);
-            return false;
+  // Also restore any experience entries the AI may have dropped.
+  if (original.experience.length > 0) {
+    if (optimized.experience.length >= original.experience.length) {
+      // AI returned at least as many entries — filter + lock them
+      locked.experience = optimized.experience
+        .filter((e) => {
+          if (isPlaceholder(e.company)) return false;
+          const companyLower = e.company?.toLowerCase().trim();
+          if (companyLower && !originalCompanies.has(companyLower)) {
+            const fuzzyMatch = Array.from(originalCompanies).some(
+              (orig) => orig.includes(companyLower) || companyLower.includes(orig)
+            );
+            if (!fuzzyMatch) {
+              console.warn(`[enforceLockedFields] Removing hallucinated experience entry: "${e.company}"`);
+              return false;
+            }
           }
-        }
-        return true;
-      })
-      .map((e, i) => {
-        // Match to original by company name (not by index — the AI may reorder)
-        const orig = original.experience.find(
-          (o) => o.company?.toLowerCase().trim() === e.company?.toLowerCase().trim()
-        ) ?? original.experience[i] ?? original.experience[0];
-        return {
-          ...e,
-          company: orig?.company ?? e.company, // NEVER change employer
-          location: orig?.location ?? e.location, // NEVER change work location
-          startDate: orig?.startDate ?? e.startDate, // NEVER change dates
-          endDate: orig?.endDate ?? e.endDate,
-        };
-      });
-
-    // If all AI entries were filtered out (extreme hallucination), use original
-    if (locked.experience.length === 0) {
+          return true;
+        })
+        .map((e, i) => {
+          const orig = original.experience.find(
+            (o) => o.company?.toLowerCase().trim() === e.company?.toLowerCase().trim()
+          ) ?? original.experience[i] ?? original.experience[0];
+          return {
+            ...e,
+            company: orig?.company ?? e.company,
+            location: orig?.location ?? e.location,
+            startDate: orig?.startDate ?? e.startDate,
+            endDate: orig?.endDate ?? e.endDate,
+          };
+        });
+    }
+    // If AI dropped entries OR all were hallucinated, restore original
+    if (locked.experience.length < original.experience.length) {
+      console.warn(`[enforceLockedFields] Restoring original experience (AI had ${optimized.experience.length}, after filter ${locked.experience.length}, original ${original.experience.length})`);
       locked.experience = original.experience;
     }
   }
 
   // === Lock education: filter out hallucinated entries + restore institution ===
-  if (optimized.education.length > 0 && original.education.length > 0) {
-    locked.education = optimized.education
-      .filter((ed) => {
-        if (isPlaceholder(ed.institution)) return false;
-        const instLower = ed.institution?.toLowerCase().trim();
-        if (instLower && !originalInstitutions.has(instLower)) {
-          const fuzzyMatch = Array.from(originalInstitutions).some(
-            (orig) => orig.includes(instLower) || instLower.includes(orig)
-          );
-          if (!fuzzyMatch) {
-            console.warn(`[enforceLockedFields] Removing hallucinated education entry: "${ed.institution}" (not in original resume)`);
-            return false;
+  if (original.education.length > 0) {
+    if (optimized.education.length >= original.education.length) {
+      locked.education = optimized.education
+        .filter((ed) => {
+          if (isPlaceholder(ed.institution)) return false;
+          const instLower = ed.institution?.toLowerCase().trim();
+          if (instLower && !originalInstitutions.has(instLower)) {
+            const fuzzyMatch = Array.from(originalInstitutions).some(
+              (orig) => orig.includes(instLower) || instLower.includes(orig)
+            );
+            if (!fuzzyMatch) {
+              console.warn(`[enforceLockedFields] Removing hallucinated education entry: "${ed.institution}"`);
+              return false;
+            }
           }
-        }
-        return true;
-      })
-      .map((ed, i) => {
-        const orig = original.education.find(
-          (o) => o.institution?.toLowerCase().trim() === ed.institution?.toLowerCase().trim()
-        ) ?? original.education[i] ?? original.education[0];
-        return {
-          ...ed,
-          institution: orig?.institution ?? ed.institution, // NEVER change school
-          location: orig?.location ?? ed.location, // NEVER change school location
-          startDate: orig?.startDate ?? ed.startDate, // restore dates
-          endDate: orig?.endDate ?? ed.endDate,
-        };
-      });
-
-    if (locked.education.length === 0) {
+          return true;
+        })
+        .map((ed, i) => {
+          const orig = original.education.find(
+            (o) => o.institution?.toLowerCase().trim() === ed.institution?.toLowerCase().trim()
+          ) ?? original.education[i] ?? original.education[0];
+          return {
+            ...ed,
+            institution: orig?.institution ?? ed.institution,
+            location: orig?.location ?? ed.location,
+            startDate: orig?.startDate ?? ed.startDate,
+            endDate: orig?.endDate ?? ed.endDate,
+          };
+        });
+    }
+    if (locked.education.length < original.education.length) {
+      console.warn(`[enforceLockedFields] Restoring original education (AI had ${optimized.education.length}, after filter ${locked.education.length}, original ${original.education.length})`);
       locked.education = original.education;
     }
   }
@@ -804,7 +805,7 @@ CONTENT REQUIREMENTS:
       languages: resume.languages,
       certifications: resume.certifications,
     })}\n\nTARGET JOB DESCRIPTION:\n${jd.rawText ?? JSON.stringify({ title: jd.title, company: jd.company, responsibilities: jd.responsibilities, requiredSkills: jd.requiredSkills, keywords: jd.keywords })}\n\n${intelligenceContext}\n\nReturn ONLY the JSON object described in the directive. No prose, no markdown fences.`,
-    maxTokens: 4000,
+    maxTokens: 8000,
     temperature: 0.4,
     taskCategory: "document",
   });
@@ -832,7 +833,7 @@ CONTENT REQUIREMENTS:
       const retryResult = await callAI({
         systemPrompt: "You are a resume optimizer. Return ONLY a valid JSON object. No prose, no markdown fences, no explanations.",
         userPrompt: `SOURCE RESUME:\n${JSON.stringify({ name: resume.name, headline: resume.headline, contact: resume.contact, summary: resume.summary, experience: resume.experience, education: resume.education, skills: resume.skills, languages: resume.languages, certifications: resume.certifications })}\n\nJOB DESCRIPTION:\n${jd.rawText?.slice(0, 1500) ?? jd.keywords.join(", ")}\n\nOptimize this resume for the job. Return ONLY a JSON object with: name, headline, email, phone, location, summary, skills [{category, items[]}], experience [{title, company, location, startDate, endDate, bullets[]}], education [{degree, institution, field, startDate, endDate, modules}], languages [{name, proficiency}]. No prose, no markdown.`,
-        maxTokens: 4000,
+        maxTokens: 8000,
         temperature: 0.4,
         taskCategory: "document",
       });
@@ -845,6 +846,27 @@ CONTENT REQUIREMENTS:
       }
     } else {
       throw new Error(`${errorType} (response length: ${responseLength}). Provider: ${result.provider}. Please try again or configure an API provider in AI Routing Settings.`);
+    }
+  }
+
+  // Validate experience count — if AI returned fewer entries than original,
+  // keep the original experience (AI likely truncated or hallucinated)
+  if (data.experience && resume.experience.length > 0) {
+    const aiCount = (data.experience ?? []).length;
+    const origCount = resume.experience.length;
+    if (aiCount < origCount) {
+      console.warn(`[Optimizer] AI returned ${aiCount} experience entries but original has ${origCount}. Restoring original experience.`);
+      data.experience = resume.experience;
+    }
+  }
+
+  // Validate education count
+  if (data.education && resume.education.length > 0) {
+    const aiCount = (data.education ?? []).length;
+    const origCount = resume.education.length;
+    if (aiCount < origCount) {
+      console.warn(`[Optimizer] AI returned ${aiCount} education entries but original has ${origCount}. Restoring original education.`);
+      data.education = resume.education;
     }
   }
 
@@ -924,6 +946,26 @@ CONTENT REQUIREMENTS:
   // original. This is the definitive guard against hallucination.
   const lockedResume = enforceLockedFields(finalResume, resume);
 
+  // === QUALITY GATES ===
+  // Reject if experience sections were lost
+  if (lockedResume.experience.length === 0 && resume.experience.length > 0) {
+    throw new Error("Optimization failed: experience section was lost. Original resume restored.");
+  }
+  // Reject if education was lost
+  if (lockedResume.education.length === 0 && resume.education.length > 0) {
+    throw new Error("Optimization failed: education section was lost. Original resume restored.");
+  }
+  // Reject if too few experience entries compared to original
+  if (lockedResume.experience.length < resume.experience.length) {
+    console.warn(`[Optimizer] Quality gate: AI returned ${lockedResume.experience.length}/${resume.experience.length} experience entries. Restoring full original.`);
+    lockedResume.experience = resume.experience;
+  }
+  // Reject if too few education entries compared to original
+  if (lockedResume.education.length < resume.education.length) {
+    console.warn(`[Optimizer] Quality gate: AI returned ${lockedResume.education.length}/${resume.education.length} education entries. Restoring full original.`);
+    lockedResume.education = resume.education;
+  }
+
   // Compute char count
   const charCount = JSON.stringify({
     summary: lockedResume.summary,
@@ -932,6 +974,23 @@ CONTENT REQUIREMENTS:
     education: lockedResume.education,
     languages: lockedResume.languages,
   }).length;
+
+  // Reject if output is too short (< 70% of original)
+  const originalCharCount = JSON.stringify({
+    summary: resume.summary,
+    experience: resume.experience,
+    skills: resume.skills,
+    education: resume.education,
+    languages: resume.languages,
+  }).length;
+  if (originalCharCount > 0 && charCount < originalCharCount * 0.7) {
+    console.warn(`[Optimizer] Quality gate: output ${charCount} chars < 70% of original ${originalCharCount}. Restoring original.`);
+    lockedResume.summary = resume.summary;
+    lockedResume.experience = resume.experience;
+    lockedResume.education = resume.education;
+    lockedResume.skills = resume.skills;
+    lockedResume.languages = resume.languages;
+  }
 
   return {
     resume: lockedResume,
