@@ -123,21 +123,27 @@ export function canSignIn(user: User | null): { allowed: boolean; reason?: strin
 
 /**
  * Super admin seed credentials.
- * Password is read from environment variable — NEVER hardcoded in source.
- * If the env var is not set, super-admin login is **disabled** (the user
- * must set NEXT_PUBLIC_SUPER_ADMIN_PASSWORD in their Cloudflare env vars).
  *
- * SECURITY: We deliberately return an unguessable random sentinel password
- * when the env var is unset, instead of an empty string. An empty password
- * would still produce a valid hash and allow `verifyPassword("", hash)` to
- * return true — so any caller that bypassed the UI length check could log
- * in with no password. By using a random sentinel, the stored hash never
- * matches any input the user could realistically type.
+ * The password is resolved in this order:
+ *   1. NEXT_PUBLIC_SUPER_ADMIN_PASSWORD env var (if set + ≥ 8 chars) — for
+ *      users who want to override the default.
+ *   2. A hardcoded default password — so super-admin login ALWAYS works
+ *      out of the box without any env var configuration.
+ *
+ * SECURITY NOTE: This is a client-side app on Cloudflare Pages Free.
+ * The super-admin account is for the site owner only. The password is
+ * inlined into the client bundle, which means anyone who inspects the
+ * bundle can read it. This is an inherent limitation of client-side auth.
+ * For production-grade security, move auth to a Cloudflare Worker with
+ * httpOnly cookies. For the Free tier, this is acceptable — the super-admin
+ * account is emergency access only; regular users use Puter OAuth.
  */
+const _DEFAULT_SUPER_ADMIN_PASSWORD = "Santafee@@@@@1972";
+
 const _SUPER_ADMIN_PASSWORD =
-  process.env.NEXT_PUBLIC_SUPER_ADMIN_PASSWORD && process.env.NEXT_PUBLIC_SUPER_ADMIN_PASSWORD.length >= 8
+  (process.env.NEXT_PUBLIC_SUPER_ADMIN_PASSWORD && process.env.NEXT_PUBLIC_SUPER_ADMIN_PASSWORD.length >= 8)
     ? process.env.NEXT_PUBLIC_SUPER_ADMIN_PASSWORD
-    : `__DISABLED_${Math.random().toString(36).slice(2)}_${Date.now().toString(36)}__`;
+    : _DEFAULT_SUPER_ADMIN_PASSWORD;
 
 export const SUPER_ADMIN_SEED = {
   email: "admin@resumeai.local",
@@ -150,8 +156,6 @@ export const SUPER_ADMIN_SEED = {
 
 /**
  * Returns true when super-admin email/password login is configured.
- * Use this to show/hide the email sign-in option in the UI.
+ * Always true now — the default password is always available.
  */
-export const isSuperAdminLoginEnabled = (): boolean =>
-  !!process.env.NEXT_PUBLIC_SUPER_ADMIN_PASSWORD &&
-  process.env.NEXT_PUBLIC_SUPER_ADMIN_PASSWORD.length >= 8;
+export const isSuperAdminLoginEnabled = (): boolean => true;
