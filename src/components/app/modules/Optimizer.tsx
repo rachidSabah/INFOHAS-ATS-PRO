@@ -157,20 +157,43 @@ export function Optimizer() {
       console.log("Title:", data?.title ?? "N/A");
       console.log("Company:", data?.company ?? "N/A");
 
+      // === NORMALIZE: flatten any object values to strings ===
+      const flattenLoc = (v: any): string | undefined => {
+        if (!v) return undefined;
+        if (typeof v === "string") return v;
+        if (typeof v === "object") {
+          const parts = [v.city, v.state, v.region, v.country, v.address].filter((x: any) => x && typeof x === "string");
+          if (parts.length > 0) return parts.join(", ");
+          return Object.values(v).filter(Boolean).join(", ");
+        }
+        return String(v);
+      };
+      const flattenStr = (v: any): string | undefined => {
+        if (v === null || v === undefined) return undefined;
+        if (typeof v === "string") return v;
+        if (typeof v === "number" || typeof v === "boolean") return String(v);
+        if (typeof v === "object") return JSON.stringify(v);
+        return String(v);
+      };
+      const flattenArray = (v: any): string[] => {
+        if (!Array.isArray(v)) return [];
+        return v.map((x: any) => typeof x === "string" ? x : (typeof x === "object" ? JSON.stringify(x) : String(x))).filter(Boolean);
+      };
+
       parsed = {
         id: uid("jd"),
-        title: data.title || "Untitled role",
-        company: data.company,
-        location: data.location,
-        employmentType: data.employmentType,
-        salary: data.salary,
-        responsibilities: data.responsibilities ?? [],
-        requiredSkills: data.requiredSkills ?? [],
-        preferredSkills: data.preferredSkills ?? [],
-        technologies: data.technologies ?? [],
-        experienceYears: data.experienceYears,
-        education: data.education,
-        keywords: data.keywords ?? [],
+        title: flattenStr(data.title) || "Untitled role",
+        company: flattenStr(data.company),
+        location: flattenLoc(data.location),
+        employmentType: flattenStr(data.employmentType),
+        salary: flattenStr(data.salary),
+        responsibilities: flattenArray(data.responsibilities),
+        requiredSkills: flattenArray(data.requiredSkills),
+        preferredSkills: flattenArray(data.preferredSkills),
+        technologies: flattenArray(data.technologies),
+        experienceYears: flattenStr(data.experienceYears),
+        education: flattenStr(data.education),
+        keywords: flattenArray(data.keywords),
         rawText: jdText,
         source: "text",
         createdAt: new Date().toISOString(),
@@ -573,15 +596,15 @@ export function Optimizer() {
               <CardContent>
                 <div className="grid sm:grid-cols-2 gap-4">
                   <div className="space-y-2 text-sm">
-                    <div><span className="text-muted-foreground">Title:</span> <span className="font-semibold">{jdParsed.title || "Untitled role"}</span></div>
-                    {jdParsed.company && <div><span className="text-muted-foreground">Company:</span> {jdParsed.company}</div>}
-                    {jdParsed.location && <div><span className="text-muted-foreground">Location:</span> {jdParsed.location}</div>}
-                    {jdParsed.experienceYears && <div><span className="text-muted-foreground">Experience:</span> {jdParsed.experienceYears}</div>}
+                    <div><span className="text-muted-foreground">Title:</span> <span className="font-semibold">{String(jdParsed.title || "Untitled role")}</span></div>
+                    {jdParsed.company && <div><span className="text-muted-foreground">Company:</span> {String(jdParsed.company)}</div>}
+                    {jdParsed.location && <div><span className="text-muted-foreground">Location:</span> {String(jdParsed.location)}</div>}
+                    {jdParsed.experienceYears && <div><span className="text-muted-foreground">Experience:</span> {String(jdParsed.experienceYears)}</div>}
                   </div>
                   <div className="space-y-2">
                     <div>
                       <div className="text-xs font-semibold text-muted-foreground uppercase mb-1">Keywords ({(jdParsed.keywords ?? []).length})</div>
-                      <div className="flex flex-wrap gap-1">{(jdParsed.keywords ?? []).map((k, i) => <Badge key={`${k}-${i}`} variant="outline" className="text-[10px]">{k}</Badge>)}</div>
+                      <div className="flex flex-wrap gap-1">{(jdParsed.keywords ?? []).map((k, i) => <Badge key={`${k}-${i}`} variant="outline" className="text-[10px]">{String(k)}</Badge>)}</div>
                     </div>
                   </div>
                 </div>

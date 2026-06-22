@@ -140,20 +140,42 @@ export function JDScraper() {
       }
 
       const data = processed.data;
+      // === NORMALIZE: flatten any object values to strings ===
+      const flattenLoc = (v: any): string | undefined => {
+        if (!v) return undefined;
+        if (typeof v === "string") return v;
+        if (typeof v === "object") {
+          const parts = [v.city, v.state, v.region, v.country, v.address].filter((x: any) => x && typeof x === "string");
+          if (parts.length > 0) return parts.join(", ");
+          return Object.values(v).filter(Boolean).join(", ");
+        }
+        return String(v);
+      };
+      const flattenStr = (v: any): string | undefined => {
+        if (v === null || v === undefined) return undefined;
+        if (typeof v === "string") return v;
+        if (typeof v === "number" || typeof v === "boolean") return String(v);
+        if (typeof v === "object") return JSON.stringify(v);
+        return String(v);
+      };
+      const flattenArray = (v: any): string[] => {
+        if (!Array.isArray(v)) return [];
+        return v.map((x: any) => typeof x === "string" ? x : (typeof x === "object" ? JSON.stringify(x) : String(x))).filter(Boolean);
+      };
       const jd: JobDescription = {
         id: uid("jd"),
-        title: data.title || "Untitled role",
-        company: data.company,
-        location: data.location,
-        employmentType: data.employmentType,
-        salary: data.salary,
-        responsibilities: data.responsibilities ?? [],
-        requiredSkills: data.requiredSkills ?? [],
-        preferredSkills: data.preferredSkills ?? [],
-        technologies: data.technologies ?? [],
-        experienceYears: data.experienceYears,
-        education: data.education,
-        keywords: data.keywords ?? [],
+        title: flattenStr(data.title) || "Untitled role",
+        company: flattenStr(data.company),
+        location: flattenLoc(data.location),
+        employmentType: flattenStr(data.employmentType),
+        salary: flattenStr(data.salary),
+        responsibilities: flattenArray(data.responsibilities),
+        requiredSkills: flattenArray(data.requiredSkills),
+        preferredSkills: flattenArray(data.preferredSkills),
+        technologies: flattenArray(data.technologies),
+        experienceYears: flattenStr(data.experienceYears),
+        education: flattenStr(data.education),
+        keywords: flattenArray(data.keywords),
         rawText,
         source: url ? "url" : "text",
         url: url || undefined,
