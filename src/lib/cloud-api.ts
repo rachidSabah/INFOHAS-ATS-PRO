@@ -55,6 +55,13 @@ export function clearUserId() {
 /**
  * Retry wrapper — retries network requests with exponential backoff.
  * Used for all cloud API calls to handle transient network failures.
+ *
+ * Retry policy:
+ *   - 5xx server errors: RETRY (transient — server may recover)
+ *   - Network errors (TypeError "Failed to fetch", AbortError timeout): RETRY
+ *     (transient — could be a temporary network blip)
+ *   - 4xx client errors (400/401/403/404/422): NO RETRY (permanent — request is bad)
+ *   - CORS errors: NO RETRY (permanent — server config issue)
  */
 async function fetchWithRetry(
   url: string,
@@ -76,20 +83,38 @@ async function fetchWithRetry(
         signal: controller.signal,
       });
       clearTimeout(timeout);
-      // Retry on 5xx server errors (transient)
+
+      // Retry on 5xx server errors (transient) — UNLESS it's the last attempt.
       if (res.status >= 500 && attempt < maxRetries) {
         await new Promise((r) => setTimeout(r, 1000 * Math.pow(2, attempt)));
         continue;
       }
+
+      // 4xx errors (400/401/403/404/422): permanent — do NOT retry.
+      // Return the response and let the caller decide what to do.
       return res;
     } catch (err: any) {
       clearTimeout(timeout);
       lastError = err;
-      // Retry on network errors (timeout, DNS, connection reset)
-      if (attempt < maxRetries) {
-        await new Promise((r) => setTimeout(r, 1000 * Math.pow(2, attempt)));
+
+      // Distinguish transient vs permanent network errors:
+      //   - AbortError (timeout): transient → retry
+      //   - TypeError "Failed to fetch": could be CORS (permanent) OR a network
+      //     blip (transient). We retry once on the first attempt; if it fails
+      //     the same way, we give up.
+      const isAbort = err?.name === "AbortError";
+      const isFailedToFetch = /failed to fetch/i.test(err?.message || "") ||
+                              /load failed/i.test(err?.message || "") ||
+                              err?.name === "TypeError";
+
+      if (attempt < maxRetries && (isAbort || isFailedToFetch)) {
+        // Shorter backoff for network errors — usually either works immediately
+        // or fails immediately (CORS). No point waiting 2s/4s.
+        await new Promise((r) => setTimeout(r, 250 * Math.pow(2, attempt)));
         continue;
       }
+      // Last attempt failed — give up.
+      break;
     }
   }
   throw lastError ?? new Error("fetchWithRetry exhausted retries");

@@ -36,7 +36,11 @@ export class PuterProvider implements AIProviderAdapter {
       "mistral-large": "mistral-large",
     };
     const rawModel = req.model || config.modelName;
-    const model = MODEL_ALIASES[rawModel?.toLowerCase()] || rawModel || undefined; // Let Puter pick its default
+    // Normalize: lowercase the model name, then look it up in the alias map.
+    // If rawModel is undefined, skip aliasing and let Puter pick its default.
+    const model = rawModel
+      ? (MODEL_ALIASES[rawModel.toLowerCase()] || rawModel)
+      : undefined;
     const resp = await window.puter.ai.chat(
       req.messages.map((m) => ({ role: m.role, content: m.content })),
       { model, max_tokens: req.maxTokens ?? config.maxTokens, temperature: req.temperature ?? config.temperature, stream: false }

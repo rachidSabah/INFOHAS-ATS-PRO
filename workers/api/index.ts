@@ -48,8 +48,65 @@ function getUserId(req: Request): string | null {
   return auth || null;
 }
 
+/**
+ * Cache for "does column X exist on table T?" lookups.
+ * Avoids repeating the same PRAGMA query within a single request.
+ */
+const columnExistenceCache = new Map<string, boolean>();
+
+/**
+ * Check whether a column exists on a given table.
+ * Uses PRAGMA table_info() — works on SQLite/D1.
+ * Result is cached per-request to avoid repeated lookups.
+ */
+async function columnExists(db: D1Database, table: string, column: string): Promise<boolean> {
+  const cacheKey = `${table}.${column}`;
+  if (columnExistenceCache.has(cacheKey)) {
+    return columnExistenceCache.get(cacheKey)!;
+  }
+  try {
+    const { results } = await db.prepare(`PRAGMA table_info(${table})`).all<any>();
+    const exists = (results || []).some((row: any) => row.name === column);
+    columnExistenceCache.set(cacheKey, exists);
+    return exists;
+  } catch {
+    // If PRAGMA fails (table doesn't exist?), assume the column doesn't exist.
+    columnExistenceCache.set(cacheKey, false);
+    return false;
+  }
+}
+
+/**
+ * Run a D1 query and never throw. Returns { ok, results, error }.
+ * Used for fire-and-forget writes where a failure should not break
+ * the response cycle.
+ */
+async function safeQuery<T = any>(
+  db: D1Database,
+  sql: string,
+  ...binds: any[]
+): Promise<{ ok: boolean; results?: T[]; error?: string }> {
+  try {
+    const stmt = db.prepare(sql);
+    const result = await (binds.length > 0 ? stmt.bind(...binds).all<T>() : stmt.all<T>());
+    return { ok: true, results: result.results || [] };
+  } catch (e: any) {
+    return { ok: false, error: e?.message || String(e) };
+  }
+}
+
 // ============ HEALTH ============
-app.get("/api/health", (c) => c.json({ ok: true, app: c.env.APP_NAME, time: new Date().toISOString() }));
+app.get("/api/health", async (c) => {
+  // Test DB connectivity
+  const dbCheck = await safeQuery(c.env.DB, "SELECT 1 AS ok");
+  return c.json({
+    ok: true,
+    app: c.env.APP_NAME,
+    time: new Date().toISOString(),
+    db: dbCheck.ok ? "connected" : "error",
+    dbError: dbCheck.error,
+  });
+});
 
 // ============ USERS ============
 app.get("/api/users", async (c) => {
@@ -359,41 +416,81 @@ app.post("/api/audit-logs", async (c) => {
 
 // ============ SETTINGS ============
 app.get("/api/settings/branding", async (c) => {
-  const result = await c.env.DB.prepare("SELECT * FROM branding WHERE id = 1").first();
-  return c.json({ branding: result || {} });
+  try {
+    const result = await c.env.DB.prepare("SELECT * FROM branding WHERE id = 1").first<any>();
+    return c.json({ branding: result || {} });
+  } catch (e: any) {
+    // Table might not exist yet (migration not applied)
+    console.error("GET /api/settings/branding failed:", e?.message);
+    return c.json({ branding: {}, dbError: e?.message });
+  }
 });
 
 app.put("/api/settings/branding", async (c) => {
   const body = await parseBody(c.req.raw);
   const now = new Date().toISOString();
-  // Try advanced UPDATE (with provider_settings_json column from migration 0006).
-  // If the column doesn't exist (migration not yet applied), fall back to basic UPDATE.
-  try {
-    const providerSettingsJson = body.providerSettings ? JSON.stringify(body.providerSettings) : null;
-    await c.env.DB.prepare(
-      "UPDATE branding SET app_name = ?, tagline = ?, primary_color = ?, accent_color = ?, logo_url = ?, email_from_name = ?, email_from_address = ?, pdf_footer_text = ?, provider_settings_json = ?, updated_at = ? WHERE id = 1"
-    ).bind(body.appName, body.tagline, body.primaryColor, body.accentColor, body.logoUrl, body.emailFromName, body.emailFromAddress, body.pdfFooterText, providerSettingsJson, now).run();
-  } catch {
-    // Fallback: column provider_settings_json doesn't exist yet
-    await c.env.DB.prepare(
-      "UPDATE branding SET app_name = ?, tagline = ?, primary_color = ?, accent_color = ?, logo_url = ?, email_from_name = ?, email_from_address = ?, pdf_footer_text = ?, updated_at = ? WHERE id = 1"
-    ).bind(body.appName, body.tagline, body.primaryColor, body.accentColor, body.logoUrl, body.emailFromName, body.emailFromAddress, body.pdfFooterText, now).run();
+
+  // Check whether the provider_settings_json column exists (migration 0006).
+  // If it doesn't, we skip those fields instead of failing the whole update.
+  const hasProviderSettingsCol = await columnExists(c.env.DB, "branding", "provider_settings_json");
+  const hasAIRoutingCol = await columnExists(c.env.DB, "branding", "ai_routing_settings_json");
+
+  const updates: string[] = [
+    "app_name = ?", "tagline = ?", "primary_color = ?", "accent_color = ?",
+    "logo_url = ?", "email_from_name = ?", "email_from_address = ?",
+    "pdf_footer_text = ?", "updated_at = ?",
+  ];
+  const values: any[] = [
+    body.appName, body.tagline, body.primaryColor, body.accentColor,
+    body.logoUrl, body.emailFromName, body.emailFromAddress,
+    body.pdfFooterText, now,
+  ];
+
+  if (hasProviderSettingsCol) {
+    updates.push("provider_settings_json = ?");
+    values.push(body.providerSettings ? JSON.stringify(body.providerSettings) : null);
   }
-  return c.json({ ok: true });
+  if (hasAIRoutingCol) {
+    updates.push("ai_routing_settings_json = ?");
+    values.push(body.aiRoutingSettings ? JSON.stringify(body.aiRoutingSettings) : null);
+  }
+
+  values.push("1"); // WHERE id = 1
+
+  try {
+    await c.env.DB.prepare(
+      `UPDATE branding SET ${updates.join(", ")} WHERE id = ?`
+    ).bind(...values).run();
+    return c.json({ ok: true, migrationApplied: hasProviderSettingsCol });
+  } catch (e: any) {
+    console.error("PUT /api/settings/branding failed:", e?.message);
+    return c.json({ ok: false, error: e?.message || "Failed to update branding" }, 500);
+  }
 });
 
 app.get("/api/settings/flags", async (c) => {
-  const { results } = await c.env.DB.prepare("SELECT * FROM feature_flags").all();
-  const flags: Record<string, boolean> = {};
-  for (const r of results || []) flags[r.key] = r.value === 1;
-  return c.json({ flags });
+  try {
+    const { results } = await c.env.DB.prepare("SELECT * FROM feature_flags").all<any>();
+    const flags: Record<string, boolean> = {};
+    for (const r of results || []) flags[r.key] = r.value === 1;
+    return c.json({ flags });
+  } catch (e: any) {
+    console.error("GET /api/settings/flags failed:", e?.message);
+    return c.json({ flags: {}, dbError: e?.message });
+  }
 });
 
 app.put("/api/settings/flags/:key", async (c) => {
   const key = c.req.param("key");
   const body = await parseBody(c.req.raw);
-  await c.env.DB.prepare("UPDATE feature_flags SET value = ?, updated_at = ? WHERE key = ?").bind(body.value ? 1 : 0, new Date().toISOString(), key).run();
-  return c.json({ ok: true });
+  try {
+    await c.env.DB.prepare("UPDATE feature_flags SET value = ?, updated_at = ? WHERE key = ?")
+      .bind(body.value ? 1 : 0, new Date().toISOString(), key).run();
+    return c.json({ ok: true });
+  } catch (e: any) {
+    console.error("PUT /api/settings/flags failed:", e?.message);
+    return c.json({ ok: false, error: e?.message }, 500);
+  }
 });
 
 // ============ DOWNLOADS ============
@@ -416,10 +513,32 @@ app.post("/api/downloads", async (c) => {
 });
 
 // 404
-app.notFound((c) => c.json({ error: "Not found" }, 404));
+app.notFound((c) => c.json({ error: "Not found", path: c.req.path }, 404));
+
+// Global error handler — catches any uncaught error from route handlers.
+// Returns a structured 500 response with useful context for debugging.
 app.onError((err, c) => {
-  console.error(err);
-  return c.json({ error: "Internal server error", message: err.message }, 500);
+  const path = c.req.path;
+  const method = c.req.method;
+  const errMsg = err?.message || String(err);
+  console.error(`[API ERROR] ${method} ${path}:`, errMsg, err?.stack);
+
+  // Detect common DB schema errors and return a more helpful message
+  if (/no such column|no such table|SQLITE_ERROR/i.test(errMsg)) {
+    return c.json({
+      error: "Database schema error",
+      message: `A required D1 migration is not yet applied. Error: ${errMsg}`,
+      path,
+      hint: "Run `npx wrangler d1 migrations apply resumeai-pro-db --remote` to apply pending migrations.",
+    }, 500);
+  }
+
+  return c.json({
+    error: "Internal server error",
+    message: errMsg,
+    path,
+    method,
+  }, 500);
 });
 
 // Helper: parse DB resume row to app format

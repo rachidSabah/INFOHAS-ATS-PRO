@@ -18,7 +18,7 @@ describe("Job Intelligence Engine", () => {
     requiredSkills: ["Customer Service", "Communication", "CRM"],
     preferredSkills: ["Multilingual"],
     technologies: ["Salesforce"],
-    experienceYears: 2,
+    experienceYears: "2",
     education: "High School",
     keywords: ["customer service", "call center", "communication"],
     rawText: "Customer Contact Centre Agent at Emirates. Handle customer calls, resolve complaints, provide excellent service.",
@@ -102,20 +102,20 @@ describe("Relevance Scoring Engine", () => {
   };
 
   it("computes a relevance score between 0 and 100", () => {
-    const score = computeRelevanceScore(mockResume, mockJI);
+    const score = computeRelevanceScore(mockResume as any, mockJI as any);
     expect(score.overall).toBeGreaterThanOrEqual(0);
     expect(score.overall).toBeLessThanOrEqual(100);
   });
 
   it("detects matched priority keywords", () => {
-    const score = computeRelevanceScore(mockResume, mockJI);
+    const score = computeRelevanceScore(mockResume as any, mockJI as any);
     expect(score.details.matchedPriorityKeywords).toContain("customer service");
     expect(score.details.matchedPriorityKeywords).toContain("communication");
     expect(score.details.matchedPriorityKeywords).toContain("crm");
   });
 
   it("detects missing priority keywords", () => {
-    const score = computeRelevanceScore(mockResume, mockJI);
+    const score = computeRelevanceScore(mockResume as any, mockJI as any);
     // "call handling" is not in the resume
     expect(score.details.missingPriorityKeywords).toContain("call handling");
   });
@@ -125,7 +125,7 @@ describe("Relevance Scoring Engine", () => {
       ...mockResume,
       summary: mockResume.summary + " Experience in airport security and passenger profiling.",
     };
-    const score = computeRelevanceScore(resumeWithAvoid, mockJI);
+    const score = computeRelevanceScore(resumeWithAvoid as any, mockJI as any);
     expect(score.details.avoidKeywordsFound).toContain("airport security");
     expect(score.details.avoidKeywordsFound).toContain("passenger profiling");
     // Score should be penalized
@@ -133,14 +133,14 @@ describe("Relevance Scoring Engine", () => {
   });
 
   it("detects transferable skills", () => {
-    const score = computeRelevanceScore(mockResume, mockJI);
+    const score = computeRelevanceScore(mockResume as any, mockJI as any);
     expect(score.details.transferableSkillsDetected).toContain("Customer Support");
     expect(score.details.transferableSkillsDetected).toContain("Communication");
   });
 
   it("sets passes=true when score >= 90", () => {
     // The mock resume has good relevance — should pass
-    const score = computeRelevanceScore(mockResume, mockJI);
+    const score = computeRelevanceScore(mockResume as any, mockJI as any);
     if (score.overall >= 90) {
       expect(score.passes).toBe(true);
     } else {
@@ -176,7 +176,7 @@ describe("AI Error Leak Prevention", () => {
       source: "manual",
     };
 
-    const result = validateResumeContent(contaminatedResume);
+    const result = validateResumeContent(contaminatedResume as any);
     expect(result.valid).toBe(false);
     expect(result.errors.length).toBeGreaterThan(0);
     expect(result.errors.some((e: string) => e.includes("AI error leak"))).toBe(true);
@@ -208,7 +208,7 @@ describe("AI Error Leak Prevention", () => {
       source: "manual",
     };
 
-    const result = validateResumeContent(cleanResume);
+    const result = validateResumeContent(cleanResume as any);
     expect(result.valid).toBe(true);
   });
 
@@ -256,7 +256,7 @@ describe("Output Validation Pipeline", () => {
       source: "manual",
     };
 
-    const result = runValidationPipeline(resume, null, null);
+    const result = runValidationPipeline(resume as any, null, null);
     expect(result.checks.length).toBe(6); // 6 checks without job intelligence (no ji)
     expect(result.allPassed).toBeDefined();
     expect(result.checks.every((c: any) => c.name && typeof c.passed === "boolean")).toBe(true);

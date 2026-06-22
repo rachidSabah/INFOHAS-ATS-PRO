@@ -708,6 +708,85 @@ function withTimeout<T>(promise: Promise<T>, ms: number, label = "operation"): P
   }) as Promise<T>;
 }
 
+// ============================================================================
+// Puter Cooldown — prevents retry storms after "No usage left" / quota errors
+// ============================================================================
+// When Puter hits its free-tier usage cap, it returns errors like:
+//   "No usage left for request" / "usage_limit_exceeded" / "quota exceeded"
+// If we keep retrying Puter on every subsequent callAI(), we burn through
+// the same error path repeatedly — producing a "Failed to fetch" loop.
+// Instead, once Puter fails with a quota error, we skip Puter entirely
+// for the next 5 minutes. The user can still fall through to the server
+// fallback (Z.ai) and local generator.
+
+const PUTER_COOLDOWN_KEY = "resumeai-puter-cooldown-until";
+const PUTER_COOLDOWN_MS = 5 * 60 * 1000; // 5 minutes
+
+/** Returns true if Puter is currently in cooldown (should be skipped). */
+function isPuterInCooldown(): boolean {
+  if (typeof window === "undefined") return false;
+  try {
+    const v = window.localStorage?.getItem(PUTER_COOLDOWN_KEY);
+    if (!v) return false;
+    const until = parseInt(v, 10);
+    if (Number.isNaN(until)) return false;
+    if (Date.now() >= until) {
+      // Cooldown expired — clear it
+      window.localStorage.removeItem(PUTER_COOLDOWN_KEY);
+      return false;
+    }
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Marks Puter as in-cooldown for the next PUTER_COOLDOWN_MS. */
+function markPuterCooldown(): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage?.setItem(PUTER_COOLDOWN_KEY, String(Date.now() + PUTER_COOLDOWN_MS));
+  } catch {
+    // ignore — localStorage may be unavailable
+  }
+}
+
+/**
+ * Detects whether a Puter error indicates the user has hit their usage cap.
+ * If so, we should enter cooldown to avoid retry-storms.
+ */
+function isPuterQuotaError(err: any): boolean {
+  const msg = (err?.message || String(err || "")).toLowerCase();
+  return (
+    /no usage left/i.test(msg) ||
+    /usage.?limit/i.test(msg) ||
+    /quota.?exceeded/i.test(msg) ||
+    /too many requests/i.test(msg) ||
+    /daily.?limit/i.test(msg) ||
+    /rate.?limit/i.test(msg)
+  );
+}
+
+/**
+ * Detects "Failed to fetch" — the generic TypeError that fetch() throws when:
+ *   - The network is offline
+ *   - CORS blocks the request
+ *   - The provider URL is wrong / unreachable
+ *   - DNS resolution failed
+ *   - The server is unreachable
+ * This is NOT a transient error — retrying immediately will fail the same way.
+ * The caller should fall through to the next provider rather than retry.
+ */
+function isFailedToFetchError(err: any): boolean {
+  const msg = (err?.message || String(err || "")).toLowerCase();
+  return (
+    /failed to fetch/i.test(msg) ||
+    /networkerror/i.test(msg) ||
+    /load failed/i.test(msg) ||
+    err?.name === "TypeError"
+  );
+}
+
 /**
  * Robustly extract a JSON object from an LLM response.
  *
@@ -806,6 +885,10 @@ async function callUserProvider(
   // Puter has NO REST API — it only works via window.puter.ai.chat().
   // If we try to fetch() https://api.puter.com/chat/completions, we get 404.
   if (provider.type === "puter" || provider.providerCategory === "browser_auth") {
+    // Skip Puter entirely if it's in cooldown (user hit usage cap recently)
+    if (isPuterInCooldown()) {
+      throw new Error("Puter is in cooldown (usage cap recently hit). Skipping — try again in a few minutes or configure an API provider in Settings.");
+    }
     if (typeof window === "undefined" || !window.puter?.ai?.chat) {
       throw new Error("Puter.js not loaded. Please refresh the page.");
     }
@@ -822,32 +905,42 @@ async function callUserProvider(
     };
     if (provider.modelName) chatOpts.model = provider.modelName;
 
-    const resp: any = await withTimeout(
-      window.puter.ai.chat(messages, chatOpts),
-      45000,
-      "Puter AI chat",
-    );
+    try {
+      const resp: any = await withTimeout(
+        window.puter.ai.chat(messages, chatOpts),
+        45000,
+        "Puter AI chat",
+      );
 
-    let text = "";
-    if (typeof resp === "string") {
-      text = resp;
-    } else if (resp?.message?.content) {
-      text = Array.isArray(resp.message.content)
-        ? resp.message.content.map((c: any) => c?.text ?? "").join("")
-        : String(resp.message.content);
-    } else if (resp?.text) {
-      text = resp.text;
-    } else if (resp?.toString && typeof resp.toString === "function") {
-      const str = resp.toString();
-      if (str && str !== "[object Object]") text = str;
+      let text = "";
+      if (typeof resp === "string") {
+        text = resp;
+      } else if (resp?.message?.content) {
+        text = Array.isArray(resp.message.content)
+          ? resp.message.content.map((c: any) => c?.text ?? "").join("")
+          : String(resp.message.content);
+      } else if (resp?.text) {
+        text = resp.text;
+      } else if (resp?.toString && typeof resp.toString === "function") {
+        const str = resp.toString();
+        if (str && str !== "[object Object]") text = str;
+      }
+      if (!text) {
+        try { text = JSON.stringify(resp); } catch { text = String(resp ?? ""); }
+      }
+      if (!text || !text.trim()) {
+        throw new Error("Puter returned an empty response");
+      }
+      return text;
+    } catch (e: any) {
+      // If Puter returned a quota/usage-limit error, enter cooldown so we
+      // don't keep retrying Puter on every subsequent callAI().
+      if (isPuterQuotaError(e)) {
+        markPuterCooldown();
+        console.warn("[AI] Puter hit usage cap — entering 5-minute cooldown. Falling through to next provider.");
+      }
+      throw e;
     }
-    if (!text) {
-      try { text = JSON.stringify(resp); } catch { text = String(resp ?? ""); }
-    }
-    if (!text || !text.trim()) {
-      throw new Error("Puter returned an empty response");
-    }
-    return text;
   }
 
   // === All other providers: use fetch() to their REST API ===
@@ -975,6 +1068,8 @@ export async function callAI(opts: AICallOptions): Promise<AICallResult> {
   // For development tasks (AI Dev Agent, Builder):
   //   → any provider
   if (!opts.preferServer && typeof window !== "undefined") {
+    // Declare outside try so the catch block can reference it for error logging.
+    let failedProviderName: string | null = null;
     try {
       const state: any = useApp.getState();
       const providers: any[] = state?.providers || [];
@@ -1026,6 +1121,7 @@ export async function callAI(opts: AICallOptions): Promise<AICallResult> {
       }
 
       if (defaultProvider) {
+        failedProviderName = defaultProvider.name || "unknown";
         const text = await callUserProvider(defaultProvider, opts);
         if (text && text.trim().length > 0) {
           console.info(`[AI] Using user-configured default provider: ${defaultProvider.name} (${defaultProvider.modelName || "default model"})`);
@@ -1038,7 +1134,14 @@ export async function callAI(opts: AICallOptions): Promise<AICallResult> {
         }
       }
     } catch (e: any) {
-      console.warn(`[AI] User default provider failed, falling back to Puter:`, e?.message || e);
+      // Log the failure with context. If it's a "Failed to fetch" network error,
+      // surface a clearer hint — the user's API provider URL is likely wrong,
+      // unreachable, or CORS-blocked.
+      if (isFailedToFetchError(e)) {
+        console.warn(`[AI] Provider "${failedProviderName}" unreachable (Failed to fetch). The URL may be wrong, CORS-blocked, or the provider is offline. Falling through to next provider.`);
+      } else {
+        console.warn(`[AI] Provider "${failedProviderName}" failed, falling back to next provider:`, e?.message || e);
+      }
     }
   }
 
@@ -1075,8 +1178,11 @@ export async function callAI(opts: AICallOptions): Promise<AICallResult> {
     // "claude-sonnet-4" (404 — Anthropic deprecated that exact ID) and then
     // "gpt-4o-mini" (works but is not the documented default). Using the default
     // avoids model-name drift.
+    //
+    // Skip Puter entirely if it's in cooldown — don't even attempt the call.
+    const puterInCooldown = isPuterInCooldown();
     try {
-      if (typeof window !== "undefined" && window.puter?.ai?.chat) {
+      if (!puterInCooldown && typeof window !== "undefined" && window.puter?.ai?.chat) {
         const messages = opts.systemPrompt
           ? [
               { role: "system", content: opts.systemPrompt },
@@ -1147,6 +1253,9 @@ export async function callAI(opts: AICallOptions): Promise<AICallResult> {
             tokensEstimate: estTokens(opts.userPrompt + (opts.systemPrompt ?? "")),
           };
         }
+      } else if (puterInCooldown) {
+        // Puter is in cooldown — skip silently (don't warn, the user already knows).
+        console.debug("[AI] Puter in cooldown — skipping to next provider");
       } else if (typeof window !== "undefined" && !window.puter) {
         // Puter.js script not yet loaded — this is common on first render.
         // Don't warn (it's noisy); just fall through to the next provider.
@@ -1154,8 +1263,12 @@ export async function callAI(opts: AICallOptions): Promise<AICallResult> {
       }
     } catch (e: any) {
       const msg = e?.message || String(e || "");
-      // Detect auth errors specifically so the UI can prompt the user to sign in
-      if (/auth|sign.?in|unauthor|401|403/i.test(msg)) {
+      // If Puter hit its usage cap, enter cooldown so we stop retrying.
+      if (isPuterQuotaError(e)) {
+        markPuterCooldown();
+        console.warn("[AI] Puter usage cap hit — entering 5-minute cooldown. Falling through to next provider.");
+      } else if (/auth|sign.?in|unauthor|401|403/i.test(msg)) {
+        // Detect auth errors specifically so the UI can prompt the user to sign in
         console.warn("[AI] Puter auth required — user should sign in via the Puter button. Error:", msg);
       } else {
         console.warn("[AI] Puter.js failed, trying next provider:", msg);

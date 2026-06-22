@@ -13,7 +13,7 @@ import type { ResumeData } from "./types";
  * Patterns that indicate an AI error leak in generated content.
  * If any of these appear in the resume, the content is contaminated.
  */
-const ERROR_LEAK_PATTERNS: RegExp[] = [
+export const ERROR_LEAK_PATTERNS: RegExp[] = [
   // Explicit error messages
   /optimization incomplete/i,
   /ai did not return/i,

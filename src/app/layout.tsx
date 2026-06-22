@@ -98,17 +98,66 @@ export default function RootLayout({
             Loaded from the official CDN per https://docs.puter.com/getting-started/.
             `async` so it doesn't block page render; Puter attaches to window.puter
             and is available by the time user interactions happen. */}
-        <script src="https://js.puter.com/v2/" async></script>
-        {/* Set puter.quiet = true after Puter loads to suppress the console banner.
-            We can't set it before because Puter overwrites window.puter on init. */}
+        {/*
+          BANNER SUPPRESSION STRATEGY:
+          Puter.js prints an ASCII-art banner to console.log on script init.
+          Setting puter.quiet = true AFTER init does NOT undo the banner —
+          it has already been printed. Setting window.puter = { quiet: true }
+          BEFORE the script loads is also unreliable because Puter overwrites
+          window.puter.
+
+          The only reliable approach: intercept console.log BEFORE Puter loads,
+          filter out the banner lines (multi-line ASCII art that contains
+          "Puter" / "the internet OS" / "console.puter.com"), then restore
+          console.log after a short delay. This keeps real logs from app code
+          while hiding the banner.
+        */}
         <script
           dangerouslySetInnerHTML={{
             __html: `
-              // Poll for Puter load and set quiet immediately
+              (function() {
+                var _origLog = console.log.bind(console);
+                var _suppressUntil = Date.now() + 4000; // 4s window
+                var _bannerRegexes = [
+                  /puter\\.js/i,
+                  /the internet os/i,
+                  /console\\.puter\\.com/i,
+                  /dollars? in free ai/i,
+                  /^\\s*█+█*\\s*$/,
+                  /^\\s*[╔╗╚╝║═─│┌┐└┘├┤┬┴┼]+\\s*$/,
+                ];
+                console.log = function() {
+                  if (Date.now() > _suppressUntil) {
+                    // Window elapsed — restore real console.log
+                    console.log = _origLog;
+                    return _origLog.apply(null, arguments);
+                  }
+                  var args = Array.prototype.slice.call(arguments);
+                  var text = args.map(function(a) {
+                    return typeof a === 'string' ? a : (a && a.toString ? a.toString() : '');
+                  }).join(' ');
+                  for (var i = 0; i < _bannerRegexes.length; i++) {
+                    if (_bannerRegexes[i].test(text)) return; // swallow
+                  }
+                  return _origLog.apply(null, arguments);
+                };
+                // Auto-restore after 4s no matter what
+                setTimeout(function() { console.log = _origLog; }, 4500);
+              })();
+            `,
+          }}
+        />
+        <script src="https://js.puter.com/v2/" async></script>
+        {/* Belt-and-suspenders: also set puter.quiet = true once Puter attaches,
+            in case Puter prints any follow-up banners after init. */}
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `
               var _pc = setInterval(function() {
                 try {
                   if (window.puter && !window.puter._quietSet) {
-                    window.puter.quiet = true;
+                    try { Object.defineProperty(window.puter, 'quiet', { value: true, writable: true, configurable: true }); }
+                    catch(e) { window.puter.quiet = true; }
                     window.puter._quietSet = true;
                     clearInterval(_pc);
                   }
