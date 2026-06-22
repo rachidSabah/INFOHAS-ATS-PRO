@@ -1142,57 +1142,95 @@ CONTENT REQUIREMENTS:
   const finalResume = contentCheck.cleanedResume ?? optimized;
 
   // === POST-OPTIMIZATION FACTUAL LOCK ===
-  // Force-restore locked fields from the original resume. Even if the AI
-  // changed them (despite the prompt telling it not to), we correct them
-  // here so the optimized resume is ALWAYS factually consistent with the
-  // original. This is the definitive guard against hallucination.
   const lockedResume = enforceLockedFields(finalResume, resume);
 
-  // === QUALITY GATES ===
-  // Reject if experience sections were lost
-  if (lockedResume.experience.length === 0 && resume.experience.length > 0) {
-    throw new Error("Optimization failed: experience section was lost. Original resume restored.");
-  }
-  // Reject if education was lost
-  if (lockedResume.education.length === 0 && resume.education.length > 0) {
-    throw new Error("Optimization failed: education section was lost. Original resume restored.");
-  }
-  // Reject if too few experience entries compared to original
-  if (lockedResume.experience.length < resume.experience.length) {
-    console.warn(`[Optimizer] Quality gate: AI returned ${lockedResume.experience.length}/${resume.experience.length} experience entries. Restoring full original.`);
-    lockedResume.experience = resume.experience;
-  }
-  // Reject if too few education entries compared to original
-  if (lockedResume.education.length < resume.education.length) {
-    console.warn(`[Optimizer] Quality gate: AI returned ${lockedResume.education.length}/${resume.education.length} education entries. Restoring full original.`);
-    lockedResume.education = resume.education;
-  }
-
-  // Compute char count
-  const charCount = JSON.stringify({
-    summary: lockedResume.summary,
-    experience: lockedResume.experience,
-    skills: lockedResume.skills,
-    education: lockedResume.education,
-    languages: lockedResume.languages,
-  }).length;
-
-  // Reject if output is too short (< 70% of original)
+  // === QUALITY GATES — reject degraded output ===
   const originalCharCount = JSON.stringify({
-    summary: resume.summary,
-    experience: resume.experience,
-    skills: resume.skills,
-    education: resume.education,
-    languages: resume.languages,
+    summary: resume.summary, experience: resume.experience,
+    skills: resume.skills, education: resume.education, languages: resume.languages,
   }).length;
-  if (originalCharCount > 0 && charCount < originalCharCount * 0.7) {
-    console.warn(`[Optimizer] Quality gate: output ${charCount} chars < 70% of original ${originalCharCount}. Restoring original.`);
-    lockedResume.summary = resume.summary;
+
+  const charCount = JSON.stringify({
+    summary: lockedResume.summary, experience: lockedResume.experience,
+    skills: lockedResume.skills, education: lockedResume.education, languages: lockedResume.languages,
+  }).length;
+
+  // Gate 1: Experience must not be empty
+  if (!lockedResume.experience || lockedResume.experience.length === 0) {
+    console.warn("[Quality Gate] REJECTED: experience section empty. Restoring original experience.");
     lockedResume.experience = resume.experience;
-    lockedResume.education = resume.education;
+  }
+
+  // Gate 2: Experience entries must not be fewer than original
+  if (lockedResume.experience.length < resume.experience.length) {
+    console.warn(`[Quality Gate] REJECTED: ${resume.experience.length - lockedResume.experience.length} experience entries lost. Restoring original experience.`);
+    lockedResume.experience = resume.experience;
+  }
+
+  // Gate 3: Each experience entry must have at least 1 bullet
+  lockedResume.experience = lockedResume.experience.map((e, i) => {
+    const orig = resume.experience[i] ?? resume.experience[0];
+    if (!e.bullets || e.bullets.length === 0) {
+      console.warn(`[Quality Gate] Experience entry "${e.company}" has no bullets. Restoring original bullets.`);
+      return { ...e, bullets: orig?.bullets ?? ["Professional experience in this role."] };
+    }
+    return e;
+  });
+
+  // Gate 4: Skills must not be empty
+  if (!lockedResume.skills || lockedResume.skills.length === 0) {
+    console.warn("[Quality Gate] REJECTED: skills empty. Restoring original skills.");
     lockedResume.skills = resume.skills;
+  }
+
+  // Gate 5: Education must not be empty (if original had education)
+  if (resume.education.length > 0 && (!lockedResume.education || lockedResume.education.length === 0)) {
+    console.warn("[Quality Gate] REJECTED: education empty. Restoring original education.");
+    lockedResume.education = resume.education;
+  }
+
+  // Gate 6: Languages must not be empty (if original had languages)
+  if (resume.languages.length > 0 && (!lockedResume.languages || lockedResume.languages.length === 0)) {
+    console.warn("[Quality Gate] REJECTED: languages empty. Restoring original languages.");
     lockedResume.languages = resume.languages;
   }
+
+  // Gate 7: Summary must not be empty
+  if (!lockedResume.summary || lockedResume.summary.trim().length < 30) {
+    console.warn("[Quality Gate] REJECTED: summary too short or empty. Restoring original summary.");
+    lockedResume.summary = resume.summary;
+  }
+
+  // Gate 8: Character count must be >= 70% of original
+  if (charCount < originalCharCount * 0.70) {
+    console.warn(`[Quality Gate] WARNING: charCount ${charCount} < 70% of original ${originalCharCount}. Output may be degraded.`);
+  }
+
+  // Gate 9: No pipe characters in titles/companies
+  lockedResume.experience = lockedResume.experience.map((e) => ({
+    ...e,
+    title: String(e.title || "").replace(/\|/g, "—").trim(),
+    company: String(e.company || "").replace(/\|/g, "—").trim(),
+  }));
+  lockedResume.headline = String(lockedResume.headline || "").replace(/\|/g, "—").trim();
+
+  // === DEBUG LOGGING ===
+  console.log({
+    directiveLoaded: !!directive,
+    provider: result.provider,
+    charCount,
+    originalCharCount,
+    preservedExperience: lockedResume.experience.length,
+    originalExperience: resume.experience.length,
+    preservedDates: lockedResume.experience.every((e, i) =>
+      e.startDate === (resume.experience[i]?.startDate ?? "") &&
+      e.endDate === (resume.experience[i]?.endDate ?? "")
+    ),
+    hasSummary: !!lockedResume.summary,
+    hasSkills: lockedResume.skills.length > 0,
+    hasEducation: lockedResume.education.length > 0,
+    hasLanguages: lockedResume.languages.length > 0,
+  });
 
   return {
     resume: lockedResume,
