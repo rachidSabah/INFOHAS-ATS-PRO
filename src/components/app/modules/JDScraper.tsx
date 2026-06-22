@@ -93,12 +93,25 @@ export function JDScraper() {
         systemPrompt: "You are a job description parser. Extract structured data. Return ONLY valid JSON.",
         userPrompt: `Extract from this job description:\n\n${rawText}\n\nReturn JSON with keys: title, company, location, employmentType, salary, responsibilities (array of strings), requiredSkills (array), preferredSkills (array), technologies (array), experienceYears, education, keywords (array of 8-15 most important).`,
         maxTokens: 2000,
-        taskCategory: "document", // Use API providers only (never Puter)
+        taskCategory: "document",
       });
+
+      // === DIAGNOSTICS ===
+      console.group("Job URL Parsing");
+      console.log("Provider:", result.provider);
+      console.log("Raw Text Length:", rawText.length);
+      console.log("AI Response Length:", result.text?.length ?? 0);
+      console.log("AI Response Preview:", result.text?.slice(0, 200) ?? "(empty)");
+      console.groupEnd();
 
       // Process through the AI Response Processing Layer — this catches
       // errors, repairs JSON, strips leaks, and validates safety
       const processed = processAIResponse<any>(result.text, result.provider, { expectJson: true });
+
+      // === MORE DIAGNOSTICS ===
+      console.log("Parsed JD:", processed.data);
+      console.log("JD Description Length:", processed.data?.description?.length ?? "N/A");
+      console.log("Keywords Extracted:", processed.data?.keywords?.length ?? 0);
 
       if (!processed.data) {
         // JSON parsing failed even after repair — use heuristic fallback

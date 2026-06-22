@@ -133,8 +133,30 @@ export function Optimizer() {
         maxTokens: 2000,
         taskCategory: "document",
       });
+
+      // === DIAGNOSTICS ===
+      console.group("Optimizer JD Parsing");
+      console.log("Provider:", result.provider);
+      console.log("JD Text Length:", jdText.length);
+      console.log("AI Response Length:", result.text?.length ?? 0);
+      console.log("AI Response Preview:", result.text?.slice(0, 200) ?? "(empty)");
+      console.groupEnd();
+
       // Robustly extract JSON — handles prose preambles, markdown fences, etc.
-      const data = extractJSON<any>(result.text);
+      let data: any;
+      try {
+        data = extractJSON<any>(result.text);
+      } catch {
+        console.warn("[Optimizer] JD parsing: extractJSON failed. Using heuristic fallback.");
+        data = { title: "Parsed role", keywords: [] };
+      }
+
+      // === MORE DIAGNOSTICS ===
+      console.log("Parsed JD:", data);
+      console.log("Keywords Extracted:", data?.keywords?.length ?? 0);
+      console.log("Title:", data?.title ?? "N/A");
+      console.log("Company:", data?.company ?? "N/A");
+
       parsed = {
         id: uid("jd"),
         title: data.title || "Untitled role",

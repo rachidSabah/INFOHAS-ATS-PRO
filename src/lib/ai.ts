@@ -992,35 +992,17 @@ export async function callAI(opts: AICallOptions): Promise<AICallResult> {
   }
 
   // === ALLOW PUTER FOR DOCUMENT TASKS AS FALLBACK ===
-  // Previously, Puter was completely excluded for document tasks (optimizer,
-  // cover letter, etc.). This caused "Optimization failed — the AI response
-  // was incomplete" when no API providers were configured, because the only
-  // fallbacks were the Z.ai server route (which may not be configured) and
-  // the local engine (which produces template output).
-  // Now: if the user default provider check above didn't use Puter (because
-  // API providers exist), we still skip Puter here. But if NO API providers
-  // are configured, we allow Puter as a last resort for document tasks.
-  const allowPuterForDocument = (() => {
-    if (typeof window === "undefined") return false;
-    try {
-      const state: any = useApp.getState();
-      const providers: any[] = state?.providers || [];
-      const hasApi = providers.some(
-        (p) => p.isActive
-          && p.type !== "puter"
-          && p.providerCategory !== "browser_auth"
-          && (p.apiUrl || p.baseUrl)
-          && (p.apiKey || p.authType === "none"),
-      );
-      return !hasApi; // allow Puter for documents only if no API providers
-    } catch { return false; }
-  })();
-
-  if (!opts.preferServer && (taskCategory !== "document" || allowPuterForDocument)) {
+  // We only reach this point if:
+  //   (a) No API provider was found/eligible, OR
+  //   (b) The API provider was found but callUserProvider() threw an error.
+  // In both cases, Puter should be tried as a fallback — even for document tasks.
+  // This fixes the "JD parsing fails with AI-over-API" bug where the API
+  // provider returned empty/invalid, and Puter was never tried as a fallback.
+  if (!opts.preferServer) {
     // 1) Try Puter.js — the free, keyless BROWSER-AUTH provider.
     //
     // Puter is used for interactive/development tasks always, and for document
-    // tasks ONLY when no API providers are configured (as a last resort).
+    // tasks ONLY when no API providers are configured OR the API provider failed.
     // ATS, cover letter, interview, PDF) — those require API providers only.
     //
     // Per https://docs.puter.com/AI/chat/:
