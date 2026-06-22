@@ -339,10 +339,30 @@ function finalizeSupervisorStatus(): void {
     // Post-optimization agents can fail (non-fatal)
   ];
 
-  // Check if any agent is still in a non-terminal state
-  const stillRunning = agentList.filter(
+  // === Agents that are NOT part of the optimization pipeline ===
+  // These are standalone tools that the user can invoke separately.
+  // They should NOT block the Supervisor from completing.
+  const nonPipelineAgents: AgentId[] = [
+    "application-tracker", "salary", "job-search",
+  ];
+
+  // Check if any PIPELINE agent is still in a non-terminal state
+  // (exclude non-pipeline agents like Application Tracker, Salary, Job Search)
+  const pipelineAgents = agentList.filter(
+    (a) => !nonPipelineAgents.includes(a.id),
+  );
+  const stillRunning = pipelineAgents.filter(
     (a) => a.status === "pending" || a.status === "running",
   );
+
+  // Mark non-pipeline agents as "skipped" if they're still pending
+  // (they're not part of this optimization run)
+  for (const id of nonPipelineAgents) {
+    if (state.agents[id]?.status === "pending") {
+      updateAgent(id, { status: "skipped", log: "Not part of this optimization pipeline." });
+    }
+  }
+
   if (stillRunning.length > 0) {
     updateAgent("supervisor", {
       status: "running",

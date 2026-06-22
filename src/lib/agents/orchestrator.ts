@@ -119,8 +119,15 @@ function enforceLockedFields(optimized: ResumeData, original: ResumeData): Resum
           return true;
         })
         .map((e, i) => {
+          // Match by substring — AI may have cleaned up company name
+          const eCompanyLower = e.company?.toLowerCase().trim() ?? "";
           const orig = original.experience.find(
-            (o) => o.company?.toLowerCase().trim() === e.company?.toLowerCase().trim()
+            (o) => {
+              const oCompanyLower = o.company?.toLowerCase().trim() ?? "";
+              return oCompanyLower === eCompanyLower ||
+                oCompanyLower.includes(eCompanyLower) ||
+                eCompanyLower.includes(oCompanyLower);
+            }
           ) ?? original.experience[i] ?? original.experience[0];
           return {
             ...e,
@@ -255,8 +262,18 @@ function computeFactualDiff(original: ResumeData, optimized: ResumeData): Factua
         datesChanged.push({ index: i, field: "endDate", original: orig.endDate || "", optimized: opt.endDate });
       }
       if (opt.company && opt.company !== orig.company) {
-        companiesChanged.push({ index: i, original: orig.company, optimized: opt.company });
-        messages.push(`BUG: Experience #${i + 1} company changed from "${orig.company}" to "${opt.company}"`);
+        // === DON'T FLAG as a company change if the optimized company is a
+        // SUBSTRING of the original (or vice versa) — the AI may have cleaned
+        // up the company name (e.g. removed "| Rabat, Morocco" suffix that
+        // was accidentally merged into the company field during parsing).
+        // Only flag if the company is COMPLETELY different.
+        const origLower = orig.company.toLowerCase().trim();
+        const optLower = opt.company.toLowerCase().trim();
+        const isSubstring = origLower.includes(optLower) || optLower.includes(origLower);
+        if (!isSubstring) {
+          companiesChanged.push({ index: i, original: orig.company, optimized: opt.company });
+          messages.push(`BUG: Experience #${i + 1} company changed from "${orig.company}" to "${opt.company}"`);
+        }
       }
     }
   }
