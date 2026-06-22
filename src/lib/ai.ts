@@ -309,7 +309,7 @@ Return ONLY valid JSON with this exact shape:
       "location": "City, Country",
       "startDate": "Mon YYYY",
       "endDate": "Mon YYYY" | "Present",
-      "bullets": ["Achievement bullet 1...", "Achievement bullet 2...", "Achievement bullet 3..."]  // 3-5 bullets
+      "bullets": ["Achievement bullet 1...", "Achievement bullet 2...", "Achievement bullet 3..."]  // PRESERVE ALL original bullets — never drop them
     },
     ...
   ],
@@ -322,7 +322,7 @@ Return ONLY valid JSON with this exact shape:
       "endDate": "YYYY",
       "modules": "Module 1, Module 2, ..." | ""
     },
-    ...  (MAX 2-3 entries)
+    ...  // PRESERVE ALL original education entries
   ],
   "languages": [
     { "name": "English", "proficiency": "Fluent", "note": "" | "optional note" },
@@ -335,16 +335,20 @@ Return ONLY valid JSON with this exact shape:
 CONTENT RULES:
 - Truthful to the source resume. Never invent employers, dates, or metrics.
 - CRITICAL: NEVER fabricate percentages, metrics, dollar amounts, or time savings. Only use real data from the original resume. No "20% improvement", "98% satisfaction", "100% resolution" — these are fake.
+- CRITICAL: NEVER change end dates to "Present". If original says "May 2024", output "May 2024". NEVER output "Present" unless the original truly says "Present".
 - Embed target job-description keywords naturally.
-- Each bullet: 80-120 characters max (one line, not two). Short and punchy.
-- Trim EVERY word that doesn't earn its place.
+- PRESERVE ALL original bullets — never drop or consolidate them. Rewrite for impact but keep the same count.
+- PRESERVE ALL original experience entries — never remove a job.
+- PRESERVE ALL original education entries.
+- PRESERVE ALL original languages.
+- CRITICAL: Do NOT remove "Date of Birth" if present in the original.
 - Use action verbs from the list above (Assisted, Managed, Handled, Processed, etc.).
 - Improve readability and recruiter impact.
 - Increase keyword relevance naturally — avoid keyword stuffing.
-- Ensure the page fits on EXACTLY one A4 page — no overflow.
-- The summary paragraph should be 2-3 lines (~30-50 words) max.
-- If content overflows: reduce older roles to 1 bullet each, tighten summary, merge skills.
-- If content is too short (under 2,000 chars): add more relevant skill groups, add soft skills, expand recent role bullets to 3 each.
+- Ensure the page fits on EXACTLY one A4 page — no overflow, but NEVER achieve this by cutting content. Use tighter writing instead.
+- The summary paragraph should match the original length — do not shorten it.
+- If content overflows: tighten word choice, merge similar skills, reduce verbosity — NEVER remove bullets or entries.
+- If content is too short (under 2,000 chars): add more relevant skill groups, add soft skills, expand recent role bullets.
 
 ONE-PAGE CONSTRAINT: The output MUST fit on exactly one A4 page. Apply the CONTENT COMPRESSION ENGINE (above) if needed. NEVER create page two. assert(pdf.pages === 1).`;
 
@@ -395,7 +399,7 @@ PAGE FORMAT & CONTENT DENSITY
 - NEVER produce a half-empty page.
 - Target: 2,500–3,000 characters of content (aim for ~2,900).
 - Fully utilize the A4 page — no excessive whitespace.
-- Dynamic adjustment: if the candidate has less experience, expand bullets with more detail. If more experience, condense older roles.
+- Dynamic adjustment: if the candidate has less experience, expand bullets with more detail. If more experience, keep all roles and all bullets.
 ${c.enforceOnePage ? "- Validation: assert(pdf.pages === 1)" : ""}
 
 ═══════════════════════════════════════════════════════════════
@@ -435,8 +439,8 @@ SECTION ORDER (MANDATORY — in this exact order)
 ═══════════════════════════════════════════════════════════════
 1. PROFESSIONAL SUMMARY — ${c.summaryMinWords}-${c.summaryMaxWords} words, single paragraph, no bullets
 2. CORE COMPETENCIES & SKILLS — max ${c.skillsMaxGroups} groups, bullet format
-3. PROFESSIONAL EXPERIENCE — max ${c.experienceMaxEntries} entries, ${c.experienceBulletsPerEntry} bullets each
-4. EDUCATION — max ${c.educationMaxEntries} entries
+3. PROFESSIONAL EXPERIENCE — PRESERVE ALL original entries, PRESERVE ALL original bullets per entry
+4. EDUCATION — PRESERVE ALL original entries
 5. LANGUAGES — max ${c.languagesMaxEntries} entries, one line per language
 
 ═══════════════════════════════════════════════════════════════
@@ -444,12 +448,12 @@ CONTENT COMPRESSION ENGINE (if content exceeds one page)
 ═══════════════════════════════════════════════════════════════
 ${c.enforceOnePage
   ? `Apply IN THIS ORDER until content fits one page:
-1. Compress summary (reduce to ${c.summaryMinWords} words minimum)
-2. Reduce bullet length (split long bullets, remove filler)
-3. Remove repetitive achievements
-4. Reduce spacing (tighten line height)
-5. Reduce font size to MINIMUM ${c.minFontSizePt}pt (never below ${c.minFontSizePt}pt)
-6. Merge similar skills (combine categories)
+1. Tighten word choice (replace long phrases with shorter ones)
+2. Reduce bullet length (trim filler words, keep all content)
+3. Reduce spacing (tighten line height)
+4. Reduce font size to MINIMUM ${c.minFontSizePt}pt (never below ${c.minFontSizePt}pt)
+5. Merge similar skills (combine categories)
+WARNING: NEVER remove bullets, experience entries, education entries, or languages. NEVER change dates.
 NEVER create page two. assert(pdf.pages === 1).`
   : "Multi-page output allowed if content exceeds one page."}
 
@@ -474,8 +478,8 @@ Return ONLY valid JSON with this exact shape:
       "company": "Company",
       "location": "City, Country",
       "startDate": "Mon YYYY",
-      "endDate": "Mon YYYY" | "Present",
-      "bullets": ["Achievement bullet 1...", "Achievement bullet 2..."]
+      "endDate": "Mon YYYY",  // CRITICAL: NEVER output "Present" unless original says "Present"
+      "bullets": ["Achievement bullet 1...", "Achievement bullet 2..."]  // PRESERVE ALL original bullets
     }
   ],
   "education": [
@@ -498,16 +502,20 @@ Return ONLY valid JSON with this exact shape:
 CONTENT RULES:
 - Truthful to the source resume. Never invent employers, dates, or metrics.
 - CRITICAL: NEVER fabricate percentages, metrics, dollar amounts, or time savings. Only use real data from the original resume. No "20% improvement", "98% satisfaction", "100% resolution" — these are fake.
+- CRITICAL: NEVER change end dates to "Present". If original says "May 2024", output "May 2024". Never use "Present" unless the original truly says "Present".
 - Embed target job-description keywords naturally.
-- Each bullet: 80-120 characters max (one line, not two). Short and punchy.
-- Trim EVERY word that doesn't earn its place.
+- PRESERVE ALL original bullets — never drop or consolidate them. Rewrite for impact but keep the same count.
+- PRESERVE ALL original experience entries.
+- PRESERVE ALL original education entries.
+- PRESERVE ALL original languages.
+- PRESERVE "Date of Birth" if present in the original.
 - Use action verbs: Assisted, Managed, Handled, Processed, Supported, Coordinated, Delivered, Facilitated, Resolved.
 - Improve readability and recruiter impact.
 - Increase keyword relevance naturally — avoid keyword stuffing.
-- Ensure the page fits on EXACTLY one A4 page — no overflow.
-- The summary paragraph should be 2-3 lines (~30-50 words) max.
-- If content overflows: reduce older roles to 1 bullet each, tighten summary, merge skills.
-- If content is too short (under 2,000 chars): add more relevant skill groups, add soft skills, expand recent role bullets to 3 each.
+- Ensure the page fits on EXACTLY one A4 page — NEVER achieve this by cutting content. Use tighter writing instead.
+- Keep the summary at the original length — do not shorten it.
+- If content overflows: tighten word choice, merge similar skills, reduce verbosity — NEVER remove bullets or entries.
+- If content is too short (under 2,000 chars): add more relevant skill groups, add soft skills, expand recent role bullets.
 
 ═══════════════════════════════════════════════════════════════
 DIRECTIVE HIERARCHY (MUST FOLLOW THIS ORDER)
