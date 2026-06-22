@@ -347,11 +347,33 @@ export async function syncAllFromCloud(store: any): Promise<void> {
     const cloudUsers = (usersRes.users || []).map(parseDbUser);
     if (cloudUsers.length > 0) {
       const existingUsers = store.getState().users || [];
+
+      // === SUPER-ADMIN PROTECTION ===
+      // The seed super-admin (id: u_superadmin) has the CORRECT password hash
+      // (computed from SUPER_ADMIN_SEED.password at runtime). D1 may have a
+      // STALE hash (e.g. "rh1$superadmin_hashed_placeholder" from an old seed).
+      // Always prefer the seed's hash + email for the super-admin — never let
+      // D1 override them. This prevents the "can't log in with admin@resumeai.local"
+      // bug when D1 has a stale/placeholder password hash.
+      const seedSuperAdmin = existingUsers.find((u: any) => u.id === "u_superadmin");
+      const mergedCloudUsers = cloudUsers.map((u: any) => {
+        if (u.id === "u_superadmin" && seedSuperAdmin) {
+          return {
+            ...u,
+            email: seedSuperAdmin.email,           // always use the seed email
+            passwordHash: seedSuperAdmin.passwordHash,  // always use the seed hash
+            role: "super_admin",                   // always super_admin
+            status: "approved",                    // always approved
+          };
+        }
+        return u;
+      });
+
       // Merge: start with cloud users, then add any in-memory users that aren't
       // in D1 yet (by ID) — this preserves the super-admin seed if it's not in D1.
-      const cloudUserIds = new Set(cloudUsers.map((u: any) => u.id));
+      const cloudUserIds = new Set(mergedCloudUsers.map((u: any) => u.id));
       const missingFromCloud = existingUsers.filter((u: any) => !cloudUserIds.has(u.id));
-      const mergedUsers = [...cloudUsers, ...missingFromCloud];
+      const mergedUsers = [...mergedCloudUsers, ...missingFromCloud];
       store.setState({ users: mergedUsers });
     }
     if (brandingRes.branding && Object.keys(brandingRes.branding).length > 0) {
