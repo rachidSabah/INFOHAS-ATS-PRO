@@ -132,21 +132,31 @@ COVER LETTER STRUCTURE:
 CONTENT RULES:
 - Target 350-500 words (preferably ~450 words)
 - One page maximum
-- Sound HUMAN — avoid generic AI language ("dynamic professional", "passionate about")
+- Sound HUMAN — avoid generic AI language ("dynamic professional", "passionate about", "track record of", "I excel in", "my professional journey", "I am confident")
 - Use strong action verbs: Delivered, Implemented, Improved, Optimized, Led, Designed
-- Reference SPECIFIC achievements from the resume with measurable outcomes
+- Reference SPECIFIC achievements from the resume with measurable outcomes (numbers, %, $)
 - Incorporate keywords from the job description naturally (no stuffing)
 - Industry-adaptive language (use industry terminology from the keyword bank)
 - NEVER mention skills not present in the resume
 - NEVER fabricate company information — only use what's in the JD
 - ATS-friendly: include key JD keywords naturally
 
+GROUNDING REQUIREMENTS (CRITICAL):
+- You MUST reference at least 3 different resume sections in the cover letter:
+  1. Professional Summary (background + years of experience)
+  2. Experience (at least 2 specific achievements with metrics from actual roles)
+  3. Skills (at least 3 relevant skills from the resume)
+- If the resume has Languages, mention them.
+- If the resume has Certifications, mention them.
+- If the resume has Education relevant to the role, mention it.
+- The sectionsReferenced array MUST list ALL sections you actually used.
+
 Return JSON:
 {
   "content": "The full cover letter text (plain text, no markdown)",
   "matchScore": 85,
-  "keywordsUsed": ["keyword1", "keyword2", ...],
-  "sectionsReferenced": ["Professional Summary", "Experience - Vercel", "Skills"]
+  "keywordsUsed": ["keyword1", "keyword2"],
+  "sectionsReferenced": ["Professional Summary", "Experience", "Skills", "Languages", "Certifications"]
 }`,
         userPrompt: `CANDIDATE'S RESUME (primary source of truth — use ONLY this information):
 ${resumeContext}
@@ -169,7 +179,33 @@ Return ONLY valid JSON.`,
       // Parse the AI response
       let data: { content: string; matchScore: number; keywordsUsed: string[]; sectionsReferenced: string[] };
       try {
-        data = extractJSON<any>(result.text);
+        const raw = extractJSON<any>(result.text);
+        // === NORMALIZATION: handle multiple possible key names ===
+        // The AI may return { content: "..." }, { letter: "..." }, { text: "..." },
+        // or just a plain string. Normalize to { content, matchScore, ... }.
+        const content = raw.content || raw.letter || raw.text || raw.coverLetter || raw.body || "";
+        if (content && typeof content === "string" && content.trim().length > 50) {
+          data = {
+            content,
+            matchScore: raw.matchScore || raw.match_score || raw.score || 75,
+            keywordsUsed: Array.isArray(raw.keywordsUsed) ? raw.keywordsUsed
+              : Array.isArray(raw.keywords_used) ? raw.keywords_used
+              : Array.isArray(raw.keywords) ? raw.keywords
+              : jd.keywords.slice(0, 8),
+            sectionsReferenced: Array.isArray(raw.sectionsReferenced) ? raw.sectionsReferenced
+              : Array.isArray(raw.sections_referenced) ? raw.sections_referenced
+              : Array.isArray(raw.sections) ? raw.sections
+              : ["Professional Summary", "Experience", "Skills"],
+          };
+        } else {
+          // JSON parsed but content is missing/empty — treat the raw text as content
+          data = {
+            content: result.text,
+            matchScore: 75,
+            keywordsUsed: jd.keywords.slice(0, 8),
+            sectionsReferenced: ["Professional Summary", "Experience", "Skills"],
+          };
+        }
       } catch {
         // Fallback: treat the entire response as cover letter content
         data = {

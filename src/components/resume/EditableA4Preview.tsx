@@ -7,6 +7,25 @@ import type { ResumeData, ResumeLanguage } from "@/lib/types";
 import { uid } from "@/lib/store";
 
 /**
+ * Safely render any value as a string. Prevents React error #31
+ * ("Objects are not valid as a React child") when the AI returns an
+ * object (e.g. { city: "Doha", country: "Qatar" }) where a string is
+ * expected.
+ */
+function safeRender(v: any): string {
+  if (v === null || v === undefined) return "";
+  if (typeof v === "string") return v;
+  if (typeof v === "number" || typeof v === "boolean") return String(v);
+  if (Array.isArray(v)) return v.map((x) => safeRender(x)).filter(Boolean).join(", ");
+  if (typeof v === "object") {
+    const values = Object.values(v).filter((x) => x !== null && x !== undefined && x !== "");
+    if (values.length > 0) return values.map((x) => safeRender(x)).join(", ");
+    return "";
+  }
+  return String(v);
+}
+
+/**
  * Detect whether the current device is a touch-only device (mobile/tablet without
  * a fine pointer). On touch devices we cannot rely on `:hover` to reveal the
  * edit pencil, so we show it persistently and also enable tap-anywhere-on-section
@@ -253,15 +272,15 @@ export function EditableA4Preview({ resume, onChange, scale = 0.7, className }: 
                   >
                     <div style={{ marginBottom: "1.5mm" }}>
                       <div style={{ marginBottom: "0.3mm", lineHeight: 1.2 }}>
-                        <span style={{ fontWeight: 700, color: BLACK }}>{e.title}</span>
-                        {e.company && <span style={{ color: BLACK }}> | {e.company}</span>}
-                        {e.location && <span style={{ color: BLACK }}> | {e.location}</span>}
+                        <span style={{ fontWeight: 700, color: BLACK }}>{String(e.title || "")}</span>
+                        {e.company && <span style={{ color: BLACK }}> | {String(e.company)}</span>}
+                        {e.location && <span style={{ color: BLACK }}> | {safeRender(e.location)}</span>}
                         {"  "}
                         <span style={{ color: BLACK }}>{fmtDateInfohas(e.startDate)} – {fmtDateInfohas(e.endDate)}</span>
                       </div>
                       <ul style={{ margin: 0, paddingLeft: "4mm", listStyleType: "•", lineHeight: 1.2 }}>
                         {e.bullets.map((b, i) => (
-                          <li key={i} style={{ marginBottom: 0, color: BLACK, textAlign: "justify", lineHeight: 1.2 }}>{b}</li>
+                          <li key={i} style={{ marginBottom: 0, color: BLACK, textAlign: "justify", lineHeight: 1.2 }}>{safeRender(b)}</li>
                         ))}
                       </ul>
                     </div>

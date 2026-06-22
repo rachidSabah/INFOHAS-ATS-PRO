@@ -35,6 +35,54 @@ import { uid } from "../store";
 import type { ResumeSkill } from "../types";
 
 // ============================================================================
+// AI response normalization helpers
+// ============================================================================
+
+/**
+ * Flatten a value that might be an object into a string.
+ * Handles: strings, numbers, booleans, null/undefined, arrays, objects.
+ * - { city: "Doha", country: "Qatar" } → "Doha, Qatar"
+ * - ["React", "Node.js"] → "React, Node.js"
+ * - 42 → "42"
+ * - null/undefined → ""
+ * This prevents React error #31 ("Objects are not valid as a React child")
+ * when the AI returns an object where a string is expected.
+ */
+function flattenValue(v: any): string {
+  if (v === null || v === undefined) return "";
+  if (typeof v === "string") return v;
+  if (typeof v === "number" || typeof v === "boolean") return String(v);
+  if (Array.isArray(v)) return v.map((x) => flattenValue(x)).filter(Boolean).join(", ");
+  if (typeof v === "object") {
+    // If it's a location-like object { city, country }, join the values
+    const values = Object.values(v).filter((x) => x !== null && x !== undefined && x !== "");
+    if (values.length > 0) return values.map((x) => flattenValue(x)).join(", ");
+    return "";
+  }
+  return String(v);
+}
+
+/**
+ * Flatten a location field that might be a string or an object.
+ * - "Doha, Qatar" → "Doha, Qatar"
+ * - { city: "Doha", country: "Qatar" } → "Doha, Qatar"
+ * - { city: "Doha" } → "Doha"
+ * - null/undefined → ""
+ */
+function flattenLocation(v: any): string {
+  if (v === null || v === undefined) return "";
+  if (typeof v === "string") return v;
+  if (typeof v === "object") {
+    // Try common location field names: city, country, state, region, address
+    const parts = [v.city, v.state, v.region, v.country, v.address].filter((x) => x && typeof x === "string");
+    if (parts.length > 0) return parts.join(", ");
+    // Fallback: join all string values
+    return flattenValue(v);
+  }
+  return String(v);
+}
+
+// ============================================================================
 // Types
 // ============================================================================
 
@@ -610,38 +658,38 @@ Produce a one-page A4 resume (~2,700-3,000 chars) that is:
 
   const optimized: ResumeData = {
     id: uid("r"),
-    name: data.name || resume.name,
-    headline: data.headline || resume.headline,
+    name: String(data.name || resume.name || ""),
+    headline: String(data.headline || resume.headline || ""),
     contact: {
-      email: data.email || resume.contact.email,
-      phone: data.phone || resume.contact.phone,
-      location: data.location || resume.contact.location,
+      email: String(data.email || resume.contact.email || ""),
+      phone: String(data.phone || resume.contact.phone || ""),
+      location: flattenLocation(data.location) || resume.contact.location,
       website: resume.contact.website,
       linkedin: resume.contact.linkedin,
       github: resume.contact.github,
     },
     dateOfBirth: data.dateOfBirth || resume.dateOfBirth,
-    summary: data.summary,
+    summary: String(data.summary || ""),
     experience: (data.experience ?? []).length > 0
       ? data.experience.map((e: any) => ({
           id: uid("e"),
-          title: e.title || "",
-          company: e.company || "",
-          location: e.location || "",
-          startDate: e.startDate || "",
-          endDate: e.endDate || "Present",
-          bullets: e.bullets ?? [],
+          title: String(e.title || ""),
+          company: String(e.company || ""),
+          location: flattenLocation(e.location) || "",
+          startDate: String(e.startDate || ""),
+          endDate: String(e.endDate || "Present"),
+          bullets: Array.isArray(e.bullets) ? e.bullets.map((b: any) => flattenValue(b)) : [],
         }))
       : resume.experience,
     education: (data.education ?? []).length > 0
       ? data.education.map((ed: any) => ({
           id: uid("ed"),
-          degree: ed.degree || "",
-          institution: ed.institution || "",
-          field: ed.field || "",
-          location: ed.location || "",
-          startDate: ed.startDate || "",
-          endDate: ed.endDate || "",
+          degree: String(ed.degree || ""),
+          institution: String(ed.institution || ""),
+          field: String(ed.field || ""),
+          location: flattenLocation(ed.location) || "",
+          startDate: String(ed.startDate || ""),
+          endDate: String(ed.endDate || ""),
           highlights: ed.modules ? [`Modules: ${ed.modules}`] : ed.highlights || [],
         }))
       : resume.education,
@@ -692,44 +740,44 @@ Produce a one-page A4 resume (~2,700-3,000 chars) that is:
 
 function mapAviationResultToResumeData(result: AviationOptimizeResult, original: ResumeData): ResumeData {
   const aiSkills: ResumeSkill[] = (result.resume.skills ?? []).flatMap((g: any) =>
-    (g.items ?? []).map((name: string) => ({ id: uid("s"), name, category: g.category || "General" }))
+    (g.items ?? []).map((name: string) => ({ id: uid("s"), name: flattenValue(name), category: flattenValue(g.category) || "General" }))
   );
 
   return {
     id: uid("r"),
-    name: result.resume.name || original.name,
-    headline: result.resume.headline || original.headline,
+    name: String(result.resume.name || original.name || ""),
+    headline: String(result.resume.headline || original.headline || ""),
     contact: {
-      email: result.resume.email || original.contact.email,
-      phone: result.resume.phone || original.contact.phone,
-      location: result.resume.location || original.contact.location,
+      email: String(result.resume.email || original.contact.email || ""),
+      phone: String(result.resume.phone || original.contact.phone || ""),
+      location: flattenLocation(result.resume.location) || original.contact.location,
       website: original.contact.website,
       linkedin: original.contact.linkedin,
       github: original.contact.github,
     },
     dateOfBirth: result.resume.dateOfBirth || original.dateOfBirth,
-    summary: result.resume.summary,
+    summary: String(result.resume.summary || ""),
     experience: (result.resume.experience ?? []).length > 0
       ? result.resume.experience.map((e: any) => ({
           id: uid("e"),
-          title: e.title || "",
-          company: e.company || "",
-          location: e.location || "",
-          startDate: e.startDate || "",
-          endDate: e.endDate || "Present",
-          bullets: e.bullets ?? [],
+          title: String(e.title || ""),
+          company: String(e.company || ""),
+          location: flattenLocation(e.location) || "",
+          startDate: String(e.startDate || ""),
+          endDate: String(e.endDate || "Present"),
+          bullets: Array.isArray(e.bullets) ? e.bullets.map((b: any) => flattenValue(b)) : [],
         }))
       : original.experience,
     education: (result.resume.education ?? []).length > 0
       ? result.resume.education.map((ed: any) => ({
           id: uid("ed"),
-          degree: ed.degree || "",
-          institution: ed.institution || "",
-          field: ed.field || "",
-          location: ed.location || "",
-          startDate: ed.startDate || "",
-          endDate: ed.endDate || "",
-          highlights: ed.modules ? [`Modules: ${ed.modules}`] : ed.highlights || [],
+          degree: String(ed.degree || ""),
+          institution: String(ed.institution || ""),
+          field: String(ed.field || ""),
+          location: flattenLocation(ed.location) || "",
+          startDate: String(ed.startDate || ""),
+          endDate: String(ed.endDate || ""),
+          highlights: ed.modules ? [`Modules: ${flattenValue(ed.modules)}`] : ed.highlights || [],
         }))
       : original.education,
     skills: aiSkills.length > 0 ? aiSkills : original.skills,
