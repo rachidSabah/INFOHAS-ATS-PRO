@@ -92,3 +92,69 @@ Stage Summary:
 - Root cause of Puter banner: the ASCII-art banner is printed by Puter.js during script initialization. Setting puter.quiet=true AFTER init (as the previous polling approach did) cannot undo a banner that already printed. The new approach intercepts console.log BEFORE Puter loads and filters banner lines for a 4-second window.
 - All 3 user-reported issues fixed. 13 regression tests added to prevent recurrence.
 - Production build verified clean. Tests verified passing. TypeScript verified at 0 errors.
+
+---
+Task ID: bugfix-parser-supervisor-a4-screenshots
+Agent: main (Super Z)
+Task: Diagnose 4 user-provided screenshots from Chrome on Android showing: (1) optimized resume with companies appearing in the title field, (2) Supervisor stuck 'Waiting for 1 agent(s): Supervisor', (3) QA dashboard showing 'Hallucination detected: Vercel, Airbnb, UC Berkeley', (4) ATS breakdown dashboard. Inspect and fix all errors.
+
+Work Log:
+- Used VLM (z-ai vision) to transcribe all 4 screenshots.
+- Screenshot 1 (173243): Optimized resume — showed 'Senior Customer Experience Specialist Vercel | Remote Mar 2022 – Pres' (company merged into title, dates truncated).
+- Screenshot 2 (173300): Supervisor pipeline — 'Waiting for 1 agent(s): Supervisor' (self-referential deadlock).
+- Screenshot 3 (173311): QA dashboard — 'Hallucination detected: 2 employer(s): Vercel, Airbnb; 1 education: University of California, Berkeley'.
+- Screenshot 4 (173330): ATS breakdown dashboard — appeared to render correctly.
+- Extracted text from upload/ALEX_MORGAN_resume.pdf via pdftotext to verify the original resume content.
+- Discovered the original PDF DOES contain 'Vercel | Remote', 'Airbnb | San Francisco, CA', 'University of California, Berkeley | Berkeley, CA' as legitimate employers — the QA agent's 'hallucination' detection was a FALSE POSITIVE caused by a parser bug.
+- Ran the parser on the PDF text and confirmed:
+  - title='Senior Customer Experience Specialist Vercel' (company merged into title — BUG)
+  - company='Remote' (location put as company — BUG)
+  - location='' (empty — BUG)
+  - education institution='•' (bullet from next line — BUG)
+  - contact location='Francisco, CA' (single-word regex match — BUG)
+
+- Fix 1 — Parser: title/company/location split (src/lib/parser.ts):
+  - Added splitTitleAndCompany() helper with 60+ title-ending keywords (Manager, Engineer, Specialist, Associate, Analyst, Consultant, Architect, Pilot, Captain, Nurse, Teacher, Lawyer, etc.).
+  - Rewrote parseExperiences with 4-strategy fallback: (1) split on ' | ', (2) split on ' at ', (3) title-end keyword split, (4) legacy comma split.
+  - Fixed contact location regex to allow 1-3 capitalized words before the comma (was 1, so 'San Francisco, CA' became 'Francisco, CA').
+- Fix 2 — Parser: education institution extraction (src/lib/parser.ts):
+  - Added INST_KEYWORDS regex to detect institution names (University, College, Institute, School, Academy, Polytechnic, Conservatory).
+  - When the degree line contains an institution keyword, extract everything from the keyword onwards as the institution. Shorten the 'field' to exclude the institution.
+  - Strip trailing ' | YEAR – YEAR' suffix from the degree line before extracting institution (was leaking into the institution field).
+  - Skip bullet lines when looking for a fallback institution.
+- Fix 3 — Supervisor self-wait (src/lib/agents/supervisor.ts):
+  - Root cause: pipelineAgents filter excluded nonPipelineAgents (application-tracker, salary, job-search) but FORGOT to exclude 'supervisor' itself.
+  - Added '&& a.id !== \"supervisor\"' to the filter.
+  - Added a regression test in supervisor.test.ts.
+- Fix 4 — A4 preview date clipping (src/components/resume/EditableA4Preview.tsx):
+  - Root cause: the title span had 'flex: 1, overflow: hidden, textOverflow: ellipsis, whiteSpace: nowrap' but NOT 'minWidth: 0'. In flex layouts, items default to 'min-width: auto', so the title span wouldn't shrink below its content's intrinsic width. The date span (flexShrink: 0) got pushed past the right edge of the page and clipped by the parent's overflow: hidden.
+  - Added 'minWidth: 0' to the title span.
+- Fix 5 — QA false positive (src/lib/agents/orchestrator.ts):
+  - Root cause: per-index comparison of original vs optimized companies. If the AI reordered entries, index 0 of original wouldn't match index 0 of optimized — even though both companies exist somewhere in the original.
+  - Added matchesAnyOriginalCompany() helper that checks if the optimized company matches ANY original company by substring. Only flag a company change if it matches NONE.
+
+- Regression tests (src/lib/parser.test.ts — 6 new tests):
+  - ALEX_MORGAN regression: 3 experience entries with correct title/company/location
+  - ALEX_MORGAN regression: education institution extracted from same line as degree
+  - ALEX_MORGAN regression: contact location 'San Francisco, CA' (not 'Francisco, CA')
+  - Title/company split: 'Product Manager Acme Corp | New York, NY'
+  - Title/company split: 'Software Engineer at Google, Mountain View, CA'
+  - QA false positive prevention: original companies include Vercel, Airbnb, UC Berkeley
+- Regression test (src/lib/agents/supervisor.test.ts — 1 new test):
+  - Supervisor self-wait: the supervisor agent must NOT appear in its own 'still running' list.
+
+Validation:
+- npx tsc --noEmit: 0 errors
+- npx vitest run: 243/243 pass (was 236 + 6 new parser + 1 new supervisor)
+- npx next build: clean
+- Commit: c329a57 on main branch.
+
+Stage Summary:
+- Root cause of ALL 4 user-reported issues was a single parser bug: the parser was splitting 'Title Company | Location Dates' on ' | ' and assigning the LEFT side as title (which contained both title and company merged) and the RIGHT side as company (which was actually the location).
+- This caused:
+  1. The optimized resume to display companies in the title field (because the parser's output was passed to the AI, which then either preserved the bug or tried to fix it).
+  2. The QA agent to flag the AI's correct output (with company='Vercel') as a hallucination, because the original parsed resume had company='Remote' (the location).
+  3. The Supervisor to enter a self-referential deadlock while waiting for itself to complete (unrelated to the parser bug, but exposed by the same test scenario).
+  4. The A4 preview to clip the date column ('Feb 20' instead of 'Feb 2022') because the title was too long and the flex layout didn't have minWidth: 0.
+- All 4 issues fixed. 7 regression tests added to prevent recurrence.
+- Production build verified clean. Tests verified passing. TypeScript verified at 0 errors.
