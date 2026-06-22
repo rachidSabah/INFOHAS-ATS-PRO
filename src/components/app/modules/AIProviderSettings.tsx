@@ -59,14 +59,18 @@ export function AIProviderSettings() {
       return;
     }
     setFetchingModels(true);
-    setLiveModels([]);
+    // === PRESERVE last known valid model list on failure ===
+    // Do NOT clear liveModels on failure — keep the previous list so the
+    // user's routing configuration stays valid. Only clear on success.
     const result = await ProviderManager.fetchModels(defaultProvider);
     setFetchingModels(false);
     if (result.ok && result.models.length > 0) {
       setLiveModels(result.models);
-      toast.success(`Fetched ${result.models.length} models from ${defaultProvider.name}.`);
+      toast.success(`Loaded ${result.models.length} ${defaultProvider.type === "puter" ? "built-in" : "live"} models from ${defaultProvider.name}.`);
     } else {
-      toast.error(result.error || "Failed to fetch models.");
+      // === DO NOT clear provider, model, or routing config ===
+      // Just show the error — the user's last known valid config is preserved.
+      toast.error(result.error || "Failed to fetch models. Your existing configuration is preserved.");
     }
   };
 
@@ -168,12 +172,21 @@ export function AIProviderSettings() {
                 ) : (
                   <Input value={form.defaultModel} onChange={(e) => update({ defaultModel: e.target.value })} placeholder="claude-sonnet-4" className="flex-1" />
                 )}
-                <Button variant="outline" size="sm" onClick={fetchModels} disabled={fetchingModels || !defaultProvider} className="gap-1.5 shrink-0">
-                  {fetchingModels ? <Icon name="Loader2" className="w-3.5 h-3.5 animate-spin" /> : <Icon name="DownloadCloud" className="w-3.5 h-3.5" />}
-                  Fetch models
-                </Button>
+                {defaultProvider?.type === "puter" ? (
+                  // Puter uses built-in models — show a static list instead of fetching
+                  <Button variant="outline" size="sm" onClick={fetchModels} disabled={fetchingModels} className="gap-1.5 shrink-0">
+                    {fetchingModels ? <Icon name="Loader2" className="w-3.5 h-3.5 animate-spin" /> : <Icon name="List" className="w-3.5 h-3.5" />}
+                    Show built-in models
+                  </Button>
+                ) : (
+                  <Button variant="outline" size="sm" onClick={fetchModels} disabled={fetchingModels || !defaultProvider} className="gap-1.5 shrink-0">
+                    {fetchingModels ? <Icon name="Loader2" className="w-3.5 h-3.5 animate-spin" /> : <Icon name="DownloadCloud" className="w-3.5 h-3.5" />}
+                    Fetch models
+                  </Button>
+                )}
               </div>
-              {liveModels.length > 0 && <p className="text-[10px] text-muted-foreground">{liveModels.length} live models fetched from {defaultProvider?.name}</p>}
+              {defaultProvider?.type === "puter" && liveModels.length === 0 && <p className="text-[10px] text-muted-foreground">Puter uses built-in models — click "Show built-in models" to load them.</p>}
+              {liveModels.length > 0 && <p className="text-[10px] text-muted-foreground">{liveModels.length} {defaultProvider?.type === "puter" ? "built-in" : "live"} models from {defaultProvider?.name}</p>}
             </div>
           </div>
         </CardContent>

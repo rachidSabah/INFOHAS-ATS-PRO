@@ -173,9 +173,26 @@ export class ProviderManager {
 
   /**
    * Fetch the list of available models from a provider's API.
-   * Routes through /api/providers/models to avoid CORS issues.
+   * For Puter (browser-only, no API endpoint), returns a static built-in
+   * model list — Puter does NOT support model discovery.
    */
   static async fetchModels(provider: AIProvider): Promise<{ ok: boolean; models: string[]; error?: string }> {
+    // === PUTER: static built-in models (no model discovery endpoint) ===
+    if (provider.type === "puter") {
+      return {
+        ok: true,
+        models: [
+          "deepseek-v4-flash",
+          "deepseek-chat",
+          "gpt-oss",
+          "glm-4",
+          "claude-3-5-sonnet",
+          "gpt-4o-mini",
+          "gpt-4o",
+          "o1-mini",
+        ],
+      };
+    }
     return this.fetchModelsForConfig(provider);
   }
 

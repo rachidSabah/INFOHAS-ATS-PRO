@@ -575,7 +575,29 @@ Produce a one-page A4 resume (~2,700-3,000 chars) that is:
   if (processed.data) {
     data = processed.data;
   } else {
-    throw new Error("AI returned non-JSON response after repair attempts.");
+    // === RETRY on incomplete/empty response ===
+    // If the AI returned an empty or non-JSON response, retry once with a
+    // simpler prompt (fewer tokens, more explicit JSON instruction).
+    // This fixes the "Optimization failed — the AI response was incomplete"
+    // error that happened when Puter returned a truncated response.
+    if (!result.text || result.text.trim().length < 50) {
+      console.warn("[Optimizer] AI returned empty/truncated response, retrying with simpler prompt...");
+      const retryResult = await callAI({
+        systemPrompt: directive,
+        userPrompt: `SOURCE RESUME:\n${JSON.stringify({ name: resume.name, headline: resume.headline, contact: resume.contact, summary: resume.summary, experience: resume.experience, education: resume.education, skills: resume.skills, languages: resume.languages, certifications: resume.certifications })}\n\nJOB DESCRIPTION:\n${jd.rawText?.slice(0, 1500) ?? jd.keywords.join(", ")}\n\nOptimize this resume for the job. Return ONLY a JSON object with: name, headline, email, phone, location, summary, skills [{category, items[]}], experience [{title, company, location, startDate, endDate, bullets[]}], education [{degree, institution, field, startDate, endDate, modules}], languages [{name, proficiency}]. No prose, no markdown.`,
+        maxTokens: 4000,
+        temperature: 0.4,
+        taskCategory: "document",
+      });
+      const retryProcessed = processAIResponse<any>(retryResult.text, retryResult.provider, { expectJson: true });
+      if (retryProcessed.data) {
+        data = retryProcessed.data;
+      } else {
+        throw new Error("AI returned non-JSON response after retry. Please try again or switch to a different AI provider.");
+      }
+    } else {
+      throw new Error("AI returned non-JSON response after repair attempts. Please try again or switch to a different AI provider.");
+    }
   }
 
   // Map AI JSON → ResumeData
