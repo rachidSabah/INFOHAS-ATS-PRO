@@ -771,15 +771,20 @@ export async function runAutonomousDebug(): Promise<{
     }
 
     // === 2. Search for REAL provider error leak patterns ===
-    // Exclude pattern-definition files (ai-error-filter.ts, ai-response-processor.ts)
-    // which legitimately contain these strings as regex definitions for leak detection.
-    const EXCLUDED_LEAK_FILES = ["ai-error-filter.ts", "ai-response-processor.ts", "analysis-leak-prevention"];
+    // Exclude pattern-definition files, test files, and mock data — these contain
+    // error strings for detection/testing purposes, not actual leaks in resume content.
+    const EXCLUDED_LEAK_FILES = [
+      "ai-error-filter.ts", "ai-response-processor.ts", "analysis-leak-prevention",
+      ".test.ts", ".spec.ts", "platform-audit", "mock-data.ts", "qa/types.ts",
+    ];
     const errorLeaks = await searchRepository("optimization incomplete|non-json output|raw response started", { regex: true, filePattern: "*.{ts,tsx}" });
     for (const r of errorLeaks.slice(0, 5)) {
-      // Skip files that define these patterns for detection purposes
+      // Skip files that define these patterns for detection/testing purposes
       if (EXCLUDED_LEAK_FILES.some((f) => r.file.includes(f))) continue;
       // Skip if the match is inside a regex literal (pattern definition, not actual leak)
       if (r.match.trim().startsWith("/") && r.match.trim().endsWith("/i")) continue;
+      // Skip if it's inside a comment (search string description, not actual code)
+      if (r.match.trim().startsWith("//") || r.match.includes("suggestedFix:")) continue;
       issues.push({
         area: "frontend",
         severity: "error",

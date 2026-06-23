@@ -147,14 +147,18 @@ jobs:
         env:
           NEXT_PUBLIC_APP_URL: ${{ vars.NEXT_PUBLIC_APP_URL || 'https://resumeai.pro' }}
           NEXT_PUBLIC_OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
-        run: bun run build
+          NEXT_PUBLIC_ZAI_API_KEY: ${{ secrets.ZAI_API_KEY }}
+          NEXT_PUBLIC_GOOGLE_CLIENT_ID: ${{ secrets.NEXT_PUBLIC_GOOGLE_CLIENT_ID }}
+        run: |
+          bun run build
+          npx next-on-pages --skip-build
       - name: Deploy to Cloudflare Pages
         id: deploy
         uses: cloudflare/wrangler-action@v3
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          command: pages deploy .next/standalone --project-name=resumeai-pro-${{ github.ref == 'refs/heads/main' && 'prod' || 'preview' }}
+          command: pages deploy .vercel/output/static --project-name=resumeai-pro-${{ github.ref == 'refs/heads/main' && 'prod' || 'preview' }}
 
   # ----------------------------------------------------------
   # 4. Deploy Workers (Hono API)
@@ -254,6 +258,20 @@ jobs:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           command: d1 execute resumeai-pro-db --file=migrations/0006_provider_settings.sql --remote --env production
+      - name: Apply provider classification (0004_provider_classification.sql)
+        uses: cloudflare/wrangler-action@v3
+        continue-on-error: true
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: d1 execute resumeai-pro-db --file=migrations/0004_provider_classification.sql --remote --env production
+      - name: Apply AI dev agent (0003_ai_dev_agent.sql)
+        uses: cloudflare/wrangler-action@v3
+        continue-on-error: true
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: d1 execute resumeai-pro-db --file=migrations/0003_ai_dev_agent.sql --remote --env production
 
   # ----------------------------------------------------------
   # 6. Smoke test — verify the deploy is healthy
