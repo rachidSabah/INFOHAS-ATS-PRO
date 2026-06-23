@@ -73,7 +73,7 @@ export class GeminiProvider extends OpenAICompatibleProvider {
 
     // Native Gemini API — uses /models?key=
     const key = config.apiKey || "";
-    const res = await fetch(`${baseUrl}/models?key=${encodeURIComponent(key)}&pageSize=100`, {
+    const res = await fetch(`${baseUrl}/models?key=${encodeURIComponent(key)}`, {
       method: "GET",
       signal: AbortSignal.timeout(Math.min(config.timeout, 10000)),
     });

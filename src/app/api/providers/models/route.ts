@@ -33,7 +33,7 @@ export async function POST(req: NextRequest) {
 
     // Special case for Gemini
     if (baseUrl.includes("generativelanguage.googleapis.com")) {
-      url = `${baseUrl.replace(/\/$/, "")}/models?key=${encodeURIComponent(apiKey || "")}&pageSize=100`;
+      url = `${baseUrl.replace(/\/$/, "")}/models?key=${encodeURIComponent(apiKey || "")}`;
     }
 
     // Special case for Anthropic Claude
