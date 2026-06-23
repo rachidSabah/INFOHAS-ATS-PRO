@@ -1189,6 +1189,14 @@ CONTENT REQUIREMENTS:
 
   // Process the AI response through the full leak-prevention pipeline
   console.info(`[Optimizer] Provider: ${result.provider}, Response length: ${result.text?.length ?? 0} chars, Tokens est: ${result.tokensEstimate}`);
+
+  // Reject local fallback — no AI provider actually executed
+  if (result.provider === "Local Engine (offline mode)" || (result.text?.length ?? 0) < 500) {
+    throw new Error(
+      "No AI provider available. Optimization could not be completed. " +
+      "Configure an API provider in Settings or sign in to Puter."
+    );
+  }
   const processed = processAIResponse<any>(result.text, result.provider, { expectJson: true });
   let data: any;
   if (processed.data) {
@@ -1215,12 +1223,23 @@ CONTENT REQUIREMENTS:
         taskCategory: "document",
       });
       console.info(`[Optimizer] Retry response: Provider: ${retryResult.provider}, Length: ${retryResult.text?.length ?? 0}`);
+      if (retryResult.provider === "Local Engine (offline mode)" || (retryResult.text?.length ?? 0) < 500) {
+        throw new Error(
+          "No AI provider available. Optimization could not be completed. " +
+          "Configure an API provider in Settings or sign in to Puter."
+        );
+      }
       const retryProcessed = processAIResponse<any>(retryResult.text, retryResult.provider, { expectJson: true });
       if (retryProcessed.data) {
         data = retryProcessed.data;
       } else {
         throw new Error(`${errorType} — retry also failed. Provider: ${retryResult.provider}. Please try again or configure an API provider in AI Routing Settings.`);
       }
+    } else if (result.provider === "Local Engine (offline mode)") {
+      throw new Error(
+        "No AI provider available. Optimization could not be completed. " +
+        "Configure an API provider in Settings or sign in to Puter."
+      );
     } else {
       throw new Error(`${errorType} (response length: ${responseLength}). Provider: ${result.provider}. Please try again or configure an API provider in AI Routing Settings.`);
     }

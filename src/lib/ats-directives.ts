@@ -713,6 +713,14 @@ Return ONLY the JSON object described in the directive. No prose, no markdown fe
     taskCategory: "document",
   });
 
+  // Reject local fallback — no AI provider actually executed
+  if (result.provider === "Local Engine (offline mode)" || result.text.length < 500) {
+    throw new Error(
+      "No AI provider available. Optimization could not be completed. " +
+      "Configure an API provider in Settings or sign in to Puter."
+    );
+  }
+
   // Parse JSON — robustly handle markdown fences, prose preambles, trailing commentary
   let data: AviationOptimizeResult;
   let rawParsed: any;

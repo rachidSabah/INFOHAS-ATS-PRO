@@ -963,8 +963,46 @@ async function callUserProvider(
   }
 
   // === All other providers: use fetch() to their REST API ===
+  // Route through the server-side CORS proxy when running in browser.
+  // Direct browser-to-provider fetch fails for many providers (Nvidia, Anthropic, etc.)
+  // that block browser-origin requests via CORS.
   const baseUrl = (provider.apiUrl || provider.baseUrl || "").trim();
   if (!baseUrl) throw new Error(`Provider "${provider.name}" has no base URL`);
+
+  if (typeof window !== "undefined") {
+    // Browser path: use server-side proxy to avoid CORS
+    const authType = provider.authType || "bearer";
+    const messages: Array<{ role: string; content: string }> = [];
+    if (opts.systemPrompt) messages.push({ role: "system", content: opts.systemPrompt });
+    messages.push({ role: "user", content: opts.userPrompt });
+
+    const proxyRes = await fetch("/api/providers/chat", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        baseUrl,
+        apiKey: provider.apiKey,
+        authType,
+        headersJson: provider.headersJson,
+        model: provider.modelName || "gpt-4o-mini",
+        messages,
+        maxTokens: opts.maxTokens ?? provider.maxTokens ?? 4096,
+        temperature: opts.temperature ?? provider.temperature ?? 0.7,
+        responsePath: provider.responsePath,
+        timeout: provider.timeout ?? 30,
+      }),
+    });
+
+    const proxyData = await proxyRes.json();
+    if (!proxyData.ok) {
+      throw new Error(proxyData.error || `Provider "${provider.name}" returned an error`);
+    }
+    const text = (proxyData.text || "").trim();
+    if (!text) {
+      throw new Error(`Provider "${provider.name}" returned an empty response`);
+    }
+    return text;
+  }
 
   // Build the chat-completions URL.
   const url = baseUrl.endsWith("/chat/completions")
