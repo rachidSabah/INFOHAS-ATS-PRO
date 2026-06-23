@@ -26,6 +26,8 @@ interface QATestResult {
 
 interface QAResponse {
   status: "passed" | "failed" | "partial";
+  /** If true, critical failures were detected — pipeline MUST abort. */
+  fatal: boolean;
   timestamp: string;
   totalTests: number;
   passedTests: number;

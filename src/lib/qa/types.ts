@@ -44,6 +44,8 @@ export interface QATestSuite {
 
 export interface QARunReport {
   status: "passed" | "failed" | "partial";
+  /** If true, critical failures were detected — pipeline MUST abort. */
+  fatal: boolean;
   timestamp: string;
   totalTests: number;
   passedTests: number;

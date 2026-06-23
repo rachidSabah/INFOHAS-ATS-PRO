@@ -307,6 +307,10 @@ export function runFullQASuite(opts: {
   const failedTests = allResults.filter((r) => !r.passed).length;
   const criticalFailures = allResults.filter((r) => !r.passed && r.severity === "critical");
 
+  // HARDENING: Critical failures are FATAL — status is "failed" (not "partial")
+  // and `fatal` flag is set. Callers MUST abort the pipeline on fatal=true.
+  const fatal = criticalFailures.length > 0;
+
   // Compute coverage by category
   const categories: TestCategory[] = ["browser", "api", "pipeline", "provider", "export", "persistence", "performance", "cache", "ats", "regression"];
   const coverageMap: Record<TestCategory, { total: number; passed: number; failed: number }> = {} as any;
@@ -321,7 +325,9 @@ export function runFullQASuite(opts: {
 
   // Generate suggestions
   const suggestions: string[] = [];
-  if (criticalFailures.length > 0) {
+  if (fatal) {
+    suggestions.push(`FATAL: ${criticalFailures.length} critical failure(s) detected. Pipeline MUST ABORT. Continuing risks data corruption or incorrect results.`);
+  } else if (criticalFailures.length > 0) {
     suggestions.push(`${criticalFailures.length} critical failure(s) require immediate attention`);
   }
   if (coverage.provider.total > 0 && coverage.provider.failed > 0) {
@@ -332,7 +338,8 @@ export function runFullQASuite(opts: {
   }
 
   return {
-    status: failedTests === 0 ? "passed" : passedTests > 0 ? "partial" : "failed",
+    status: fatal ? "failed" : failedTests === 0 ? "passed" : passedTests > 0 ? "partial" : "failed",
+    fatal,
     timestamp,
     totalTests: allResults.length,
     passedTests,

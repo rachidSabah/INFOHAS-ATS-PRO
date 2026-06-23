@@ -404,8 +404,8 @@ export class ZaiProvider implements OAuthAIProvider {
       if (apiKey) {
         try {
           return await this.login();
-        } catch {
-          // Auto-login failed — user must manually connect
+        } catch (autoLoginErr) {
+          console.warn("[Z.ai Provider] Auto-login failed — user must manually connect:", autoLoginErr instanceof Error ? autoLoginErr.message : autoLoginErr);
         }
       }
       this.session = createEmptySession("zai-direct");
@@ -431,7 +431,8 @@ export class ZaiProvider implements OAuthAIProvider {
         const refreshed = await this.refresh();
         console.log("[PROVIDER AUTH] session restored (refreshed)");
         return refreshed;
-      } catch {
+      } catch (refreshErr) {
+        console.warn("[Z.ai Provider] Session refresh failed:", refreshErr instanceof Error ? refreshErr.message : refreshErr);
         this.session.authenticated = false;
         this.session.expiresAt = null;
         await saveSession(this.session);
@@ -442,7 +443,7 @@ export class ZaiProvider implements OAuthAIProvider {
 
     // Proactively refresh if expiring soon
     if (isSessionExpiringSoon(stored)) {
-      this.refresh().catch(() => {});
+      this.refresh().catch((e) => { console.warn("[Z.ai Provider] Proactive refresh failed:", e instanceof Error ? e.message : e); });
     }
 
     console.log("[PROVIDER AUTH] session restored");
@@ -639,22 +640,30 @@ export class ZaiProvider implements OAuthAIProvider {
         signal: AbortSignal.timeout(15000),
       });
       return res.ok;
-    } catch {
+    } catch (validateErr) {
+      console.warn("[Z.ai Provider] API key validation request failed:", validateErr instanceof Error ? validateErr.message : validateErr);
       return false;
     }
   }
 
   /**
    * Store a Z.ai API key linked to a Google user ID.
-   * Uses localStorage with encryption for secure storage.
+   * Uses localStorage with XOR obfuscation for secure storage.
    * Key format: resumeai-google-zai-key-{googleUserId}
+   *
+   * SECURITY NOTE: Client-side encryption is inherently limited — the decryption
+   * key is also client-side. XOR obfuscation prevents casual snooping (DevTools
+   * localStorage viewer) but is NOT equivalent to server-side encryption.
+   * For true security, the API key should be stored server-side (D1) with
+   * server-side AES-GCM encryption (as done in workers/api/index.ts).
    */
   private async linkZaiApiKey(googleUserId: string, apiKey: string): Promise<void> {
     try {
-      // Store the association — the API key itself will be encrypted
-      // by the session manager when it's saved as part of the session
       const key = `${GOOGLE_ZAI_KEY_PREFIX}${googleUserId}`;
-      localStorage.setItem(key, apiKey); // API key will be encrypted by session manager
+      // XOR-obfuscate the API key so it's not plaintext in localStorage.
+      // The obfuscation key is derived from the Google user ID + app salt.
+      const obfuscated = this.obfuscateApiKey(apiKey, googleUserId);
+      localStorage.setItem(key, obfuscated);
       console.log(`[Z.ai Google OAuth] API key linked to Google user ${googleUserId}`);
     } catch (e) {
       console.warn("[Z.ai Google OAuth] Failed to link API key:", e);
@@ -663,12 +672,23 @@ export class ZaiProvider implements OAuthAIProvider {
 
   /**
    * Retrieve a Z.ai API key previously linked to a Google user ID.
+   * De-obfuscates the stored value before returning.
    */
   private async getLinkedZaiApiKey(googleUserId: string): Promise<string | null> {
     try {
       const key = `${GOOGLE_ZAI_KEY_PREFIX}${googleUserId}`;
-      return localStorage.getItem(key);
-    } catch {
+      const stored = localStorage.getItem(key);
+      if (!stored) return null;
+      // Try de-obfuscation first. If it fails (legacy plaintext), return as-is.
+      try {
+        return this.deobfuscateApiKey(stored, googleUserId);
+      } catch {
+        // Legacy plaintext storage — return as-is for backwards compatibility
+        console.warn("[Z.ai Provider] Legacy plaintext API key found — consider re-linking for obfuscated storage.");
+        return stored;
+      }
+    } catch (storageErr) {
+      console.warn("[Z.ai Provider] Failed to retrieve linked API key:", storageErr instanceof Error ? storageErr.message : storageErr);
       return null;
     }
   }
@@ -681,9 +701,51 @@ export class ZaiProvider implements OAuthAIProvider {
       const key = `${GOOGLE_ZAI_KEY_PREFIX}${googleUserId}`;
       localStorage.removeItem(key);
       console.log(`[Z.ai Google OAuth] API key unlinked from Google user ${googleUserId}`);
-    } catch {
-      // Ignore
+    } catch (unlinkErr) {
+      console.warn("[Z.ai Provider] Failed to unlink API key:", unlinkErr instanceof Error ? unlinkErr.message : unlinkErr);
     }
+  }
+
+  // ============================================================================
+  // XOR Obfuscation for API key storage in localStorage
+  // ============================================================================
+
+  /** App-specific salt for XOR obfuscation (NOT cryptographic — just prevents casual reading) */
+  private static readonly OBFUSCATION_SALT = "ResumeAI-Pro-2024-ZAI-KEY-OBFUSCATION";
+
+  /**
+   * XOR-obfuscate an API key with a key derived from the user ID + salt.
+   * Returns a base64-encoded string that is NOT human-readable.
+   */
+  private obfuscateApiKey(apiKey: string, userId: string): string {
+    const key = userId + ZaiProvider.OBFUSCATION_SALT;
+    const keyBytes = new TextEncoder().encode(key);
+    const apiBytes = new TextEncoder().encode(apiKey);
+    const result = new Uint8Array(apiBytes.length);
+    for (let i = 0; i < apiBytes.length; i++) {
+      result[i] = apiBytes[i] ^ keyBytes[i % keyBytes.length];
+    }
+    // Prepend "enc:" marker so we can distinguish obfuscated from plaintext
+    return "enc:" + btoa(String.fromCharCode(...result));
+  }
+
+  /**
+   * De-obfuscate an API key. If the stored value doesn't start with "enc:",
+   * it's a legacy plaintext key — throw so the caller can handle it.
+   */
+  private deobfuscateApiKey(stored: string, userId: string): string {
+    if (!stored.startsWith("enc:")) {
+      throw new Error("Not an obfuscated value — legacy plaintext");
+    }
+    const b64 = stored.slice(4);
+    const encoded = atob(b64);
+    const key = userId + ZaiProvider.OBFUSCATION_SALT;
+    const keyBytes = new TextEncoder().encode(key);
+    const result = new Uint8Array(encoded.length);
+    for (let i = 0; i < encoded.length; i++) {
+      result[i] = encoded.charCodeAt(i) ^ keyBytes[i % keyBytes.length];
+    }
+    return new TextDecoder().decode(result);
   }
 }
 

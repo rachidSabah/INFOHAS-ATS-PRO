@@ -60,10 +60,10 @@ export function PWAInstaller() {
         .then((registration) => {
           // Check for updates every 60 seconds
           updateInterval = setInterval(() => {
-            registration.update().catch(() => {});
+            registration.update().catch((e) => { console.warn("[PWA] SW update check failed:", e instanceof Error ? e.message : e); });
           }, 60000);
         })
-        .catch(() => {});
+        .catch((e) => { console.warn("[PWA] SW registration failed:", e instanceof Error ? e.message : e); });
 
       // === Listen for SW update messages ===
       const handleMessage = (event: MessageEvent) => {

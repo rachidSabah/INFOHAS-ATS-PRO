@@ -92,7 +92,7 @@ function generateRequestId(): string {
     if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
       return crypto.randomUUID();
     }
-  } catch {}
+  } catch (cryptoErr) { /* crypto.randomUUID not available — fallback below */ }
   return `req_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
 }
 
@@ -227,7 +227,7 @@ function addDiagnostic(diag: AICallDiagnostic): void {
   for (const listener of listeners) {
     try {
       listener(diag);
-    } catch {}
+    } catch (listenerErr) { console.warn("[ai-diagnostics] Diagnostic listener threw:", listenerErr instanceof Error ? listenerErr.message : listenerErr); }
   }
 }
 

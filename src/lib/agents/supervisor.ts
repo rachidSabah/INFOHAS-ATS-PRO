@@ -234,7 +234,7 @@ function updateAgent(id: AgentId, patch: Partial<AgentState>): void {
   //   1. A pipelineId has been set (via initPipelineTask())
   //   2. We're in a browser context (not SSR)
   if (newStatus && newStatus !== prevStatus) {
-    reportAgentStatusToD1(id, newStatus, patch).catch(() => {});
+    reportAgentStatusToD1(id, newStatus, patch).catch((e) => { console.warn("[supervisor] D1 status report failed:", e instanceof Error ? e.message : e); });
   }
 }
 

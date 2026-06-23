@@ -168,8 +168,8 @@ export async function saveSession(session: ProviderSession): Promise<void> {
   }
 
   // Also persist to D1 via cloud API (fire-and-forget)
-  persistToCloud(encrypted).catch(() => {
-    // Cloud persistence is best-effort — don't block on it
+  persistToCloud(encrypted).catch((e) => {
+    console.warn("[SessionManager] Cloud persist failed:", e instanceof Error ? e.message : e);
   });
 }
 
@@ -201,8 +201,8 @@ export async function loadSession(provider: ProviderSession["provider"]): Promis
       await saveSession(cloudSession);
       return cloudSession;
     }
-  } catch {
-    // Cloud load failed — that's OK
+  } catch (cloudLoadErr) {
+    console.warn("[SessionManager] Cloud session load failed:", cloudLoadErr instanceof Error ? cloudLoadErr.message : cloudLoadErr);
   }
 
   return null;
@@ -214,12 +214,12 @@ export async function loadSession(provider: ProviderSession["provider"]): Promis
 export async function clearSession(provider: ProviderSession["provider"]): Promise<void> {
   try {
     localStorage.removeItem(storageKey(provider));
-  } catch {
-    // Ignore
+  } catch (clearErr) {
+    console.warn("[SessionManager] localStorage clear failed:", clearErr instanceof Error ? clearErr.message : clearErr);
   }
 
   // Clear from cloud too
-  clearFromCloud(provider).catch(() => {});
+  clearFromCloud(provider).catch((e) => { console.warn("[session-manager] Cloud clear failed:", e instanceof Error ? e.message : e); });
 
   console.log(`[SessionManager] Session cleared for ${provider}`);
 }
@@ -276,8 +276,8 @@ async function persistToCloud(session: ProviderSession): Promise<void> {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(session),
     });
-  } catch {
-    // Best-effort — don't block
+  } catch (persistErr) {
+    console.warn("[SessionManager] Cloud persist failed:", persistErr instanceof Error ? persistErr.message : persistErr);
   }
 }
 
@@ -288,8 +288,8 @@ async function loadFromCloud(provider: string): Promise<ProviderSession | null> 
     if (res.ok) {
       return await res.json();
     }
-  } catch {
-    // Best-effort
+  } catch (loadErr) {
+    console.warn("[SessionManager] Cloud load failed:", loadErr instanceof Error ? loadErr.message : loadErr);
   }
   return null;
 }
@@ -300,7 +300,7 @@ async function clearFromCloud(provider: string): Promise<void> {
     await fetch(`${CLOUD_API_BASE}/api/provider-sessions/${provider}`, {
       method: "DELETE",
     });
-  } catch {
-    // Best-effort
+  } catch (deleteErr) {
+    console.warn("[SessionManager] Cloud delete failed:", deleteErr instanceof Error ? deleteErr.message : deleteErr);
   }
 }

@@ -48,7 +48,7 @@ export default function Home() {
         if (restored) {
           console.info("[pipeline] Restored pipeline state from snapshot.");
         }
-      }).catch(() => {});
+      }).catch((e) => { console.warn("[pipeline] Snapshot restore failed:", e instanceof Error ? e.message : e); });
     }
   }, [isAuthed]);
 

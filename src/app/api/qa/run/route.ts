@@ -20,6 +20,8 @@ interface QATestResult {
 
 interface QAResponse {
   status: "passed" | "failed" | "partial";
+  /** If true, critical failures were detected — pipeline MUST abort, not continue. */
+  fatal: boolean;
   timestamp: string;
   totalTests: number;
   passedTests: number;
@@ -318,7 +320,12 @@ export async function GET(_req: NextRequest): Promise<NextResponse<QAResponse>> 
   const passedTests = results.filter((r) => r.passed).length;
   const failedTests = results.filter((r) => !r.passed).length;
   const criticalFailures = results.filter((r) => !r.passed && r.severity === "critical");
-  const status = failedTests === 0 ? "passed" : passedTests > 0 ? "partial" : "failed";
+  // HARDENING: QA failures are now FATAL for critical severity.
+  // If any critical test fails, the status is "failed" (not "partial"),
+  // and the response includes a `fatal: true` flag that clients MUST respect
+  // by aborting the pipeline rather than continuing with degraded service.
+  const status = criticalFailures.length > 0 ? "failed" : failedTests === 0 ? "passed" : passedTests > 0 ? "partial" : "failed";
+  const fatal = criticalFailures.length > 0;
 
   // Coverage by category
   const coverageMap: Record<string, { total: number; passed: number; failed: number }> = {};
@@ -333,7 +340,9 @@ export async function GET(_req: NextRequest): Promise<NextResponse<QAResponse>> 
 
   // Suggestions
   const suggestions: string[] = [];
-  if (criticalFailures.length > 0) {
+  if (fatal) {
+    suggestions.push(`FATAL: ${criticalFailures.length} critical failure(s) detected. Pipeline MUST ABORT. Continuing with degraded service risks data corruption or incorrect results.`);
+  } else if (criticalFailures.length > 0) {
     suggestions.push(`${criticalFailures.length} critical failure(s) need immediate attention`);
   }
   if (totalConfigured === 0) {
@@ -348,6 +357,7 @@ export async function GET(_req: NextRequest): Promise<NextResponse<QAResponse>> 
 
   return NextResponse.json({
     status,
+    fatal,
     timestamp: new Date().toISOString(),
     totalTests: results.length,
     passedTests,

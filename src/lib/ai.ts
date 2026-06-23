@@ -1626,14 +1626,45 @@ export async function callAI(opts: AICallOptions): Promise<AICallResult> {
   //
   // If we reach this point, it means all providers (including Z.ai and Puter)
   // genuinely failed — network errors, rate limits, invalid responses, etc.
-  
+  //
+  // HARDENING: Document/optimizer tasks NEVER use the local engine — the
+  // deterministic fallback cannot produce reliable AI-optimized resumes.
   if (opts.isOptimizerCall || opts.taskCategory === "document") {
     console.error("[AI] Document task failed — no fallback available.");
     throw new Error("AI optimization failed: All configured providers are unreachable or returned errors. Please check your provider settings, API keys, and network connection. (No offline fallback allowed for this task)");
   }
 
+  // SECURITY: Reject oversized prompts (>20000 chars).
+  // The local engine is a deterministic fallback — it cannot meaningfully process
+  // large prompts and would produce garbage. Better to fail loudly than return
+  // a fake result that looks like a real AI response.
+  const promptLen = (opts.userPrompt || "").length;
+  const MAX_LOCAL_ENGINE_PROMPT = 20_000;
+  const MAX_LOCAL_ENGINE_SUMMARY = 500;
+
+  if (promptLen > MAX_LOCAL_ENGINE_PROMPT) {
+    console.error(`[AI] Local Engine REJECTED: prompt too large (${promptLen} chars > ${MAX_LOCAL_ENGINE_PROMPT} limit). All providers failed — cannot process this request.`);
+    throw new Error(
+      `All AI providers failed and the local engine cannot process this request ` +
+      `(prompt is ${promptLen} characters, which exceeds the offline limit of ${MAX_LOCAL_ENGINE_PROMPT}). ` +
+      `Please check your internet connection and try again.`
+    );
+  }
+
   console.warn("[AI] All providers failed. Falling back to Local Engine (offline mode). This should only happen when all providers are genuinely unavailable.");
   const text = localGenerate(opts);
+
+  // SECURITY: Validate local engine output — reject if it looks like a full optimization
+  // for a large resume that the local engine can't actually handle properly.
+  // The local engine is only acceptable for simple/short prompts.
+  if (text.length > MAX_LOCAL_ENGINE_SUMMARY && opts.isOptimizerCall) {
+    console.error(`[AI] Local Engine REJECTED: optimizer call produced ${text.length} chars of output — too large for offline mode. Throwing error instead of returning potentially incorrect optimization.`);
+    throw new Error(
+      `All AI providers failed and the local engine cannot reliably optimize your resume offline. ` +
+      `Please check your internet connection and try again.`
+    );
+  }
+
   return {
     text,
     provider: "Local Engine (offline mode)",

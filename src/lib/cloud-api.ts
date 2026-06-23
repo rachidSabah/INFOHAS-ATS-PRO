@@ -309,7 +309,7 @@ export async function syncAllFromCloud(store: any): Promise<void> {
             store.setState({ jobDescriptions: safeBackup });
             // Best-effort: re-sync backup JDs to the cloud so future loads work.
             for (const jd of safeBackup) {
-              api.createJobDescription(jd).catch(() => {});
+              api.createJobDescription(jd).catch((e) => { console.warn("[cloudApi] JD cloud sync failed:", e instanceof Error ? e.message : e); });
             }
           }
         } catch (err) { console.warn("[cloudApi] Job descriptions backup restore failed:", err instanceof Error ? err.message : err); }
@@ -624,28 +624,28 @@ export async function migrateLocalStorageToCloud(store: any): Promise<void> {
     // Migrate resumes
     if (state.resumes?.length) {
       for (const r of state.resumes) {
-        await api.createResume(r).catch(() => {});
+        await api.createResume(r).catch((e) => { console.warn("[cloudApi] Resume migration failed:", e instanceof Error ? e.message : e); });
       }
     }
 
     // Migrate cover letters
     if (state.coverLetters?.length) {
       for (const cl of state.coverLetters) {
-        await api.createCoverLetter(cl).catch(() => {});
+        await api.createCoverLetter(cl).catch((e) => { console.warn("[cloudApi] Cover letter migration failed:", e instanceof Error ? e.message : e); });
       }
     }
 
     // Migrate job descriptions
     if (state.jobDescriptions?.length) {
       for (const jd of state.jobDescriptions) {
-        await api.createJobDescription(jd).catch(() => {});
+        await api.createJobDescription(jd).catch((e) => { console.warn("[cloudApi] JD migration failed:", e instanceof Error ? e.message : e); });
       }
     }
 
     // Migrate interview packages
     if (state.interviews?.length) {
       for (const iv of state.interviews) {
-        await api.createInterview(iv).catch(() => {});
+        await api.createInterview(iv).catch((e) => { console.warn("[cloudApi] Interview migration failed:", e instanceof Error ? e.message : e); });
       }
     }
 
