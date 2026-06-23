@@ -1320,9 +1320,9 @@ CONTENT REQUIREMENTS:
   }
 
   // Validate experience count — if AI returned fewer entries than original,
-  // keep the original experience (AI likely truncated or hallucinated)
-  if (data.experience && resume.experience.length > 0) {
-    const aiCount = (data.experience ?? []).length;
+  // or if experience is missing entirely, restore the original experience.
+  if (resume.experience.length > 0) {
+    const aiCount = Array.isArray(data.experience) ? data.experience.length : 0;
     const origCount = resume.experience.length;
     if (aiCount < origCount) {
       console.warn(`[Optimizer] AI returned ${aiCount} experience entries but original has ${origCount}. Restoring original experience.`);
@@ -1331,8 +1331,8 @@ CONTENT REQUIREMENTS:
   }
 
   // Validate education count
-  if (data.education && resume.education.length > 0) {
-    const aiCount = (data.education ?? []).length;
+  if (resume.education.length > 0) {
+    const aiCount = Array.isArray(data.education) ? data.education.length : 0;
     const origCount = resume.education.length;
     if (aiCount < origCount) {
       console.warn(`[Optimizer] AI returned ${aiCount} education entries but original has ${origCount}. Restoring original education.`);

@@ -1186,50 +1186,11 @@ export async function callAI(opts: AICallOptions): Promise<AICallResult> {
       const providers: any[] = state?.providers || [];
       const settings = state?.providerSettings || {};
 
-      // Use the provider router to find the right provider for this task
-      let defaultProvider: any = null;
+      // Use the proper provider router instead of inline logic
+      const { routeProvider } = await import("./provider-router");
+      const route = routeProvider(taskCategory);
+      let defaultProvider = route.primary;
 
-      // For document tasks: EXCLUDE Puter (browser_auth providers)
-      // For interactive/development tasks: allow any provider
-      const isDocumentTask = taskCategory === "document";
-      // Check if ANY API providers are configured (non-Puter)
-      const hasApiProviders = providers.some(
-        (p) => p.isActive
-          && p.type !== "puter"
-          && p.providerCategory !== "browser_auth"
-          && (p.apiUrl || p.baseUrl)
-          && (p.apiKey || p.authType === "none"),
-      );
-
-      // 1. User's configured default (if it's eligible for this task)
-      if (settings.defaultProviderId) {
-        const candidate = providers.find((p) => p.id === settings.defaultProviderId && p.isActive);
-        if (candidate) {
-          // For document tasks: use the user's configured default provider
-          // REGARDLESS of whether it's Puter or an API provider.
-          // The user explicitly chose this provider — respect their choice.
-          // (Previous code skipped Puter for document tasks when API providers
-          // existed, which meant the user's choice was ignored.)
-          defaultProvider = candidate;
-        }
-      }
-      // 2. isDefault flag
-      if (!defaultProvider) {
-        const candidate = providers.find((p) => p.isDefault && p.isActive);
-        if (candidate) {
-          defaultProvider = candidate;
-        }
-      }
-      // 3. First active API provider (fallback if no default is set)
-      if (!defaultProvider) {
-        defaultProvider = providers.find(
-          (p) => p.isActive
-            && !p.isBuiltIn
-            && p.type !== "z-ai-fallback"
-            && (p.apiUrl || p.baseUrl || p.type === "puter")
-            && (p.apiKey || p.authType === "none" || p.type === "puter"),
-        );
-      }
 
       if (defaultProvider) {
         failedProviderName = defaultProvider.name || "unknown";
@@ -1665,6 +1626,12 @@ export async function callAI(opts: AICallOptions): Promise<AICallResult> {
   //
   // If we reach this point, it means all providers (including Z.ai and Puter)
   // genuinely failed — network errors, rate limits, invalid responses, etc.
+  
+  if (opts.isOptimizerCall || opts.taskCategory === "document") {
+    console.error("[AI] Document task failed — no fallback available.");
+    throw new Error("AI optimization failed: All configured providers are unreachable or returned errors. Please check your provider settings, API keys, and network connection. (No offline fallback allowed for this task)");
+  }
+
   console.warn("[AI] All providers failed. Falling back to Local Engine (offline mode). This should only happen when all providers are genuinely unavailable.");
   const text = localGenerate(opts);
   return {

@@ -798,23 +798,27 @@ export async function exportResumeDOCX(resume: ResumeData, layout?: ResumeLayout
     }
   }
 
+  // Helper for right tab position
+  const marginTwip = (mm: number) => convertInchesToTwip(mm / 25.4);
+  const rightTabPosition = marginTwip(210 - L.marginLeftMm - L.marginRightMm);
+  const docxTabStops = [{ type: TabStopType.RIGHT, position: rightTabPosition }];
+
   // ===== PROFESSIONAL EXPERIENCE =====
   if (resume.experience.length) {
     addSection("PROFESSIONAL EXPERIENCE");
     for (const e of resume.experience) {
-      // Title | Location — bold
-      const titleParts = [e.title, e.company, e.location].filter(Boolean);
+      // Title Company | Location
+      const leftSide = `${e.title} ${e.company}${e.location ? ` | ${e.location}` : ""}`;
+      const dateStr = e.startDate || e.endDate ? `${fmtInfohasDate(e.startDate)} – ${fmtInfohasDate(e.endDate)}` : "";
+
       children.push(new Paragraph({
+        tabStops: docxTabStops,
         spacing: { after: 20 },
-        children: [new TextRun({ text: titleParts.join(" | "), bold: true, size: L.bodyFontSizePt * 2, font: L.fontFamily, color: bodyHex })],
+        children: [
+          new TextRun({ text: leftSide, bold: true, size: L.bodyFontSizePt * 2, font: L.fontFamily, color: bodyHex }),
+          new TextRun({ text: dateStr ? "\t" + dateStr : "", bold: true, size: L.bodyFontSizePt * 2, font: L.fontFamily, color: bodyHex }),
+        ],
       }));
-      // Date range
-      if (e.startDate || e.endDate) {
-        children.push(new Paragraph({
-          spacing: { after: 40 },
-          children: [new TextRun({ text: `${fmtInfohasDate(e.startDate)} – ${fmtInfohasDate(e.endDate)}`, size: L.bodyFontSizePt * 2, font: L.fontFamily, color: bodyHex })],
-        }));
-      }
       // Bullets
       for (const b of e.bullets) {
         children.push(new Paragraph({
@@ -831,17 +835,17 @@ export async function exportResumeDOCX(resume: ResumeData, layout?: ResumeLayout
   if (resume.education.length) {
     addSection("EDUCATION");
     for (const ed of resume.education) {
+      const leftSide = `${ed.degree} ${ed.institution}${ed.location ? ` | ${ed.location}` : ""}`;
+      const dateStr = ed.startDate || ed.endDate ? `${fmtInfohasDate(ed.startDate)} – ${fmtInfohasDate(ed.endDate)}` : "";
+
       children.push(new Paragraph({
+        tabStops: docxTabStops,
         spacing: { after: 20 },
-        children: [new TextRun({ text: ed.degree || "", bold: true, size: L.bodyFontSizePt * 2, font: L.fontFamily, color: bodyHex })],
+        children: [
+          new TextRun({ text: leftSide, bold: true, size: L.bodyFontSizePt * 2, font: L.fontFamily, color: bodyHex }),
+          new TextRun({ text: dateStr ? "\t" + dateStr : "", bold: true, size: L.bodyFontSizePt * 2, font: L.fontFamily, color: bodyHex }),
+        ],
       }));
-      const eduLine = [ed.institution, ed.startDate || ed.endDate ? `${fmtInfohasDate(ed.startDate)} – ${fmtInfohasDate(ed.endDate)}` : ""].filter(Boolean).join(" | ");
-      if (eduLine) {
-        children.push(new Paragraph({
-          spacing: { after: 80 },
-          children: [new TextRun({ text: eduLine, size: L.bodyFontSizePt * 2, font: L.fontFamily, color: bodyHex })],
-        }));
-      }
     }
   }
 
@@ -865,7 +869,6 @@ export async function exportResumeDOCX(resume: ResumeData, layout?: ResumeLayout
     }
   }
 
-  const marginTwip = (mm: number) => convertInchesToTwip(mm / 25.4);
   const doc = new Document({
     styles: { default: { document: { run: { font: L.fontFamily, size: L.bodyFontSizePt * 2 } } } },
     sections: [{
