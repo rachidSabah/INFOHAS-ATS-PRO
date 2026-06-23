@@ -695,6 +695,10 @@ export interface AICallOptions {
   // "development" = AI Dev Agent/Builder → any provider
   // If omitted, defaults to "document" (safest — API providers only).
   taskCategory?: "document" | "interactive" | "development";
+  // If true, this is the resume optimizer call — validate the directive integrity.
+  // Only the optimizer call should have this set; JI, Company, SkillGap, QA, Reflection
+  // should NOT, because their prompts don't contain one-page compression directives.
+  isOptimizerCall?: boolean;
 }
 
 export interface AICallResult {
@@ -1251,9 +1255,12 @@ export async function callAI(opts: AICallOptions): Promise<AICallResult> {
           };
         }
 
-        // === CRITICAL: Directive validation (optimizer only) ===
+        // === CRITICAL: Directive validation (optimizer ONLY) ===
         // The optimizer directive (systemPrompt) must contain one-page rules.
-        if (taskCategory === "document" && opts.systemPrompt) {
+        // IMPORTANT: Only validate when isOptimizerCall is true.
+        // Other document-task calls (JI, Company Intel, Skill Gap, QA, Reflection)
+        // do NOT contain one-page compression directives and must NOT be validated here.
+        if (opts.isOptimizerCall && opts.systemPrompt) {
           const finalPrompt = (opts.systemPrompt ?? "") + opts.userPrompt;
 
           // Debug logging

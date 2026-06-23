@@ -843,6 +843,10 @@ export async function handleOptimizationRequested(
   } catch (e: any) {
     updateAgent("supervisor", { status: "failed", error: e?.message ?? "Optimization failed", log: `✗ ${e?.message}` });
     setState((prev) => ({ ...prev, isRunning: false }));
+    // Return the failed PipelineResult (if it exists) instead of null,
+    // so the UI can show which pipeline steps completed vs failed.
+    // Only return null if we never got a PipelineResult at all.
+    if (result) return result;
     return null;
   }
 }

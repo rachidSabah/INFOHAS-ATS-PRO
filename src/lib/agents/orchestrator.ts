@@ -1186,6 +1186,7 @@ CONTENT REQUIREMENTS:
   const split = splitOptimizationDirective(directive);
   const result = await callAI({
     systemPrompt: split.system,
+    isOptimizerCall: true,
     userPrompt: (split.user ? split.user + "\n\n---\n\n" : "") + `SOURCE RESUME (be truthful to this — never invent employers, dates, or metrics):\n${JSON.stringify({
       name: resume.name,
       headline: resume.headline,
@@ -1248,6 +1249,7 @@ CONTENT REQUIREMENTS:
       }
       const retryResult = await callAI({
         systemPrompt: retrySystem,
+        isOptimizerCall: true,
         userPrompt: (retrySplit.user ? retrySplit.user + "\n\n---\n\n" : "") + `SOURCE RESUME:\n${JSON.stringify({ name: resume.name, headline: resume.headline, contact: resume.contact, summary: resume.summary, experience: resume.experience, education: resume.education, skills: resume.skills, languages: resume.languages, certifications: resume.certifications })}\n\nJOB DESCRIPTION:\n${jd.rawText?.slice(0, 1500) ?? jd.keywords.join(", ")}\n\nOptimize this resume for the job. Return ONLY a JSON object with: name, headline, email, phone, location, summary, skills [{category, items[]}], experience [{title, company, location, startDate, endDate, bullets[]}], education [{degree, institution, field, startDate, endDate, modules}], languages [{name, proficiency}]. No prose, no markdown.`,
         maxTokens: 8000,
         temperature: 0.4,

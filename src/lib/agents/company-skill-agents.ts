@@ -100,6 +100,12 @@ Be specific to ${companyName}. If information is not available for a field, use 
     taskCategory: "document",
   });
 
+  // Reject local fallback — it returns empty/placeholder data
+  if (result.provider === "Local Engine (offline mode)") {
+    console.warn("[CompanyIntelligence] No AI provider available — returning null");
+    return null;
+  }
+
   let data: any;
   try { data = extractJSON<any>(result.text); }
   catch { return null; }
@@ -226,6 +232,12 @@ Be honest. If the candidate is a poor match, say so. The bridging strategy must 
     temperature: 0.3,
     taskCategory: "document",
   });
+
+  // Reject local fallback — it returns empty/placeholder data
+  if (result.provider === "Local Engine (offline mode)") {
+    console.warn("[SkillGap] No AI provider available — returning null");
+    return null;
+  }
 
   let data: any;
   try { data = extractJSON<any>(result.text); }

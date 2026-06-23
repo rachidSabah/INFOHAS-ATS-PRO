@@ -132,9 +132,17 @@ Return ONLY valid JSON:
       userPrompt: prompt,
       maxTokens: 3000,
       temperature: 0.3,
+      taskCategory: "document",
     });
 
     const data = extractJSON<JobIntelligence>(result.text);
+
+    // Reject local fallback — it returns empty/placeholder data
+    if (result.provider === "Local Engine (offline mode)") {
+      console.warn("[JobIntelligence] No AI provider available — using fallback");
+      return fallbackJobIntelligence(jd);
+    }
+
     return normalizeJobIntelligence(data, jd);
   } catch (e: any) {
     console.warn("[JobIntelligence] Analysis failed, using fallback:", e?.message);
