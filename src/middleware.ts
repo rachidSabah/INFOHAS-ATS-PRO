@@ -16,6 +16,16 @@ const RATE_LIMIT_MAX_REQUESTS = 30; // 30 requests per minute per IP
 
 function checkRateLimit(ip: string): boolean {
   const now = Date.now();
+  
+  // Lazy cleanup
+  if (Math.random() < 0.01) {
+    for (const [key, entry] of rateLimitMap) {
+      if (now >= entry.resetAt) {
+        rateLimitMap.delete(key);
+      }
+    }
+  }
+
   const entry = rateLimitMap.get(ip);
 
   if (!entry || now >= entry.resetAt) {
@@ -31,16 +41,8 @@ function checkRateLimit(ip: string): boolean {
 }
 
 // Cleanup old entries periodically (prevent memory leak)
-if (typeof setInterval !== "undefined") {
-  setInterval(() => {
-    const now = Date.now();
-    for (const [key, entry] of rateLimitMap) {
-      if (now >= entry.resetAt) {
-        rateLimitMap.delete(key);
-      }
-    }
-  }, 5 * 60_000); // Every 5 minutes
-}
+// In edge environments (Cloudflare Workers), setInterval is not allowed in global scope.
+// We instead clean up lazily during checkRateLimit.
 
 // ============================================================================
 // Routes that should be disabled in production
