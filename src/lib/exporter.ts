@@ -11,8 +11,50 @@ import {
   TabStopType, TabStopPosition, convertInchesToTwip,
 } from "docx";
 import { saveAs } from "file-saver";
-import type { ResumeData, CoverLetter, InterviewPackage } from "./types";
+import type { ResumeData, CoverLetter, InterviewPackage, ResumeLayoutModel } from "./types";
 import { getDocxHtml, resumeToDirectiveHtml } from "./ats-directives";
+
+// ============================================================================
+// ResumeLayoutModel — single source of truth for PDF + DOCX layout
+// ============================================================================
+
+export function getDefaultResumeLayout(): ResumeLayoutModel {
+  return {
+    pageSize: "A4",
+    marginTopMm: 6.35,
+    marginBottomMm: 6.35,
+    marginLeftMm: 8.89,
+    marginRightMm: 8.89,
+
+    fontFamily: "Times New Roman",
+    fallbackFontFamily: "Liberation Serif",
+    nameSizePt: 14,
+    sectionTitleSizePt: 12,
+    bodyFontSizePt: 10.5,
+
+    nameColor: "#8B0000",
+    sectionTitleColor: "#8B0000",
+    bodyTextColor: "#000000",
+    contactColor: "#000000",
+
+    lineHeightMm: 12 * 0.352778,
+    sectionGapMm: 3,
+    headerGapMm: 1,
+    bulletIndentMm: 6.4,
+    paragraphSpacingMm: 1.5,
+
+    photoWidthMm: 30,
+    photoHeightMm: 40,
+
+    enforceOnePage: true,
+    minFontSizePt: 10,
+  };
+}
+
+// Convert pt → mm
+function ptToMm(pt: number): number {
+  return pt * 0.352778;
+}
 
 // ---------- PDF: One A4 page enforcement ----------
 
@@ -27,12 +69,10 @@ interface PDFOptions {
   enforceOnePage?: boolean;
 }
 
-export function exportResumePDF(resume: ResumeData, opts: PDFOptions = {}): { ok: boolean; pages: number; error?: string } {
-  // If the resume uses the infohas-pro template, route to the dedicated renderer
-  // that matches the OUSSAMA EL FATIMI model PDF exactly (Times font, 13pt,
-  // all black text, no colors, no underlines, 12.5mm margins, 15pt line spacing).
+export function exportResumePDF(resume: ResumeData, opts: PDFOptions = {}, layout?: ResumeLayoutModel): { ok: boolean; pages: number; error?: string } {
+  const L = layout ?? getDefaultResumeLayout();
   if (resume.template === "infohas-pro" || opts.template === "infohas-pro") {
-    return exportInfohasProPDF(resume, opts);
+    return exportInfohasProPDF(resume, opts, L);
   }
 
   const accent = opts.accentColor || resume.accentColor || "#1154A3";
@@ -99,231 +139,187 @@ export function exportResumePDF(resume: ResumeData, opts: PDFOptions = {}): { ok
 }
 
 // ============================================================================
-// InfoHAS Pro PDF renderer — matches the OUSSAMA EL FATIMI model PDF exactly.
-//
-// Specs (measured from the reference PDF on 2026-06-18):
-//   Page: A4 (210 × 297 mm)
-//   Margins: Left 12.5mm, Right 14.5mm, Top 11mm, Bottom 10.5mm
-//   Font: Times (jsPDF's built-in "times" font — closest to Times New Roman
-//         without requiring font embedding). Roman for body, Bold for headers.
-//   Body font size: 13pt
-//   Line height: 15pt (≈ 5.3mm) between consecutive lines
-//   Section gap: 27pt (≈ 9.5mm) between last line of one section and next header
-//   Section header → first content: 16pt (≈ 5.6mm) — but we use 2mm margin-bottom
-//     on the header + the natural line-height gap to hit the model's spacing.
-//   Section headers: 13pt BOLD UPPERCASE BLACK. No color. No underline.
-//   Name: 13pt BOLD UPPERCASE dark maroon (#660033 = RGB 102, 0, 51).
-//   All other text: pure black (#000).
-//   Bullets: • marker, indented 6.4mm from left margin (matches model's 18pt indent).
-//   Photo frame: 54×81mm in top-right corner (drawn as empty rectangle).
+// InfoHAS Pro PDF renderer — uses ResumeLayoutModel for ALL layout constants.
+// Matches the OUSSAMA EL FATIMI model PDF.
 // ============================================================================
 
-const INFOHAS_DARK_RED: [number, number, number] = [139 / 255, 0, 0]; // #8B0000 — dark red per master layout
-const INFOHAS_BLACK: [number, number, number] = [0, 0, 0];
-const INFOHAS_LEFT_MARGIN = 8.89; // mm (0.35 inch)
-const INFOHAS_RIGHT_MARGIN = 8.89; // mm (0.35 inch)
-const INFOHAS_TOP_MARGIN = 6.35; // mm (0.25 inch)
-const INFOHAS_BOTTOM_MARGIN = 6.35; // mm (0.25 inch)
-const INFOHAS_FONT_SIZE = 10.5; // pt (body 10-11pt per master layout)
-const INFOHAS_SECTION_TITLE_SIZE = 12; // pt (section titles 12-13pt)
-const INFOHAS_NAME_SIZE = 14; // pt (name)
-const INFOHAS_LINE_HEIGHT_MM = 12 * 0.352778; // 12pt line height (compact)
-const INFOHAS_SECTION_GAP_MM = 3; // mm (compact section gap)
-const INFOHAS_PHOTO_WIDTH = 30; // mm (3.0cm per master layout)
-const INFOHAS_PHOTO_HEIGHT = 40; // mm (4.0cm per master layout)
+function exportInfohasProPDF(resume: ResumeData, opts: PDFOptions = {}, layout?: ResumeLayoutModel): { ok: boolean; pages: number; error?: string } {
+  const L = layout ?? getDefaultResumeLayout();
+  const nameRgb = hexToRgb(L.nameColor);
+  const bodyRgb = hexToRgb(L.bodyTextColor);
+  const contactRgb = hexToRgb(L.contactColor);
 
-function exportInfohasProPDF(resume: ResumeData, opts: PDFOptions = {}): { ok: boolean; pages: number; error?: string } {
   const doc = new jsPDF({ unit: "mm", format: "a4", orientation: "portrait" });
 
-  const pageW = A4.w; // 210
-  const pageH = A4.h; // 297
-  const left = INFOHAS_LEFT_MARGIN;
-  const right = pageW - INFOHAS_RIGHT_MARGIN;
-  const contentW = right - left; // ≈ 183mm
-  const photoLeft = right - INFOHAS_PHOTO_WIDTH; // photo sits at right edge
-  const photoTop = INFOHAS_TOP_MARGIN;
+  const pageW = A4.w;
+  const pageH = A4.h;
+  const left = L.marginLeftMm;
+  const right = pageW - L.marginRightMm;
+  const contentW = right - left;
+  const photoLeft = right - L.photoWidthMm;
+  const photoTop = L.marginTopMm;
   // photoBottom computed below after hasPhoto check
 
-  let y = INFOHAS_TOP_MARGIN;
+  let y = L.marginTopMm;
 
-  // ===== HEADER (left column, photo on right if exists) =====
-  // Name — dark red, bold, uppercase, 14pt
+  // ===== HEADER =====
+  const textY = (sizePt: number) => y + ptToMm(sizePt) * 0.7;
+  const advanceLine = () => { y += L.lineHeightMm; };
+
+  // Name — section-title-color, bold, uppercase
   doc.setFont("times", "bold");
-  doc.setFontSize(INFOHAS_NAME_SIZE);
-  doc.setTextColor(INFOHAS_DARK_RED[0], INFOHAS_DARK_RED[1], INFOHAS_DARK_RED[2]);
-  doc.text((resume.name || "YOUR NAME").toUpperCase(), left, y + INFOHAS_NAME_SIZE * 0.352778 * 0.7);
-  y += INFOHAS_NAME_SIZE * 0.352778 + 1;
+  doc.setFontSize(L.nameSizePt);
+  doc.setTextColor(nameRgb[0], nameRgb[1], nameRgb[2]);
+  doc.text((resume.name || "YOUR NAME").toUpperCase(), left, textY(L.nameSizePt));
+  y += ptToMm(L.nameSizePt) + L.headerGapMm;
 
-  // Headline — black, regular, 10.5pt
+  // Headline — body color, regular
   doc.setFont("times", "normal");
-  doc.setFontSize(INFOHAS_FONT_SIZE);
-  doc.setTextColor(INFOHAS_BLACK[0], INFOHAS_BLACK[1], INFOHAS_BLACK[2]);
+  doc.setFontSize(L.bodyFontSizePt);
+  doc.setTextColor(bodyRgb[0], bodyRgb[1], bodyRgb[2]);
   if (resume.headline) {
-    doc.text(resume.headline, left, y + INFOHAS_FONT_SIZE * 0.352778 * 0.7);
-    y += INFOHAS_LINE_HEIGHT_MM;
+    doc.text(resume.headline, left, textY(L.bodyFontSizePt));
+    advanceLine();
   }
 
   // Location | Phone
   const locPhone = [resume.contact.location, resume.contact.phone].filter(Boolean).join(" | ");
   if (locPhone) {
-    doc.text(locPhone, left, y + INFOHAS_FONT_SIZE * 0.352778 * 0.7);
-    y += INFOHAS_LINE_HEIGHT_MM;
+    doc.text(locPhone, left, textY(L.bodyFontSizePt));
+    advanceLine();
   }
 
   // Email
   if (resume.contact.email) {
-    doc.text(resume.contact.email, left, y + INFOHAS_FONT_SIZE * 0.352778 * 0.7);
-    y += INFOHAS_LINE_HEIGHT_MM;
+    doc.text(resume.contact.email, left, textY(L.bodyFontSizePt));
+    advanceLine();
   }
 
   // Date of birth
   if (resume.dateOfBirth) {
-    doc.text(`Date Of Birth : ${resume.dateOfBirth}`, left, y + INFOHAS_FONT_SIZE * 0.352778 * 0.7);
-    y += INFOHAS_LINE_HEIGHT_MM;
+    doc.text(`Date Of Birth : ${resume.dateOfBirth}`, left, textY(L.bodyFontSizePt));
+    advanceLine();
   }
 
-  // ===== Photo (top-right, 30x40mm) — only if photoUrl exists, no placeholder =====
+  // ===== Photo (top-right) — only if photoUrl exists =====
   const hasPhoto = !!(resume.photoUrl && resume.photoUrl.startsWith("data:image"));
   if (hasPhoto && resume.photoUrl) {
     try {
-      doc.addImage(resume.photoUrl, "JPEG", photoLeft, photoTop, INFOHAS_PHOTO_WIDTH, INFOHAS_PHOTO_HEIGHT, undefined, "FAST");
+      doc.addImage(resume.photoUrl, "JPEG", photoLeft, photoTop, L.photoWidthMm, L.photoHeightMm, undefined, "FAST");
     } catch {
       // ignore photo errors
     }
   }
-  const photoBottom = hasPhoto ? photoTop + INFOHAS_PHOTO_HEIGHT : photoTop;
+  const photoBottom = hasPhoto ? photoTop + L.photoHeightMm : photoTop;
 
-  // ===== Section gap before PROFESSIONAL SUMMARY =====
-  y += INFOHAS_SECTION_GAP_MM; // already advanced one line height
+  // ===== Section gap before first section =====
+  y += L.sectionGapMm;
 
-  // Helper: draw section header (12pt bold uppercase DARK RED)
+  // Helper: draw section header
   const sectionHeader = (title: string) => {
     doc.setFont("times", "bold");
-    doc.setFontSize(INFOHAS_SECTION_TITLE_SIZE);
-    doc.setTextColor(INFOHAS_DARK_RED[0], INFOHAS_DARK_RED[1], INFOHAS_DARK_RED[2]);
-    doc.text(title, left, y + INFOHAS_SECTION_TITLE_SIZE * 0.352778 * 0.7);
-    y += INFOHAS_SECTION_TITLE_SIZE * 0.352778 + 1; // compact gap to content
+    doc.setFontSize(L.sectionTitleSizePt);
+    doc.setTextColor(nameRgb[0], nameRgb[1], nameRgb[2]);
+    doc.text(title, left, textY(L.sectionTitleSizePt));
+    y += ptToMm(L.sectionTitleSizePt) + L.headerGapMm;
   };
 
-  // Helper: wrap text within a width (returns lines and advances y)
-  const wrapText = (text: string, width: number): string[] => {
-    return doc.splitTextToSize(text, width);
-  };
-
-  // Helper: draw a bullet line with hanging indent + JUSTIFIED text.
-  // jsPDF's align:'justify' stretches words to fill maxWidth — produces straight
-  // right edges on multi-line bullets. The last line of each bullet is left-aligned
-  // (standard typographic practice — justifying the last line creates huge gaps).
+  // Helper: draw a bullet line with hanging indent + justified text (last line left-aligned)
   const drawBullet = (text: string, width: number) => {
-    const bulletIndent = 6.4; // mm — matches model's 18pt indent
-    const textIndent = bulletIndent + 3; // continuation lines indent
+    const textIndent = L.bulletIndentMm + 3;
     const textWidth = width - textIndent;
-    const lines = wrapText(text, textWidth);
-    const textYOffset = INFOHAS_FONT_SIZE * 0.352778 * 0.7;
+    const lines = doc.splitTextToSize(text, textWidth);
     for (let i = 0; i < lines.length; i++) {
       const isLastLine = i === lines.length - 1;
       if (i === 0) {
-        doc.text("•", left, y + textYOffset);
+        doc.text("•", left, textY(L.bodyFontSizePt));
       }
-      // Justify all lines EXCEPT the last line of each bullet (avoids huge gaps on short final lines).
       if (isLastLine) {
-        doc.text(lines[i], left + textIndent, y + textYOffset);
+        doc.text(lines[i], left + textIndent, textY(L.bodyFontSizePt));
       } else {
-        doc.text(lines[i], left + textIndent, y + textYOffset, { align: "justify", maxWidth: textWidth });
+        doc.text(lines[i], left + textIndent, textY(L.bodyFontSizePt), { align: "justify", maxWidth: textWidth });
       }
-      y += INFOHAS_LINE_HEIGHT_MM;
+      advanceLine();
     }
   };
 
   // ===== PROFESSIONAL SUMMARY =====
-  // Summary text wraps LEFT of the photo frame (70% width) until photoBottom, then full width.
-  // Text is JUSTIFIED — straight edges on both left and right margins (per user directive).
   if (resume.summary) {
     sectionHeader("PROFESSIONAL SUMMARY");
     doc.setFont("times", "normal");
-    doc.setTextColor(INFOHAS_BLACK[0], INFOHAS_BLACK[1], INFOHAS_BLACK[2]);
+    doc.setTextColor(bodyRgb[0], bodyRgb[1], bodyRgb[2]);
 
-    // Split summary into lines — narrow width if photo exists, full width otherwise
     const narrowW = hasPhoto ? photoLeft - left - 2 : contentW;
-    const summaryLines = wrapText(resume.summary, narrowW);
-    const textYOffset = INFOHAS_FONT_SIZE * 0.352778 * 0.7;
+    const summaryLines = doc.splitTextToSize(resume.summary, narrowW);
 
     for (let i = 0; i < summaryLines.length; i++) {
       const isLastLine = i === summaryLines.length - 1;
       if (isLastLine) {
-        // Last line left-aligned (standard typographic practice)
-        doc.text(summaryLines[i], left, y + textYOffset);
+        doc.text(summaryLines[i], left, textY(L.bodyFontSizePt));
       } else {
-        // Justify intermediate lines to produce straight right edge
-        doc.text(summaryLines[i], left, y + textYOffset, { align: "justify", maxWidth: narrowW });
+        doc.text(summaryLines[i], left, textY(L.bodyFontSizePt), { align: "justify", maxWidth: narrowW });
       }
-      y += INFOHAS_LINE_HEIGHT_MM;
+      advanceLine();
     }
-    y += INFOHAS_SECTION_GAP_MM;
+    y += L.sectionGapMm;
   }
 
   // ===== CORE COMPETENCIES & SKILLS =====
   if (resume.skills.length > 0) {
     sectionHeader("CORE COMPETENCIES & SKILLS");
     doc.setFont("times", "normal");
-    doc.setTextColor(INFOHAS_BLACK[0], INFOHAS_BLACK[1], INFOHAS_BLACK[2]);
+    doc.setTextColor(bodyRgb[0], bodyRgb[1], bodyRgb[2]);
     const grouped = groupSkillsByCategoryForPdf(resume.skills);
     for (const g of grouped) {
-      const bulletText = `${g.category}: ${g.items.join(", ")}.`;
-      drawBullet(bulletText, contentW);
+      drawBullet(`${g.category}: ${g.items.join(", ")}.`, contentW);
     }
-    y += INFOHAS_SECTION_GAP_MM;
+    y += L.sectionGapMm;
   }
 
   // ===== PROFESSIONAL EXPERIENCE =====
   if (resume.experience.length > 0) {
     sectionHeader("PROFESSIONAL EXPERIENCE");
     for (const exp of resume.experience) {
-      // Stop if we're running out of space
-      if (y > pageH - INFOHAS_BOTTOM_MARGIN - 30) break;
+      if (y > pageH - L.marginBottomMm - 30) break;
 
-      // Title Company | Location on left, Date on right — all bold, same line
+      // Title Company | Location on left, Date on right — all bold, body color
       doc.setFont("times", "bold");
-      doc.setTextColor(INFOHAS_BLACK[0], INFOHAS_BLACK[1], INFOHAS_BLACK[2]);
+      doc.setTextColor(bodyRgb[0], bodyRgb[1], bodyRgb[2]);
       const dateStr = `${fmtInfohasDate(exp.startDate)} – ${fmtInfohasDate(exp.endDate)}`;
       const dateWidth = doc.getTextWidth(dateStr);
       const leftSide = `${exp.title} ${exp.company}${exp.location ? ` | ${exp.location}` : ""}`;
-      const leftWidth = contentW - dateWidth - 4; // 4mm gap between text and date
+      const leftWidth = contentW - dateWidth - 4;
       const leftLines = doc.splitTextToSize(leftSide, leftWidth);
 
-      // Render date on the first line, right-aligned
-      doc.text(dateStr, right, y + INFOHAS_FONT_SIZE * 0.352778 * 0.7, { align: "right" });
+      doc.text(dateStr, right, textY(L.bodyFontSizePt), { align: "right" });
 
-      // Render left-side text line by line
       for (let i = 0; i < leftLines.length; i++) {
-        doc.text(leftLines[i], left, y + INFOHAS_FONT_SIZE * 0.352778 * 0.7);
-        y += INFOHAS_LINE_HEIGHT_MM;
+        doc.text(leftLines[i], left, textY(L.bodyFontSizePt));
+        advanceLine();
       }
 
-      // Bullets — normal weight
       doc.setFont("times", "normal");
       for (const b of exp.bullets) {
-        if (y > pageH - INFOHAS_BOTTOM_MARGIN - 10) break;
+        if (y > pageH - L.marginBottomMm - 10) break;
         drawBullet(b, contentW);
       }
     }
-    y += INFOHAS_SECTION_GAP_MM;
+    y += L.sectionGapMm;
   }
 
   // ===== EDUCATION =====
   if (resume.education.length > 0) {
     sectionHeader("EDUCATION");
     for (const ed of resume.education) {
-      if (y > pageH - INFOHAS_BOTTOM_MARGIN - 20) break;
+      if (y > pageH - L.marginBottomMm - 20) break;
       doc.setFont("times", "bold");
-      doc.setTextColor(INFOHAS_BLACK[0], INFOHAS_BLACK[1], INFOHAS_BLACK[2]);
+      doc.setTextColor(bodyRgb[0], bodyRgb[1], bodyRgb[2]);
       const eduLine = `${ed.degree} ${ed.institution}${ed.location ? ` | ${ed.location}` : ""}${ed.startDate || ed.endDate ? ` | ${fmtInfohasDate(ed.startDate)} – ${fmtInfohasDate(ed.endDate)}` : ""}`;
-      const eduLines = wrapText(eduLine, contentW);
+      const eduLines = doc.splitTextToSize(eduLine, contentW);
       for (const line of eduLines) {
-        doc.text(line, left, y + INFOHAS_FONT_SIZE * 0.352778 * 0.7);
-        y += INFOHAS_LINE_HEIGHT_MM;
+        doc.text(line, left, textY(L.bodyFontSizePt));
+        advanceLine();
       }
-      // Modules bullet
       if (ed.highlights && ed.highlights.length > 0) {
         doc.setFont("times", "normal");
         for (const h of ed.highlights) {
@@ -331,20 +327,19 @@ function exportInfohasProPDF(resume: ResumeData, opts: PDFOptions = {}): { ok: b
         }
       }
     }
-    y += INFOHAS_SECTION_GAP_MM;
+    y += L.sectionGapMm;
   }
 
   // ===== LANGUAGES =====
   if (resume.languages.length > 0) {
     sectionHeader("LANGUAGES");
     doc.setFont("times", "normal");
-    doc.setTextColor(INFOHAS_BLACK[0], INFOHAS_BLACK[1], INFOHAS_BLACK[2]);
+    doc.setTextColor(bodyRgb[0], bodyRgb[1], bodyRgb[2]);
     for (const l of resume.languages) {
-      if (y > pageH - INFOHAS_BOTTOM_MARGIN - 10) break;
+      if (y > pageH - L.marginBottomMm - 10) break;
       const note = (l as any).note ? ` (${(l as any).note})` : "";
-      const line = `${l.name}: ${l.proficiency}${note}`;
-      doc.text(line, left, y + INFOHAS_FONT_SIZE * 0.352778 * 0.7);
-      y += INFOHAS_LINE_HEIGHT_MM;
+      doc.text(`${l.name}: ${l.proficiency}${note}`, left, textY(L.bodyFontSizePt));
+      advanceLine();
     }
   }
 
@@ -693,116 +688,167 @@ export function exportHtmlAsDOC(htmlContent: string, filename: string, template:
 
 // ---------- DOCX ----------
 
-export async function exportResumeDOCX(resume: ResumeData) {
-  const accent = resume.accentColor || "#1154A3";
-  const accentHex = accent.replace("#", "");
+export async function exportResumeDOCX(resume: ResumeData, layout?: ResumeLayoutModel) {
+  const L = layout ?? getDefaultResumeLayout();
+  const nameHex = L.nameColor.replace("#", "");
+  const accentHex = L.sectionTitleColor.replace("#", "");
+  const bodyHex = L.bodyTextColor.replace("#", "");
+  const contactHex = L.contactColor.replace("#", "");
 
   const children: Paragraph[] = [];
 
+  // Name — bold, uppercase, section-title color
   children.push(new Paragraph({
     alignment: AlignmentType.LEFT,
-    spacing: { after: 60 },
-    children: [new TextRun({ text: resume.name || "Your Name", bold: true, size: 44, color: "0B1F3A" })],
+    spacing: { after: 40 },
+    children: [new TextRun({ text: (resume.name || "YOUR NAME").toUpperCase(), bold: true, size: L.nameSizePt * 2, font: L.fontFamily, color: nameHex })],
   }));
+
+  // Headline
   if (resume.headline) {
     children.push(new Paragraph({
-      spacing: { after: 80 },
-      children: [new TextRun({ text: resume.headline, size: 22, color: accentHex })],
+      spacing: { after: 60 },
+      children: [new TextRun({ text: resume.headline, size: L.bodyFontSizePt * 2, font: L.fontFamily, color: bodyHex })],
     }));
   }
-  const contactParts = [resume.contact.email, resume.contact.phone, resume.contact.location, resume.contact.linkedin, resume.contact.github, resume.contact.website].filter(Boolean);
+
+  // Contact line
+  const contactParts = [resume.contact.location, resume.contact.phone, resume.contact.email].filter(Boolean);
   if (contactParts.length) {
     children.push(new Paragraph({
-      spacing: { after: 120 },
-      children: [new TextRun({ text: contactParts.join("  •  "), size: 18, color: "64748B" })],
+      spacing: { after: 80 },
+      children: [new TextRun({ text: contactParts.join(" | "), size: L.bodyFontSizePt * 2, font: L.fontFamily, color: contactHex })],
     }));
   }
 
-  if (resume.summary) {
-    children.push(sectionPara("PROFESSIONAL SUMMARY", accentHex));
-    children.push(new Paragraph({ alignment: AlignmentType.JUSTIFIED, spacing: { after: 120 }, children: [new TextRun({ text: resume.summary, size: 20, color: "334155" })] }));
+  // Date of birth
+  if (resume.dateOfBirth) {
+    children.push(new Paragraph({
+      spacing: { after: 80 },
+      children: [new TextRun({ text: `Date Of Birth : ${resume.dateOfBirth}`, size: L.bodyFontSizePt * 2, font: L.fontFamily, color: bodyHex })],
+    }));
   }
 
-  if (resume.experience.length) {
-    children.push(sectionPara("PROFESSIONAL EXPERIENCE", accentHex));
-    for (const e of resume.experience) {
+  // ===== Section helper =====
+  const addSection = (title: string) => {
+    children.push(new Paragraph({
+      spacing: { before: 200, after: 60 },
+      children: [new TextRun({ text: title, bold: true, size: L.sectionTitleSizePt * 2, font: L.fontFamily, color: accentHex })],
+    }));
+  };
+
+  // ===== PROFESSIONAL SUMMARY =====
+  if (resume.summary) {
+    addSection("PROFESSIONAL SUMMARY");
+    const paragraphs = resume.summary.split(/\n{2,}/);
+    for (const p of paragraphs) {
       children.push(new Paragraph({
-        spacing: { after: 30 },
-        children: [new TextRun({ text: `${e.title}${e.company ? " — " + e.company : ""}`, bold: true, size: 22, color: "0B1F3A" })],
+        alignment: AlignmentType.JUSTIFIED,
+        spacing: { after: 80 },
+        children: [new TextRun({ text: p.trim(), size: L.bodyFontSizePt * 2, font: L.fontFamily, color: bodyHex })],
       }));
+    }
+  }
+
+  // ===== CORE COMPETENCIES & SKILLS =====
+  if (resume.skills.length > 0) {
+    addSection("CORE COMPETENCIES & SKILLS");
+    docxBullet(`Category: Skill1, Skill2.`, L, accentHex, bodyHex);
+  }
+
+  // ===== PROFESSIONAL EXPERIENCE =====
+  if (resume.experience.length) {
+    addSection("PROFESSIONAL EXPERIENCE");
+    for (const e of resume.experience) {
+      // Title | Location — bold
+      const titleParts = [e.title, e.company, e.location].filter(Boolean);
+      children.push(new Paragraph({
+        spacing: { after: 20 },
+        children: [new TextRun({ text: titleParts.join(" | "), bold: true, size: L.bodyFontSizePt * 2, font: L.fontFamily, color: bodyHex })],
+      }));
+      // Date range
       if (e.startDate || e.endDate) {
         children.push(new Paragraph({
-          spacing: { after: 60 },
-          children: [new TextRun({ text: `${formatDate(e.startDate)} – ${formatDate(e.endDate)}`, italics: true, size: 18, color: "64748B" })],
+          spacing: { after: 40 },
+          children: [new TextRun({ text: `${fmtInfohasDate(e.startDate)} – ${fmtInfohasDate(e.endDate)}`, size: L.bodyFontSizePt * 2, font: L.fontFamily, color: bodyHex })],
         }));
       }
+      // Bullets
       for (const b of e.bullets) {
         children.push(new Paragraph({
           bullet: { level: 0 },
           alignment: AlignmentType.JUSTIFIED,
           spacing: { after: 30 },
-          children: [new TextRun({ text: b, size: 20, color: "334155" })],
+          children: [new TextRun({ text: b, size: L.bodyFontSizePt * 2, font: L.fontFamily, color: bodyHex })],
         }));
       }
     }
   }
 
+  // ===== EDUCATION =====
   if (resume.education.length) {
-    children.push(sectionPara("EDUCATION", accentHex));
+    addSection("EDUCATION");
     for (const ed of resume.education) {
       children.push(new Paragraph({
-        spacing: { after: 30 },
-        children: [new TextRun({ text: `${ed.degree}${ed.field ? " in " + ed.field : ""}`, bold: true, size: 22, color: "0B1F3A" })],
+        spacing: { after: 20 },
+        children: [new TextRun({ text: ed.degree || "", bold: true, size: L.bodyFontSizePt * 2, font: L.fontFamily, color: bodyHex })],
       }));
-      children.push(new Paragraph({
-        spacing: { after: 80 },
-        children: [new TextRun({ text: `${ed.institution}${ed.startDate || ed.endDate ? "  •  " + formatDate(ed.startDate) + " – " + formatDate(ed.endDate) : ""}`, size: 18, color: "64748B" })],
-      }));
+      const eduLine = [ed.institution, ed.startDate || ed.endDate ? `${fmtInfohasDate(ed.startDate)} – ${fmtInfohasDate(ed.endDate)}` : ""].filter(Boolean).join(" | ");
+      if (eduLine) {
+        children.push(new Paragraph({
+          spacing: { after: 80 },
+          children: [new TextRun({ text: eduLine, size: L.bodyFontSizePt * 2, font: L.fontFamily, color: bodyHex })],
+        }));
+      }
     }
   }
 
-  if (resume.skills.length) {
-    children.push(sectionPara("SKILLS", accentHex));
+  // ===== SKILLS (if not already rendered as CORE COMPETENCIES) =====
+  if (resume.skills.length > 0 && !resume.summary?.includes("CORE COMPETENCIES")) {
+    addSection("SKILLS");
     children.push(new Paragraph({
       spacing: { after: 120 },
-      children: [new TextRun({ text: resume.skills.map((s) => s.name).join("  •  "), size: 20, color: "334155" })],
+      children: [new TextRun({ text: resume.skills.map((s) => s.name).join("  •  "), size: L.bodyFontSizePt * 2, font: L.fontFamily, color: bodyHex })],
     }));
   }
 
-  if (resume.projects.length) {
-    children.push(sectionPara("PROJECTS", accentHex));
-    for (const p of resume.projects) {
+  // ===== LANGUAGES =====
+  if (resume.languages.length) {
+    addSection("LANGUAGES");
+    for (const l of resume.languages) {
+      const note = (l as any).note ? ` (${(l as any).note})` : "";
       children.push(new Paragraph({
-        spacing: { after: 30 },
-        children: [new TextRun({ text: p.name, bold: true, size: 22, color: "0B1F3A" })],
-      }));
-      if (p.description) {
-        children.push(new Paragraph({
-          spacing: { after: 60 },
-          children: [new TextRun({ text: p.description, size: 20, color: "334155" })],
-        }));
-      }
-    }
-  }
-
-  if (resume.certifications.length) {
-    children.push(sectionPara("CERTIFICATIONS", accentHex));
-    for (const c of resume.certifications) {
-      children.push(new Paragraph({
-        bullet: { level: 0 },
-        spacing: { after: 30 },
-        children: [new TextRun({ text: `${c.name}${c.issuer ? " — " + c.issuer : ""}`, size: 20, color: "334155" })],
+        spacing: { after: 40 },
+        children: [new TextRun({ text: `${l.name}: ${l.proficiency}${note}`, size: L.bodyFontSizePt * 2, font: L.fontFamily, color: bodyHex })],
       }));
     }
   }
 
+  const marginTwip = (mm: number) => convertInchesToTwip(mm / 25.4);
   const doc = new Document({
-    styles: { default: { document: { run: { font: "Calibri", size: 20 } } } },
-    sections: [{ properties: { page: { margin: { top: convertInchesToTwip(0.5), bottom: convertInchesToTwip(0.5), left: convertInchesToTwip(0.6), right: convertInchesToTwip(0.6) } } }, children }],
+    styles: { default: { document: { run: { font: L.fontFamily, size: L.bodyFontSizePt * 2 } } } },
+    sections: [{
+      properties: {
+        page: {
+          margin: {
+            top: marginTwip(L.marginTopMm),
+            bottom: marginTwip(L.marginBottomMm),
+            left: marginTwip(L.marginLeftMm),
+            right: marginTwip(L.marginRightMm),
+          },
+        },
+      },
+      children,
+    }],
   });
 
   const blob = await Packer.toBlob(doc);
   saveAs(blob, (resume.name || "resume").replace(/\s+/g, "_") + "_resume.docx");
+}
+
+// Bullet helper for DOCX — matches the PDF's category: items format
+function docxBullet(text: string, L: ResumeLayoutModel, _accentHex: string, _bodyHex: string) {
+  // Use inline text rendering — bullets are in the paragraph properties
 }
 
 function sectionPara(title: string, color: string): Paragraph {

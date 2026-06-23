@@ -541,6 +541,42 @@ export interface OptimizerDirectiveConfig {
   customDirectiveOverride: string;
 }
 
+/**
+ * ResumeLayoutModel — single source of truth for ALL export layout parameters.
+ * Both PDF and DOCX exporters consume this model.
+ * Never duplicate layout logic between exporters.
+ */
+export interface ResumeLayoutModel {
+  pageSize: "A4" | "Letter";
+  marginTopMm: number;
+  marginBottomMm: number;
+  marginLeftMm: number;
+  marginRightMm: number;
+
+  fontFamily: string;
+  fallbackFontFamily: string;
+  nameSizePt: number;
+  sectionTitleSizePt: number;
+  bodyFontSizePt: number;
+
+  nameColor: string;
+  sectionTitleColor: string;
+  bodyTextColor: string;
+  contactColor: string;
+
+  lineHeightMm: number;
+  sectionGapMm: number;
+  headerGapMm: number;
+  bulletIndentMm: number;
+  paragraphSpacingMm: number;
+
+  photoWidthMm: number;
+  photoHeightMm: number;
+
+  enforceOnePage: boolean;
+  minFontSizePt: number;
+}
+
 export interface AuditLog {
   id: string;
   timestamp: string;
