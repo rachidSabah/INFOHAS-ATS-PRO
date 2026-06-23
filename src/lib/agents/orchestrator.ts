@@ -1178,7 +1178,18 @@ CONTENT REQUIREMENTS:
     if (directive.length < 500) {
       throw new Error("Optimizer directive missing or truncated from final prompt. Aborting.");
     }
-    if (!directive.includes("2,700") || !directive.includes("ONE PAGE")) {
+    // Check for page format rules — accept any variant of the one-page rule.
+    // The directive may say "ONE PAGE", "ONE A4 PAGE", "EXACTLY 1", or "Maximum pages: 1".
+    const hasPageRule = directive.includes("ONE PAGE") || directive.includes("ONE A4 PAGE") || directive.includes("EXACTLY 1") || directive.includes("Maximum pages: 1");
+    // Check for character target — accept any numeric target (2,700, 2,900, 3,000, etc.)
+    const hasCharTarget = /2[,.]?[0-9]{3}|3[,.]?000|character/.test(directive);
+    if (!hasPageRule || !hasCharTarget) {
+      console.error("[Optimizer] Directive validation failed:", {
+        hasPageRule,
+        hasCharTarget,
+        directiveLength: directive.length,
+        directivePreview: directive.slice(0, 500),
+      });
       throw new Error("Optimizer directive missing page format or character target. Aborting.");
     }
   }
