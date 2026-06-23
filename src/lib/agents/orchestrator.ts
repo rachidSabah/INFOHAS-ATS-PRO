@@ -775,6 +775,8 @@ export async function runOptimizationPipeline(input: PipelineInput): Promise<Pip
     emitProgress(3, `Optimization failed. Original resume preserved.`);
     result.optimizedResume = resume; // Restore original
     result.status = "failed";
+    result.error = e?.message ?? "Optimizer failed";
+    result.provider = "Local Engine (offline mode)";
     return result;
   }
 

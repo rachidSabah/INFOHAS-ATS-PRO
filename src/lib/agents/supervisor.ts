@@ -749,6 +749,30 @@ export async function handleOptimizationRequested(
       onProgress,
     });
 
+    // === SYNC CORE AGENT STATUSES FROM THE V2 PIPELINE RESULT ===
+    // The V2 runOptimizationPipeline() runs 6 core agents internally but
+    // doesn't update the Supervisor's agent status map. We sync them here
+    // so the PipelineDashboard shows the correct status for every agent.
+    // This fixes the "impossible state" where core agents showed "Pending"
+    // while the Supervisor showed "Completed".
+    syncCoreAgentStatusesFromPipeline(result);
+
+    // === CACHE GUARD: never cache local engine fallback or degraded results ===
+    // Must run before updateContext — we must never propagate degraded results.
+    const isRealOptimization = result.provider !== "Local Engine (offline mode)"
+      && result.status !== "failed"
+      && (result.charCount ?? 0) >= 2200;
+    if (!isRealOptimization) {
+      cache.delete(cacheK);
+      throw new Error(
+        result.error
+        || (result.provider === "Local Engine (offline mode)"
+          ? "No AI provider available. Optimization could not be completed. Configure an API provider in Settings or sign in to Puter."
+          : "Optimization produced insufficient content. Please try again or reduce resume content.")
+      );
+    }
+    setCached(cacheK, result);
+
     // Update the shared context with the pipeline results
     updateContext({
       optimizedResume: result.optimizedResume,
@@ -766,15 +790,6 @@ export async function handleOptimizationRequested(
       optimizationId: result.optimizedResume?.id ?? null,
     });
 
-    // === SYNC CORE AGENT STATUSES FROM THE V2 PIPELINE RESULT ===
-    // The V2 runOptimizationPipeline() runs 6 core agents internally but
-    // doesn't update the Supervisor's agent status map. We sync them here
-    // so the PipelineDashboard shows the correct status for every agent.
-    // This fixes the "impossible state" where core agents showed "Pending"
-    // while the Supervisor showed "Completed".
-    syncCoreAgentStatusesFromPipeline(result);
-
-    setCached(cacheK, result);
     // === SUPERVISOR DOES NOT COMPLETE YET ===
     // The Supervisor only completes AFTER all post-optimization agents
     // (CoverLetter, Interview, CareerCoach) have also reached a terminal
