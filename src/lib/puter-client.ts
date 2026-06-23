@@ -334,7 +334,7 @@ export async function puterChatStreamed(
     throw new Error(`Puter authentication required. Current status: ${authStatus}. Please sign in to Puter first.`);
   }
 
-  const model = options.model || "gpt-5-nano";
+  const model = options.model || "gpt-5.4-nano";
   const response: any = await window.puter.ai.chat(messages, {
     model,
     max_tokens: options.maxTokens ?? 4096,
@@ -407,7 +407,7 @@ export async function testPuterConnection(model?: string): Promise<PuterTestResu
 
   // Step 3: Run a test prompt
   try {
-    const testModel = model || "gpt-5-nano";
+    const testModel = model || "gpt-5.4-nano";
     const response = await window.puter.ai.chat(
       "Reply with exactly: PUTER_CONNECTION_OK",
       { model: testModel, max_tokens: 20, temperature: 0 },
@@ -474,7 +474,7 @@ export async function puterChat(
     throw new Error(`Puter authentication required. Current status: ${authStatus}. Please sign in to Puter first.`);
   }
 
-  const model = options?.model || "gpt-5-nano";
+  const model = options?.model || "gpt-5.4-nano";
   const response = await window.puter.ai.chat(messages, {
     model,
     max_tokens: options?.maxTokens ?? 4096,

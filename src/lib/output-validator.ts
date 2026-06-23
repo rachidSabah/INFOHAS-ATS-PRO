@@ -185,7 +185,16 @@ function validateATS(resume: ResumeData): ValidationCheck {
     errors.push("Missing contact information (email or phone)");
   }
 
-  // 3. No tables/columns (can't check from data, but check for pipe characters)
+  // 3. No tables/columns — check for pipe characters in key fields
+  // Pipes in experience titles and company names are particularly harmful
+  for (const e of resume.experience) {
+    if (e.title && e.title.includes("|")) {
+      errors.push(`Pipe character in job title: "${e.title}"`);
+    }
+    if (e.company && e.company.includes("|")) {
+      errors.push(`Pipe character in company name: "${e.company}"`);
+    }
+  }
   const allText = JSON.stringify(resume);
   if ((allText.match(/\|/g) || []).length > 5) {
     errors.push("Pipe characters detected (possible table formatting — not ATS-friendly)");

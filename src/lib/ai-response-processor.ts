@@ -13,7 +13,7 @@
 "use client";
 
 import { extractJSON } from "./ai";
-import type { ResumeData } from "./types";
+import type { ResumeData, ResumeLanguage } from "./types";
 
 export type ResponseType = "json" | "markdown" | "plain_text" | "streaming" | "tool_call" | "error";
 
@@ -211,6 +211,43 @@ export function stripLeaks(text: string): { cleaned: string; repairs: string[] }
 }
 
 /**
+ * Strip pipe characters from resume text fields — pipes break ATS parsing
+ * and should never appear in job titles, company names, or section headers.
+ */
+export function stripPipesFromResume(resume: ResumeData): ResumeData {
+  const clean = (text: string | undefined | null): string => (text || "").replace(/\|/g, "·");
+  return {
+    ...resume,
+    summary: clean(resume.summary || ""),
+    headline: clean(resume.headline || ""),
+    experience: resume.experience.map((e) => ({
+      ...e,
+      title: clean(e.title),
+      company: clean(e.company),
+      location: clean(e.location),
+      bullets: e.bullets.map((b) => clean(b)),
+    })),
+    skills: resume.skills.map((s) => ({
+      ...s,
+      name: clean(s.name),
+      category: s.category ? clean(s.category) : undefined,
+    })),
+    education: resume.education.map((ed) => ({
+      ...ed,
+      degree: clean(ed.degree),
+      institution: clean(ed.institution),
+      location: clean(ed.location),
+      highlights: ed.highlights?.map((h) => clean(h)),
+    })),
+    languages: resume.languages.map((l) => ({
+      ...l,
+      name: clean(l.name),
+      proficiency: clean(l.proficiency) as ResumeLanguage["proficiency"],
+    })),
+  };
+}
+
+/**
  * Attempt to repair malformed JSON.
  * Common issues: trailing commas, unquoted keys, single quotes, comments.
  */
@@ -374,10 +411,17 @@ export function validateResumeForExport(resume: ResumeData): {
   if (errors.length > 0) {
     // Try to clean the resume
     const cleaned = stripLeaksFromResume(resume);
-    return { valid: false, errors, cleanedResume: cleaned };
+    // Also strip pipe characters
+    if (cleaned) {
+      const pipesCleaned = stripPipesFromResume(cleaned);
+      return { valid: false, errors, cleanedResume: pipesCleaned };
+    }
+    return { valid: false, errors, cleanedResume: null };
   }
 
-  return { valid: true, errors: [], cleanedResume: resume };
+  // Always strip pipe characters before export
+  const cleanedResume = stripPipesFromResume(resume);
+  return { valid: true, errors: [], cleanedResume };
 }
 
 /**

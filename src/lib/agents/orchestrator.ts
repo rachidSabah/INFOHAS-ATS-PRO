@@ -68,8 +68,18 @@ import type { ResumeSkill } from "../types";
  *   - experience[].bullets (rewritten for impact)
  *   - skills (reordered, categories improved)
  *   - education[].degree, field (minor wording)
+ *
+ * ADDITIONAL FIXES:
+ *   - Strip pipe characters (|) from titles, company names, section headers
+ *   - Detects and deduplicates education entries
+ *   - Restores any missing bullets (AI must not drop bullets)
  */
 function enforceLockedFields(optimized: ResumeData, original: ResumeData): ResumeData {
+  // Strip pipe characters from all text fields — pipes break ATS parsing
+  const stripPipes = (text: string): string => (text || "").replace(/\|/g, "·");
+  const cleanTitle = (title: string): string => stripPipes(title);
+  const cleanCompany = (company: string): string => stripPipes(company);
+
   // Lock contact info
   const locked: ResumeData = {
     ...optimized,
@@ -139,29 +149,47 @@ function enforceLockedFields(optimized: ResumeData, original: ResumeData): Resum
                 eCompanyLower.includes(oCompanyLower);
             }
           ) ?? original.experience[i] ?? original.experience[0];
+          // Restore ALL original bullets for this entry — AI must not drop them
+          const restoredBullets = orig && orig.bullets.length > e.bullets.length
+            ? orig.bullets
+            : e.bullets;
           return {
             ...e,
-            company: orig?.company ?? e.company,
+            title: cleanTitle(e.title || orig?.title || ""),
+            company: cleanCompany(orig?.company ?? e.company),
             location: orig?.location ?? e.location,
             startDate: orig?.startDate ?? e.startDate,
             endDate: orig?.endDate ?? e.endDate,
+            bullets: restoredBullets,
           };
         });
     }
     // If AI dropped entries OR all were hallucinated, restore original
     if (locked.experience.length < original.experience.length) {
       console.warn(`[enforceLockedFields] Restoring original experience (AI had ${optimized.experience.length}, after filter ${locked.experience.length}, original ${original.experience.length})`);
-      locked.experience = original.experience;
+      locked.experience = original.experience.map((e) => ({
+        ...e,
+        title: cleanTitle(e.title),
+        company: cleanCompany(e.company),
+      }));
     }
   }
 
   // === Lock education: filter out hallucinated entries + restore institution ===
+  // ALSO deduplicates education entries that the AI may have doubled.
   if (original.education.length > 0) {
     if (optimized.education.length >= original.education.length) {
+      const seenInstitutions = new Set<string>();
       locked.education = optimized.education
         .filter((ed) => {
           if (isPlaceholder(ed.institution)) return false;
           const instLower = ed.institution?.toLowerCase().trim();
+          // Deduplication: skip if we've already seen this institution
+          if (instLower && seenInstitutions.has(instLower)) {
+            console.warn(`[enforceLockedFields] Removing duplicate education entry: "${ed.institution}"`);
+            return false;
+          }
+          if (instLower) seenInstitutions.add(instLower);
           if (instLower && !originalInstitutions.has(instLower)) {
             const fuzzyMatch = Array.from(originalInstitutions).some(
               (orig) => orig.includes(instLower) || instLower.includes(orig)
@@ -894,6 +922,47 @@ export async function runOptimizationPipeline(input: PipelineInput): Promise<Pip
       qualityErrors.push(`${diff.companiesChanged.length} company name(s) changed: ${diff.companiesChanged.map((c) => `"${c.original}" → "${c.optimized}"`).join(", ")}`);
     }
 
+    // Gate 7: No pipe characters in job titles or company names
+    const pipeInTitle = result.optimizedResume.experience.filter((e) => (e.title || "").includes("|"));
+    const pipeInCompany = result.optimizedResume.experience.filter((e) => (e.company || "").includes("|"));
+    if (pipeInTitle.length > 0) {
+      qualityErrors.push(`${pipeInTitle.length} job title(s) contain pipe character "|": ${pipeInTitle.map((e) => e.title).join(", ")}`);
+    }
+    if (pipeInCompany.length > 0) {
+      qualityErrors.push(`${pipeInCompany.length} company name(s) contain pipe character "|": ${pipeInCompany.map((e) => e.company).join(", ")}`);
+    }
+
+    // Gate 8: No section merging — each section must have content distinct from others
+    // If the summary bleeds into experience content, or education merges into experience, flag it.
+    const allSummary = (result.optimizedResume.summary || "").toLowerCase();
+    const allBullets = result.optimizedResume.experience.flatMap((e) => e.bullets.map((b) => b.toLowerCase()));
+    const eduText = result.optimizedResume.education.map((ed) => `${ed.degree} ${ed.institution}`).join(" ").toLowerCase();
+    // Check if summary contains education content that should be in the education section
+    const eduKeywordsInSummary = ["bachelor", "master", "phd", "degree", "diploma", "university", "college"]
+      .filter((kw) => allSummary.includes(kw) && !eduText.includes(kw));
+    if (eduKeywordsInSummary.length > 2) {
+      qualityErrors.push(`Summary may contain education content that should be in the Education section (found: ${eduKeywordsInSummary.join(", ")})`);
+    }
+
+    // Gate 9: No education duplication — same institution appearing multiple times
+    const eduInstCounts = new Map<string, number>();
+    for (const ed of result.optimizedResume.education) {
+      const inst = (ed.institution || "").toLowerCase().trim();
+      if (inst) eduInstCounts.set(inst, (eduInstCounts.get(inst) || 0) + 1);
+    }
+    const duplicatedEdu = Array.from(eduInstCounts.entries()).filter(([, count]) => count > 1);
+    if (duplicatedEdu.length > 0) {
+      qualityErrors.push(`Duplicated education entries: ${duplicatedEdu.map(([inst, count]) => `${inst} (×${count})`).join(", ")}`);
+    }
+
+    // Gate 10: Bullet count preservation — every original bullet must be present
+    if (diff.bulletsPerEntry.optimized.some((c, i) => c < diff.bulletsPerEntry.original[i])) {
+      const missingBullets = diff.bulletsPerEntry.original
+        .map((orig, i) => ({ entry: i, original: orig, optimized: diff.bulletsPerEntry.optimized[i] || 0 }))
+        .filter((x) => x.optimized < x.original);
+      qualityErrors.push(`Bullet count reduced in ${missingBullets.length} experience entr(ies): ${missingBullets.map((x) => `#${x.entry + 1} ${x.original}→${x.optimized}`).join(", ")}`);
+    }
+
     if (qualityErrors.length > 0) {
       console.warn("[OptimizationContext] Quality gates FAILED:", qualityErrors);
       // Per spec: "If AI fails: DO NOT generate fallback resumes. DO NOT generate
@@ -908,7 +977,7 @@ export async function runOptimizationPipeline(input: PipelineInput): Promise<Pip
       result.status = "failed";
       result.error = `AI optimization failed: ${qualityErrors.join("; ")}. Please retry.`;
     } else {
-      log("Quality Assurance", `✓ All ${6 - qualityErrors.filter((e) => e.includes("empty")).length}/6 quality gates passed.`);
+      log("Quality Assurance", `✓ All ${10 - qualityErrors.filter((e) => e.includes("empty")).length}/10 quality gates passed.`);
     }
 
     // === DYNAMIC PAGE FILL VALIDATION (spec: 90-98% page fill target) ===

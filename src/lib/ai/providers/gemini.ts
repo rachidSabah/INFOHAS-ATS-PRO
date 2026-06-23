@@ -1,4 +1,7 @@
 // Google Gemini provider adapter.
+// Supports BOTH:
+//   1. Native Gemini API (baseUrl without /openai/) — uses :generateContent?key=
+//   2. OpenAI-compatible endpoint (baseUrl with /openai/) — uses /chat/completions + Bearer
 import { OpenAICompatibleProvider, ProviderError } from "./openai-compatible";
 import type { ChatRequest, ChatResponse, ProviderConfig } from "./interface";
 
@@ -6,15 +9,21 @@ export class GeminiProvider extends OpenAICompatibleProvider {
   constructor() { super("gemini"); }
 
   async chat(req: ChatRequest, config: ProviderConfig): Promise<ChatResponse> {
-    const t0 = performance.now();
     const baseUrl = (config.baseUrl || "https://generativelanguage.googleapis.com/v1beta").replace(/\/$/, "");
+
+    // OpenAI-compatible endpoint (/v1beta/openai/) — delegate to parent which uses
+    // /chat/completions with Authorization: Bearer header
+    if (baseUrl.includes("/openai")) {
+      return super.chat(req, config);
+    }
+
+    // Native Gemini API — use :generateContent with ?key= query param
+    const t0 = performance.now();
     const model = req.model || config.modelName || "gemini-2.0-flash";
     const key = config.apiKey || "";
 
-    // Gemini uses :generateContent endpoint with key in query
     const url = `${baseUrl}/models/${model}:generateContent?key=${encodeURIComponent(key)}`;
 
-    // Convert messages: system → systemInstruction, user/assistant → contents
     const sysMsg = req.messages.find((m) => m.role === "system");
     const contents = req.messages
       .filter((m) => m.role !== "system")
@@ -56,6 +65,13 @@ export class GeminiProvider extends OpenAICompatibleProvider {
 
   async listModels(config: ProviderConfig): Promise<string[]> {
     const baseUrl = (config.baseUrl || "https://generativelanguage.googleapis.com/v1beta").replace(/\/$/, "");
+
+    // OpenAI-compatible endpoint — delegate to parent
+    if (baseUrl.includes("/openai")) {
+      return super.listModels(config);
+    }
+
+    // Native Gemini API — uses /models?key=
     const key = config.apiKey || "";
     const res = await fetch(`${baseUrl}/models?key=${encodeURIComponent(key)}&pageSize=100`, {
       method: "GET",
@@ -65,7 +81,6 @@ export class GeminiProvider extends OpenAICompatibleProvider {
       throw new Error(`Gemini listModels ${res.status}: ${(await res.text().catch(() => "")).slice(0, 200)}`);
     }
     const data = await res.json();
-    // Gemini returns { models: [{ name: "models/gemini-1.5-pro", ... }] }
     return (data?.models ?? [])
       .map((m: any) => m.name?.replace(/^models\//, "") || m.name)
       .filter((n: string) => n && !n.includes("/"))

@@ -705,14 +705,14 @@ function TechTemplate({ resume, accent }: { resume: ResumeData; accent: string }
 
       {resume.summary && (
         <section className="mb-3">
-          <h2 className="text-[10pt] font-bold uppercase tracking-wider mb-1" style={{ color: accent }}>// Profile</h2>
+          <h2 className="text-[10pt] font-bold uppercase tracking-wider mb-1" style={{ color: accent }}>{"// Profile"}</h2>
           <p className="text-[9.5pt] text-slate-700 text-justify">{resume.summary}</p>
         </section>
       )}
 
       {resume.skills.length > 0 && (
         <section className="mb-3">
-          <h2 className="text-[10pt] font-bold uppercase tracking-wider mb-1" style={{ color: accent }}>// Tech Stack</h2>
+          <h2 className="text-[10pt] font-bold uppercase tracking-wider mb-1" style={{ color: accent }}>{"// Tech Stack"}</h2>
           <div className="grid grid-cols-3 gap-1.5 text-[9pt]">
             {resume.skills.map((s) => (
               <div key={s.id} className="px-2 py-1 rounded border" style={{ borderColor: `${accent}33`, background: `${accent}08` }}>
@@ -726,7 +726,7 @@ function TechTemplate({ resume, accent }: { resume: ResumeData; accent: string }
 
       {resume.experience.length > 0 && (
         <section className="mb-3">
-          <h2 className="text-[10pt] font-bold uppercase tracking-wider mb-1" style={{ color: accent }}>// Experience</h2>
+          <h2 className="text-[10pt] font-bold uppercase tracking-wider mb-1" style={{ color: accent }}>{"// Experience"}</h2>
           <div className="space-y-2.5">
             {resume.experience.map((e) => (
               <div key={e.id}>
@@ -752,7 +752,7 @@ function TechTemplate({ resume, accent }: { resume: ResumeData; accent: string }
       <div className="grid grid-cols-2 gap-3">
         {resume.education.length > 0 && (
           <section>
-            <h2 className="text-[10pt] font-bold uppercase tracking-wider mb-1" style={{ color: accent }}>// Education</h2>
+            <h2 className="text-[10pt] font-bold uppercase tracking-wider mb-1" style={{ color: accent }}>{"// Education"}</h2>
             <div className="space-y-0.5">
               {resume.education.map((ed) => (
                 <div key={ed.id} className="text-[9pt]">
@@ -767,7 +767,7 @@ function TechTemplate({ resume, accent }: { resume: ResumeData; accent: string }
 
         {resume.projects.length > 0 && (
           <section>
-            <h2 className="text-[10pt] font-bold uppercase tracking-wider mb-1" style={{ color: accent }}>// Projects</h2>
+            <h2 className="text-[10pt] font-bold uppercase tracking-wider mb-1" style={{ color: accent }}>{"// Projects"}</h2>
             <div className="space-y-0.5">
               {resume.projects.slice(0, 3).map((p) => (
                 <div key={p.id} className="text-[9pt]">

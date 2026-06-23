@@ -48,8 +48,8 @@ export const SEED_PROVIDERS: AIProvider[] = [
     applicationId: "resumeai-pro-app",
     clientId: "resumeai-pro-client",
     redirectUri: "https://resumeai.pro/auth/puter/callback",
-    enabledModels: ["gpt-5-nano", "gpt-4o-mini", "gpt-4o", "claude-sonnet-4-5", "claude-3-5-sonnet", "gemini-2.5-flash", "deepseek-chat", "mistral-large-latest"],
-    modelName: "gpt-5-nano", // Puter's documented default
+    enabledModels: ["gpt-5.4-nano", "gpt-5-nano", "gpt-4o-mini", "gpt-4o", "claude-sonnet-4-5", "claude-3-5-sonnet", "gemini-2.5-flash", "deepseek-chat", "mistral-large-latest"],
+    modelName: "gpt-5.4-nano",
     streamingEnabled: false,
     authType: "none",
     costPerInputToken: 0,
@@ -450,7 +450,7 @@ export const SEED_PROVIDER_SETTINGS: AIProviderSettings = {
   // Default to Puter — always free, always works. OpenCode/NVIDIA/Mistral are
   // fallbacks if the user configures valid API keys.
   defaultProviderId: "p_puter",
-  defaultModel: "gpt-5-nano",
+  defaultModel: "gpt-5.4-nano",
   fallbackProviderIds: ["p_nvidia", "p_mistral", "p_puter"],
   retryAttempts: 2,
   timeout: 30000,

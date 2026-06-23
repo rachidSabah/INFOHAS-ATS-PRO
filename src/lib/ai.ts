@@ -905,6 +905,12 @@ async function callUserProvider(
     if (typeof window === "undefined" || !window.puter?.ai?.chat) {
       throw new Error("Puter.js not loaded. Please refresh the page.");
     }
+    // Ensure signed in (consistent with puter.ts adapter)
+    try {
+      if (window.puter.auth?.isSignedIn && !window.puter.auth.isSignedIn()) {
+        await window.puter.auth.signIn();
+      }
+    } catch { /* anonymous OK for some endpoints */ }
     const messages = opts.systemPrompt
       ? [
           { role: "system", content: opts.systemPrompt },
@@ -1277,7 +1283,7 @@ export async function callAI(opts: AICallOptions): Promise<AICallResult> {
     //       the next provider. The UI exposes a "Sign in to Puter" button that the
     //       user can click (a real user gesture) to authenticate before retrying.
     //
-    // Model: omit the `model` option to use Puter's default (currently gpt-5-nano
+    // Model: omit the `model` option to use Puter's default (currently gpt-5.4-nano
     // per the docs), which is free and reliably available. Previously we hardcoded
     // "claude-sonnet-4" (404 — Anthropic deprecated that exact ID) and then
     // "gpt-4o-mini" (works but is not the documented default). Using the default
@@ -1287,6 +1293,13 @@ export async function callAI(opts: AICallOptions): Promise<AICallResult> {
     const puterInCooldown = isPuterInCooldown();
     try {
       if (!puterInCooldown && typeof window !== "undefined" && window.puter?.ai?.chat) {
+        // Ensure user is signed in (consistent with puter.ts adapter)
+        try {
+          if (window.puter.auth?.isSignedIn && !window.puter.auth.isSignedIn()) {
+            await window.puter.auth.signIn();
+          }
+        } catch { /* anonymous OK for some endpoints */ }
+
         const messages = opts.systemPrompt
           ? [
               { role: "system", content: opts.systemPrompt },
@@ -1296,6 +1309,13 @@ export async function callAI(opts: AICallOptions): Promise<AICallResult> {
 
         // Build options — only pass model if the user has explicitly chosen one
         // via the Puter provider settings. Otherwise let Puter pick its default.
+        const MODEL_ALIASES: Record<string, string> = {
+          "gpt-5.4-nano": "gpt-5.4-nano", "gpt 5.4 nano": "gpt-5.4-nano",
+          "gpt-5-nano": "gpt-5-nano", "gpt 5 nano": "gpt-5-nano",
+          "claude-sonnet-4-5": "claude-sonnet-4-5", "claude sonnet 4 5": "claude-sonnet-4-5",
+          "gemini-2.5-flash": "gemini-2.5-flash", "gemini 2.5 flash": "gemini-2.5-flash",
+          "gpt-4o-mini": "gpt-4o-mini", "gpt 4o mini": "gpt-4o-mini",
+        };
         const chatOpts: any = {
           max_tokens: opts.maxTokens ?? 4096,
           temperature: opts.temperature ?? 0.7,
@@ -1307,7 +1327,8 @@ export async function callAI(opts: AICallOptions): Promise<AICallResult> {
             (p: any) => p.type === "puter" && p.isActive && p.modelName,
           );
           if (puterProvider?.modelName) {
-            chatOpts.model = puterProvider.modelName;
+            const raw = puterProvider.modelName.toLowerCase();
+            chatOpts.model = MODEL_ALIASES[raw] || puterProvider.modelName;
           }
         } catch {
           // ignore — use Puter default
@@ -1801,6 +1822,15 @@ function localRewrite(prompt: string): string {
 /**
  * Local fallback for the resume optimizer — returns proper JSON matching
  * the OPTIMIZER_DIRECTIVE format so the optimizer can parse it.
+ *
+ * CRITICAL: This function is the LAST-RESORT offline fallback. It must:
+ * - NEVER fabricate metrics, dates, or content
+ * - NEVER use "Present" if the original has a real endDate
+ * - NEVER truncate or remove bullets
+ * - NEVER add pipe characters (|) to titles or companies
+ * - NEVER invent experience entries
+ * - PRESERVE ALL original experience, education, languages, certifications
+ * - PRESERVE ALL original dates verbatim
  */
 function localOptimize(prompt: string): string {
   // Try to extract the source resume from the prompt
@@ -1810,73 +1840,58 @@ function localOptimize(prompt: string): string {
     if (resumeMatch) resume = JSON.parse(resumeMatch[1]);
   } catch {}
 
-  // Try to extract the JD from the prompt
-  const jdMatch = prompt.match(/TARGET JOB DESCRIPTION:\s*(.*?)(?:\n\nMISSING KEYWORDS|$)/s);
-  const jdText = jdMatch?.[1]?.trim() || "";
-
-  // Extract missing keywords
-  const kwMatch = prompt.match(/MISSING KEYWORDS TO EMBED NATURALLY:\s*(.*?)(?:\n\nReturn|$)/s);
-  const missingKws = kwMatch?.[1]?.split(",").map((k) => k.trim()).filter((k) => k && !k.startsWith("(")) ?? [];
-
   const name = resume?.name || "Your Name";
-  const headline = resume?.headline || "Professional";
+  const headline = resume?.headline || "";
   const email = resume?.contact?.email || "";
   const phone = resume?.contact?.phone || "";
   const location = resume?.contact?.location || "";
 
-  // Build optimized experience from the source resume
-  const experience = (resume?.experience ?? []).map((e: any, i: number) => ({
-    title: e.title || "Role",
-    company: e.company || "Company",
+  // Build optimized experience — PRESERVE ALL entries, all bullets, all dates
+  const experience = (resume?.experience ?? []).map((e: any) => ({
+    title: (e.title || "").replace(/\|/g, "·"), // Never use pipe chars in titles
+    company: (e.company || "").replace(/\|/g, "·"),
     location: e.location || "",
     startDate: e.startDate || "",
-    endDate: e.endDate || "Present",
-    bullets: i < 2
-      ? (e.bullets ?? []).map((b: string) => {
-          // Enhance bullets with action verbs and measurable outcomes
-          let enhanced = b.replace(/^(Responsible for|Helped with|Worked on|Tasked with|Duties included)\s*/i, "Led ");
-          if (!/\d/.test(enhanced) && i === 0) {
-            enhanced += " Achieved 25% improvement in key metrics.";
-          }
-          return enhanced;
-        })
-      : (e.bullets ?? []).slice(0, 2), // Older roles: fewer bullets
+    endDate: e.endDate || "", // PRESERVE original endDate — never use "Present" as default
+    bullets: (e.bullets ?? []).map((b: string) => {
+      // Enhance weak verbs but NEVER add fake metrics
+      return b.replace(/^(Responsible for|Helped with|Worked on|Tasked with|Duties included)\s*/i, "Led ");
+    }),
   }));
 
-  // Build education from source
+  // Build education from source — PRESERVE ALL entries
   const education = (resume?.education ?? []).map((ed: any) => ({
-    degree: ed.degree || "Degree",
-    institution: ed.institution || "Institution",
+    degree: ed.degree || "",
+    institution: ed.institution || "",
     location: ed.location || "",
     startDate: ed.startDate || "",
     endDate: ed.endDate || "",
     modules: ed.highlights?.join(", ") || "",
   }));
 
-  // Build skills from source + missing keywords
+  // Build skills from source — NEVER add fake JD keywords
   const sourceSkills = (resume?.skills ?? []).map((s: any) => s.name).filter(Boolean);
-  const allSkills = Array.from(new Set([...sourceSkills, ...missingKws]));
+  const allSkills = Array.from(new Set(sourceSkills));
 
-  // Group skills into categories
   const skills = [
     { category: "Core Skills", items: allSkills.slice(0, 6) },
     { category: "Additional Skills", items: allSkills.slice(6) },
   ].filter((g) => g.items.length > 0);
 
-  // Build languages from source
-  const languages = (resume?.languages ?? []).map((l: any) => ({
-    name: l.name || "English",
-    proficiency: l.proficiency || "fluent",
-    note: "",
-  }));
-  if (languages.length === 0) languages.push({ name: "English", proficiency: "fluent", note: "" });
+  // Build languages from source — PRESERVE ALL
+  const languages = (resume?.languages ?? [])
+    .map((l: any) => ({
+      name: l.name || "English",
+      proficiency: l.proficiency || "fluent",
+      note: "",
+    }));
 
-  // Build summary
+  // Build summary — PRESERVE original, never add fake sentences
   const summary = resume?.summary
-    ? resume.summary.length > 400
-      ? resume.summary.slice(0, 380).trim() + "…"
+    ? resume.summary.length > 500
+      ? resume.summary.slice(0, 480).trim() + "…"
       : resume.summary
-    : `${name} is a ${headline} with proven experience delivering measurable results. Skilled in ${allSkills.slice(0, 5).join(", ")}.`;
+    : "";
 
   return JSON.stringify({
     name,
@@ -1890,16 +1905,13 @@ function localOptimize(prompt: string): string {
     experience,
     education,
     languages,
-    missingKeywordsAdded: missingKws,
+    missingKeywordsAdded: [],
     bulletsRewritten: experience.reduce((n: number, e: any) => n + e.bullets.length, 0),
-    // CRITICAL: summary_critique is an ANALYSIS field. Leave it EMPTY — never
-    // put analysis text here. The resume summary field above is the ONLY
-    // summary that should appear in the document.
-    score: 82,
-    score_breakdown: { impact: 85, brevity: 90, keywords: 78 },
+    score: 0,
+    score_breakdown: { impact: 0, brevity: 0, keywords: 0 },
     summary_critique: "",
     missing_keywords: [],
-    matched_keywords: missingKws,
+    matched_keywords: [],
     optimized_content: "",
   }, null, 2);
 }

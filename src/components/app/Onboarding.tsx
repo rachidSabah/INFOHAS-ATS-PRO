@@ -76,17 +76,18 @@ export function OnboardingProvider({ children }: { children: ReactNode }) {
   const [isActive, setIsActive] = useState(false);
   const [currentStep, setCurrentStep] = useState(0);
   const [completedSteps, setCompletedSteps] = useState<string[]>([]);
-  const [isCompleted, setIsCompleted] = useState(false);
+  const [isCompleted, setIsCompleted] = useState(() => {
+    if (typeof window === "undefined") return false;
+    return localStorage.getItem(ONBOARDING_KEY) === "true";
+  });
 
   useEffect(() => {
     if (typeof window === "undefined") return;
     const completed = localStorage.getItem(ONBOARDING_KEY);
-    if (completed === "true") {
-      setIsCompleted(true);
-    } else {
+    if (!completed) {
       // Auto-start onboarding for first-time users after a short delay
       const timer = setTimeout(() => {
-        if (!completed) setIsActive(true);
+        setIsActive(true);
       }, 2000);
       return () => clearTimeout(timer);
     }

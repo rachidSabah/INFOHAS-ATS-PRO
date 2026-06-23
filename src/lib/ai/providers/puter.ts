@@ -22,10 +22,20 @@ export class PuterProvider implements AIProviderAdapter {
     const MODEL_ALIASES: Record<string, string> = {
       "gemini 2.0 flash": "gemini-2.0-flash",
       "gemini-2.0-flash": "gemini-2.0-flash",
+      "gemini 2.5 flash": "gemini-2.5-flash",
+      "gemini-2.5-flash": "gemini-2.5-flash",
+      "gpt 5 nano": "gpt-5-nano",
+      "gpt-5-nano": "gpt-5-nano",
+      "gpt 5.4 nano": "gpt-5.4-nano",
+      "gpt-5.4-nano": "gpt-5.4-nano",
+      "gpt 5.4": "gpt-5.4",
+      "gpt-5.4": "gpt-5.4",
       "gpt 4o mini": "gpt-4o-mini",
       "gpt-4o-mini": "gpt-4o-mini",
       "gpt 4o": "gpt-4o",
       "gpt-4o": "gpt-4o",
+      "claude sonnet 4 5": "claude-sonnet-4-5",
+      "claude-sonnet-4-5": "claude-sonnet-4-5",
       "claude 3.5 sonnet": "claude-3-5-sonnet",
       "claude-3-5-sonnet": "claude-3-5-sonnet",
       "deepseek chat": "deepseek-chat",
@@ -73,7 +83,7 @@ export class PuterProvider implements AIProviderAdapter {
   }
 
   async listModels(config: ProviderConfig): Promise<string[]> {
-    return config.enabledModels ?? ["gpt-4o-mini", "gpt-4o", "deepseek-chat", "claude-3-5-sonnet", "gemini-2.0-flash", "llama-3.3-70b", "mistral-large"];
+    return config.enabledModels ?? ["gpt-5.4-nano", "gpt-5-nano", "gpt-4o-mini", "gpt-4o", "claude-sonnet-4-5", "claude-3-5-sonnet", "gemini-2.5-flash", "deepseek-chat", "llama-3.3-70b", "mistral-large"];
   }
 }
 

@@ -154,7 +154,7 @@ export function AIProviderSettings() {
                 className="w-full h-9 px-3 rounded-md border border-input bg-background text-sm"
               >
                 <option value="">— None —</option>
-                {providers.filter((p) => p.isActive).map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+                {providers.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
               </select>
             </div>
             <div className="space-y-1.5">
