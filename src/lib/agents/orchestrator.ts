@@ -1163,36 +1163,46 @@ CONTENT REQUIREMENTS:
 - Include ALL certifications from the original
 - Skills section should have 8-15 skills grouped by category`);
 
-  const intelligenceContext = intelligenceBlocks.join("\n\n");
-
-  // DEBUG: ensure directive is present before sending
-  console.group("[Optimizer Prompt]");
-  console.log("Directive chars:", directive.length);
-  console.log("Prompt chars:", intelligenceBlocks.reduce((sum, b) => sum + b.length, 0) + directive.length);
-  console.log("Directive included:", directive.includes("PAGE FORMAT"));
-  console.log("One-page included:", directive.includes("ONE PAGE"));
-  console.log("Target chars included:", directive.includes("2,700"));
-  console.groupEnd();
-  // Hard assertions only in production — tests use intentionally short mock directives
+  // Validation: only HARD-FAIL if the directive is clearly truncated or empty.
+  // Page format and character target checks are SOFT — they warn but don't abort,
+  // because custom directive overrides may intentionally omit these details.
   if (process.env.NODE_ENV !== "test") {
     if (directive.length < 500) {
+      // This is a hard failure — the directive is clearly broken/missing
       throw new Error("Optimizer directive missing or truncated from final prompt. Aborting.");
     }
-    // Check for page format rules — accept any variant of the one-page rule.
-    // The directive may say "ONE PAGE", "ONE A4 PAGE", "EXACTLY 1", or "Maximum pages: 1".
-    const hasPageRule = directive.includes("ONE PAGE") || directive.includes("ONE A4 PAGE") || directive.includes("EXACTLY 1") || directive.includes("Maximum pages: 1");
-    // Check for character target — accept any numeric target (2,700, 2,900, 3,000, etc.)
-    const hasCharTarget = /2[,.]?[0-9]{3}|3[,.]?000|character/.test(directive);
+    // Soft checks — warn but don't crash the optimization
+    const hasPageRule = directive.includes("ONE PAGE") || directive.includes("ONE A4 PAGE") || directive.includes("EXACTLY 1") || directive.includes("Maximum pages: 1") || directive.includes("one page") || directive.includes("one A4 page");
+    const hasCharTarget = /2[,.]?[0-9]{3}|3[,.]?000|character/i.test(directive);
     if (!hasPageRule || !hasCharTarget) {
-      console.error("[Optimizer] Directive validation failed:", {
+      console.warn("[Optimizer] Directive validation warning — missing recommended elements:", {
         hasPageRule,
         hasCharTarget,
         directiveLength: directive.length,
         directivePreview: directive.slice(0, 500),
       });
-      throw new Error("Optimizer directive missing page format or character target. Aborting.");
+      // Inject missing instructions directly into the prompt so the AI
+      // still gets the constraint even if the directive omitted it
+      if (!hasPageRule) {
+        intelligenceBlocks.push("PAGE CONSTRAINT: The resume MUST fit on exactly ONE A4 page. Never produce a second page.");
+      }
+      if (!hasCharTarget) {
+        intelligenceBlocks.push("CONTENT TARGET: Aim for 2,500–3,000 characters of body content. Under 2,000 is too short; over 3,000 is too long.");
+      }
+      // DO NOT throw — let the optimization proceed with the injected instructions
     }
   }
+
+  // Join intelligence blocks AFTER validation (validation may inject more blocks)
+  const intelligenceContext = intelligenceBlocks.join("\n\n");
+
+  // DEBUG: log directive summary
+  console.group("[Optimizer Prompt]");
+  console.log("Directive chars:", directive.length);
+  console.log("Prompt chars:", intelligenceBlocks.reduce((sum, b) => sum + b.length, 0) + directive.length);
+  console.log("One-page constraint:", directive.includes("ONE PAGE") || directive.includes("Maximum pages: 1") || directive.includes("EXACTLY 1"));
+  console.log("Character target:", /2[,.]?[0-9]{3}|3[,.]?000|character/i.test(directive));
+  console.groupEnd();
 
   const split = splitOptimizationDirective(directive);
   const result = await callAI({
