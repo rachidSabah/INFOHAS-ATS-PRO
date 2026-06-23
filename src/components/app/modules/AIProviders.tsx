@@ -12,6 +12,7 @@ import { useApp, uid } from "@/lib/store";
 import { ProviderManager } from "@/lib/ai/services";
 import { toast } from "sonner";
 import type { AIProvider, AIProviderType } from "@/lib/types";
+import { isOpenCodeZenFree } from "@/lib/provider-capabilities";
 import { ProviderEditor } from "./AIProviderEditor";
 import { ProviderAnalytics } from "./ProviderAnalytics";
 import { ProviderLogsTable } from "./ProviderLogsTable";
@@ -173,6 +174,11 @@ export function AIProviders() {
                                 {p.isBuiltIn && <Badge variant="outline" className="text-[9px]">BUILT-IN</Badge>}
                               </div>
                               <div className="text-xs text-muted-foreground truncate">{p.name}</div>
+                              {isOpenCodeZenFree(p) && (
+                                <div className="text-[10px] text-amber-600 dark:text-amber-400 font-medium mt-0.5">
+                                  ⚠ Free model – third-party rate limits may apply.
+                                </div>
+                              )}
                             </div>
                           </div>
                         </td>

@@ -107,6 +107,11 @@ interface AppState {
   // needs to be called from a useEffect to apply it (avoids hydration mismatch).
   _needsRehydrate: boolean;
 
+  // fallback offer (rate-limit UI)
+  fallbackOfferOpen: boolean;
+  fallbackOfferChoices: AIProvider[];
+  fallbackOfferCurrentProviderId: string | null;
+
   // actions
   rehydrateSession: () => void;
   setView: (v: ViewKey) => void;
@@ -209,6 +214,8 @@ interface AppState {
 
   // usage tracking
   incUsage: (k: "resumesGenerated" | "atsChecks" | "coverLetters" | "interviewPreps" | "downloads") => void;
+  openFallbackOffer: (choices: AIProvider[], currentProviderId: string | null) => void;
+  closeFallbackOffer: () => void;
 }
 
 const uid = (p = "id") => `${p}_${Math.random().toString(36).slice(2, 9)}${Date.now().toString(36).slice(-4)}`;
@@ -405,6 +412,9 @@ export const useApp = create<AppState>()(
       // Flag: true when a session was found in localStorage at module load
       // and needs to be applied via rehydrateSession() after hydration.
       _needsRehydrate: _hasPendingRehydration,
+      fallbackOfferOpen: false,
+      fallbackOfferChoices: [],
+      fallbackOfferCurrentProviderId: null,
 
       setView: (v) => set({ view: v, landingSection: null }),
 
@@ -1061,6 +1071,16 @@ export const useApp = create<AppState>()(
           return { providerSettings: { ...s.providerSettings, fallbackProviderIds: ids } };
         });
       },
+      openFallbackOffer: (choices, currentProviderId) => set({
+        fallbackOfferOpen: true,
+        fallbackOfferChoices: choices,
+        fallbackOfferCurrentProviderId: currentProviderId,
+      }),
+      closeFallbackOffer: () => set({
+        fallbackOfferOpen: false,
+        fallbackOfferChoices: [],
+        fallbackOfferCurrentProviderId: null,
+      }),
       addProviderLog: (l) => {
         set((s) => ({
           providerLogs: [l, ...s.providerLogs].slice(0, 1000),

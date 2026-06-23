@@ -12,6 +12,8 @@
 
 import { useApp } from "./store";
 import { startAICall, truncatePromptToTokenLimit, checkTokenLimit } from "./ai-diagnostics";
+import { getRequestQueue, withRateLimitRetry, isRateLimitError, getRateLimitErrorMessage, getRecommendedFallbacks, isOpenCodeZenFree, startOptimizationTracking, stopOptimizationTracking } from "./provider-capabilities";
+import type { AIProvider } from "./types";
 import {
   checkPuterUsageStatus as _checkPuterUsageStatus,
   getPuterMonthlyUsage as _getPuterMonthlyUsage,
@@ -967,20 +969,21 @@ async function callUserProvider(
   const headers: Record<string, string> = { "Content-Type": "application/json" };
   const authType = provider.authType || "bearer";
 
-  // === SPECIAL CASE: Google Gemini API ===
-  // Google's OpenAI-compatible endpoint does NOT accept API keys as Bearer
-  // tokens. It requires either:
-  //   1. ?key=... query parameter (most reliable — used here), OR
-  //   2. x-goog-api-key header (can be stripped by some edge runtimes)
-  // Sending `Authorization: Bearer API_KEY` produces:
-  //   401 "API keys are not supported by this API. Expected OAuth2 access token"
-  // So for the gemini provider type, we use the query parameter method.
+  // === GOOGLE GEMINI API ===
+  // Two endpoint types, different auth methods:
+  //   1. OpenAI-compatible (/v1beta/openai/...): Authorization: Bearer
+  //   2. Native API (/v1/models/...:generateContent): ?key= query param
+  // The x-goog-api-key header works but can be stripped by some edge runtimes.
   const isGemini = provider.type === "gemini" || provider.type === "google" ||
     baseUrl.includes("generativelanguage.googleapis.com");
+  const isGeminiOpenAI = isGemini && baseUrl.includes("/openai/");
 
   if (isGemini) {
-    // Key is appended as ?key=... below in the URL construction
-    // Don't set any auth header here
+    if (isGeminiOpenAI) {
+      // OpenAI-compatible endpoint: use Bearer token
+      if (provider.apiKey) headers["Authorization"] = `Bearer ${provider.apiKey}`;
+    }
+    // Native endpoint: key appended as ?key= below — no auth header
   } else if (provider.apiKey && authType === "bearer") {
     headers["Authorization"] = `Bearer ${provider.apiKey}`;
   } else if (provider.apiKey && authType === "header") {
@@ -1011,10 +1014,10 @@ async function callUserProvider(
     stream: false,
   };
 
-  // Build final URL (with query param for Gemini or authType === "query")
+  // Build final URL (with query param for native Gemini or authType === "query")
   let finalUrl = url;
-  if (isGemini && provider.apiKey) {
-    // Google Gemini: append ?key=API_KEY (most reliable auth method)
+  if (isGemini && !isGeminiOpenAI && provider.apiKey) {
+    // Native Gemini endpoint: append ?key=API_KEY
     const sep = finalUrl.includes("?") ? "&" : "?";
     finalUrl = `${finalUrl}${sep}key=${encodeURIComponent(provider.apiKey)}`;
   } else if (authType === "query" && provider.apiKey) {
@@ -1022,25 +1025,52 @@ async function callUserProvider(
     finalUrl = `${finalUrl}${sep}key=${encodeURIComponent(provider.apiKey)}`;
   }
 
-  // Fetch with timeout
+  // Fetch with sequential queue + rate-limit retry
+  // For OpenCode Zen free models: maxConcurrent=1, backoff 1s/2s/4s, max 3 attempts
   const timeoutMs = provider.timeout && provider.timeout > 0 ? provider.timeout * 1000 : 30000;
-  const res = await withTimeout(
-    fetch(finalUrl, {
-      method: "POST",
-      headers,
-      body: JSON.stringify(body),
-    }),
-    timeoutMs,
-    `Provider "${provider.name}" call`,
+  const queue = getRequestQueue(provider);
+  const data = await queue.run(() =>
+    withRateLimitRetry(
+      async () => {
+        const r = await withTimeout(
+          fetch(finalUrl, {
+            method: "POST",
+            headers,
+            body: JSON.stringify(body),
+          }),
+          timeoutMs,
+          `Provider "${provider.name}" call`,
+        );
+
+        if (!r.ok) {
+          const errText = await r.text().catch(() => "");
+          const error: any = new Error(
+            `Provider "${provider.name}" returned HTTP ${r.status}: ${errText.slice(0, 200)}`,
+          );
+          error.statusCode = r.status;
+          error.statusText = r.statusText;
+          try {
+            const parsed = JSON.parse(errText);
+            if (parsed?.error?.type) {
+              error.type = parsed.error.type;
+              error.message += ` [${parsed.error.type}]`;
+            } else if (errText.includes("FreeUsageLimitError")) {
+              error.type = "FreeUsageLimitError";
+            }
+            if (parsed?.error?.code) error.statusCode = parsed.error.code;
+          } catch {
+            if (errText.includes("FreeUsageLimitError")) {
+              error.type = "FreeUsageLimitError";
+            }
+          }
+          throw error;
+        }
+
+        return r.json();
+      },
+      provider,
+    ),
   );
-
-  if (!res.ok) {
-    const errText = await res.text().catch(() => "");
-    console.warn(`[AI] Provider "${provider.name}" (${provider.type}) returned HTTP ${res.status} from ${finalUrl}. Response: ${errText.slice(0, 200)}`);
-    throw new Error(`Provider "${provider.name}" returned HTTP ${res.status}: ${errText.slice(0, 200)}`);
-  }
-
-  const data = await res.json();
 
   // Extract text from common response shapes:
   //   OpenAI-style:    data.choices[0].message.content
@@ -1191,7 +1221,17 @@ export async function callAI(opts: AICallOptions): Promise<AICallResult> {
           diag.fail(new Error("Provider returned empty response"));
         } catch (e: any) {
           diag.fail(e);
-          throw e; // re-throw so the outer catch handles fallback
+          // Rate-limit handling: trigger fallback offer for OpenCode Zen free
+          if (isRateLimitError(e) && isOpenCodeZenFree(defaultProvider)) {
+            try {
+              const state = useApp.getState();
+              const fallbacks = getRecommendedFallbacks(state.providers, defaultProvider?.id);
+              if (fallbacks.length > 0) {
+                state.openFallbackOffer(fallbacks, defaultProvider?.id ?? null);
+              }
+            } catch {}
+          }
+          throw e;
         }
       }
     } catch (e: any) {

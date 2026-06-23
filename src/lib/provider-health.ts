@@ -154,7 +154,7 @@ export function recordFailure(providerId: string, error: string, isRateLimit = f
  * Detect if an error is a rate limit (429) error.
  */
 export function isRateLimitError(error: string): boolean {
-  return /429|rate.?limit|too.?many.?requests|quota/i.test(error);
+  return /429|rate.?limit|too.?many.?requests|quota|FreeUsageLimitError/i.test(error);
 }
 
 /**

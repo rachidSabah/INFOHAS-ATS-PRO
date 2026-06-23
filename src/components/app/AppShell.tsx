@@ -40,7 +40,10 @@ import {
 } from "./modules/CareerTools";
 import { ResumeReviewPlatform } from "./modules/ResumeReviewPlatform";
 import { SafeRender } from "./SafeRender";
-import type { ViewKey } from "@/lib/types";
+import { Button } from "@/components/ui/button";
+import { Icon } from "@/components/shared";
+import { toast } from "sonner";
+import type { ViewKey, AIProvider } from "@/lib/types";
 
 const VIEW_COMPONENTS: Record<ViewKey, React.FC> = {
   landing: Dashboard, // never used (landing renders separately)
@@ -151,6 +154,7 @@ export function AppShell() {
   const setView = useApp((s) => s.setView);
   const user = useApp((s) => s.user);
   const role = user?.role ?? "user";
+  const fallbackOfferOpen = useApp((s) => s.fallbackOfferOpen);
 
   // Access control: if the current view requires a higher role than the user
   // has, redirect to the dashboard. This prevents non-superadmin users from
@@ -190,6 +194,101 @@ export function AppShell() {
           </AnimatePresence>
         </main>
       </div>
+      <AnimatePresence>
+        {fallbackOfferOpen && <FallbackOfferModal />}
+      </AnimatePresence>
     </div>
+  );
+}
+
+function FallbackOfferModal() {
+  const fallbackOfferChoices = useApp((s) => s.fallbackOfferChoices);
+  const closeFallbackOffer = useApp((s) => s.closeFallbackOffer);
+  const setDefaultProvider = useApp((s) => s.setDefaultProvider);
+
+  const handleSelect = (providerId: string, providerName: string) => {
+    setDefaultProvider(providerId);
+    closeFallbackOffer();
+    toast.success(`Switched default provider to ${providerName}. Please retry your operation.`);
+  };
+
+  return (
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      className="fixed inset-0 z-50 bg-background/80 backdrop-blur-sm flex items-center justify-center p-4"
+      onClick={closeFallbackOffer}
+    >
+      <motion.div
+        initial={{ y: 20, opacity: 0, scale: 0.97 }}
+        animate={{ y: 0, opacity: 1, scale: 1 }}
+        exit={{ y: 20, opacity: 0, scale: 0.97 }}
+        transition={{ type: "spring", damping: 26, stiffness: 280 }}
+        className="bg-card rounded-2xl border border-border shadow-premium w-full max-w-md overflow-hidden"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="p-6 border-b border-border flex items-start gap-4">
+          <div className="w-10 h-10 rounded-full bg-amber-500/10 flex items-center justify-center shrink-0">
+            <Icon name="AlertTriangle" className="w-5 h-5 text-amber-500" />
+          </div>
+          <div className="flex-1">
+            <h3 className="font-display font-bold text-lg text-foreground">
+              Rate Limit Encountered
+            </h3>
+            <p className="text-sm text-muted-foreground mt-1">
+              OpenCode Zen free models are temporarily rate-limited for third-party applications. Switch to a recommended fallback provider to continue.
+            </p>
+          </div>
+          <Button variant="ghost" size="icon" className="-mt-1 -mr-2" onClick={closeFallbackOffer}>
+            <Icon name="X" className="w-4 h-4" />
+          </Button>
+        </div>
+
+        <div className="p-6 space-y-3">
+          <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+            Recommended Fallbacks
+          </div>
+
+          {fallbackOfferChoices.length === 0 ? (
+            <p className="text-sm text-muted-foreground">No fallback providers configured. Please go to AI Providers settings to configure a provider.</p>
+          ) : (
+            <div className="space-y-2">
+              {fallbackOfferChoices.map((p: AIProvider) => {
+                let badgeText = "Recommended Fallback";
+                if (p.type === "puter") badgeText = "Free & Keyless (Puter.js)";
+                else if (p.type === "gemini") badgeText = "Google Gemini API";
+                else if (p.type === "openrouter") badgeText = "OpenRouter API";
+                else if (p.type === "opencode") badgeText = "Paid Zen Model";
+
+                return (
+                  <button
+                    key={p.id}
+                    onClick={() => handleSelect(p.id, p.name)}
+                    className="w-full text-left p-3.5 rounded-xl border border-border bg-card hover:bg-accent/50 hover:border-brand/40 transition-all flex items-center justify-between group"
+                  >
+                    <div>
+                      <div className="font-medium text-foreground group-hover:text-brand transition-colors">
+                        {p.name}
+                      </div>
+                      <div className="text-xs text-muted-foreground mt-0.5">
+                        {badgeText} · {p.modelName || "Default Model"}
+                      </div>
+                    </div>
+                    <Icon name="ChevronRight" className="w-4 h-4 text-muted-foreground group-hover:text-brand group-hover:translate-x-0.5 transition-all" />
+                  </button>
+                );
+              })}
+            </div>
+          )}
+        </div>
+
+        <div className="p-4 bg-muted/40 border-t border-border flex justify-end gap-2">
+          <Button variant="outline" onClick={closeFallbackOffer}>
+            Cancel
+          </Button>
+        </div>
+      </motion.div>
+    </motion.div>
   );
 }
