@@ -1,9 +1,42 @@
 // Proxy for fetching live models from AI provider APIs
 // Solves CORS issues — browser calls this route, Worker calls the provider API
 import { NextRequest, NextResponse } from "next/server";
-import { isAllowedProviderUrl, BLOCKED_PROXY_HEADERS } from "@/lib/ssrf-allowlist";
 
 export const runtime = "edge";
+
+// ============================================================================
+// SSRF Protection — inlined (avoids @/ import issues on Cloudflare Pages Edge Runtime)
+// Must stay in sync with src/lib/ssrf-allowlist.ts
+// ============================================================================
+const ALLOWED_PROVIDER_HOSTS = new Set([
+  "api.openai.com", "api.anthropic.com", "generativelanguage.googleapis.com",
+  "api.groq.com", "api.deepseek.com", "integrate.api.nvidia.com",
+  "openrouter.ai", "api.opencode.com", "opencode.ai",
+  "api.perplexity.ai", "api.mistral.ai", "api.cohere.com",
+  "api.together.xyz", "api.z.ai", "api.aimlapi.com", "api.azure.com",
+  "api-inference.huggingface.co", "api.puter.com", "api.cohere.ai",
+  "bedrock-runtime.us-east-1.amazonaws.com", "bedrock-runtime.us-west-2.amazonaws.com",
+]);
+
+const BLOCKED_PROXY_HEADERS = new Set([
+  "host", "cookie", "authorization", "x-forwarded-for", "x-real-ip",
+  "proxy-authorization", "connection", "content-length",
+]);
+
+function isAllowedProviderUrl(urlStr: string): boolean {
+  try {
+    const url = new URL(urlStr);
+    const h = url.hostname.toLowerCase();
+    if (h === "localhost" || h === "127.0.0.1" || h === "0.0.0.0" ||
+      h.startsWith("192.168.") || h.startsWith("10.") ||
+      /^172\.(1[6-9]|2[0-9]|3[0-1])\./.test(h) ||
+      h.startsWith("169.254.") || h === "metadata.google.internal" ||
+      h.endsWith(".local") || h.endsWith(".internal")) {
+      return false;
+    }
+    return ALLOWED_PROVIDER_HOSTS.has(h);
+  } catch { return false; }
+}
 
 export async function POST(req: NextRequest) {
   try {
@@ -13,7 +46,6 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "baseUrl is required" }, { status: 400 });
     }
 
-    // SSRF check — uses shared module (proper 172.16/12 coverage + all provider hosts)
     if (!isAllowedProviderUrl(baseUrl)) {
       return NextResponse.json(
         { error: "Provider URL not allowed. Only known AI provider APIs are supported." },
@@ -21,7 +53,6 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Build headers — block dangerous overrides (uses shared BLOCKED_PROXY_HEADERS including "authorization")
     const headers: Record<string, string> = {};
     if (headersJson) {
       try {
@@ -34,25 +65,17 @@ export async function POST(req: NextRequest) {
       } catch (e) { console.warn("[ProviderModels] Invalid headersJson:", e); }
     }
     if (apiKey) {
-      if (authType === "header") {
-        headers["x-api-key"] = apiKey;
-      } else {
-        headers["Authorization"] = `Bearer ${apiKey}`;
-      }
+      if (authType === "header") { headers["x-api-key"] = apiKey; }
+      else { headers["Authorization"] = `Bearer ${apiKey}`; }
     }
 
-    // Build URL — OpenAI-compatible APIs use GET /models
     let url = `${baseUrl.replace(/\/$/, "")}/models`;
     if (authType === "query" && apiKey) {
       url += `?api_key=${encodeURIComponent(apiKey)}`;
     }
-
-    // Special case for Gemini
     if (baseUrl.includes("generativelanguage.googleapis.com")) {
       url = `${baseUrl.replace(/\/$/, "")}/models?key=${encodeURIComponent(apiKey || "")}`;
     }
-
-    // Special case for Anthropic Claude
     if (baseUrl.includes("anthropic.com")) {
       headers["x-api-key"] = apiKey || "";
       headers["anthropic-version"] = "2023-06-01";
@@ -60,10 +83,7 @@ export async function POST(req: NextRequest) {
 
     const res = await fetch(url, {
       method: "GET",
-      headers: {
-        "Content-Type": "application/json",
-        ...headers,
-      },
+      headers: { "Content-Type": "application/json", ...headers },
       signal: AbortSignal.timeout(10000),
     });
 
@@ -74,16 +94,12 @@ export async function POST(req: NextRequest) {
 
     const data = await res.json();
 
-    // Normalize the response — different APIs return different shapes
     let models: string[] = [];
     if (data?.data) {
-      // OpenAI-compatible: { data: [{ id: "model-name" }] }
       models = data.data.map((m: { id?: string }) => m.id).filter(Boolean);
     } else if (data?.models) {
-      // Gemini: { models: [{ name: "models/gemini-1.5-pro" }] }
       models = data.models.map((m: { name?: string }) => m.name?.replace(/^models\//, "") || m.name).filter(Boolean);
     } else if (Array.isArray(data)) {
-      // Some APIs return a plain array
       models = data.map((m: unknown) => typeof m === "string" ? m : ((m as Record<string, string>)?.id || (m as Record<string, string>)?.name)).filter(Boolean);
     }
 
@@ -92,9 +108,7 @@ export async function POST(req: NextRequest) {
     const message = e instanceof Error ? e.message : String(e);
     console.error("[ProviderModels] Unhandled error:", message);
     return NextResponse.json({
-      success: false,
-      code: "PROVIDER_MODELS_FAILED",
-      message,
+      success: false, code: "PROVIDER_MODELS_FAILED", message,
     }, { status: 500 });
   }
 }

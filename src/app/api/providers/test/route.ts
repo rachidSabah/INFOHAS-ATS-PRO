@@ -1,9 +1,60 @@
 // CORS proxy for testing AI provider connections
 // The browser can't call provider APIs directly due to CORS — this route proxies the request
 import { NextRequest, NextResponse } from "next/server";
-import { isAllowedProviderUrl, BLOCKED_PROXY_HEADERS } from "@/lib/ssrf-allowlist";
 
 export const runtime = "edge";
+
+// ============================================================================
+// SSRF Protection — inlined (avoids @/ import issues on Cloudflare Pages Edge Runtime)
+// Must stay in sync with src/lib/ssrf-allowlist.ts
+// ============================================================================
+const ALLOWED_PROVIDER_HOSTS = new Set([
+  "api.openai.com",
+  "api.anthropic.com",
+  "generativelanguage.googleapis.com",
+  "api.groq.com",
+  "api.deepseek.com",
+  "integrate.api.nvidia.com",
+  "openrouter.ai",
+  "api.opencode.com",
+  "opencode.ai",
+  "api.perplexity.ai",
+  "api.mistral.ai",
+  "api.cohere.com",
+  "api.together.xyz",
+  "api.z.ai",
+  "api.aimlapi.com",
+  "api.azure.com",
+  "api-inference.huggingface.co",
+  "api.puter.com",
+  "api.cohere.ai",
+  "bedrock-runtime.us-east-1.amazonaws.com",
+  "bedrock-runtime.us-west-2.amazonaws.com",
+]);
+
+const BLOCKED_PROXY_HEADERS = new Set([
+  "host", "cookie", "authorization", "x-forwarded-for", "x-real-ip",
+  "proxy-authorization", "connection", "content-length",
+]);
+
+function isAllowedProviderUrl(urlStr: string): boolean {
+  try {
+    const url = new URL(urlStr);
+    const h = url.hostname.toLowerCase();
+    if (
+      h === "localhost" || h === "127.0.0.1" || h === "0.0.0.0" ||
+      h.startsWith("192.168.") || h.startsWith("10.") ||
+      /^172\.(1[6-9]|2[0-9]|3[0-1])\./.test(h) ||
+      h.startsWith("169.254.") || h === "metadata.google.internal" ||
+      h.endsWith(".local") || h.endsWith(".internal")
+    ) {
+      return false;
+    }
+    return ALLOWED_PROVIDER_HOSTS.has(h);
+  } catch {
+    return false;
+  }
+}
 
 export async function POST(req: NextRequest) {
   try {
@@ -37,17 +88,10 @@ export async function POST(req: NextRequest) {
       } catch (e) { console.warn("[ProviderTest] Invalid headersJson:", e); }
     }
     if (apiKey) {
-      // === GOOGLE GEMINI ===
-      // Two endpoint types, different auth methods:
-      //   1. OpenAI-compatible (/v1beta/openai/...): Authorization: Bearer
-      //   2. Native API (/v1/models/...): ?key= query param
-      // The x-goog-api-key header works but can be stripped by some edge runtimes.
       if (baseUrl.includes("generativelanguage.googleapis.com")) {
         if (baseUrl.includes("/openai/")) {
-          // OpenAI-compatible endpoint: use Bearer token
           headers["Authorization"] = `Bearer ${apiKey}`;
         }
-        // Native endpoint: key appended as ?key= below — no auth header
       } else if (authType === "header") {
         headers["x-api-key"] = apiKey;
       } else {
@@ -55,9 +99,9 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // Special case for Anthropic Claude — different endpoint
+    // Build URL and body for different provider types
     let url = "";
-    let reqBody: any = {};
+    let reqBody: Record<string, unknown> = {};
 
     if (baseUrl.includes("anthropic.com")) {
       headers["x-api-key"] = apiKey || "";
@@ -69,11 +113,7 @@ export async function POST(req: NextRequest) {
         messages: [{ role: "user", content: testPrompt || "Reply with exactly: OK" }],
       };
     } else if (baseUrl.includes("generativelanguage.googleapis.com")) {
-      // Google Gemini
-      // OpenAI-compatible endpoint (/v1beta/openai/): uses Bearer token (set above)
-      // Native endpoint: uses ?key= query parameter
       url = `${baseUrl.replace(/\/$/, "")}/chat/completions`;
-      // Only append ?key= for native endpoint (not OpenAI-compatible)
       if (!baseUrl.includes("/openai/")) {
         url += `?key=${encodeURIComponent(apiKey || "")}`;
       }
@@ -97,7 +137,8 @@ export async function POST(req: NextRequest) {
     }
 
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), Math.min(timeout || 15000, 15000));
+    const timeoutMs = Math.min(timeout || 15000, 15000);
+    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
     const t0 = performance.now();
     const res = await fetch(url, {
@@ -115,24 +156,16 @@ export async function POST(req: NextRequest) {
       let errorMessage = errText.slice(0, 300);
       try {
         const errJson = JSON.parse(errText);
-        // OpenAI format: { error: { message: "..." } }
         if (errJson?.error?.message) {
-          errorMessage = errJson.error.message;
-        }
-        // Anthropic format: { error: { type: "...", message: "..." } }
-        else if (errJson?.error?.type && errJson?.error?.message) {
-          errorMessage = `${errJson.error.type}: ${errJson.error.message}`;
-        }
-        // OpenCode/Zen format: { type: "error", error: { type: "AuthError", message: "..." } }
-        else if (errJson?.error?.type && errJson?.error?.message) {
-          errorMessage = `${errJson.error.type}: ${errJson.error.message}`;
-        }
-        // Z.ai format: { error: { code: "1000", message: "..." } }
-        else if (errJson?.error?.code && errJson?.error?.message) {
+          // OpenAI format: { error: { message: "..." } }
+          // Also handles OpenCode: { type: "error", error: { type: "AuthError", message: "..." } }
+          errorMessage = errJson.error.type
+            ? `${errJson.error.type}: ${errJson.error.message}`
+            : errJson.error.message;
+        } else if (errJson?.error?.code && errJson?.error?.message) {
+          // Z.ai format: { error: { code: "1000", message: "..." } }
           errorMessage = `Error ${errJson.error.code}: ${errJson.error.message}`;
-        }
-        // Generic: just use the message if available
-        else if (errJson?.message) {
+        } else if (errJson?.message) {
           errorMessage = errJson.message;
         }
       } catch {
@@ -151,7 +184,6 @@ export async function POST(req: NextRequest) {
     try {
       data = JSON.parse(responseText);
     } catch {
-      // Response is not JSON — probably an error page or "Not Found" text
       return NextResponse.json({
         ok: false,
         latencyMs,
@@ -165,17 +197,14 @@ export async function POST(req: NextRequest) {
     let outputTokens: number | undefined;
 
     if (data?.choices?.[0]?.message?.content) {
-      // OpenAI-compatible
       text = data.choices[0].message.content;
       inputTokens = data?.usage?.prompt_tokens;
       outputTokens = data?.usage?.completion_tokens;
     } else if (data?.content?.[0]?.text) {
-      // Anthropic
       text = data.content[0].text;
       inputTokens = data?.usage?.input_tokens;
       outputTokens = data?.usage?.output_tokens;
     } else if (data?.candidates?.[0]?.content?.parts?.[0]?.text) {
-      // Gemini
       text = data.candidates[0].content.parts[0].text;
       inputTokens = data?.usageMetadata?.promptTokenCount;
       outputTokens = data?.usageMetadata?.candidatesTokenCount;
