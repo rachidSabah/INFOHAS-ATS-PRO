@@ -16,6 +16,7 @@
 // with the original spec — in practice any provider can serve it.
 
 import { callAI, extractJSON, getOptimizerDirective } from "./ai";
+import { splitOptimizationDirective } from "./ai-diagnostics";
 import { INDUSTRY_PROFILES } from "./industry-ats";
 import type { OptimizerDirectiveConfig, ResumeData } from "./types";
 import { useApp } from "./store";
@@ -723,9 +724,10 @@ Return ONLY the JSON object described in the directive. No prose, no markdown fe
     }
   }
 
+  const split = splitOptimizationDirective(directive);
   const result = await callAI({
-    systemPrompt: directive,
-    userPrompt,
+    systemPrompt: split.system,
+    userPrompt: (split.user ? split.user + "\n\n---\n\n" : "") + userPrompt,
     maxTokens: 8000,
     temperature: 0.45,
     taskCategory: "document",

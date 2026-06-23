@@ -11,7 +11,7 @@
 "use client";
 
 import { useApp } from "./store";
-import { startAICall, truncatePromptToTokenLimit, checkTokenLimit } from "./ai-diagnostics";
+import { startAICall, truncatePromptToTokenLimit, checkTokenLimit, MAX_INPUT_TOKENS } from "./ai-diagnostics";
 import { getRequestQueue, withRateLimitRetry, isRateLimitError, getRateLimitErrorMessage, getRecommendedFallbacks, isOpenCodeZenFree, startOptimizationTracking, stopOptimizationTracking } from "./provider-capabilities";
 import type { AIProvider } from "./types";
 import {
@@ -1226,18 +1226,61 @@ export async function callAI(opts: AICallOptions): Promise<AICallResult> {
       if (defaultProvider) {
         failedProviderName = defaultProvider.name || "unknown";
         // === P1.5: Token overflow protection ===
-        // Truncate the prompt if it exceeds the token limit (8K tokens default)
-        const fullPrompt = (opts.systemPrompt ?? "") + opts.userPrompt;
-        const tokenCheck = checkTokenLimit(fullPrompt);
-        if (!tokenCheck.ok) {
+        // CRITICAL FIX: The optimizer directive (systemPrompt) must NEVER be truncated.
+        // It contains one-page enforcement rules, page format, validation, font rules, etc.
+        // If total prompt exceeds the token limit, only truncate the userPrompt (resume+JD content).
+        const systemText = opts.systemPrompt ?? "";
+        const userText = opts.userPrompt;
+        const totalTokens = estTokens(systemText + userText);
+        const maxTokens = MAX_INPUT_TOKENS; // 8,000
+        if (totalTokens > maxTokens) {
+          const systemTokens = estTokens(systemText);
+          const userTokens = estTokens(userText);
+          const userBudget = Math.max(0, maxTokens - systemTokens); // Reserve all space for systemPrompt directive
+
           console.warn(
-            `[AI] Prompt exceeds token limit: ${tokenCheck.tokens} > ${tokenCheck.maxTokens}. Truncating.`,
+            `[AI] Prompt exceeds token limit: ${totalTokens} > ${maxTokens}. ` +
+            `Truncating USER PROMPT ONLY. System prompt (directive) is protected. ` +
+            `System: ${systemTokens} tokens. User budget: ${userBudget} tokens.`,
           );
+
           opts = {
             ...opts,
-            userPrompt: truncatePromptToTokenLimit(opts.userPrompt),
-            systemPrompt: opts.systemPrompt ? truncatePromptToTokenLimit(opts.systemPrompt) : undefined,
+            userPrompt: truncatePromptToTokenLimit(opts.userPrompt, userBudget),
+            // systemPrompt: NEVER truncated — it contains the optimizer directive
           };
+        }
+
+        // === CRITICAL: Directive validation (optimizer only) ===
+        // The optimizer directive (systemPrompt) must contain one-page rules.
+        if (taskCategory === "document" && opts.systemPrompt) {
+          const finalPrompt = (opts.systemPrompt ?? "") + opts.userPrompt;
+
+          // Debug logging
+          if (process.env.NODE_ENV !== "test") {
+            console.group("[Optimizer Directive — FINAL]");
+            console.log("Directive chars:", (opts.systemPrompt ?? "").length);
+            console.log("Directive included:", (opts.systemPrompt ?? "")?.includes("PAGE FORMAT"));
+            console.log("One-page included:", (opts.systemPrompt ?? "").includes("ONE PAGE") || finalPrompt.includes("ONE-PAGE COMPRESSION"));
+            console.log("Contains assert(pdf.pages === 1):", (opts.systemPrompt ?? "").includes("assert(pdf.pages === 1)"));
+            console.log("Contains NEVER create page two:", (opts.systemPrompt ?? "").includes("NEVER create page two") || finalPrompt.includes("NEVER create page two"));
+            console.log("Contains ONE-PAGE COMPRESSION:", (opts.systemPrompt ?? "").includes("ONE-PAGE COMPRESSION") || finalPrompt.includes("ONE-PAGE COMPRESSION"));
+            console.log("Prompt length:", finalPrompt.length);
+            console.groupEnd();
+          }
+
+          // Hard assertions — abort if the directive was truncated
+          if (process.env.NODE_ENV !== "test") {
+            if (!finalPrompt.includes("ONE-PAGE COMPRESSION")) {
+              throw new Error("Optimizer directive truncated before AI call: missing ONE-PAGE COMPRESSION. Aborting.");
+            }
+            if (!finalPrompt.includes("assert(pdf.pages === 1)")) {
+              throw new Error("Optimizer directive truncated before AI call: missing pdf.pages assertion. Aborting.");
+            }
+            if (!finalPrompt.includes("NEVER create page two")) {
+              throw new Error("Optimizer directive truncated before AI call: missing NEVER create page two. Aborting.");
+            }
+          }
         }
 
         // === P1.5: AI Response Diagnostics ===

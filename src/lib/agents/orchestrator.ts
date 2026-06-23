@@ -24,6 +24,7 @@ import type { ResumeData, JobDescription, OptimizerDirectiveConfig } from "../ty
 import type { JobIntelligence } from "../job-intelligence";
 import { analyzeJobIntelligence } from "../job-intelligence";
 import { callAI, getOptimizerDirective, extractJSON } from "../ai";
+import { splitOptimizationDirective } from "../ai-diagnostics";
 import { processAIResponse } from "../ai-response-processor";
 import { validateResumeContent } from "../ai-error-filter";
 import { normalizeResumeObject, normalizeToText } from "../ai-response-normalizer";
@@ -1182,9 +1183,10 @@ CONTENT REQUIREMENTS:
     }
   }
 
+  const split = splitOptimizationDirective(directive);
   const result = await callAI({
-    systemPrompt: directive,
-    userPrompt: `SOURCE RESUME (be truthful to this — never invent employers, dates, or metrics):\n${JSON.stringify({
+    systemPrompt: split.system,
+    userPrompt: (split.user ? split.user + "\n\n---\n\n" : "") + `SOURCE RESUME (be truthful to this — never invent employers, dates, or metrics):\n${JSON.stringify({
       name: resume.name,
       headline: resume.headline,
       contact: resume.contact,
@@ -1229,8 +1231,8 @@ CONTENT REQUIREMENTS:
 
     // === RETRY with a simpler prompt but STILL includes the directive ===
     if (responseLength < 200) {
-      const directivePrefix = directive.trimEnd() + "\n\n";
-      const retrySystem = directivePrefix + "The previous attempt produced an invalid or empty response. Return ONLY a valid JSON object matching the ResumeData schema. No prose, no markdown fences.\n";
+      const retrySplit = splitOptimizationDirective(directive);
+      const retrySystem = retrySplit.system + "\n\nThe previous attempt produced an invalid or empty response. Return ONLY a valid JSON object matching the ResumeData schema. No prose, no markdown fences.\n";
       console.group("[Optimizer Prompt — Retry]");
       console.log("Directive chars:", directive.length);
       console.log("Prompt chars:", retrySystem.length);
@@ -1245,8 +1247,8 @@ CONTENT REQUIREMENTS:
         }
       }
       const retryResult = await callAI({
-        systemPrompt: directivePrefix + "The previous attempt produced an invalid or empty response. Return ONLY a valid JSON object matching the ResumeData schema. No prose, no markdown fences.\n", // simple retry
-        userPrompt: `SOURCE RESUME:\n${JSON.stringify({ name: resume.name, headline: resume.headline, contact: resume.contact, summary: resume.summary, experience: resume.experience, education: resume.education, skills: resume.skills, languages: resume.languages, certifications: resume.certifications })}\n\nJOB DESCRIPTION:\n${jd.rawText?.slice(0, 1500) ?? jd.keywords.join(", ")}\n\nOptimize this resume for the job. Return ONLY a JSON object with: name, headline, email, phone, location, summary, skills [{category, items[]}], experience [{title, company, location, startDate, endDate, bullets[]}], education [{degree, institution, field, startDate, endDate, modules}], languages [{name, proficiency}]. No prose, no markdown.`,
+        systemPrompt: retrySystem,
+        userPrompt: (retrySplit.user ? retrySplit.user + "\n\n---\n\n" : "") + `SOURCE RESUME:\n${JSON.stringify({ name: resume.name, headline: resume.headline, contact: resume.contact, summary: resume.summary, experience: resume.experience, education: resume.education, skills: resume.skills, languages: resume.languages, certifications: resume.certifications })}\n\nJOB DESCRIPTION:\n${jd.rawText?.slice(0, 1500) ?? jd.keywords.join(", ")}\n\nOptimize this resume for the job. Return ONLY a JSON object with: name, headline, email, phone, location, summary, skills [{category, items[]}], experience [{title, company, location, startDate, endDate, bullets[]}], education [{degree, institution, field, startDate, endDate, modules}], languages [{name, proficiency}]. No prose, no markdown.`,
         maxTokens: 8000,
         temperature: 0.4,
         taskCategory: "document",

@@ -312,6 +312,102 @@ export function truncatePromptToTokenLimit(text: string, maxTokens = MAX_INPUT_T
 /**
  * Check if a prompt is within the token limit. Returns { ok, tokens, maxTokens }.
  */
+/**
+ * Split an optimizer directive into critical (system-level) and auxiliary (user-level) parts.
+ *
+ * CRITICAL sections (never truncated, always in system prompt):
+ *   - PAGE FORMAT / PAGE FORMAT & CONTENT DENSITY
+ *   - MARGINS
+ *   - FONT RULES
+ *   - ATS RULES
+ *   - CONTENT COMPRESSION ENGINE / ONE-PAGE COMPRESSION
+ *   - VALIDATION / OUTPUT FORMAT (JSON schema)
+ *   - ONE-PAGE CONSTRAINT
+ *
+ * AUXILIARY sections (compressible, may be in user prompt):
+ *   - HEADER LAYOUT
+ *   - SECTION ORDER
+ *   - PROFESSIONAL SUMMARY
+ *   - CORE COMPETENCIES & SKILLS
+ *   - PROFESSIONAL EXPERIENCE
+ *   - EDUCATION
+ *   - LANGUAGES
+ *   - AI OPTIMIZATION BEHAVIOR
+ *   - CONTENT RULES
+ *   - COMPANY RESEARCH
+ *   - ATS EXPLANATIONS
+ *   - REFLECTIONS
+ *
+ * @param directive The full optimizer directive string
+ * @returns { system: string, user: string } — split parts
+ */
+export function splitOptimizationDirective(directive: string): { system: string; user: string } {
+  if (!directive) return { system: "", user: "" };
+
+  const sectionDelimiter = "═══════════════════════════════════════════════════════════════";
+
+  // Section headers that MUST be in system prompt (critical, non-compressible)
+  const systemSectionKeywords = [
+    "PAGE FORMAT",
+    "MARGINS",
+    "FONT RULES",
+    "ATS RULES",
+    "CONTENT COMPRESSION",
+    "ONE-PAGE COMPRESSION",
+    "OUTPUT FORMAT",
+    "VALIDATION",
+    "ONE-PAGE CONSTRAINT",
+  ];
+
+  // Parse all section start positions
+  const sectionStarts: Array<{ index: number; name: string; isCritical: boolean }> = [];
+  const sectionRex = new RegExp(
+    // ──────── delimiter ──────── \n name \n ──────── delimiter ────────
+    "═+\\n([^\\n]+)\\n═+",
+    "g"
+  );
+  let secMatch: RegExpExecArray | null;
+  while ((secMatch = sectionRex.exec(directive)) !== null) {
+    const name = secMatch[1]?.trim() ?? "";
+    if (!name) continue;
+    const isCritical = systemSectionKeywords.some((kw) =>
+      name.toUpperCase().includes(kw.toUpperCase()),
+    );
+    sectionStarts.push({ index: secMatch.index, name, isCritical });
+  }
+
+  // Build system and user parts
+  const systemParts: string[] = [];
+  const userParts: string[] = [];
+
+  // Preamble (everything before the first section) always goes in system
+  if (sectionStarts.length > 0 && sectionStarts[0].index > 0) {
+    systemParts.push(directive.slice(0, sectionStarts[0].index).trim());
+  }
+
+  for (let i = 0; i < sectionStarts.length; i++) {
+    const sec = sectionStarts[i];
+    const end = i + 1 < sectionStarts.length ? sectionStarts[i + 1].index : directive.length;
+    const text = directive.slice(sec.index, end).trim();
+    if (sec.isCritical) {
+      systemParts.push(text);
+    } else {
+      userParts.push(text);
+    }
+  }
+
+  // Also search for a trailing ONE-PAGE CONSTRAINT paragraph (may not be a section)
+  const onePageMatch = directive.match(/ONE-PAGE CONSTRAINT:[\s\S]*?(?=\n═+|$)/);
+  if (onePageMatch && !systemParts.some((p) => p.includes(onePageMatch[0].slice(0, 30)))) {
+    systemParts.push(onePageMatch[0]);
+  }
+
+  return {
+    system: systemParts.join("\n\n").trim(),
+    user: userParts.join("\n\n").trim(),
+  };
+}
+
 export function checkTokenLimit(text: string, maxTokens = MAX_INPUT_TOKENS): {
   ok: boolean;
   tokens: number;
