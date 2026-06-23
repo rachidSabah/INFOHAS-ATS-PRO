@@ -1492,6 +1492,45 @@ export async function callAI(opts: AICallOptions): Promise<AICallResult> {
   if (!opts.preferLocal) {
     // 2) Try server fallback (z-ai-web-dev-sdk)
     try {
+      // Also expose the Z.ai key via NEXT_PUBLIC_ prefix for Cloudflare Pages
+      // where server-side env vars are not available at runtime.
+      const zaiKey = process.env.NEXT_PUBLIC_ZAI_API_KEY;
+      if (zaiKey) {
+        // Direct client-side call to Z.ai API — avoids the server-side route
+        // which may not have the env var on Cloudflare Pages
+        const messages = [
+          { role: "system", content: opts.systemPrompt || "You are ResumeAI Pro, a helpful assistant for resume and career tasks." },
+          { role: "user", content: opts.userPrompt },
+        ];
+        const res = await fetch("https://api.z.ai/api/paas/v4/chat/completions", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${zaiKey}`,
+          },
+          body: JSON.stringify({
+            model: "glm-4.6",
+            messages,
+            temperature: opts.temperature ?? 0.7,
+            max_tokens: opts.maxTokens ?? 4096,
+          }),
+          signal: AbortSignal.timeout(30000),
+        });
+        if (res.ok) {
+          const data = await res.json();
+          const text = data?.choices?.[0]?.message?.content ?? "";
+          if (text && text.trim().length > 0) {
+            return {
+              text,
+              provider: "Z.ai Fallback",
+              latencyMs: Math.round(performance.now() - t0),
+              tokensEstimate: estTokens(opts.userPrompt + (opts.systemPrompt ?? "")),
+            };
+          }
+        }
+      }
+
+      // Also try the server-side route as backup
       const res = await fetch("/api/ai/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },

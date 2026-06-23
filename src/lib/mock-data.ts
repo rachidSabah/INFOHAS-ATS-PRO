@@ -447,11 +447,12 @@ export const SEED_PROVIDER_LOGS: AIProviderLog[] = [
 ];
 
 export const SEED_PROVIDER_SETTINGS: AIProviderSettings = {
-  // Default to Puter — always free, always works. OpenCode/NVIDIA/Mistral are
-  // fallbacks if the user configures valid API keys.
-  defaultProviderId: "p_puter",
-  defaultModel: "gpt-5.4-nano",
-  fallbackProviderIds: ["p_nvidia", "p_mistral", "p_puter"],
+  // Default to OpenCode — API provider that works without browser auth.
+  // Puter is available as a browser-auth fallback for interactive tasks.
+  // NVIDIA/Mistral are fallbacks if the user configures valid API keys.
+  defaultProviderId: "p_opencode",
+  defaultModel: "deepseek-v4-flash-free",
+  fallbackProviderIds: ["p_puter", "p_nvidia", "p_mistral"],
   retryAttempts: 2,
   timeout: 30000,
   rateLimitPerMinute: 60,
