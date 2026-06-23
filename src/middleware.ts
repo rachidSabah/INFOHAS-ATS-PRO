@@ -54,6 +54,7 @@ const ALLOWED_PROVIDER_HOSTS = new Set([
   "integrate.api.nvidia.com",
   "openrouter.ai",
   "api.opencode.com",
+  "opencode.ai",
   "api.perplexity.ai",
   "api.mistral.ai",
   "api.cohere.com",
@@ -161,7 +162,7 @@ export function middleware(request: NextRequest) {
   if (isProduction) {
     response.headers.set(
       "Content-Security-Policy",
-      "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' https://api.z.ai https://api.openai.com https://api.anthropic.com https://api.groq.com https://api.deepseek.com https://openrouter.ai https://api.mistral.ai https://*.cloudflare.com https://puter.com;",
+      "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' https://api.z.ai https://api.openai.com https://api.anthropic.com https://api.groq.com https://api.deepseek.com https://openrouter.ai https://opencode.ai https://api.mistral.ai https://*.cloudflare.com https://puter.com https://accounts.google.com;",
     );
   }
 

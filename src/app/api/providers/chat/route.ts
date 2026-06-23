@@ -8,9 +8,9 @@ export const runtime = "edge";
 const ALLOWED_HOSTS = new Set([
   "api.openai.com", "api.anthropic.com", "generativelanguage.googleapis.com",
   "api.groq.com", "api.deepseek.com", "integrate.api.nvidia.com",
-  "openrouter.ai", "api.opencode.com", "api.perplexity.ai",
-  "api.mistral.ai", "api.cohere.com", "api.together.xyz",
-  "api.z.ai", "api.aimlapi.com", "api.azure.com",
+  "openrouter.ai", "api.opencode.com", "opencode.ai",
+  "api.perplexity.ai", "api.mistral.ai", "api.cohere.com",
+  "api.together.xyz", "api.z.ai", "api.aimlapi.com", "api.azure.com",
 ]);
 
 function isAllowedUrl(urlStr: string): boolean {
