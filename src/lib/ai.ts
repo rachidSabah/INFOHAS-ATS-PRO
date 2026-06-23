@@ -1343,6 +1343,42 @@ export async function callAI(opts: AICallOptions): Promise<AICallResult> {
     }
   }
 
+  // ============================================================
+  // 0.5) OAUTH PROVIDER AUTH CHECK
+  // ============================================================
+  // If Puter or Z.ai is the configured default/fallback provider,
+  // check if they're authenticated. If NOT authenticated, throw
+  // ProviderAuthenticationError instead of silently falling to local engine.
+  // This prevents the "silent fallback → fake optimization" bug.
+  if (!opts.preferServer && typeof window !== "undefined") {
+    try {
+      const { getPuterProvider, getZaiProvider, ProviderAuthenticationError: AuthError } = await import("./providers");
+      const puterProvider = getPuterProvider();
+      const zaiProvider = getZaiProvider();
+
+      // Check if the default provider requires auth but isn't authenticated
+      const state: any = useApp.getState();
+      const providers: any[] = state?.providers || [];
+      const settings = state?.providerSettings || {};
+      const defaultId = settings.defaultProviderId;
+      const defaultProvider = providers.find((p: any) => p.id === defaultId);
+
+      if (defaultProvider?.type === "puter" && !puterProvider.isAuthenticated()) {
+        throw new AuthError(
+          "auth_required",
+          "Puter authentication required. Please sign in from Provider Settings.",
+          "puter",
+        );
+      }
+    } catch (e: any) {
+      if (e.name === "ProviderAuthenticationError") {
+        throw e; // Surface to the caller — no silent fallback
+      }
+      // Other errors during auth check are non-fatal
+      console.warn("[AI] Provider auth check failed (non-fatal):", e?.message);
+    }
+  }
+
   // === ALLOW PUTER FOR DOCUMENT TASKS AS FALLBACK ===
   // We only reach this point if:
   //   (a) No API provider was found/eligible, OR
@@ -1350,7 +1386,37 @@ export async function callAI(opts: AICallOptions): Promise<AICallResult> {
   // In both cases, Puter should be tried as a fallback — even for document tasks.
   // This fixes the "JD parsing fails with AI-over-API" bug where the API
   // provider returned empty/invalid, and Puter was never tried as a fallback.
+  //
+  // NEW: Also try the Z.ai Direct OAuth provider as a fallback before Puter.
+  // Z.ai is an API provider that works without browser auth — it should be
+  // preferred over Puter for document tasks.
   if (!opts.preferServer) {
+    // 0) Try Z.ai Direct OAuth provider (if authenticated)
+    try {
+      const { getZaiProvider } = await import("./providers");
+      const zaiProvider = getZaiProvider();
+      if (zaiProvider.isAuthenticated()) {
+        const result = await zaiProvider.generate({
+          systemPrompt: opts.systemPrompt,
+          userPrompt: opts.userPrompt,
+          maxTokens: opts.maxTokens,
+          temperature: opts.temperature,
+        });
+        console.info(`[AI] Using Z.ai Direct OAuth provider`);
+        return {
+          text: result.text,
+          provider: result.provider,
+          latencyMs: result.latencyMs,
+          tokensEstimate: estTokens(opts.userPrompt + (opts.systemPrompt ?? "")),
+        };
+      }
+    } catch (e: any) {
+      if (e.name === "ProviderAuthenticationError") {
+        throw e; // Surface auth errors — no silent fallback
+      }
+      console.warn("[AI] Z.ai Direct OAuth provider failed, trying Puter:", e?.message);
+    }
+
     // 1) Try Puter.js — the free, keyless BROWSER-AUTH provider.
     //
     // Puter is used for interactive/development tasks always, and for document
@@ -1558,6 +1624,18 @@ export async function callAI(opts: AICallOptions): Promise<AICallResult> {
   }
 
   // 3) Local deterministic fallback — always works, even offline
+  //
+  // CRITICAL RULE: The offline engine may activate ONLY if ALL providers fail.
+  // It must NEVER activate because:
+  //   - provider not logged in
+  //   - session expired
+  //   - refresh failed
+  // Those are authentication errors, not provider failures.
+  // When those occur, ProviderAuthenticationError is thrown above.
+  //
+  // If we reach this point, it means all providers (including Z.ai and Puter)
+  // genuinely failed — network errors, rate limits, invalid responses, etc.
+  console.warn("[AI] All providers failed. Falling back to Local Engine (offline mode). This should only happen when all providers are genuinely unavailable.");
   const text = localGenerate(opts);
   return {
     text,

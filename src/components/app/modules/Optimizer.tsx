@@ -408,6 +408,15 @@ export function Optimizer() {
       toast.success(`Optimization complete — ATS ${result.beforeATS?.scores.ats ?? "?"} → ${result.afterATS?.scores.ats ?? "?"} (${deltaStr} pts) · Confidence ${confidence}/100`);
     } catch (e: any) {
       if (controller.signal.aborted) return;
+      // Check for provider authentication errors — surface them specifically
+      if (e?.name === "ProviderAuthenticationError" || e?.code === "auth_required" || e?.code === "session_expired") {
+        const authMsg = e?.message || "Authentication required. Please sign in from Provider Settings.";
+        setPipelineError(authMsg);
+        setAiLog((l) => [...l, `✗ Authentication required: ${authMsg}`]);
+        setAiThinking(false);
+        toast.error(`Authentication required: ${authMsg.slice(0, 120)}`);
+        return;
+      }
       const errMsg = e?.message || "Optimization failed. Please try again.";
       setPipelineError(errMsg);
       setAiLog((l) => [...l, `✗ Pipeline failed: ${errMsg}`]);
