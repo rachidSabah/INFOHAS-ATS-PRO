@@ -98,8 +98,17 @@ export interface OAuthAIProvider {
 
   /**
    * Check if the provider is currently authenticated.
+   * Returns false when session is expired (no TOCTOU race).
+   * Use tryRefresh() to attempt a refresh before checking.
    */
   isAuthenticated(): boolean;
+
+  /**
+   * Attempt to refresh an expired session.
+   * Returns true if the session is now valid (still valid or successfully refreshed).
+   * Should be called before isAuthenticated() when the caller wants auto-refresh.
+   */
+  tryRefresh(): Promise<boolean>;
 }
 
 /**

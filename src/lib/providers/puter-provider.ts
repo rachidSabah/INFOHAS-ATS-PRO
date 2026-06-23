@@ -110,19 +110,18 @@ export class PuterProvider implements OAuthAIProvider {
         : false;
 
       if (!isSignedIn) {
-        // Try to re-authenticate
-        try {
-          await window.puter.auth.signIn();
-        } catch {
-          this.session = createEmptySession("puter");
-          this.session.authenticated = false;
-          await saveSession(this.session);
-          throw new ProviderAuthenticationError(
-            "refresh_failed",
-            "Unable to refresh Puter session. Please sign in again.",
-            "puter",
-          );
-        }
+        // DO NOT call signIn() here — it opens a popup which will be blocked
+        // by popup blockers when called from a non-user-gesture context (like
+        // a background refresh). Instead, mark as unauthenticated and require
+        // the user to explicitly sign in again.
+        this.session = createEmptySession("puter");
+        this.session.authenticated = false;
+        await saveSession(this.session);
+        throw new ProviderAuthenticationError(
+          "session_expired",
+          "Puter session expired. Please sign in again from Provider Settings.",
+          "puter",
+        );
       }
 
       // Extend the session
@@ -305,17 +304,36 @@ export class PuterProvider implements OAuthAIProvider {
 
   /**
    * Check if currently authenticated.
+   * Returns false when session is expired — no TOCTOU race.
+   * Use tryRefresh() to attempt a refresh before checking.
    */
   isAuthenticated(): boolean {
     if (!this.session.authenticated) return false;
     if (isSessionExpired(this.session)) {
-      // Don't immediately fail — mark for background refresh
-      this.refresh().catch(() => {
-        this.session.authenticated = false;
-      });
-      return true; // Give the refresh a chance
+      // Session is expired — do NOT return true while refreshing.
+      // That creates a TOCTOU race where callers see "true" but the
+      // session is actually invalid. Instead, return false and let
+      // the caller decide whether to refresh.
+      return false;
     }
     return true;
+  }
+
+  /**
+   * Attempt to refresh an expired session.
+   * Returns true if the session is now valid (either still valid or successfully refreshed).
+   * Should be called before isAuthenticated() when the caller wants auto-refresh.
+   */
+  async tryRefresh(): Promise<boolean> {
+    if (!this.session.authenticated) return false;
+    if (!isSessionExpired(this.session)) return true;
+    try {
+      await this.refresh();
+      return true;
+    } catch {
+      this.session.authenticated = false;
+      return false;
+    }
   }
 
   /**

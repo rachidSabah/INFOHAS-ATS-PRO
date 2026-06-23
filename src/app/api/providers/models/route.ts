@@ -4,6 +4,28 @@ import { NextRequest, NextResponse } from "next/server";
 
 export const runtime = "edge";
 
+// SSRF protection — same allowlist as chat route
+const ALLOWED_HOSTS = new Set([
+  "api.openai.com", "api.anthropic.com", "generativelanguage.googleapis.com",
+  "api.groq.com", "api.deepseek.com", "integrate.api.nvidia.com",
+  "openrouter.ai", "api.opencode.com", "api.perplexity.ai",
+  "api.mistral.ai", "api.cohere.com", "api.together.xyz",
+  "api.z.ai", "api.aimlapi.com", "api.azure.com",
+]);
+
+function isAllowedUrl(urlStr: string): boolean {
+  try {
+    const url = new URL(urlStr);
+    const h = url.hostname.toLowerCase();
+    if (h === "localhost" || h === "127.0.0.1" || h.startsWith("192.168.") ||
+        h.startsWith("10.") || h.startsWith("172.16.") || h.startsWith("169.254.") ||
+        h.endsWith(".local") || h.endsWith(".internal") || h === "0.0.0.0") {
+      return false;
+    }
+    return ALLOWED_HOSTS.has(h);
+  } catch { return false; }
+}
+
 export async function POST(req: NextRequest) {
   try {
     const { baseUrl, apiKey, authType, headersJson } = await req.json();
@@ -12,10 +34,26 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "baseUrl is required" }, { status: 400 });
     }
 
-    // Build headers
+    // SSRF check
+    if (!isAllowedUrl(baseUrl)) {
+      return NextResponse.json(
+        { error: "Provider URL not allowed. Only known AI provider APIs are supported." },
+        { status: 403 },
+      );
+    }
+
+    // Build headers — block dangerous overrides
+    const BLOCKED_HEADERS = new Set(["host", "cookie", "x-forwarded-for", "x-real-ip"]);
     const headers: Record<string, string> = {};
     if (headersJson) {
-      try { Object.assign(headers, JSON.parse(headersJson)); } catch {}
+      try {
+        const parsed = JSON.parse(headersJson);
+        for (const [key, value] of Object.entries(parsed)) {
+          if (!BLOCKED_HEADERS.has(key.toLowerCase())) {
+            headers[key] = String(value);
+          }
+        }
+      } catch (e) { console.warn("[ProviderModels] Invalid headersJson:", e); }
     }
     if (apiKey) {
       if (authType === "header") {

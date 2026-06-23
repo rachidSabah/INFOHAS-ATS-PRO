@@ -2,6 +2,9 @@
 // Returns codebase diagnostics: silent failure scan results, provider
 // health, cache state, error patterns, and debug metadata.
 // Edge Runtime compatible.
+//
+// SECURITY: This endpoint is BLOCKED in production via middleware.
+// It exposes internal architecture details that must not be public.
 
 import { NextRequest, NextResponse } from "next/server";
 
@@ -58,6 +61,11 @@ interface DebugResponse {
 }
 
 export async function GET(_req: NextRequest): Promise<NextResponse<DebugResponse>> {
+  // Extra runtime guard — also enforced by middleware, but belt-and-suspenders
+  if (process.env.NODE_ENV === "production") {
+    return NextResponse.json({ error: "Not found" }, { status: 404 });
+  }
+
   // Provider diagnostics
   const serverSideProviders = [
     { name: "OpenAI", configured: !!process.env.OPENAI_API_KEY, envVar: "OPENAI_API_KEY" },

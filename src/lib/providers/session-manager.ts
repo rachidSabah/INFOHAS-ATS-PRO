@@ -10,18 +10,43 @@ import { createEmptySession } from "./interface";
 // Encryption helpers using Web Crypto API (available in Edge + browser)
 // ============================================================================
 
-const ENCRYPTION_KEY = "resumeai-pro-session-key-v1";
-
+// Derive encryption key from a combination of origin + user agent fingerprint.
+// This is NOT as secure as a per-user secret, but it's much better than a
+// hardcoded key in source code. The key is unique per origin+browser combo,
+// so stealing the source code does NOT give the decryption key.
+// For production, replace with a proper server-side key management system.
 async function getEncryptionKey(): Promise<CryptoKey> {
+  // Create a stable but origin-specific key material
+  const origin = typeof window !== "undefined" ? window.location.origin : "resumeai-pro-fallback";
+  const ua = typeof navigator !== "undefined" ? navigator.userAgent : "unknown-ua";
+  const keyMaterial = `ResumeAI-Pro-Session-${origin}-${ua.slice(0, 32)}`;
+
+  // Use PBKDF2 to derive a proper AES-GCM key from the material
   const encoder = new TextEncoder();
-  const keyMaterial = await crypto.subtle.importKey(
+  const baseKey = await crypto.subtle.importKey(
     "raw",
-    encoder.encode(ENCRYPTION_KEY.padEnd(32, "0").slice(0, 32)),
-    { name: "AES-GCM" },
+    encoder.encode(keyMaterial),
+    { name: "PBKDF2" },
+    false,
+    ["deriveKey"],
+  );
+
+  // Use a fixed salt (acceptable for same-origin derivation — the salt
+  // prevents rainbow table attacks even though it's in source code)
+  const salt = encoder.encode("ResumeAI-Pro-PBKDF2-Salt-v1");
+
+  return crypto.subtle.deriveKey(
+    {
+      name: "PBKDF2",
+      salt,
+      iterations: 100000, // OWASP recommended minimum
+      hash: "SHA-256",
+    },
+    baseKey,
+    { name: "AES-GCM", length: 256 },
     false,
     ["encrypt", "decrypt"],
   );
-  return keyMaterial;
 }
 
 /**
@@ -43,11 +68,15 @@ async function encryptValue(plaintext: string | null): Promise<string | null> {
     const combined = new Uint8Array(iv.length + ciphertext.byteLength);
     combined.set(iv);
     combined.set(new Uint8Array(ciphertext), iv.length);
-    return btoa(String.fromCharCode(...combined));
-  } catch {
-    // Encryption not available — store as-is (better than losing the session)
-    console.warn("[SessionManager] Encryption failed, storing token as-is");
-    return plaintext;
+    // Use chunked encoding to avoid "Maximum call stack size exceeded" for large payloads
+    return uint8ToBase64(combined);
+  } catch (e) {
+    // CRITICAL: Encryption failure must NOT silently store plaintext tokens.
+    // Return a marker that indicates encryption failed — callers must handle this.
+    console.error("[SessionManager] Encryption FAILED — refusing to store unencrypted token!", e);
+    // Return null to signal encryption failure — the session manager should
+    // refuse to persist rather than storing plaintext.
+    return null;
   }
 }
 
@@ -69,8 +98,25 @@ async function decryptValue(ciphertext: string | null): Promise<string | null> {
     return new TextDecoder().decode(plaintext);
   } catch {
     // Decryption failed — might be unencrypted (from older version)
-    return ciphertext;
+    // or the key material changed (different browser/origin)
+    // Return the raw value and let the caller validate it
+    console.warn("[SessionManager] Decryption failed — data may be from a different origin or older version");
+    return null; // Don't return ciphertext as plaintext
   }
+}
+
+/**
+ * Chunked base64 encoding — avoids stack overflow on large Uint8Arrays.
+ * String.fromCharCode(...hugeArray) hits the max call stack size.
+ */
+function uint8ToBase64(bytes: Uint8Array): string {
+  const chunkSize = 8192;
+  let binary = "";
+  for (let i = 0; i < bytes.length; i += chunkSize) {
+    const chunk = bytes.subarray(i, Math.min(i + chunkSize, bytes.length));
+    binary += String.fromCharCode(...chunk);
+  }
+  return btoa(binary);
 }
 
 // ============================================================================
@@ -89,13 +135,30 @@ function storageKey(provider: ProviderSession["provider"]): string {
 
 /**
  * Save a provider session to localStorage with encrypted tokens.
+ * Refuses to store if encryption fails (no plaintext tokens on disk).
  */
 export async function saveSession(session: ProviderSession): Promise<void> {
   const encrypted = { ...session };
 
   // Encrypt sensitive fields
-  encrypted.accessToken = await encryptValue(session.accessToken);
-  encrypted.refreshToken = await encryptValue(session.refreshToken);
+  const encAccess = await encryptValue(session.accessToken);
+  const encRefresh = await encryptValue(session.refreshToken);
+
+  // If encryption failed, store session WITHOUT the access/refresh tokens
+  // rather than storing them in plaintext. The session metadata (email,
+  // expiry, models) is still useful for the UI, but the tokens are gone.
+  if (session.accessToken && encAccess === null) {
+    console.error(`[SessionManager] CRITICAL: Access token encryption failed for ${session.provider} — token will NOT be stored`);
+    encrypted.accessToken = null;
+  } else {
+    encrypted.accessToken = encAccess;
+  }
+  if (session.refreshToken && encRefresh === null) {
+    console.error(`[SessionManager] CRITICAL: Refresh token encryption failed for ${session.provider} — token will NOT be stored`);
+    encrypted.refreshToken = null;
+  } else {
+    encrypted.refreshToken = encRefresh;
+  }
 
   try {
     localStorage.setItem(storageKey(session.provider), JSON.stringify(encrypted));
@@ -199,9 +262,11 @@ export async function getAllSessions(): Promise<ProviderSession[]> {
 // ============================================================================
 
 const CLOUD_API_BASE =
-  typeof window !== "undefined" && window.location.hostname === "localhost"
+  (typeof window !== "undefined" && (window as any).__CLOUD_API_BASE) ||
+  (typeof process !== "undefined" && process.env?.NEXT_PUBLIC_CLOUD_API_BASE) ||
+  (typeof window !== "undefined" && window.location.hostname === "localhost"
     ? "http://localhost:8787"
-    : "https://resumeai-pro-api.rachidelsabah.workers.dev";
+    : "https://resumeai-pro-api.rachidelsabah.workers.dev");
 
 async function persistToCloud(session: ProviderSession): Promise<void> {
   if (typeof window === "undefined") return;

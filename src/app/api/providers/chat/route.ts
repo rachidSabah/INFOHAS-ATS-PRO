@@ -4,6 +4,31 @@ import { NextRequest, NextResponse } from "next/server";
 
 export const runtime = "edge";
 
+// SSRF protection — only allow known AI provider hostnames
+const ALLOWED_HOSTS = new Set([
+  "api.openai.com", "api.anthropic.com", "generativelanguage.googleapis.com",
+  "api.groq.com", "api.deepseek.com", "integrate.api.nvidia.com",
+  "openrouter.ai", "api.opencode.com", "api.perplexity.ai",
+  "api.mistral.ai", "api.cohere.com", "api.together.xyz",
+  "api.z.ai", "api.aimlapi.com", "api.azure.com",
+]);
+
+function isAllowedUrl(urlStr: string): boolean {
+  try {
+    const url = new URL(urlStr);
+    const h = url.hostname.toLowerCase();
+    // Block internal/private networks
+    if (h === "localhost" || h === "127.0.0.1" || h.startsWith("192.168.") ||
+        h.startsWith("10.") || h.startsWith("172.16.") || h.startsWith("169.254.") ||
+        h.endsWith(".local") || h.endsWith(".internal") || h === "0.0.0.0") {
+      return false;
+    }
+    return ALLOWED_HOSTS.has(h);
+  } catch {
+    return false;
+  }
+}
+
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json().catch(() => ({}));
@@ -13,10 +38,28 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: false, error: "baseUrl is required" }, { status: 400 });
     }
 
+    // SSRF check — reject requests to non-allowed hosts
+    if (!isAllowedUrl(baseUrl)) {
+      return NextResponse.json(
+        { ok: false, error: "Provider URL not allowed. Only known AI provider APIs are supported." },
+        { status: 403 },
+      );
+    }
+
+    // Block dangerous header overrides
+    const BLOCKED_HEADERS = new Set(["host", "cookie", "authorization", "x-forwarded-for", "x-real-ip"]);
+
     // Build headers
     const headers: Record<string, string> = { "Content-Type": "application/json" };
     if (headersJson) {
-      try { Object.assign(headers, JSON.parse(headersJson)); } catch {}
+      try {
+        const parsed = JSON.parse(headersJson);
+        for (const [key, value] of Object.entries(parsed)) {
+          if (!BLOCKED_HEADERS.has(key.toLowerCase())) {
+            headers[key] = String(value);
+          }
+        }
+      } catch (e) { console.warn("[ProviderChat] Invalid headersJson:", e); }
     }
     if (apiKey) {
       const isGemini = baseUrl.includes("generativelanguage.googleapis.com");

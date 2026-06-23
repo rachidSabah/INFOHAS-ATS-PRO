@@ -753,7 +753,23 @@ export async function exportResumeDOCX(resume: ResumeData, layout?: ResumeLayout
   // ===== CORE COMPETENCIES & SKILLS =====
   if (resume.skills.length > 0) {
     addSection("CORE COMPETENCIES & SKILLS");
-    docxBullet(`Category: Skill1, Skill2.`, L, accentHex, bodyHex);
+    // Group skills by category if available, otherwise render as a flat list
+    const categorized = new Map<string, string[]>();
+    for (const s of resume.skills) {
+      const cat = s.category?.trim() || "General";
+      if (!categorized.has(cat)) categorized.set(cat, []);
+      categorized.get(cat)!.push(s.name);
+    }
+    for (const [category, skills] of categorized) {
+      children.push(new Paragraph({
+        bullet: { level: 0 },
+        spacing: { after: 30 },
+        children: [
+          new TextRun({ text: `${category}: `, bold: true, size: L.bodyFontSizePt * 2, font: L.fontFamily, color: bodyHex }),
+          new TextRun({ text: skills.join(", "), size: L.bodyFontSizePt * 2, font: L.fontFamily, color: bodyHex }),
+        ],
+      }));
+    }
   }
 
   // ===== PROFESSIONAL EXPERIENCE =====
@@ -803,14 +819,13 @@ export async function exportResumeDOCX(resume: ResumeData, layout?: ResumeLayout
     }
   }
 
-  // ===== SKILLS (if not already rendered as CORE COMPETENCIES) =====
-  if (resume.skills.length > 0 && !resume.summary?.includes("CORE COMPETENCIES")) {
-    addSection("SKILLS");
-    children.push(new Paragraph({
-      spacing: { after: 120 },
-      children: [new TextRun({ text: resume.skills.map((s) => s.name).join("  •  "), size: L.bodyFontSizePt * 2, font: L.fontFamily, color: bodyHex })],
-    }));
-  }
+  // ===== SKILLS (only if not already rendered as CORE COMPETENCIES above) =====
+  // NOTE: We always render skills above in the CORE COMPETENCIES section.
+  // This section is a fallback for resumes that have skills but no summary
+  // and the CORE COMPETENCIES section already rendered them. We skip this
+  // to avoid double-rendering skills in the DOCX output.
+  // If you want a separate "SKILLS" section without the categorization,
+  // remove the CORE COMPETENCIES section above and use this instead.
 
   // ===== LANGUAGES =====
   if (resume.languages.length) {
@@ -846,10 +861,11 @@ export async function exportResumeDOCX(resume: ResumeData, layout?: ResumeLayout
   saveAs(blob, (resume.name || "resume").replace(/\s+/g, "_") + "_resume.docx");
 }
 
-// Bullet helper for DOCX — matches the PDF's category: items format
-function docxBullet(text: string, L: ResumeLayoutModel, _accentHex: string, _bodyHex: string) {
-  // Use inline text rendering — bullets are in the paragraph properties
-}
+// NOTE: The docxBullet function was previously a no-op (empty body).
+// Skills are now rendered directly as Paragraph elements with bullet properties
+// in the CORE COMPETENCIES section above. This function is removed to prevent
+// confusion. If you need a bullet helper, use children.push(new Paragraph({ bullet: { level: 0 }, ... }))
+// directly as shown in the skills section.
 
 function sectionPara(title: string, color: string): Paragraph {
   return new Paragraph({

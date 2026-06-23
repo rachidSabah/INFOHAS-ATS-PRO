@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect, useCallback } from "react";
 import { motion } from "framer-motion";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -17,6 +17,9 @@ import { ProviderEditor } from "./AIProviderEditor";
 import { ProviderAnalytics } from "./ProviderAnalytics";
 import { ProviderLogsTable } from "./ProviderLogsTable";
 import { TestConnectionModal } from "./TestConnectionModal";
+import { ProviderAuthCard } from "./ProviderAuthCard";
+import { getPuterProvider, getZaiProvider } from "@/lib/providers";
+import type { ProviderAuthStatus } from "@/lib/providers/interface";
 import {
   AreaChart, Area, BarChart, Bar, PieChart, Pie, Cell,
   XAxis, YAxis, Tooltip, ResponsiveContainer, Legend,
@@ -42,7 +45,7 @@ const PROVIDER_TYPES: { type: AIProviderType; label: string; icon: string; defau
   { type: "custom", label: "Custom / self-hosted LLM", icon: "Settings", defaultUrl: "", defaultModel: "", authType: "bearer" },
 ];
 
-type Tab = "providers" | "analytics" | "logs";
+type Tab = "providers" | "auth" | "analytics" | "logs";
 
 export function AIProviders() {
   const providers = useApp((s) => s.providers);
@@ -54,6 +57,37 @@ export function AIProviders() {
   const [editing, setEditing] = useState<AIProvider | null>(null);
   const [testing, setTesting] = useState<AIProvider | null>(null);
   const [q, setQ] = useState("");
+
+  // Provider auth state
+  const [puterStatus, setPuterStatus] = useState<ProviderAuthStatus>({
+    connected: false, authenticated: false, email: null, expiresAt: null, models: [], sharedAdminAccount: false,
+  });
+  const [zaiStatus, setZaiStatus] = useState<ProviderAuthStatus>({
+    connected: false, authenticated: false, email: null, expiresAt: null, models: [], sharedAdminAccount: false,
+  });
+
+  // Refresh auth status from providers
+  const refreshAuthStatus = useCallback(() => {
+    try {
+      setPuterStatus(getPuterProvider().getStatus());
+    } catch {}
+    try {
+      setZaiStatus(getZaiProvider().getStatus());
+    } catch {}
+  }, []);
+
+  // Restore sessions on mount
+  useEffect(() => {
+    (async () => {
+      try {
+        await getPuterProvider().restore();
+      } catch {}
+      try {
+        await getZaiProvider().restore();
+      } catch {}
+      refreshAuthStatus();
+    })();
+  }, [refreshAuthStatus]);
 
   const totalReqs = providers.reduce((n, p) => n + p.usage.requests, 0);
   const activeCount = providers.filter((p) => p.isActive).length;
@@ -85,13 +119,14 @@ export function AIProviders() {
       </div>
 
       {/* KPI cards */}
-      <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
+      <div className="grid grid-cols-2 lg:grid-cols-6 gap-3">
         {[
           { label: "Total providers", value: providers.length, icon: "Cpu", color: "#1154A3" },
           { label: "Active", value: activeCount, icon: "CheckCircle2", color: "#10B981" },
           { label: "Healthy", value: healthyCount, icon: "Heart", color: "#10B981" },
           { label: "Total requests", value: totalReqs.toLocaleString(), icon: "Activity", color: "#F59E0B" },
           { label: "Est. cost", value: `$${totalCost.toFixed(4)}`, icon: "DollarSign", color: "#8B5CF6" },
+          { label: "OAuth Auth", value: [puterStatus.authenticated, zaiStatus.authenticated].filter(Boolean).length, icon: "Shield", color: "#10B981" },
         ].map((s) => (
           <Card key={s.label}>
             <CardContent className="p-4 flex items-center gap-3">
@@ -111,6 +146,7 @@ export function AIProviders() {
       <div className="flex gap-1 p-1 bg-secondary rounded-lg w-fit">
         {[
           { id: "providers" as const, label: "Providers", icon: "List" },
+          { id: "auth" as const, label: "OAuth Auth", icon: "Shield" },
           { id: "analytics" as const, label: "Usage Analytics", icon: "BarChart3" },
           { id: "logs" as const, label: "Error Logs", icon: "ScrollText" },
         ].map((t) => (
@@ -209,6 +245,99 @@ export function AIProviders() {
             </div>
           </CardContent>
         </Card>
+      )}
+
+      {/* OAuth Auth tab */}
+      {tab === "auth" && (
+        <div className="space-y-4">
+          <div className="flex items-center justify-between">
+            <div>
+              <h2 className="text-lg font-semibold font-display flex items-center gap-2">
+                <Icon name="Shield" className="w-5 h-5 text-brand" />
+                Provider Authentication
+              </h2>
+              <p className="text-sm text-muted-foreground mt-1">
+                Authenticate with AI providers to enable seamless optimization. Authenticated providers never silently fall back to offline mode.
+              </p>
+            </div>
+            <Button variant="outline" size="sm" onClick={refreshAuthStatus} className="gap-1.5">
+              <Icon name="RefreshCw" className="w-3.5 h-3.5" /> Refresh Status
+            </Button>
+          </div>
+
+          <div className="grid gap-4 md:grid-cols-2">
+            {/* Z.ai Direct Auth */}
+            <ProviderAuthCard
+              providerId="zai-direct"
+              providerName="Z.ai Direct"
+              iconName="Cpu"
+              brandColor="#1154A3"
+              description="REST API with API key authentication"
+              models={["glm-4.6", "glm-5", "glm-5.1", "glm-5.2", "glm-5-air", "glm-5-flash", "codegeex-4"]}
+              status={zaiStatus}
+              onLogin={async () => {
+                const session = await getZaiProvider().login();
+                refreshAuthStatus();
+              }}
+              onRefresh={async () => {
+                await getZaiProvider().refresh();
+                refreshAuthStatus();
+              }}
+              onLogout={async () => {
+                await getZaiProvider().logout();
+                refreshAuthStatus();
+              }}
+              onToggleShared={async (enabled) => {
+                await getZaiProvider().setSharedAdminAccount(enabled);
+                refreshAuthStatus();
+              }}
+            />
+
+            {/* Puter.js Auth */}
+            <ProviderAuthCard
+              providerId="puter"
+              providerName="Puter.js"
+              iconName="Sparkles"
+              brandColor="#F59E0B"
+              description="Free browser-auth with Google OAuth"
+              models={["claude-sonnet-4-5", "gpt-5.4-nano", "gpt-4o", "gemini-2.5-flash", "deepseek-chat"]}
+              status={puterStatus}
+              onLogin={async () => {
+                const session = await getPuterProvider().login();
+                refreshAuthStatus();
+              }}
+              onRefresh={async () => {
+                await getPuterProvider().refresh();
+                refreshAuthStatus();
+              }}
+              onLogout={async () => {
+                await getPuterProvider().logout();
+                refreshAuthStatus();
+              }}
+              onToggleShared={async (enabled) => {
+                await getPuterProvider().setSharedAdminAccount(enabled);
+                refreshAuthStatus();
+              }}
+            />
+          </div>
+
+          {/* Auth info box */}
+          <Card className="bg-blue-50/50 dark:bg-blue-950/20 border-blue-200 dark:border-blue-800">
+            <CardContent className="p-4 flex items-start gap-3">
+              <Icon name="Info" className="w-5 h-5 text-blue-600 shrink-0 mt-0.5" />
+              <div className="text-sm text-blue-700 dark:text-blue-300 space-y-1">
+                <p className="font-medium">How Provider Authentication Works</p>
+                <ul className="text-xs space-y-0.5 text-blue-600/80 dark:text-blue-400/80">
+                  <li>• <strong>Z.ai Direct</strong> uses your API key to authenticate — no browser popup needed. The key is encrypted and stored securely.</li>
+                  <li>• <strong>Puter.js</strong> uses Google OAuth via a browser popup. Sign in once and your session persists across reloads.</li>
+                  <li>• When a provider is authenticated, it becomes available in the AI routing chain for all optimization requests.</li>
+                  <li>• <strong>Shared Admin Account</strong> mode lets all users on this instance use your authenticated session — ideal for team deployments.</li>
+                  <li>• Authentication errors are <strong>never silently ignored</strong> — you will always see a clear "Authentication required" message.</li>
+                </ul>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
       )}
 
       {/* Analytics tab */}

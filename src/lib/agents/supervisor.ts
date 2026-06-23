@@ -66,6 +66,7 @@ interface CacheEntry {
 
 const cache = new Map<string, CacheEntry>();
 const CACHE_TTL_MS = 10 * 60 * 1000; // 10 minutes
+const MAX_CACHE_SIZE = 50; // Prevent unbounded memory growth
 
 function getCached<T>(key: string): T | null {
   const entry = cache.get(key);
@@ -78,6 +79,11 @@ function getCached<T>(key: string): T | null {
 }
 
 function setCached<T>(key: string, result: T): void {
+  // Evict oldest entries if cache exceeds max size
+  if (cache.size >= MAX_CACHE_SIZE) {
+    const oldest = cache.keys().next().value;
+    if (oldest) cache.delete(oldest);
+  }
   cache.set(key, { key, result, timestamp: Date.now() });
 }
 
@@ -160,7 +166,7 @@ function setState(updater: (prev: SupervisorState) => SupervisorState): void {
   // pipeline survives browser refresh, logout/login, and crash. ===
   saveSnapshot(state);
   for (const listener of listeners) {
-    try { listener(state); } catch {}
+    try { listener(state); } catch (e) { console.warn("[Supervisor] Listener error:", e); }
   }
 }
 
@@ -307,7 +313,7 @@ async function reportAgentStatusToD1(
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        status: status === "running" ? "running" : status === "completed" || status === "cached" ? "running" : status === "failed" ? "running" : "running",
+        status: status === "completed" || status === "cached" ? "completed" : status === "failed" ? "failed" : "running",
         progress: progressMap[status],
         message: messageMap[status],
         error: patch.error,
@@ -682,6 +688,15 @@ export async function handleOptimizationRequested(
   },
 ): Promise<PipelineResult | null> {
   const { resume, jd, userDirectives, aviationMode, enableReflection = true, onProgress } = inputs;
+
+  // === CONCURRENT EXECUTION GUARD ===
+  // Prevent double-clicks or rapid re-submissions from running two
+  // pipelines simultaneously against the same mutable state.
+  if (state.isRunning) {
+    console.warn("[Supervisor] Pipeline already running — ignoring duplicate request");
+    return null;
+  }
+
   logEvent("job-url-added", { resumeId: resume.id, jobId: jd.id });
 
   setState((prev) => ({ ...prev, isRunning: true }));
@@ -746,13 +761,14 @@ export async function handleOptimizationRequested(
     return cachedResult;
   }
 
+  let result: PipelineResult | null = null;
   try {
     // === Run the existing 6-agent pipeline (V2) ===
     // The Supervisor delegates to runOptimizationPipeline — the existing
     // production-tested orchestrator. This preserves 100% backward compat.
     updateAgent("supervisor", { status: "running", startedAt: new Date().toISOString(), log: "Delegating to 6-agent optimization pipeline…" });
 
-    const result = await runOptimizationPipeline({
+    result = await runOptimizationPipeline({
       resume,
       jd,
       userDirectives,
@@ -1324,7 +1340,7 @@ export function restoreFromSnapshot(): boolean {
 
   // Notify listeners
   for (const listener of listeners) {
-    try { listener(state); } catch {}
+    try { listener(state); } catch (e) { console.warn("[Supervisor] Listener error:", e); }
   }
   return true;
 }

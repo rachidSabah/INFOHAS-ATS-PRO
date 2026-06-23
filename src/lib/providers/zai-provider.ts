@@ -54,7 +54,9 @@ export class ZaiProvider implements OAuthAIProvider {
     }
 
     try {
-      // Validate the API key by making a test call
+      // Validate the API key by making a minimal test call.
+      // Use the smallest possible request to minimize token consumption.
+      // We send a 1-token prompt and request only 1 max_token.
       const testResponse = await fetch("https://api.z.ai/api/paas/v4/chat/completions", {
         method: "POST",
         headers: {
@@ -62,9 +64,9 @@ export class ZaiProvider implements OAuthAIProvider {
           "Authorization": `Bearer ${apiKey}`,
         },
         body: JSON.stringify({
-          model: "glm-4.6",
-          messages: [{ role: "user", content: "Hello, respond with 'OK' to confirm connectivity." }],
-          max_tokens: 10,
+          model: "glm-5-flash", // Use the lightest/cheapest model for validation
+          messages: [{ role: "user", content: "Hi" }], // Minimal prompt
+          max_tokens: 1, // Only request 1 token back
         }),
         signal: AbortSignal.timeout(15000),
       });
@@ -133,7 +135,7 @@ export class ZaiProvider implements OAuthAIProvider {
     }
 
     try {
-      // Quick validation call
+      // Quick validation call — use the cheapest model and minimal tokens
       const testResponse = await fetch("https://api.z.ai/api/paas/v4/chat/completions", {
         method: "POST",
         headers: {
@@ -141,9 +143,9 @@ export class ZaiProvider implements OAuthAIProvider {
           "Authorization": `Bearer ${apiKey}`,
         },
         body: JSON.stringify({
-          model: "glm-4.6",
-          messages: [{ role: "user", content: "Ping" }],
-          max_tokens: 5,
+          model: "glm-5-flash", // Lightest model for validation
+          messages: [{ role: "user", content: "Hi" }],
+          max_tokens: 1,
         }),
         signal: AbortSignal.timeout(15000),
       });
@@ -313,9 +315,11 @@ export class ZaiProvider implements OAuthAIProvider {
     const text = data?.choices?.[0]?.message?.content ?? "";
 
     if (!text || text.trim().length === 0) {
+      // Empty response is NOT necessarily an auth error — it could be
+      // a rate limit, content filter, or model error. Use a distinct code.
       throw new ProviderAuthenticationError(
-        "auth_required",
-        "Z.ai returned an empty response.",
+        "session_expired",
+        "Z.ai returned an empty response. This may indicate a rate limit, content filter, or model error. Please try again.",
         "zai-direct",
       );
     }
@@ -343,16 +347,36 @@ export class ZaiProvider implements OAuthAIProvider {
 
   /**
    * Check if currently authenticated.
+   * Returns false when session is expired — no TOCTOU race.
+   * Use tryRefresh() to attempt a refresh before checking.
    */
   isAuthenticated(): boolean {
     if (!this.session.authenticated) return false;
     if (isSessionExpired(this.session)) {
-      this.refresh().catch(() => {
-        this.session.authenticated = false;
-      });
-      return true;
+      // Session is expired — do NOT return true while refreshing.
+      // That creates a TOCTOU race where callers see "true" but the
+      // session is actually invalid. Instead, return false and let
+      // the caller decide whether to refresh.
+      return false;
     }
     return true;
+  }
+
+  /**
+   * Attempt to refresh an expired session.
+   * Returns true if the session is now valid (either still valid or successfully refreshed).
+   * Should be called before isAuthenticated() when the caller wants auto-refresh.
+   */
+  async tryRefresh(): Promise<boolean> {
+    if (!this.session.authenticated) return false;
+    if (!isSessionExpired(this.session)) return true;
+    try {
+      await this.refresh();
+      return true;
+    } catch {
+      this.session.authenticated = false;
+      return false;
+    }
   }
 
   /**

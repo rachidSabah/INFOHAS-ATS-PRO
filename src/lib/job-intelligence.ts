@@ -135,13 +135,14 @@ Return ONLY valid JSON:
       taskCategory: "document",
     });
 
-    const data = extractJSON<JobIntelligence>(result.text);
-
-    // Reject local fallback — it returns empty/placeholder data
+    // Reject local fallback BEFORE parsing — it returns empty/placeholder data
+    // and extractJSON may throw on malformed fallback responses.
     if (result.provider === "Local Engine (offline mode)") {
       console.warn("[JobIntelligence] No AI provider available — using fallback");
       return fallbackJobIntelligence(jd);
     }
+
+    const data = extractJSON<JobIntelligence>(result.text);
 
     return normalizeJobIntelligence(data, jd);
   } catch (e: any) {

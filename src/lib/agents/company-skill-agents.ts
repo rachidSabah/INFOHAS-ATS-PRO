@@ -108,7 +108,7 @@ Be specific to ${companyName}. If information is not available for a field, use 
 
   let data: any;
   try { data = extractJSON<any>(result.text); }
-  catch { return null; }
+  catch (e) { console.warn("[CompanyIntelligence] JSON parse failed:", e); return null; }
 
   // Defensive normalization (the AI may return arrays as strings, etc.)
   const toArray = (v: any): string[] => {
@@ -241,7 +241,7 @@ Be honest. If the candidate is a poor match, say so. The bridging strategy must 
 
   let data: any;
   try { data = extractJSON<any>(result.text); }
-  catch { return null; }
+  catch (e) { console.warn("[SkillGap] JSON parse failed:", e); return null; }
 
   // Defensive normalization
   const toArray = (v: any): string[] => {

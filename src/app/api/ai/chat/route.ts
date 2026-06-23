@@ -20,6 +20,17 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "userPrompt is required" }, { status: 400 });
     }
 
+    // Input validation — prevent abuse
+    const MAX_PROMPT_LENGTH = 100_000; // 100K chars
+    if (userPrompt.length > MAX_PROMPT_LENGTH) {
+      return NextResponse.json({ error: "userPrompt too long (max 100K characters)" }, { status: 400 });
+    }
+    if (systemPrompt && systemPrompt.length > MAX_PROMPT_LENGTH) {
+      return NextResponse.json({ error: "systemPrompt too long (max 100K characters)" }, { status: 400 });
+    }
+    const clampedMaxTokens = Math.min(Math.max(Number(maxTokens) || 4096, 100), 16384);
+    const clampedTemperature = Math.min(Math.max(Number(temperature) || 0.7, 0), 2);
+
     // Call Z.ai API directly via fetch (Edge-compatible)
     // The z-ai-web-dev-sdk isn't Edge-compatible, so we use the REST API.
     // In dev, this falls back to the local engine on the client side if this fails.
@@ -47,8 +58,8 @@ export async function POST(req: NextRequest) {
       body: JSON.stringify({
         model: "glm-4.6",
         messages,
-        temperature,
-        max_tokens: maxTokens,
+        temperature: clampedTemperature,
+        max_tokens: clampedMaxTokens,
       }),
       signal: AbortSignal.timeout(25000),
     });
@@ -70,8 +81,12 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ text, provider: "z-ai" });
   } catch (e: any) {
     console.error("[/api/ai/chat] error:", e);
+    // Don't leak internal error details in production
+    const msg = process.env.NODE_ENV === "production"
+      ? "AI service temporarily unavailable. Please try again."
+      : (e?.message ?? "AI call failed");
     return NextResponse.json(
-      { error: e?.message ?? "AI call failed", fallback: true },
+      { error: msg, fallback: true },
       { status: 500 }
     );
   }

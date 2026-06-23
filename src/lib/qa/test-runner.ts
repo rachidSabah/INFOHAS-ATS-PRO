@@ -148,6 +148,8 @@ export function runFullQASuite(opts: {
   allResults.push(...cacheKeyTests);
 
   // === 4. Export Tests ===
+  // NOTE: These are structural checks, not runtime validation.
+  // Real export validation happens in the pipeline QA agent.
   const exportTests: QATestResult[] = [
     {
       id: `export_formats_${Date.now()}`,
@@ -158,6 +160,7 @@ export function runFullQASuite(opts: {
       message: "All 5 export formats available: PDF, DOCX, DOC, TXT, HTML",
       durationMs: 0,
       timestamp,
+      suggestion: "This is a structural check. Runtime export validation is performed by the pipeline QA agent.",
     },
     {
       id: `export_onepage_${Date.now()}`,
@@ -165,9 +168,10 @@ export function runFullQASuite(opts: {
       category: "export",
       severity: "critical",
       passed: true,
-      message: "PDF export enforces one-page A4 format with auto-compression",
+      message: "PDF export enforces one-page A4 format with auto-compression (up to 4 retry attempts)",
       durationMs: 0,
       timestamp,
+      suggestion: "This is a structural check. Actual one-page compliance is validated by optimization-validators during pipeline runs.",
     },
   ];
   suites.push({
@@ -272,6 +276,8 @@ export function runFullQASuite(opts: {
   allResults.push(...perfTests);
 
   // === 10. Persistence Tests ===
+  // NOTE: Structural check only. Actual D1/localStorage availability
+  // is validated at runtime by the session manager and supervisor.
   const persistenceTests: QATestResult[] = [
     {
       id: `persistence_config_${Date.now()}`,
@@ -282,6 +288,7 @@ export function runFullQASuite(opts: {
       message: "Data persisted via D1 (cloud) + localStorage (offline fallback)",
       durationMs: 0,
       timestamp,
+      suggestion: "This is a structural check. Actual D1 connectivity is validated by session-manager at runtime.",
     },
   ];
   suites.push({

@@ -1323,7 +1323,7 @@ export async function callAI(opts: AICallOptions): Promise<AICallResult> {
               if (fallbacks.length > 0) {
                 state.openFallbackOffer(fallbacks, defaultProvider?.id ?? null);
               }
-            } catch {}
+            } catch (e) { console.warn("[AI] Fallback offer failed:", e); }
           }
           throw e;
         }
@@ -1356,19 +1356,23 @@ export async function callAI(opts: AICallOptions): Promise<AICallResult> {
       const puterProvider = getPuterProvider();
       const zaiProvider = getZaiProvider();
 
-      // Check if the default provider requires auth but isn't authenticated
+      // Check if the default provider requires auth but isn't authenticated.
+      // Use tryRefresh() to handle expired sessions correctly (no TOCTOU race).
       const state: any = useApp.getState();
       const providers: any[] = state?.providers || [];
       const settings = state?.providerSettings || {};
       const defaultId = settings.defaultProviderId;
       const defaultProvider = providers.find((p: any) => p.id === defaultId);
 
-      if (defaultProvider?.type === "puter" && !puterProvider.isAuthenticated()) {
-        throw new AuthError(
-          "auth_required",
-          "Puter authentication required. Please sign in from Provider Settings.",
-          "puter",
-        );
+      if (defaultProvider?.type === "puter") {
+        const puterOk = await puterProvider.tryRefresh();
+        if (!puterOk) {
+          throw new AuthError(
+            "auth_required",
+            "Puter authentication required. Please sign in from Provider Settings.",
+            "puter",
+          );
+        }
       }
     } catch (e: any) {
       if (e.name === "ProviderAuthenticationError") {
@@ -1395,7 +1399,8 @@ export async function callAI(opts: AICallOptions): Promise<AICallResult> {
     try {
       const { getZaiProvider } = await import("./providers");
       const zaiProvider = getZaiProvider();
-      if (zaiProvider.isAuthenticated()) {
+      // Use tryRefresh() to handle expired sessions — no TOCTOU race
+      if (await zaiProvider.tryRefresh()) {
         const result = await zaiProvider.generate({
           systemPrompt: opts.systemPrompt,
           userPrompt: opts.userPrompt,
@@ -2043,7 +2048,7 @@ function localOptimize(prompt: string): string {
   const firstBrace = prompt.indexOf("{");
   const lastBrace = prompt.lastIndexOf("}");
   if (firstBrace !== -1 && lastBrace > firstBrace) {
-    try { resume = JSON.parse(prompt.slice(firstBrace, lastBrace + 1)); } catch {}
+    try { resume = JSON.parse(prompt.slice(firstBrace, lastBrace + 1)); } catch (e) { /* JSON parse of user prompt is best-effort */ }
   }
 
   const name = resume?.name || "Your Name";
@@ -2162,7 +2167,7 @@ export async function callAIStreamed(opts: AICallOptions, onChunk: (chunk: strin
           if (puterProvider?.modelName) {
             chatOpts.model = puterProvider.modelName;
           }
-        } catch {}
+        } catch (e) { console.warn("[AI] Puter model lookup failed:", e); }
 
         const response: any = await withTimeout(
           window.puter.ai.chat(messages, chatOpts),
