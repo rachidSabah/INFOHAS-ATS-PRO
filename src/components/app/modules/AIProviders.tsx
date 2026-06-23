@@ -307,7 +307,7 @@ export function AIProviders() {
                 providerName="Z.ai Direct"
                 iconName="Cpu"
                 brandColor="#1154A3"
-                description={isGoogleOAuthConfigured() ? "Sign in with Google or API key" : "REST API — sign in with API key"}
+                description="Sign in with Google or API key"
                 models={zaiStatus.models.length > 0 ? zaiStatus.models : ["glm-4.6", "glm-5", "glm-5.1", "glm-5.2", "glm-5-air", "glm-5-flash", "codegeex-4"]}
                 status={zaiStatus}
                 onLogin={async () => {
@@ -433,9 +433,20 @@ export function AIProviders() {
                     {!isGoogleOAuthConfigured() && (
                       <div className="flex items-start gap-2 p-2 bg-amber-50 dark:bg-amber-950/20 rounded-md border border-amber-200 dark:border-amber-800">
                         <Icon name="Info" className="w-3.5 h-3.5 text-amber-600 shrink-0 mt-0.5" />
-                        <p className="text-[10px] text-amber-700 dark:text-amber-400">
-                          To enable &quot;Sign in with Google&quot; for Z.ai, set <code className="font-mono text-[9px] bg-amber-100 dark:bg-amber-900/40 px-1 py-0.5 rounded">NEXT_PUBLIC_GOOGLE_CLIENT_ID</code> in your environment variables.
-                        </p>
+                        <div className="text-[10px] text-amber-700 dark:text-amber-400 space-y-1">
+                          <p className="font-medium">Enable Google Sign-In for Z.ai</p>
+                          <p className="text-amber-600/80 dark:text-amber-500/80">
+                            Add your Google OAuth Client ID to <code className="font-mono text-[9px] bg-amber-100 dark:bg-amber-900/40 px-1 py-0.5 rounded">NEXT_PUBLIC_GOOGLE_CLIENT_ID</code> in your <code className="font-mono text-[9px] bg-amber-100 dark:bg-amber-900/40 px-1 py-0.5 rounded">.env</code> file, then redeploy.
+                          </p>
+                          <a
+                            href="https://console.cloud.google.com/apis/credentials"
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex items-center gap-1 text-blue-600 hover:underline font-medium"
+                          >
+                            <Icon name="ExternalLink" className="w-3 h-3" /> Get Client ID from Google Cloud Console
+                          </a>
+                        </div>
                       </div>
                     )}
                   </CardContent>
