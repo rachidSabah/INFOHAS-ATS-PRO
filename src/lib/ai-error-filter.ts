@@ -66,6 +66,15 @@ export const ERROR_LEAK_PATTERNS: RegExp[] = [
   /```/i,
   // ATS/optimization metadata that should never appear in a resume
   /\b(ats score|keyword match|requirements match|optimization notes|ai notes)\b/i,
+  // Analysis artifacts — AI outputs "From JD:" instead of real skill categories
+  /from jd\s*:/i,
+  /\bmissing skills?\s*:/i,
+  /\bkeywords? identified\s*:/i,
+  /\brequired skills?\s*:/i,
+  /keyword gap/i,
+  /identified gaps/i,
+  /areas? (for|of) improvement/i,
+  /suggested improvement/i,
 ];
 
 /**
@@ -82,6 +91,10 @@ const FORBIDDEN_SECTIONS = [
   "provider errors",
   "system messages",
   "debug information",
+  "from jd",
+  "missing skills",
+  "keyword gap",
+  "identified gaps",
 ];
 
 export interface ValidationResult {

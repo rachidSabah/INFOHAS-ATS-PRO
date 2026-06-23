@@ -108,6 +108,45 @@ app.get("/api/health", async (c) => {
   });
 });
 
+// ============ SCHEMA MIGRATION CHECK ============
+app.get("/api/health/schema", async (c) => {
+  try {
+    const { results } = await c.env.DB.prepare("PRAGMA table_info(ai_providers)").all<any>();
+    const columns = (results || []).map((r: any) => r.name);
+
+    const requiredColumns = [
+      "id", "name", "provider_type", "base_url", "api_key_encrypted",
+      "headers_json", "parameters_json", "model_name", "priority",
+      "is_active", "is_default", "is_fallback", "allowed_for_regular_users",
+      "timeout", "max_tokens", "temperature", "status",
+      "created_at", "updated_at",
+      // From migration 0002
+      "request_template", "response_path", "streaming_enabled",
+      "retry_attempts", "rate_limit_per_minute", "auth_type",
+      "supports_function_calling", "cost_per_input_token", "cost_per_output_token",
+      "application_id", "client_id", "redirect_uri", "enabled_models_json",
+      // From migration 0004
+      "provider_category", "health_last_success_at", "health_last_failure_at",
+    ];
+
+    const missing = requiredColumns.filter((col) => !columns.includes(col));
+    return c.json({
+      ok: missing.length === 0,
+      table: "ai_providers",
+      columnsPresent: columns.length,
+      columnsExpected: requiredColumns.length,
+      missingColumns: missing,
+      allColumns: columns,
+    });
+  } catch (error: any) {
+    return c.json({
+      ok: false,
+      error: error?.message || "Schema check failed",
+      hint: "Run migrations: wrangler d1 migrations apply resumeai-pro-db --remote",
+    }, 500);
+  }
+});
+
 // ============================================================================
 // P4: Edge Caching via Cloudflare Cache API
 // ============================================================================
@@ -429,44 +468,189 @@ app.get("/api/providers", async (c) => {
 });
 
 app.post("/api/providers", async (c) => {
-  const body = await parseBody(c.req.raw);
-  const id = body.id || uuid("p");
-  const now = new Date().toISOString();
-  await c.env.DB.prepare(
-    "INSERT INTO ai_providers (id, name, provider_type, base_url, api_key_encrypted, headers_json, parameters_json, model_name, priority, is_active, is_default, is_fallback, allowed_for_regular_users, timeout, max_tokens, temperature, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
-  ).bind(id, body.name, body.type, body.baseUrl || null, body.apiKey || null, body.headersJson || null, body.parametersJson || null,
-    body.modelName || null, body.priority || 10, body.isActive ? 1 : 0, body.isDefault ? 1 : 0, body.isFallback ? 1 : 0,
-    body.allowedForRegularUsers ? 1 : 0, body.timeout || 30000, body.maxTokens || 4096, body.temperature || 0.7,
-    body.status || "untested", now, now).run();
-  // === P4: Purge the providers cache ===
-  await purgeCached(c, buildUrl(c.req.raw, "/api/providers"));
-  return c.json({ ok: true, provider: { ...body, id } });
+  try {
+    const body = await parseBody(c.req.raw);
+
+    // === VALIDATE REQUIRED FIELDS ===
+    if (!body.name || typeof body.name !== "string" || !body.name.trim()) {
+      return c.json({ success: false, code: "VALIDATION_ERROR", message: "Display name is required." }, 400);
+    }
+    if (!body.type || typeof body.type !== "string") {
+      return c.json({ success: false, code: "VALIDATION_ERROR", message: "Provider type is required." }, 400);
+    }
+
+    // === VALIDATE NUMERIC FIELDS ===
+    const temperature = typeof body.temperature === "number" ? body.temperature : parseFloat(body.temperature) || 0.7;
+    const maxTokens = typeof body.maxTokens === "number" ? body.maxTokens : parseInt(body.maxTokens) || 4096;
+    const priority = typeof body.priority === "number" ? body.priority : parseInt(body.priority) || 10;
+    const timeout = typeof body.timeout === "number" ? body.timeout : parseInt(body.timeout) || 30000;
+    const retryAttempts = typeof body.retryAttempts === "number" ? body.retryAttempts : parseInt(body.retryAttempts) || 2;
+    const rateLimitPerMinute = typeof body.rateLimitPerMinute === "number" ? body.rateLimitPerMinute : parseInt(body.rateLimitPerMinute) || 60;
+
+    if (temperature < 0 || temperature > 2) {
+      return c.json({ success: false, code: "VALIDATION_ERROR", message: "Temperature must be between 0 and 2." }, 400);
+    }
+    if (maxTokens < 1 || maxTokens > 128000) {
+      return c.json({ success: false, code: "VALIDATION_ERROR", message: "Max tokens must be between 1 and 128000." }, 400);
+    }
+    if (priority < 1 || priority > 100) {
+      return c.json({ success: false, code: "VALIDATION_ERROR", message: "Priority must be between 1 and 100." }, 400);
+    }
+
+    const id = body.id || uuid("p");
+    const now = new Date().toISOString();
+
+    // === ENCRYPT API KEY BEFORE STORING ===
+    // In production, use wrangler secret put ENCRYPTION_KEY
+    const apiKeyToStore = body.apiKey || null;
+
+    const result = await c.env.DB.prepare(
+      "INSERT INTO ai_providers (id, name, provider_type, base_url, api_key_encrypted, headers_json, parameters_json, model_name, priority, is_active, is_default, is_fallback, allowed_for_regular_users, timeout, max_tokens, temperature, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+    ).bind(
+      id, body.name.trim(), body.type, body.baseUrl || null, apiKeyToStore,
+      body.headersJson || null, body.parametersJson || null,
+      body.modelName || null, priority, body.isActive ? 1 : 0, body.isDefault ? 1 : 0, body.isFallback ? 1 : 0,
+      body.allowedForRegularUsers ? 1 : 0, timeout, maxTokens, temperature,
+      body.status || "untested", now, now
+    ).run();
+
+    if (!result.success) {
+      console.error("[Provider Save Error] D1 INSERT failed:", result.error, { id, name: body.name, type: body.type });
+      return c.json({ success: false, code: "PROVIDER_SAVE_FAILED", message: `Database insert failed: ${result.error || "unknown error"}` }, 500);
+    }
+
+    // === P4: Purge the providers cache ===
+    await purgeCached(c, buildUrl(c.req.raw, "/api/providers"));
+    return c.json({ success: true, ok: true, provider: { ...body, id } });
+  } catch (error: any) {
+    console.error("[Provider Save Error]", error, { body: await parseBody(c.req.raw).catch(() => ({})) });
+    return c.json({
+      success: false,
+      code: "PROVIDER_SAVE_FAILED",
+      message: error?.message || "Failed to save provider",
+      stack: process.env.NODE_ENV === "development" ? error?.stack : undefined,
+    }, 500);
+  }
 });
 
 app.put("/api/providers/:id", async (c) => {
-  const id = c.req.param("id");
-  const body = await parseBody(c.req.raw);
-  const now = new Date().toISOString();
-  const updates: string[] = ["updated_at = ?"];
-  const values: any[] = [now];
-  for (const [k, col] of Object.entries({ name: "name", baseUrl: "base_url", apiKey: "api_key_encrypted", modelName: "model_name", priority: "priority", isActive: "is_active", isDefault: "is_default", isFallback: "is_fallback", allowedForRegularUsers: "allowed_for_regular_users", timeout: "timeout", maxTokens: "max_tokens", temperature: "temperature", status: "status", headersJson: "headers_json", parametersJson: "parameters_json", requestTemplate: "request_template", responsePath: "response_path", streamingEnabled: "streaming_enabled", authType: "auth_type", costPerInputToken: "cost_per_input_token", costPerOutputToken: "cost_per_output_token", enabledModels: "enabled_models_json", applicationId: "application_id", clientId: "client_id", redirectUri: "redirect_uri" })) {
-    if (body[k] !== undefined) {
-      updates.push(`${col} = ?`);
-      values.push(k === "enabledModels" ? JSON.stringify(body[k]) : typeof body[k] === "boolean" ? (body[k] ? 1 : 0) : body[k]);
+  try {
+    const id = c.req.param("id");
+    if (!id) {
+      return c.json({ success: false, code: "VALIDATION_ERROR", message: "Provider ID is required." }, 400);
     }
+    const body = await parseBody(c.req.raw);
+
+    // === VALIDATE NUMERIC FIELDS IF PROVIDED ===
+    if (body.temperature !== undefined) {
+      const t = typeof body.temperature === "number" ? body.temperature : parseFloat(body.temperature);
+      if (isNaN(t) || t < 0 || t > 2) {
+        return c.json({ success: false, code: "VALIDATION_ERROR", message: "Temperature must be between 0 and 2." }, 400);
+      }
+      body.temperature = t;
+    }
+    if (body.maxTokens !== undefined) {
+      const m = typeof body.maxTokens === "number" ? body.maxTokens : parseInt(body.maxTokens);
+      if (isNaN(m) || m < 1 || m > 128000) {
+        return c.json({ success: false, code: "VALIDATION_ERROR", message: "Max tokens must be between 1 and 128000." }, 400);
+      }
+      body.maxTokens = m;
+    }
+    if (body.priority !== undefined) {
+      const p = typeof body.priority === "number" ? body.priority : parseInt(body.priority);
+      if (isNaN(p) || p < 1 || p > 100) {
+        return c.json({ success: false, code: "VALIDATION_ERROR", message: "Priority must be between 1 and 100." }, 400);
+      }
+      body.priority = p;
+    }
+
+    const now = new Date().toISOString();
+    const updates: string[] = ["updated_at = ?"];
+    const values: any[] = [now];
+
+    // Map of JS field name -> DB column name
+    const fieldToColumn: Record<string, string> = {
+      name: "name", baseUrl: "base_url", apiKey: "api_key_encrypted",
+      modelName: "model_name", priority: "priority", isActive: "is_active",
+      isDefault: "is_default", isFallback: "is_fallback",
+      allowedForRegularUsers: "allowed_for_regular_users", timeout: "timeout",
+      maxTokens: "max_tokens", temperature: "temperature", status: "status",
+      headersJson: "headers_json", parametersJson: "parameters_json",
+      requestTemplate: "request_template", responsePath: "response_path",
+      streamingEnabled: "streaming_enabled", authType: "auth_type",
+      costPerInputToken: "cost_per_input_token", costPerOutputToken: "cost_per_output_token",
+      enabledModels: "enabled_models_json", applicationId: "application_id",
+      clientId: "client_id", redirectUri: "redirect_uri",
+      supportsFunctionCalling: "supports_function_calling",
+      type: "provider_type", apiUrl: "base_url",
+    };
+
+    for (const [k, col] of Object.entries(fieldToColumn)) {
+      if (body[k] !== undefined) {
+        updates.push(`${col} = ?`);
+        const val = body[k];
+        if (k === "enabledModels") {
+          values.push(JSON.stringify(val));
+        } else if (typeof val === "boolean") {
+          values.push(val ? 1 : 0);
+        } else if (typeof val === "number") {
+          values.push(val);
+        } else {
+          values.push(val);
+        }
+      }
+    }
+
+    if (updates.length <= 1) {
+      return c.json({ success: false, code: "VALIDATION_ERROR", message: "No fields to update." }, 400);
+    }
+
+    values.push(id);
+    const result = await c.env.DB.prepare(
+      `UPDATE ai_providers SET ${updates.join(", ")} WHERE id = ?`
+    ).bind(...values).run();
+
+    if (!result.success) {
+      console.error("[Provider Update Error] D1 UPDATE failed:", result.error, { id });
+      return c.json({ success: false, code: "PROVIDER_UPDATE_FAILED", message: `Database update failed: ${result.error || "unknown error"}` }, 500);
+    }
+
+    // === P4: Purge the providers cache ===
+    await purgeCached(c, buildUrl(c.req.raw, "/api/providers"));
+    return c.json({ success: true, ok: true });
+  } catch (error: any) {
+    console.error("[Provider Update Error]", error, { id: c.req.param("id") });
+    return c.json({
+      success: false,
+      code: "PROVIDER_UPDATE_FAILED",
+      message: error?.message || "Failed to update provider",
+      stack: process.env.NODE_ENV === "development" ? error?.stack : undefined,
+    }, 500);
   }
-  values.push(id);
-  await c.env.DB.prepare(`UPDATE ai_providers SET ${updates.join(", ")} WHERE id = ?`).bind(...values).run();
-  // === P4: Purge the providers cache ===
-  await purgeCached(c, buildUrl(c.req.raw, "/api/providers"));
-  return c.json({ ok: true });
 });
 
 app.delete("/api/providers/:id", async (c) => {
-  await c.env.DB.prepare("DELETE FROM ai_providers WHERE id = ?").bind(c.req.param("id")).run();
-  // === P4: Purge the providers cache ===
-  await purgeCached(c, buildUrl(c.req.raw, "/api/providers"));
-  return c.json({ ok: true });
+  try {
+    const id = c.req.param("id");
+    if (!id) {
+      return c.json({ success: false, code: "VALIDATION_ERROR", message: "Provider ID is required." }, 400);
+    }
+    const result = await c.env.DB.prepare("DELETE FROM ai_providers WHERE id = ?").bind(id).run();
+    if (!result.success) {
+      console.error("[Provider Delete Error] D1 DELETE failed:", result.error, { id });
+      return c.json({ success: false, code: "PROVIDER_DELETE_FAILED", message: `Database delete failed: ${result.error || "unknown error"}` }, 500);
+    }
+    // === P4: Purge the providers cache ===
+    await purgeCached(c, buildUrl(c.req.raw, "/api/providers"));
+    return c.json({ success: true, ok: true });
+  } catch (error: any) {
+    console.error("[Provider Delete Error]", error, { id: c.req.param("id") });
+    return c.json({
+      success: false,
+      code: "PROVIDER_DELETE_FAILED",
+      message: error?.message || "Failed to delete provider",
+    }, 500);
+  }
 });
 
 // ============ PROMPT TEMPLATES ============

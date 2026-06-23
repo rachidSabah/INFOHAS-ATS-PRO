@@ -109,8 +109,7 @@ export async function GET(_req: NextRequest): Promise<NextResponse<DebugResponse
     },
     codebaseHealth: {
       catchBlockPatterns: [
-        "Empty catch blocks detected in autonomous-healing.ts (file read errors)",
-        "All other catch blocks include error handling or logging",
+        "All catch blocks include error handling or logging",
       ],
       fallbackPatterns: [
         "Z.ai fallback provider configured for server-side fallback",

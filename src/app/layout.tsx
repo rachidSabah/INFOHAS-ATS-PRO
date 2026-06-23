@@ -161,7 +161,7 @@ export default function RootLayout({
                     window.puter._quietSet = true;
                     clearInterval(_pc);
                   }
-                } catch(e) {}
+                } catch(e) { /* intentional: puter.quiet setup is best-effort, failures are non-critical */ }
               }, 10);
               setTimeout(function() { clearInterval(_pc); }, 10000);
             `,

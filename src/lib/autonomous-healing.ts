@@ -77,8 +77,9 @@ export async function analyzeRootCause(error: AIDevIssue): Promise<HealingResult
         const codeSnippet = file.lines.slice(start, end).join("\n");
         evidence.push({ file: error.file, line: error.line, code: codeSnippet });
       }
-    } catch {
-      // File not readable — skip
+    } catch (readErr) {
+      // File not readable in agent runtime — skip evidence from this file
+      console.warn(`[autonomous-healing] Could not read file ${error.file}:`, readErr instanceof Error ? readErr.message : String(readErr));
     }
   }
 
@@ -127,7 +128,9 @@ Return ONLY valid JSON:
       taskCategory: "development",
     });
 
-    const data = extractJSON<any>(result.text);
+    const data = extractJSON<{
+      rootCause: string; patch: string; riskLevel: "low" | "medium" | "high"; confidence: number;
+    }>(result.text);
     return {
       error: error.title,
       rootCause: data.rootCause || "Unable to determine root cause",
@@ -138,7 +141,8 @@ Return ONLY valid JSON:
       autoHealEligible: data.riskLevel === "low" && data.confidence >= 80,
       status: "analyzed",
     };
-  } catch {
+  } catch (analysisErr) {
+    console.warn(`[autonomous-healing] Root cause analysis failed for "${error.title}":`, analysisErr instanceof Error ? analysisErr.message : String(analysisErr));
     return {
       error: error.title,
       rootCause: "AI analysis failed — manual review required",
@@ -205,8 +209,13 @@ Return ONLY valid JSON:
       taskCategory: "development",
     });
 
-    return extractJSON<any>(result.text);
-  } catch {
+    return extractJSON<{
+      codeReview: string; architectureReview: string; securityReview: string;
+      performanceReview: string; regressionRisk: string; confidenceScore: number;
+      riskScore: number; affectedComponents: string[];
+    }>(result.text);
+  } catch (reflectionErr) {
+    console.warn(`[autonomous-healing] Self-reflection failed for "${taskResult.title}":`, reflectionErr instanceof Error ? reflectionErr.message : String(reflectionErr));
     return {
       codeReview: "Review failed",
       architectureReview: "Review failed",

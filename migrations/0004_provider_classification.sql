@@ -1,13 +1,17 @@
 -- ResumeAI Pro — Provider Classification System
 -- Adds provider_category, capability flags, and health tracking to ai_providers
 -- Cloudflare D1 (SQLite) compatible
+--
+-- NOTE: supports_function_calling was already added in migration 0002.
+-- We skip re-adding it here. If running manually and you get a "duplicate column"
+-- error, that's expected — the column already exists.
 
 -- Add provider classification columns
 ALTER TABLE ai_providers ADD COLUMN provider_category TEXT NOT NULL DEFAULT 'api';
 ALTER TABLE ai_providers ADD COLUMN supports_server_side INTEGER NOT NULL DEFAULT 1;
 ALTER TABLE ai_providers ADD COLUMN supports_client_side INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE ai_providers ADD COLUMN supports_streaming INTEGER NOT NULL DEFAULT 0;
-ALTER TABLE ai_providers ADD COLUMN supports_function_calling INTEGER NOT NULL DEFAULT 0;
+-- supports_function_calling already exists from migration 0002 — do NOT re-add
 ALTER TABLE ai_providers ADD COLUMN supports_json_mode INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE ai_providers ADD COLUMN requires_browser_auth INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE ai_providers ADD COLUMN requires_api_key INTEGER NOT NULL DEFAULT 1;

@@ -771,8 +771,15 @@ export async function runAutonomousDebug(): Promise<{
     }
 
     // === 2. Search for REAL provider error leak patterns ===
+    // Exclude pattern-definition files (ai-error-filter.ts, ai-response-processor.ts)
+    // which legitimately contain these strings as regex definitions for leak detection.
+    const EXCLUDED_LEAK_FILES = ["ai-error-filter.ts", "ai-response-processor.ts", "analysis-leak-prevention"];
     const errorLeaks = await searchRepository("optimization incomplete|non-json output|raw response started", { regex: true, filePattern: "*.{ts,tsx}" });
-    for (const r of errorLeaks.slice(0, 3)) {
+    for (const r of errorLeaks.slice(0, 5)) {
+      // Skip files that define these patterns for detection purposes
+      if (EXCLUDED_LEAK_FILES.some((f) => r.file.includes(f))) continue;
+      // Skip if the match is inside a regex literal (pattern definition, not actual leak)
+      if (r.match.trim().startsWith("/") && r.match.trim().endsWith("/i")) continue;
       issues.push({
         area: "frontend",
         severity: "error",
@@ -785,8 +792,17 @@ export async function runAutonomousDebug(): Promise<{
     }
 
     // === 3. Search for "From JD" skill category (analysis artifact) ===
+    // Exclude files where "From JD" appears in negative examples (ai.ts),
+    // pattern definitions, test data, or comments referencing JD input.
+    const EXCLUDED_FROM_JD_FILES = ["ai-error-filter.ts", "ai-response-processor.ts", "analysis-leak-prevention", "mock-data.ts"];
     const fromJd = await searchRepository("From JD", { filePattern: "*.{ts,tsx}" });
-    for (const r of fromJd.slice(0, 3)) {
+    for (const r of fromJd.slice(0, 5)) {
+      // Skip pattern definition and test files
+      if (EXCLUDED_FROM_JD_FILES.some((f) => r.file.includes(f))) continue;
+      // Skip if it's in a "BAD:" example (negative teaching pattern in ai.ts)
+      if (r.match.includes("BAD:") || r.match.includes("✗")) continue;
+      // Skip if it's just a comment like "from JD + resume" (not the artifact)
+      if (/from JD[\s+]/i.test(r.match) && !/From JD:/i.test(r.match)) continue;
       issues.push({
         area: "frontend",
         severity: "warning",
@@ -798,10 +814,17 @@ export async function runAutonomousDebug(): Promise<{
       });
     }
 
-    // === 4. Search for summary_critique being used as resume summary ===
+    // === 4. Search for summary_critique being wrongly assigned to resume.summary ===
+    // Only flag if summary_critique is explicitly assigned to a resume summary field.
+    // Exclude: type definitions, pattern definitions, mock data, and the search code itself.
+    const EXCLUDED_CRITIQUE_FILES = ["ats-directives.ts", "mock-data.ts", "ai-builder-agent.ts"];
     const critiqueUsage = await searchRepository("summary_critique", { filePattern: "*.{ts,tsx}" });
-    for (const r of critiqueUsage.slice(0, 3)) {
-      if (r.match.includes("summary:") || r.match.includes("summary =")) {
+    for (const r of critiqueUsage.slice(0, 5)) {
+      // Skip type definition files, mock data, and this file's own search code
+      if (EXCLUDED_CRITIQUE_FILES.some((f) => r.file.includes(f))) continue;
+      // Only flag if summary_critique is being ASSIGNED to a .summary field
+      // Pattern: result.summary_critique being used as resume.summary = result.summary_critique
+      if (r.match.includes("summary =") && r.match.includes("summary_critique") && !r.match.includes("summary_critique:")) {
         issues.push({
           area: "frontend",
           severity: "error",
@@ -835,11 +858,13 @@ export async function runAutonomousDebug(): Promise<{
           if (patch.diff && patch.diff.startsWith("diff --git")) {
             generatedPatches.push(patch);
           }
-        } catch {
-          // AI didn't return valid JSON — skip this patch
+        } catch (parseErr) {
+          // AI didn't return valid JSON for the patch — skip
+          console.warn(`[ai-builder-agent] Failed to parse patch JSON:`, parseErr instanceof Error ? parseErr.message : String(parseErr));
         }
-      } catch {
-        // Patch generation failed — skip
+      } catch (patchErr) {
+        // Patch generation failed for this issue — skip
+        console.warn(`[ai-builder-agent] Patch generation failed:`, patchErr instanceof Error ? patchErr.message : String(patchErr));
       }
     }
 

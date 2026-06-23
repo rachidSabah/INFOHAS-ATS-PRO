@@ -11,6 +11,8 @@ const ALLOWED_HOSTS = new Set([
   "openrouter.ai", "api.opencode.com", "opencode.ai",
   "api.perplexity.ai", "api.mistral.ai", "api.cohere.com",
   "api.together.xyz", "api.z.ai", "api.aimlapi.com", "api.azure.com",
+  "api-inference.huggingface.co", "api.puter.com", "api.cohere.ai",
+  "bedrock-runtime.us-east-1.amazonaws.com", "bedrock-runtime.us-west-2.amazonaws.com",
 ]);
 
 function isAllowedUrl(urlStr: string): boolean {
@@ -147,12 +149,21 @@ export async function POST(req: NextRequest) {
     }
 
     return NextResponse.json({ ok: true, latencyMs, text });
-  } catch (e: any) {
-    const msg = e?.name === "AbortError"
+  } catch (e: unknown) {
+    const isAbort = e instanceof Error && e.name === "AbortError";
+    const isFetchFail = e instanceof Error && (e.message.includes("fetch") || e.message.includes("Failed to fetch"));
+    const msg = isAbort
       ? "Request timed out"
-      : e?.message?.includes("fetch") || e?.message?.includes("Failed to fetch")
+      : isFetchFail
       ? "The provider endpoint is unreachable. Possible causes: wrong URL, CORS blocked, provider offline."
-      : e?.message || "Connection failed";
-    return NextResponse.json({ ok: false, latencyMs: 0, error: msg });
+      : (e instanceof Error ? e.message : "Connection failed");
+    console.error("[ProviderChat] Unhandled error:", msg);
+    return NextResponse.json({
+      ok: false,
+      success: false,
+      code: "PROVIDER_CHAT_FAILED",
+      message: msg,
+      latencyMs: 0,
+    });
   }
 }

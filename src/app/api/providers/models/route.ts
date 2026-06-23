@@ -11,6 +11,8 @@ const ALLOWED_HOSTS = new Set([
   "openrouter.ai", "api.opencode.com", "opencode.ai",
   "api.perplexity.ai", "api.mistral.ai", "api.cohere.com",
   "api.together.xyz", "api.z.ai", "api.aimlapi.com", "api.azure.com",
+  "api-inference.huggingface.co", "api.puter.com", "api.cohere.ai",
+  "bedrock-runtime.us-east-1.amazonaws.com", "bedrock-runtime.us-west-2.amazonaws.com",
 ]);
 
 function isAllowedUrl(urlStr: string): boolean {
@@ -23,7 +25,10 @@ function isAllowedUrl(urlStr: string): boolean {
       return false;
     }
     return ALLOWED_HOSTS.has(h);
-  } catch { return false; }
+  } catch (urlErr) {
+    // Invalid URL format — reject
+    return false;
+  }
 }
 
 export async function POST(req: NextRequest) {
@@ -110,7 +115,13 @@ export async function POST(req: NextRequest) {
     }
 
     return NextResponse.json({ models: models.sort() });
-  } catch (e: any) {
-    return NextResponse.json({ error: e?.message || "Failed to fetch models" }, { status: 500 });
+  } catch (e: unknown) {
+    const message = e instanceof Error ? e.message : String(e);
+    console.error("[ProviderModels] Unhandled error:", message);
+    return NextResponse.json({
+      success: false,
+      code: "PROVIDER_MODELS_FAILED",
+      message,
+    }, { status: 500 });
   }
 }

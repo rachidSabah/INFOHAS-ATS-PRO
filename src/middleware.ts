@@ -62,7 +62,11 @@ const ALLOWED_PROVIDER_HOSTS = new Set([
   "api.z.ai",
   "api.aimlapi.com",
   "api.azure.com",
-  // Add more as needed
+  "api-inference.huggingface.co",
+  "api.puter.com",
+  "api.cohere.ai",
+  "bedrock-runtime.us-east-1.amazonaws.com",
+  "bedrock-runtime.us-west-2.amazonaws.com",
 ]);
 
 function isAllowedProviderHost(urlStr: string): boolean {
@@ -162,7 +166,7 @@ export function middleware(request: NextRequest) {
   if (isProduction) {
     response.headers.set(
       "Content-Security-Policy",
-      "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' https://api.z.ai https://api.openai.com https://api.anthropic.com https://api.groq.com https://api.deepseek.com https://openrouter.ai https://opencode.ai https://api.mistral.ai https://*.cloudflare.com https://puter.com https://accounts.google.com;",
+      "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' https://api.z.ai https://api.openai.com https://api.anthropic.com https://api.groq.com https://api.deepseek.com https://openrouter.ai https://opencode.ai https://api.mistral.ai https://api.cohere.com https://api.perplexity.ai https://api.together.xyz https://api-inference.huggingface.co https://*.cloudflare.com https://puter.com https://accounts.google.com https://generativelanguage.googleapis.com;",
     );
   }
 
