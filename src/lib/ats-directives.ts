@@ -715,18 +715,47 @@ Return ONLY the JSON object described in the directive. No prose, no markdown fe
 
   // Parse JSON — robustly handle markdown fences, prose preambles, trailing commentary
   let data: AviationOptimizeResult;
+  let rawParsed: any;
   try {
-    data = extractJSON<AviationOptimizeResult>(result.text);
+    rawParsed = extractJSON<any>(result.text);
   } catch (parseErr: any) {
-    // Log only in development — never expose provider name or raw response to users
     if (process.env.NODE_ENV !== "production") {
       console.warn("[aviationOptimize] JSON extraction failed:", parseErr?.message);
     }
     throw new Error("Optimization failed — the AI returned an unexpected response. Please try again.");
   }
 
-  // Validate the resume object exists
-  if (!data.resume || typeof data.resume !== "object") {
+  // Support BOTH response shapes:
+  //   1. Wrapped: { resume: { name, experience, ... }, score, ... }
+  //   2. Flat:    { name, experience, education, skills, ... } (common from non-Puter providers)
+  if (rawParsed.resume && typeof rawParsed.resume === "object") {
+    data = rawParsed as AviationOptimizeResult;
+  } else if (rawParsed.name || rawParsed.experience || rawParsed.education || rawParsed.summary) {
+    // Wrap flat response into the expected AviationOptimizeResult shape
+    data = {
+      resume: {
+        name: rawParsed.name || "",
+        headline: rawParsed.headline || "",
+        location: rawParsed.location || "",
+        phone: rawParsed.phone || "",
+        email: rawParsed.email || "",
+        dateOfBirth: rawParsed.dateOfBirth || "",
+        summary: rawParsed.summary || "",
+        skills: Array.isArray(rawParsed.skills) ? rawParsed.skills : [],
+        experience: Array.isArray(rawParsed.experience) ? rawParsed.experience : [],
+        education: Array.isArray(rawParsed.education) ? rawParsed.education : [],
+        languages: Array.isArray(rawParsed.languages) ? rawParsed.languages : [],
+        missingKeywordsAdded: Array.isArray(rawParsed.missingKeywordsAdded) ? rawParsed.missingKeywordsAdded : [],
+        bulletsRewritten: rawParsed.bulletsRewritten ?? 0,
+      },
+      score: rawParsed.score ?? 0,
+      score_breakdown: rawParsed.score_breakdown || { impact: 85, brevity: 90, keywords: 85 },
+      matched_keywords: Array.isArray(rawParsed.matched_keywords) ? rawParsed.matched_keywords : [],
+      missing_keywords: Array.isArray(rawParsed.missing_keywords) ? rawParsed.missing_keywords : [],
+      summary_critique: rawParsed.summary_critique || "",
+      charCount: rawParsed.charCount || 0,
+    };
+  } else {
     throw new Error("Optimization failed — the AI response was incomplete. Please try again.");
   }
 
