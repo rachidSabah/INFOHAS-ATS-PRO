@@ -41,10 +41,12 @@ export class ZaiProvider implements OAuthAIProvider {
    * "Sign in" to Z.ai by validating the API key.
    * Z.ai doesn't have OAuth — authentication is via API key.
    * We validate the key by making a test call to the API.
+   * @param providedKey Optional API key from user input. If not provided,
+   *   falls back to env var or stored session key.
    */
-  async login(): Promise<ProviderSession> {
-    // Get the API key from the environment or user input
-    const apiKey = this.getZaiApiKey();
+  async login(providedKey?: string): Promise<ProviderSession> {
+    // Get the API key from user input, environment, or stored session
+    const apiKey = providedKey || this.getZaiApiKey();
     if (!apiKey) {
       throw new ProviderAuthenticationError(
         "not_configured",

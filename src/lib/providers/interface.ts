@@ -51,8 +51,9 @@ export interface OAuthAIProvider {
    * Authenticate with the provider.
    * Opens OAuth flow (popup/redirect) or validates stored credentials.
    * On success, persists the session via SessionManager.
+   * @param providedKey Optional API key (for Z.ai Direct).
    */
-  login(): Promise<ProviderSession>;
+  login(providedKey?: string): Promise<ProviderSession>;
 
   /**
    * Refresh the current session using the stored refresh token.

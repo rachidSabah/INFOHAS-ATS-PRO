@@ -52,11 +52,14 @@ export function AIProviders() {
   const settings = useApp((s) => s.providerSettings);
   const setView = useApp((s) => s.setView);
 
-  const [tab, setTab] = useState<Tab>("providers");
+  // Default to auth tab if no providers are authenticated — the user needs to
+  // connect Puter or Z.ai before anything works. Once authenticated, show providers.
+  const [tab, setTab] = useState<Tab>(!puterStatus.authenticated && !zaiStatus.authenticated ? "auth" : "providers");
   const [showAdd, setShowAdd] = useState(false);
   const [editing, setEditing] = useState<AIProvider | null>(null);
   const [testing, setTesting] = useState<AIProvider | null>(null);
   const [q, setQ] = useState("");
+  const [zaiApiKeyInput, setZaiApiKeyInput] = useState("");
 
   // Provider auth state
   const [puterStatus, setPuterStatus] = useState<ProviderAuthStatus>({
@@ -76,16 +79,18 @@ export function AIProviders() {
     } catch {}
   }, []);
 
-  // Restore sessions on mount
+  // Restore sessions on mount and switch to providers tab if already authenticated
   useEffect(() => {
     (async () => {
-      try {
-        await getPuterProvider().restore();
-      } catch {}
-      try {
-        await getZaiProvider().restore();
-      } catch {}
+      let puterOk = false;
+      let zaiOk = false;
+      try { const s = await getPuterProvider().restore(); puterOk = !!s?.authenticated; } catch {}
+      try { const s = await getZaiProvider().restore(); zaiOk = !!s?.authenticated; } catch {}
       refreshAuthStatus();
+      // If already authenticated, show providers tab (not auth tab)
+      if (puterOk || zaiOk) {
+        setTab("providers");
+      }
     })();
   }, [refreshAuthStatus]);
 
@@ -146,7 +151,7 @@ export function AIProviders() {
       <div className="flex gap-1 p-1 bg-secondary rounded-lg w-fit">
         {[
           { id: "providers" as const, label: "Providers", icon: "List" },
-          { id: "auth" as const, label: "OAuth Auth", icon: "Shield" },
+          { id: "auth" as const, label: !puterStatus.authenticated && !zaiStatus.authenticated ? "Sign In" : "OAuth Auth", icon: !puterStatus.authenticated && !zaiStatus.authenticated ? "LogIn" : "Shield" },
           { id: "analytics" as const, label: "Usage Analytics", icon: "BarChart3" },
           { id: "logs" as const, label: "Error Logs", icon: "ScrollText" },
         ].map((t) => (
@@ -156,12 +161,38 @@ export function AIProviders() {
             className={`flex items-center gap-1.5 px-4 py-2 rounded-md text-sm font-medium transition ${tab === t.id ? "bg-card shadow-sm text-brand" : "text-muted-foreground hover:text-foreground"}`}
           >
             <Icon name={t.icon} className="w-4 h-4" /> {t.label}
+            {t.id === "auth" && !puterStatus.authenticated && !zaiStatus.authenticated && (
+              <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
+            )}
           </button>
         ))}
       </div>
 
       {/* Providers tab */}
       {tab === "providers" && (
+        <>
+          {/* Auth required banner — shown when no OAuth providers are connected */}
+          {!puterStatus.authenticated && !zaiStatus.authenticated && (
+            <Card className="border-amber-300 dark:border-amber-700 bg-amber-50/50 dark:bg-amber-950/20">
+              <CardContent className="p-4 flex items-start gap-3">
+                <Icon name="AlertTriangle" className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
+                <div className="flex-1">
+                  <p className="text-sm font-medium text-amber-700 dark:text-amber-400">No AI provider authenticated</p>
+                  <p className="text-xs text-amber-600/80 dark:text-amber-500/80 mt-0.5">
+                    Connect Puter.js (free, Google OAuth) or Z.ai Direct (API key) to enable resume optimization. Without authentication, the optimizer cannot run.
+                  </p>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="mt-2 gap-1.5 border-amber-400 text-amber-700 hover:bg-amber-100 dark:border-amber-600 dark:text-amber-400 dark:hover:bg-amber-950/40"
+                    onClick={() => setTab("auth")}
+                  >
+                    <Icon name="LogIn" className="w-3.5 h-3.5" /> Go to OAuth Auth
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+          )}
         <Card>
           <CardContent className="p-0">
             <div className="p-4 border-b border-border flex items-center justify-between gap-3 flex-wrap">
@@ -245,6 +276,7 @@ export function AIProviders() {
             </div>
           </CardContent>
         </Card>
+        </>
       )}
 
       {/* OAuth Auth tab */}
@@ -267,31 +299,78 @@ export function AIProviders() {
 
           <div className="grid gap-4 md:grid-cols-2">
             {/* Z.ai Direct Auth */}
-            <ProviderAuthCard
-              providerId="zai-direct"
-              providerName="Z.ai Direct"
-              iconName="Cpu"
-              brandColor="#1154A3"
-              description="REST API with API key authentication"
-              models={["glm-4.6", "glm-5", "glm-5.1", "glm-5.2", "glm-5-air", "glm-5-flash", "codegeex-4"]}
-              status={zaiStatus}
-              onLogin={async () => {
-                const session = await getZaiProvider().login();
-                refreshAuthStatus();
-              }}
-              onRefresh={async () => {
-                await getZaiProvider().refresh();
-                refreshAuthStatus();
-              }}
-              onLogout={async () => {
-                await getZaiProvider().logout();
-                refreshAuthStatus();
-              }}
-              onToggleShared={async (enabled) => {
-                await getZaiProvider().setSharedAdminAccount(enabled);
-                refreshAuthStatus();
-              }}
-            />
+            <div className="space-y-3">
+              <ProviderAuthCard
+                providerId="zai-direct"
+                providerName="Z.ai Direct"
+                iconName="Cpu"
+                brandColor="#1154A3"
+                description="REST API with API key authentication"
+                models={zaiStatus.models.length > 0 ? zaiStatus.models : ["glm-4.6", "glm-5", "glm-5.1", "glm-5.2", "glm-5-air", "glm-5-flash", "codegeex-4"]}
+                status={zaiStatus}
+                onLogin={async () => {
+                  const session = await getZaiProvider().login(zaiApiKeyInput || undefined);
+                  refreshAuthStatus();
+                }}
+                onRefresh={async () => {
+                  await getZaiProvider().refresh();
+                  refreshAuthStatus();
+                }}
+                onLogout={async () => {
+                  await getZaiProvider().logout();
+                  refreshAuthStatus();
+                }}
+                onToggleShared={async (enabled) => {
+                  await getZaiProvider().setSharedAdminAccount(enabled);
+                  refreshAuthStatus();
+                }}
+              />
+              {/* API Key input — shown when not connected */}
+              {!zaiStatus.authenticated && (
+                <Card className="border-blue-200 dark:border-blue-800 bg-blue-50/30 dark:bg-blue-950/10">
+                  <CardContent className="p-3 space-y-2">
+                    <Label htmlFor="zai-api-key" className="text-xs font-medium flex items-center gap-1.5">
+                      <Icon name="Key" className="w-3.5 h-3.5" /> Z.ai API Key
+                    </Label>
+                    <div className="flex gap-2">
+                      <Input
+                        id="zai-api-key"
+                        type="password"
+                        placeholder="Enter your Z.ai API key..."
+                        value={zaiApiKeyInput}
+                        onChange={(e) => setZaiApiKeyInput(e.target.value)}
+                        className="h-8 text-xs font-mono"
+                      />
+                      <Button
+                        size="sm"
+                        className="h-8 gap-1.5 shrink-0"
+                        style={{ background: "#1154A3" }}
+                        onClick={async () => {
+                          if (!zaiApiKeyInput.trim()) {
+                            toast.error("Please enter your Z.ai API key.");
+                            return;
+                          }
+                          try {
+                            await getZaiProvider().login(zaiApiKeyInput.trim());
+                            refreshAuthStatus();
+                            toast.success("Z.ai Direct connected successfully!");
+                            setZaiApiKeyInput("");
+                          } catch (e: any) {
+                            toast.error(e?.message || "Failed to connect Z.ai Direct.");
+                          }
+                        }}
+                      >
+                        <Icon name="Plug" className="w-3.5 h-3.5" /> Connect
+                      </Button>
+                    </div>
+                    <p className="text-[10px] text-muted-foreground">
+                      Get your API key from <a href="https://open.bigmodel.cn/" target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">open.bigmodel.cn</a>.
+                      If NEXT_PUBLIC_ZAI_API_KEY is set in environment, the key is used automatically.
+                    </p>
+                  </CardContent>
+                </Card>
+              )}
+            </div>
 
             {/* Puter.js Auth */}
             <ProviderAuthCard
