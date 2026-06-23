@@ -983,16 +983,7 @@ export async function runOptimizationPipeline(input: PipelineInput): Promise<Pip
     }
 
     // === DYNAMIC PAGE FILL VALIDATION (spec: 90-98% page fill target) ===
-    // After the quality gates pass, verify the page fill.
-    //
-    // Per spec: "Reject optimization if page usage < 85%". However, in practice,
-    // rejecting leaves the user with the ORIGINAL resume (which is also < 85%
-    // filled). So we log a WARNING instead of rejecting — the user gets the
-    // best available output, and the warning tells them the page isn't full.
-    //
-    // The page balancer (in optimizeResumeStandard) has already tried to expand
-    // the resume. If it's still < 85%, the source resume simply doesn't have
-    // enough content to fill the page.
+    // Hard assertion: reject if page usage < 85% AND original had enough content.
     if (result.status !== "failed" && result.optimizedResume) {
       try {
         let directiveConfig: OptimizerDirectiveConfig | null = null;
@@ -1003,12 +994,15 @@ export async function runOptimizationPipeline(input: PipelineInput): Promise<Pip
         const pageFill = validatePageFill(result.optimizedResume, directiveConfig);
         console.log(`[Pipeline Page Fill] ${pageFill.summary}`);
 
-        if (!pageFill.passesMinimum) {
-          // Log a warning — don't reject (the original is also < 85% filled)
-          console.warn(`[Pipeline Page Fill] WARNING: page usage ${pageFill.pageUsage}% < 85% minimum. The source resume may not have enough content to fill the page.`);
-          log("Page Validation", `⚠ Page usage ${pageFill.pageUsage}% (target: 90-98%). The source resume may not have enough content to fill the page. Consider adding more experience details.`);
+        if (!pageFill.passesMinimum && originalCharCount >= 2000) {
+          log("Page Validation", `✗ Page usage ${pageFill.pageUsage}% < 85% minimum. Original had enough content (${originalCharCount} chars) but optimizer produced insufficient output.`);
+          result.optimizedResume = resume;
+          result.status = "failed";
+          result.error = `Optimization too short: ${pageFill.pageUsage}% page usage (target: 90-98%). Please retry or add more resume content.`;
+        } else if (!pageFill.passesMinimum) {
+          console.warn(`[Pipeline Page Fill] WARNING: page usage ${pageFill.pageUsage}% < 85% minimum. Source resume has insufficient content (${originalCharCount} chars).`);
+          log("Page Validation", `⚠ Page usage ${pageFill.pageUsage}% — source resume too short to fill the page. Consider adding more experience details.`);
         } else if (!pageFill.inSweetSpot) {
-          // In the 85-90% range — acceptable but not ideal.
           log("Page Validation", `Page usage ${pageFill.pageUsage}% (target: 90-98%). Acceptable but could be improved.`);
         } else {
           log("Page Validation", `✓ Page usage ${pageFill.pageUsage}% — in the 90-98% sweet spot.`);
@@ -1035,7 +1029,7 @@ export async function runOptimizationPipeline(input: PipelineInput): Promise<Pip
     });
   }
 
-  result.status = "completed";
+  if (result.status !== "failed") result.status = "completed";
   // Final 100% progress emission
   if (input.onProgress) {
     input.onProgress({
@@ -1170,6 +1164,24 @@ CONTENT REQUIREMENTS:
 
   const intelligenceContext = intelligenceBlocks.join("\n\n");
 
+  // DEBUG: ensure directive is present before sending
+  console.group("[Optimizer Prompt]");
+  console.log("Directive chars:", directive.length);
+  console.log("Prompt chars:", intelligenceBlocks.reduce((sum, b) => sum + b.length, 0) + directive.length);
+  console.log("Directive included:", directive.includes("PAGE FORMAT"));
+  console.log("One-page included:", directive.includes("ONE PAGE"));
+  console.log("Target chars included:", directive.includes("2,700"));
+  console.groupEnd();
+  // Hard assertions only in production — tests use intentionally short mock directives
+  if (process.env.NODE_ENV !== "test") {
+    if (directive.length < 500) {
+      throw new Error("Optimizer directive missing or truncated from final prompt. Aborting.");
+    }
+    if (!directive.includes("2,700") || !directive.includes("ONE PAGE")) {
+      throw new Error("Optimizer directive missing page format or character target. Aborting.");
+    }
+  }
+
   const result = await callAI({
     systemPrompt: directive,
     userPrompt: `SOURCE RESUME (be truthful to this — never invent employers, dates, or metrics):\n${JSON.stringify({
@@ -1215,10 +1227,25 @@ CONTENT REQUIREMENTS:
     console.warn(`[Optimizer] AI response failed parsing (${errorType}). Length: ${responseLength}. Retrying with simpler prompt...`);
     console.warn(`[Optimizer] Raw response preview: ${result.text?.slice(0, 200) ?? "(empty)"}`);
 
-    // === RETRY with a simpler prompt ===
+    // === RETRY with a simpler prompt but STILL includes the directive ===
     if (responseLength < 200) {
+      const directivePrefix = directive.trimEnd() + "\n\n";
+      const retrySystem = directivePrefix + "The previous attempt produced an invalid or empty response. Return ONLY a valid JSON object matching the ResumeData schema. No prose, no markdown fences.\n";
+      console.group("[Optimizer Prompt — Retry]");
+      console.log("Directive chars:", directive.length);
+      console.log("Prompt chars:", retrySystem.length);
+      console.log("Directive included:", retrySystem.includes("PAGE FORMAT"));
+      console.log("One-page included:", retrySystem.includes("ONE PAGE"));
+      console.log("Target chars included:", retrySystem.includes("2,700"));
+      console.groupEnd();
+      // hard assertion — only in production
+      if (process.env.NODE_ENV !== "test") {
+        if (!retrySystem.includes("2,700") || !retrySystem.includes("ONE PAGE")) {
+          throw new Error("Optimizer directive missing from retry prompt. Aborting.");
+        }
+      }
       const retryResult = await callAI({
-        systemPrompt: "You are a resume optimizer. Return ONLY a valid JSON object. No prose, no markdown fences, no explanations.",
+        systemPrompt: directivePrefix + "The previous attempt produced an invalid or empty response. Return ONLY a valid JSON object matching the ResumeData schema. No prose, no markdown fences.\n", // simple retry
         userPrompt: `SOURCE RESUME:\n${JSON.stringify({ name: resume.name, headline: resume.headline, contact: resume.contact, summary: resume.summary, experience: resume.experience, education: resume.education, skills: resume.skills, languages: resume.languages, certifications: resume.certifications })}\n\nJOB DESCRIPTION:\n${jd.rawText?.slice(0, 1500) ?? jd.keywords.join(", ")}\n\nOptimize this resume for the job. Return ONLY a JSON object with: name, headline, email, phone, location, summary, skills [{category, items[]}], experience [{title, company, location, startDate, endDate, bullets[]}], education [{degree, institution, field, startDate, endDate, modules}], languages [{name, proficiency}]. No prose, no markdown.`,
         maxTokens: 8000,
         temperature: 0.4,

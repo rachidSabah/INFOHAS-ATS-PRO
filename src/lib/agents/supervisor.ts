@@ -85,6 +85,18 @@ function cacheKey(prefix: string, ...parts: (string | undefined | null)[]): stri
   return `${prefix}:${parts.filter(Boolean).join(":")}`;
 }
 
+/** Simple string hash for cache invalidation key. */
+function directiveHash(directives?: string): string {
+  const s = directives || "";
+  let hash = 0;
+  for (let i = 0; i < s.length; i++) {
+    const chr = s.charCodeAt(i);
+    hash = ((hash << 5) - hash) + chr;
+    hash |= 0;
+  }
+  return Math.abs(hash).toString(36);
+}
+
 // ============================================================================
 // Supervisor state
 // ============================================================================
@@ -683,11 +695,12 @@ export async function handleOptimizationRequested(
     jobTitle: jd.title ?? null,
   });
 
-  // Check cache — include provider/model in key so switching providers invalidates cache
+  // Check cache — include provider/model/directiveHash so switching providers or directives invalidates cache
   const appState = useApp.getState();
   const activeProvider = appState?.providerSettings?.defaultProviderId ?? "none";
   const activeModel = appState?.providers?.find((p: any) => p.id === activeProvider)?.modelName ?? "";
-  const cacheK = cacheKey("optimization", resume.id, jd.id, activeProvider, activeModel);
+  const dHash = directiveHash(userDirectives || JSON.stringify(appState?.optimizerDirective || {}));
+  const cacheK = cacheKey("optimization", resume.id, jd.id, activeProvider, activeModel, dHash);
   const cachedResult = getCached<PipelineResult>(cacheK);
   if (cachedResult) {
     // === SYNC CORE AGENT STATUSES FROM CACHE ===
@@ -1029,13 +1042,16 @@ The 'questions' array MUST contain exactly 9 objects. The 'readinessScore' MUST 
       normalized.readinessScore = normalized.readinessScore > 0 ? normalized.readinessScore : 50;
 
       if (aiCount === 0) {
-        // AI returned 0 questions — this is a partial failure. Mark as completed
-        // (we produced a usable package via fallback) but log the degradation.
+        // AI returned 0 questions — this is a degraded result. Mark FAILED so
+        // the user knows the interview prep is not AI-tailored.
+        updateContext({ interviewPackage: null });
         updateAgent(agentId, {
-          status: "completed",
+          status: "failed",
           completedAt: new Date().toISOString(),
-          log: `Interview package generated via fallback: ${normalized.questions.length} questions, readiness ${normalized.readinessScore}/100. (AI returned 0 parseable questions.)`,
+          error: "AI returned 0 parseable interview questions.",
+          log: `✗ Interview generation failed: AI returned 0 parseable questions.`,
         });
+        return;
       } else {
         // AI returned some questions but fewer than 9 — supplement with fallbacks.
         updateAgent(agentId, {
@@ -1090,9 +1106,10 @@ The 'questions' array MUST contain exactly 9 objects. The 'readinessScore' MUST 
     };
     updateContext({ interviewPackage: fallbackPackage });
     updateAgent(agentId, {
-      status: "completed", // not "failed" — we still produced a usable package
+      status: "failed",
       completedAt: new Date().toISOString(),
-      log: `Interview package generated via fallback (AI failed: ${e?.message ?? "unknown"}): ${fallbackQuestions.length} questions.`,
+      error: `AI interview generation failed: ${e?.message ?? "unknown"}. Fallback questions provided for user convenience only.`,
+      log: `✗ Interview generation failed (AI error): ${e?.message ?? "unknown"}. Fallback provided: ${fallbackQuestions.length} questions.`,
     });
   }
 }

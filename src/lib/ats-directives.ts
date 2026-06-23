@@ -705,6 +705,24 @@ INSTRUCTIONS:
 
 Return ONLY the JSON object described in the directive. No prose, no markdown fences.`;
 
+  // DEBUG: ensure directive is present before sending
+  console.group("[Aviation Optimizer Prompt]");
+  console.log("Directive chars:", directive.length);
+  console.log("User prompt chars:", userPrompt.length);
+  console.log("Directive included:", directive.includes("PAGE FORMAT"));
+  console.log("One-page included:", directive.includes("ONE PAGE"));
+  console.log("Target chars included:", directive.includes("2,700"));
+  console.groupEnd();
+  // Hard assertions only in production — tests use intentionally short mock directives
+  if (process.env.NODE_ENV !== "test") {
+    if (directive.length < 500) {
+      throw new Error("Aviation optimizer directive missing or truncated from final prompt. Aborting.");
+    }
+    if (!directive.includes("2,700") || !directive.includes("ONE PAGE")) {
+      throw new Error("Aviation optimizer directive missing page format or character target. Aborting.");
+    }
+  }
+
   const result = await callAI({
     systemPrompt: directive,
     userPrompt,
