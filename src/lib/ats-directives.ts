@@ -266,7 +266,7 @@ export async function analyzeWithGemini(
     const result = await callAI({
       systemPrompt: `You are an Expert Recruiter, Senior ATS Consultant, and Master Resume Strategist. You deeply analyze resumes and job descriptions before rewriting. You use recruiter-grade language, industry terminology, and high-impact phrases. You NEVER fabricate information. Industry: ${INDUSTRY_PROFILES[airlineProfile]?.label || "Generic"}. Always return ONLY valid JSON — no markdown fences, no prose.`,
       userPrompt: prompt,
-      maxTokens: 4000,
+      maxTokens: 6000,
       temperature: 0.4,
     });
 
@@ -708,7 +708,7 @@ Return ONLY the JSON object described in the directive. No prose, no markdown fe
   const result = await callAI({
     systemPrompt: directive,
     userPrompt,
-    maxTokens: 5000,
+    maxTokens: 8000,
     temperature: 0.45,
     taskCategory: "document",
   });

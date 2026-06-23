@@ -24,6 +24,7 @@
 // ============================================================================
 
 import type { ResumeData, JobDescription } from "../types";
+import { useApp } from "../store";
 import { runOptimizationPipeline, type PipelineResult, type PipelineProgress } from "./orchestrator";
 import { analyzeCompanyIntelligence, analyzeSkillGap } from "./company-skill-agents";
 import { callAI, extractJSON } from "../ai";
@@ -682,8 +683,11 @@ export async function handleOptimizationRequested(
     jobTitle: jd.title ?? null,
   });
 
-  // Check cache — if we've optimized this exact resume+JD combo recently, return cached
-  const cacheK = cacheKey("optimization", resume.id, jd.id);
+  // Check cache — include provider/model in key so switching providers invalidates cache
+  const appState = useApp.getState();
+  const activeProvider = appState?.providerSettings?.defaultProviderId ?? "none";
+  const activeModel = appState?.providers?.find((p: any) => p.id === activeProvider)?.modelName ?? "";
+  const cacheK = cacheKey("optimization", resume.id, jd.id, activeProvider, activeModel);
   const cachedResult = getCached<PipelineResult>(cacheK);
   if (cachedResult) {
     // === SYNC CORE AGENT STATUSES FROM CACHE ===
