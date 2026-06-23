@@ -156,7 +156,8 @@ export class PuterProvider implements OAuthAIProvider {
       if (typeof window !== "undefined" && window.puter?.auth?.signOut) {
         await window.puter.auth.signOut();
       }
-    } catch {
+    } catch (err) {
+      console.warn("[puterProvider] SignOut failed:", err instanceof Error ? err.message : err);
       // SignOut may not be available — just clear the session
     }
 
@@ -196,7 +197,8 @@ export class PuterProvider implements OAuthAIProvider {
         const refreshed = await this.refresh();
         console.log("[PROVIDER AUTH] session restored (refreshed)");
         return refreshed;
-      } catch {
+      } catch (err) {
+        console.warn("[puterProvider] Session refresh failed:", err instanceof Error ? err.message : err);
         // Refresh failed — mark as unauthenticated
         this.session.authenticated = false;
         this.session.expiresAt = null;
@@ -292,7 +294,7 @@ export class PuterProvider implements OAuthAIProvider {
     }
 
     if (!text) {
-      try { text = JSON.stringify(resp); } catch { text = String(resp ?? ""); }
+      try { text = JSON.stringify(resp); } catch (err) { console.warn("[puterProvider] Response JSON.stringify failed:", err instanceof Error ? err.message : err); text = String(resp ?? ""); }
     }
 
     return {
@@ -347,7 +349,8 @@ export class PuterProvider implements OAuthAIProvider {
     try {
       await this.refresh();
       return true;
-    } catch {
+    } catch (err) {
+      console.warn("[puterProvider] Session tryRefresh failed:", err instanceof Error ? err.message : err);
       this.session.authenticated = false;
       return false;
     }
@@ -371,7 +374,8 @@ export class PuterProvider implements OAuthAIProvider {
         const user = await window.puter.auth.getUser();
         return user?.token || user?.accessToken || null;
       }
-    } catch {
+    } catch (err) {
+      console.warn("[puterProvider] Token extraction failed:", err instanceof Error ? err.message : err);
       // Token extraction is best-effort
     }
     return null;

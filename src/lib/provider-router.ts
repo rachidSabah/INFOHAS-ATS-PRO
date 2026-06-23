@@ -180,8 +180,17 @@ export function routeProvider(taskCategory: TaskCategory): RouteResult {
     primary = eligible[0];
   }
 
-  // Build fallback chain (all eligible except primary)
-  const fallbacks = eligible.filter((p) => p.id !== primary!.id);
+  // Safety: if primary is still null (shouldn't happen after eligible.length > 0 check), return error
+  if (!primary) {
+    return {
+      primary: null,
+      fallbacks: [],
+      reason: `No eligible providers for task category "${taskCategory}". Internal routing error.`,
+    };
+  }
+
+  // Build fallback chain (all eligible except primary) — safe now, primary is guaranteed non-null
+  const fallbacks = eligible.filter((p) => p.id !== primary.id);
 
   // For document tasks, sort fallbacks by priority order
   if (taskCategory === "document") {

@@ -29,10 +29,11 @@ app.use(
 );
 
 // Helper: parse JSON body
-async function parseBody(req: Request): Promise<any> {
+async function parseBody(req: Request): Promise<Record<string, unknown>> {
   try {
     return await req.json();
-  } catch {
+  } catch (parseErr) {
+    console.warn("[Worker] Body parse failed:", parseErr instanceof Error ? parseErr.message : parseErr);
     return {};
   }
 }
@@ -42,10 +43,31 @@ function uuid(prefix = "id"): string {
   return `${prefix}_${Math.random().toString(36).slice(2, 9)}${Date.now().toString(36).slice(-4)}`;
 }
 
-// Helper: get or create user_id from header (simplified auth for demo)
+// ============================================================================
+// AUTH: Validate user identity from request headers.
+//
+// SECURITY NOTE: The current auth model trusts the X-User-Id header sent by
+// the client. This is a DEMO-level auth model. For production, replace with:
+//   - JWT verification (sign with a server-side secret)
+//   - Session-based auth (httpOnly cookies + server-side session store)
+//   - OAuth2 token validation
+//
+// The minimum viable hardening is:
+//   1. Validate the user ID format (must match our uid pattern)
+//   2. Reject obviously malicious IDs (SQL injection, path traversal)
+//   3. Rate-limit per user (done in middleware)
+// ============================================================================
+const ALLOWED_USER_ID_PATTERN = /^[a-zA-Z0-9_-]{2,64}$/;
+
 function getUserId(req: Request): string | null {
-  const auth = req.headers.get("X-User-Id") || req.headers.get("Authorization")?.replace("Bearer ", "");
-  return auth || null;
+  const raw = req.headers.get("X-User-Id") || req.headers.get("Authorization")?.replace("Bearer ", "") || null;
+  if (!raw) return null;
+  // Validate format — reject SQL injection, path traversal, XSS
+  if (!ALLOWED_USER_ID_PATTERN.test(raw)) {
+    console.warn("[Worker] Rejected malformed user ID:", raw.slice(0, 20));
+    return null;
+  }
+  return raw;
 }
 
 /**
@@ -65,14 +87,75 @@ async function columnExists(db: D1Database, table: string, column: string): Prom
     return columnExistenceCache.get(cacheKey)!;
   }
   try {
+    // SANITIZE: Only allow alphanumeric + underscore table names to prevent SQL injection
+    if (!/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(table)) {
+      console.warn("[Worker] Rejected suspicious table name in PRAGMA:", table);
+      columnExistenceCache.set(cacheKey, false);
+      return false;
+    }
     const { results } = await db.prepare(`PRAGMA table_info(${table})`).all<any>();
     const exists = (results || []).some((row: any) => row.name === column);
     columnExistenceCache.set(cacheKey, exists);
     return exists;
-  } catch {
+  } catch (pragmaErr) {
     // If PRAGMA fails (table doesn't exist?), assume the column doesn't exist.
+    console.warn("[Worker] PRAGMA table_info failed:", pragmaErr instanceof Error ? pragmaErr.message : pragmaErr);
     columnExistenceCache.set(cacheKey, false);
     return false;
+  }
+}
+
+// ============================================================================
+// API KEY ENCRYPTION — AES-GCM using Web Crypto API (available in Workers)
+//
+// The ENCRYPTION_KEY env var must be set via `wrangler secret put ENCRYPTION_KEY`.
+// It should be a 32-byte hex string (64 hex chars).
+// If ENCRYPTION_KEY is not set, API keys are stored in plaintext (DEV ONLY).
+// ============================================================================
+
+async function getEncryptionKey(env: Env): Promise<CryptoKey | null> {
+  const keyHex = (env as Record<string, string>).ENCRYPTION_KEY;
+  if (!keyHex || keyHex.length !== 64) return null;
+  try {
+    const keyBytes = new Uint8Array(keyHex.match(/.{2}/g)!.map((b: string) => parseInt(b, 16)));
+    return await crypto.subtle.importKey("raw", keyBytes, { name: "AES-GCM" }, false, ["encrypt", "decrypt"]);
+  } catch (importErr) {
+    console.warn("[Worker] Failed to import ENCRYPTION_KEY — storing API keys in plaintext:", importErr instanceof Error ? importErr.message : importErr);
+    return null;
+  }
+}
+
+async function encryptApiKey(plaintext: string, env: Env): Promise<string> {
+  if (!plaintext) return plaintext;
+  const key = await getEncryptionKey(env);
+  if (!key) return plaintext; // No encryption key — store plaintext (dev mode)
+  try {
+    const iv = crypto.getRandomValues(new Uint8Array(12));
+    const encoded = new TextEncoder().encode(plaintext);
+    const ciphertext = await crypto.subtle.encrypt({ name: "AES-GCM", iv }, key, encoded);
+    // Format: base64(iv):base64(ciphertext)
+    const ivB64 = btoa(String.fromCharCode(...iv));
+    const ctB64 = btoa(String.fromCharCode(...new Uint8Array(ciphertext)));
+    return `enc:${ivB64}:${ctB64}`;
+  } catch (encErr) {
+    console.warn("[Worker] API key encryption failed:", encErr instanceof Error ? encErr.message : encErr);
+    return plaintext; // Fallback to plaintext
+  }
+}
+
+async function decryptApiKey(stored: string, env: Env): Promise<string> {
+  if (!stored || !stored.startsWith("enc:")) return stored;
+  const key = await getEncryptionKey(env);
+  if (!key) return stored; // Can't decrypt without key
+  try {
+    const [, ivB64, ctB64] = stored.split(":");
+    const iv = Uint8Array.from(atob(ivB64), (c) => c.charCodeAt(0));
+    const ciphertext = Uint8Array.from(atob(ctB64), (c) => c.charCodeAt(0));
+    const decrypted = await crypto.subtle.decrypt({ name: "AES-GCM", iv }, key, ciphertext);
+    return new TextDecoder().decode(decrypted);
+  } catch (decErr) {
+    console.warn("[Worker] API key decryption failed:", decErr instanceof Error ? decErr.message : decErr);
+    return stored; // Return as-is
   }
 }
 
@@ -94,6 +177,32 @@ async function safeQuery<T = any>(
     return { ok: false, error: e?.message || String(e) };
   }
 }
+
+// ============================================================================
+// AUTH MIDDLEWARE — Require authenticated user for write operations
+// ============================================================================
+
+/** Middleware that requires a valid user ID for write operations */
+const requireAuth = async (c: any, next: any) => {
+  const userId = getUserId(c.req.raw);
+  if (!userId) {
+    return c.json({ success: false, code: "AUTH_REQUIRED", message: "Authentication required. Provide X-User-Id or Authorization header." }, 401);
+  }
+  await next();
+};
+
+// Apply auth middleware to all write routes (POST, PUT, PATCH, DELETE)
+app.use("/api/resumes/*", requireAuth);
+app.use("/api/cover-letters/*", requireAuth);
+app.use("/api/interviews/*", requireAuth);
+app.use("/api/ats-reports/*", requireAuth);
+app.use("/api/providers/*", requireAuth);
+app.use("/api/prompts/*", requireAuth);
+app.use("/api/branding", requireAuth);
+app.use("/api/flags/*", requireAuth);
+app.use("/api/audit-logs", requireAuth);
+app.use("/api/settings/*", requireAuth);
+app.use("/api/downloads/*", requireAuth);
 
 // ============ HEALTH ============
 app.get("/api/health", async (c) => {
@@ -196,8 +305,9 @@ async function getCached(c: any, url: string): Promise<Response | null> {
       resp.headers.set("X-Cache-Status", "HIT");
       return resp;
     }
-  } catch {
+  } catch (cacheReadErr) {
     // Cache API not available in some environments (e.g. local dev)
+    console.warn("[Worker] Cache read failed:", cacheReadErr instanceof Error ? cacheReadErr.message : cacheReadErr);
   }
   return null;
 }
@@ -215,8 +325,9 @@ async function setCached(c: any, url: string, response: Response, maxAgeSec = 60
     cached.headers.set("X-Cache-Status", "MISS");
     // waitUntil ensures the cache write completes even if the request ends first
     c.executionCtx.waitUntil(cache.put(cacheKey, cached.clone()));
-  } catch {
+  } catch (cacheWriteErr) {
     // Cache API not available
+    console.warn("[Worker] Cache write failed:", cacheWriteErr instanceof Error ? cacheWriteErr.message : cacheWriteErr);
   }
 }
 
@@ -229,8 +340,9 @@ async function purgeCached(c: any, url: string): Promise<void> {
     const cache = caches.default;
     const cacheKey = new Request(url, { method: "GET" });
     c.executionCtx.waitUntil(cache.delete(cacheKey));
-  } catch {
+  } catch (cachePurgeErr) {
     // Cache API not available
+    console.warn("[Worker] Cache purge failed:", cachePurgeErr instanceof Error ? cachePurgeErr.message : cachePurgeErr);
   }
 }
 
@@ -501,8 +613,8 @@ app.post("/api/providers", async (c) => {
     const now = new Date().toISOString();
 
     // === ENCRYPT API KEY BEFORE STORING ===
-    // In production, use wrangler secret put ENCRYPTION_KEY
-    const apiKeyToStore = body.apiKey || null;
+    // Uses AES-GCM if ENCRYPTION_KEY is set, otherwise stores plaintext (DEV ONLY)
+    const apiKeyToStore = body.apiKey ? await encryptApiKey(String(body.apiKey), c.env) : null;
 
     const result = await c.env.DB.prepare(
       "INSERT INTO ai_providers (id, name, provider_type, base_url, api_key_encrypted, headers_json, parameters_json, model_name, priority, is_active, is_default, is_fallback, allowed_for_regular_users, timeout, max_tokens, temperature, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
@@ -589,7 +701,10 @@ app.put("/api/providers/:id", async (c) => {
       if (body[k] !== undefined) {
         updates.push(`${col} = ?`);
         const val = body[k];
-        if (k === "enabledModels") {
+        if (k === "apiKey") {
+          // Encrypt API key before storing
+          values.push(val ? await encryptApiKey(String(val), c.env) : null);
+        } else if (k === "enabledModels") {
           values.push(JSON.stringify(val));
         } else if (typeof val === "boolean") {
           values.push(val ? 1 : 0);

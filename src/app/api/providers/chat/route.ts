@@ -1,35 +1,9 @@
 // CORS proxy for AI provider chat completions
 // Browser cannot call provider APIs directly due to CORS — this route proxies the request server-side
 import { NextRequest, NextResponse } from "next/server";
+import { isAllowedProviderUrl, BLOCKED_PROXY_HEADERS } from "@/lib/ssrf-allowlist";
 
 export const runtime = "edge";
-
-// SSRF protection — only allow known AI provider hostnames
-const ALLOWED_HOSTS = new Set([
-  "api.openai.com", "api.anthropic.com", "generativelanguage.googleapis.com",
-  "api.groq.com", "api.deepseek.com", "integrate.api.nvidia.com",
-  "openrouter.ai", "api.opencode.com", "opencode.ai",
-  "api.perplexity.ai", "api.mistral.ai", "api.cohere.com",
-  "api.together.xyz", "api.z.ai", "api.aimlapi.com", "api.azure.com",
-  "api-inference.huggingface.co", "api.puter.com", "api.cohere.ai",
-  "bedrock-runtime.us-east-1.amazonaws.com", "bedrock-runtime.us-west-2.amazonaws.com",
-]);
-
-function isAllowedUrl(urlStr: string): boolean {
-  try {
-    const url = new URL(urlStr);
-    const h = url.hostname.toLowerCase();
-    // Block internal/private networks
-    if (h === "localhost" || h === "127.0.0.1" || h.startsWith("192.168.") ||
-        h.startsWith("10.") || h.startsWith("172.16.") || h.startsWith("169.254.") ||
-        h.endsWith(".local") || h.endsWith(".internal") || h === "0.0.0.0") {
-      return false;
-    }
-    return ALLOWED_HOSTS.has(h);
-  } catch {
-    return false;
-  }
-}
 
 export async function POST(req: NextRequest) {
   try {
@@ -40,24 +14,21 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: false, error: "baseUrl is required" }, { status: 400 });
     }
 
-    // SSRF check — reject requests to non-allowed hosts
-    if (!isAllowedUrl(baseUrl)) {
+    // SSRF check — reject requests to non-allowed hosts (uses shared module)
+    if (!isAllowedProviderUrl(baseUrl)) {
       return NextResponse.json(
         { ok: false, error: "Provider URL not allowed. Only known AI provider APIs are supported." },
         { status: 403 },
       );
     }
 
-    // Block dangerous header overrides
-    const BLOCKED_HEADERS = new Set(["host", "cookie", "authorization", "x-forwarded-for", "x-real-ip"]);
-
-    // Build headers
+    // Build headers — block dangerous overrides (uses shared BLOCKED_PROXY_HEADERS)
     const headers: Record<string, string> = { "Content-Type": "application/json" };
     if (headersJson) {
       try {
         const parsed = JSON.parse(headersJson);
         for (const [key, value] of Object.entries(parsed)) {
-          if (!BLOCKED_HEADERS.has(key.toLowerCase())) {
+          if (!BLOCKED_PROXY_HEADERS.has(key.toLowerCase())) {
             headers[key] = String(value);
           }
         }
@@ -93,7 +64,7 @@ export async function POST(req: NextRequest) {
     }
 
     // Build request body (OpenAI chat completions format)
-    const reqBody: Record<string, any> = {
+    const reqBody: Record<string, unknown> = {
       model: model || "gpt-4o-mini",
       messages: messages || [{ role: "user", content: "Hello" }],
       max_tokens: maxTokens ?? 4096,
@@ -102,7 +73,8 @@ export async function POST(req: NextRequest) {
     };
 
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), Math.min((body.timeout || 30) * 1000, 60000));
+    const timeoutMs = Math.min((body.timeout || 30) * 1000, 60000);
+    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
     const t0 = performance.now();
     const res = await fetch(url, {
@@ -128,11 +100,11 @@ export async function POST(req: NextRequest) {
     // Extract text from common response shapes (same logic as callUserProvider)
     let text = "";
     if (responsePath) {
-      text = responsePath.split(".").reduce((acc: any, key: string) => {
+      text = responsePath.split(".").reduce((acc: unknown, key: string) => {
         const m = key.match(/^([^\[]+)(?:\[(\d+)\])?$/);
         if (!m) return acc;
-        const v = acc?.[m[1]];
-        return m[2] !== undefined ? v?.[parseInt(m[2], 10)] : v;
+        const v = (acc as Record<string, unknown>)?.[m[1]];
+        return m[2] !== undefined ? (v as unknown[])?.[parseInt(m[2], 10)] : v;
       }, data) ?? "";
     } else if (data?.choices?.[0]?.message?.content) {
       text = data.choices[0].message.content;

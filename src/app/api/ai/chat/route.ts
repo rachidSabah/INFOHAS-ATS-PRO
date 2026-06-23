@@ -33,8 +33,9 @@ export async function POST(req: NextRequest) {
 
     // Call Z.ai API directly via fetch (Edge-compatible)
     // The z-ai-web-dev-sdk isn't Edge-compatible, so we use the REST API.
-    // In dev, this falls back to the local engine on the client side if this fails.
-    const ZAI_API_KEY = process.env.ZAI_API_KEY || process.env.NEXT_PUBLIC_ZAI_API_KEY || "";
+    // SECURITY: Prefer server-only ZAI_API_KEY over NEXT_PUBLIC_ variant.
+    // NEXT_PUBLIC_ keys are exposed to the client bundle — avoid if possible.
+    const ZAI_API_KEY = process.env.ZAI_API_KEY || "";
 
     // If no key, return a helpful error — the client will fall back to local engine
     if (!ZAI_API_KEY) {

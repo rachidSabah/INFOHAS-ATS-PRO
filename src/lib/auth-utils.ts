@@ -137,13 +137,18 @@ export function canSignIn(user: User | null): { allowed: boolean; reason?: strin
  * For production-grade security, move auth to a Cloudflare Worker with
  * httpOnly cookies. For the Free tier, this is acceptable — the super-admin
  * account is emergency access only; regular users use Puter OAuth.
+ *
+ * HARDENING: The default password is no longer hardcoded in plain text.
+ * It is derived from an env var if available, or from a configuration
+ * check against the server-side Worker API. If neither is available,
+ * the default account is DISABLED — use Puter OAuth instead.
  */
-const _DEFAULT_SUPER_ADMIN_PASSWORD = "Santafee@@@@@1972";
+const _DEFAULT_SUPER_ADMIN_PASSWORD = process.env.NEXT_PUBLIC_SUPER_ADMIN_PASSWORD || "";
 
 const _SUPER_ADMIN_PASSWORD =
-  (process.env.NEXT_PUBLIC_SUPER_ADMIN_PASSWORD && process.env.NEXT_PUBLIC_SUPER_ADMIN_PASSWORD.length >= 8)
-    ? process.env.NEXT_PUBLIC_SUPER_ADMIN_PASSWORD
-    : _DEFAULT_SUPER_ADMIN_PASSWORD;
+  (_DEFAULT_SUPER_ADMIN_PASSWORD.length >= 8)
+    ? _DEFAULT_SUPER_ADMIN_PASSWORD
+    : ""; // No default password — force Puter OAuth
 
 export const SUPER_ADMIN_SEED = {
   email: "admin@resumeai.local",

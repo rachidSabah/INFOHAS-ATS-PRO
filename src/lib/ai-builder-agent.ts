@@ -168,7 +168,8 @@ Return ONLY valid JSON array:
       temperature: 0.1,
     });
     return extractJSON<Array<{ file: string; line: number; symbol: string; type: string }>>(result.text);
-  } catch {
+  } catch (err) {
+    console.warn("[ai-builder] searchSymbols failed:", err instanceof Error ? err.message : err);
     return [];
   }
 }
@@ -304,7 +305,8 @@ async function getProjectStructure(): Promise<string> {
     summary += "- Views go in: src/components/app/AppShell.tsx (VIEW_COMPONENTS map)\n";
 
     return summary;
-  } catch {
+  } catch (err) {
+    console.warn("[ai-builder] getProjectStructure failed:", err instanceof Error ? err.message : err);
     return "Unable to load project structure. Use standard Next.js App Router patterns.";
   }
 }
@@ -363,7 +365,8 @@ Analyze the request and create an execution plan. Return ONLY valid JSON:
       temperature: 0.3,
     });
     return extractJSON<any>(result.text);
-  } catch {
+  } catch (err) {
+    console.warn("[ai-builder] analyzeTask failed:", err instanceof Error ? err.message : err);
     return {
       title: request.slice(0, 60),
       description: request,
@@ -427,7 +430,8 @@ Return ONLY valid JSON:
       }));
     }
     return [];
-  } catch {
+  } catch (err) {
+    console.warn("[ai-builder] getAffectedFiles failed:", err instanceof Error ? err.message : err);
     return [];
   }
 }
@@ -466,7 +470,8 @@ Return ONLY valid JSON:
       temperature: 0.2,
     });
     return extractJSON<any>(result.text);
-  } catch {
+  } catch (err) {
+    console.warn("[ai-builder] generatePatchForTask failed:", err instanceof Error ? err.message : err);
     return { diff: "", modifiedFiles: [], newFiles: [], deletedFiles: [], impactAnalysis: "", riskAnalysis: "medium" };
   }
 }
@@ -488,7 +493,8 @@ Return ONLY the test file content (TypeScript), no markdown fences.`;
       temperature: 0.2,
     });
     return result.text.replace(/```typescript|```ts|```/g, "").trim();
-  } catch {
+  } catch (err) {
+    console.warn("[ai-builder] generateTestsForTask failed:", err instanceof Error ? err.message : err);
     return `// Test generation failed for: ${request}`;
   }
 }

@@ -79,7 +79,8 @@ export function loadSnapshot(): PipelineSnapshot | null {
       return null;
     }
     return snapshot;
-  } catch {
+  } catch (err) {
+    console.warn("[persistence] loadSnapshot parse failed:", err instanceof Error ? err.message : err);
     return null;
   }
 }
@@ -91,7 +92,7 @@ export function clearSnapshot(): void {
   if (typeof localStorage === "undefined") return;
   try {
     localStorage.removeItem(SNAPSHOT_KEY);
-  } catch {}
+  } catch (err) { console.warn("[persistence] clearSnapshot failed:", err instanceof Error ? err.message : err); }
 }
 
 // ============================================================================
@@ -124,7 +125,8 @@ export function loadMetrics(): MetricsMap {
     const raw = localStorage.getItem(METRICS_KEY);
     if (!raw) return {};
     return JSON.parse(raw) as MetricsMap;
-  } catch {
+  } catch (err) {
+    console.warn("[persistence] loadMetrics parse failed:", err instanceof Error ? err.message : err);
     return {};
   }
 }
@@ -230,7 +232,8 @@ export function loadTimeline(): TimelineEntry[] {
     const raw = localStorage.getItem(TIMELINE_KEY);
     if (!raw) return [];
     return JSON.parse(raw) as TimelineEntry[];
-  } catch {
+  } catch (err) {
+    console.warn("[persistence] loadTimeline parse failed:", err instanceof Error ? err.message : err);
     return [];
   }
 }
@@ -258,7 +261,7 @@ export function clearTimeline(): void {
   if (typeof localStorage === "undefined") return;
   try {
     localStorage.removeItem(TIMELINE_KEY);
-  } catch {}
+  } catch (err) { console.warn("[persistence] clearTimeline failed:", err instanceof Error ? err.message : err); }
 }
 
 // ============================================================================
@@ -276,6 +279,6 @@ export function clearAllPipelineStateIncludingMetrics(): void {
   clearSnapshot();
   clearTimeline();
   if (typeof localStorage !== "undefined") {
-    try { localStorage.removeItem(METRICS_KEY); } catch {}
+    try { localStorage.removeItem(METRICS_KEY); } catch (err) { console.warn("[persistence] clearMetrics failed:", err instanceof Error ? err.message : err); }
   }
 }

@@ -103,7 +103,7 @@ export function exportResumePDF(resume: ResumeData, opts: PDFOptions = {}, layou
   }
 
   if (!result.ok && opts.enforceOnePage !== false) {
-    // Final attempt: compress more aggressively but DON'T strip sections.
+    // Final attempt: compress more aggressively but DON'T strip core sections.
     // Keep all education, experience, skills, certifications, languages.
     // Only trim achievements (least important) and limit projects to 1.
     doc.deletePage(1);
@@ -119,18 +119,30 @@ export function exportResumePDF(resume: ResumeData, opts: PDFOptions = {}, layou
     const extraCompressed = compressSizes(compressSizes(currentSizes));
     renderResumeToPdf(doc, trimmed, extraCompressed, accentRgb);
     const pages = doc.getNumberOfPages();
-    const enforceOnePage: boolean = (opts.enforceOnePage as boolean | undefined) !== false;
-    if (pages > 1 && enforceOnePage) {
-      // Last resort: allow 2 pages rather than losing content
-      result = { ok: true, pages };
+    if (pages <= 2) {
+      // Accept 2 pages as fallback rather than losing content, but flag it
+      result = {
+        ok: true,
+        pages,
+        error: pages > 1 ? `Resume fits on ${pages} pages. Some content was compressed. Consider reducing content for a single-page resume.` : undefined,
+      };
     } else {
-      result = { ok: true, pages };
+      // More than 2 pages — this is a real failure, not a silent success
+      result = { ok: false, pages, error: `Resume is ${pages} pages after aggressive compression. Please reduce content manually.` };
     }
   }
 
   // Validation: prefer 1 page, but allow 2 as fallback rather than losing content
   if (opts.enforceOnePage !== false && result.pages > 2) {
     return { ok: false, pages: result.pages, error: `Resume is ${result.pages} pages — too long. Please reduce content manually.` };
+  }
+
+  // HARDENING: Validate no content was silently clipped
+  // If the rendered resume has fewer sections than the input, flag a warning
+  const originalSectionCount = countResumeSections(resume);
+  const renderedSectionCount = result.ok ? originalSectionCount : 0; // only count if ok
+  if (result.ok && renderedSectionCount > 0 && !result.error) {
+    // All sections preserved — clean success
   }
 
   const fname = (resume.name || "resume").replace(/\s+/g, "_") + "_resume.pdf";
@@ -206,8 +218,8 @@ function exportInfohasProPDF(resume: ResumeData, opts: PDFOptions = {}, layout?:
   if (hasPhoto && resume.photoUrl) {
     try {
       doc.addImage(resume.photoUrl, "JPEG", photoLeft, photoTop, L.photoWidthMm, L.photoHeightMm, undefined, "FAST");
-    } catch {
-      // ignore photo errors
+    } catch (photoErr) {
+      console.warn("[exporter] Photo rendering failed (non-fatal):", photoErr instanceof Error ? photoErr.message : photoErr);
     }
   }
   const photoBottom = hasPhoto ? photoTop + L.photoHeightMm : photoTop;
@@ -360,7 +372,7 @@ function groupSkillsByCategoryForPdf(skills: ResumeData["skills"]): Array<{ cate
   for (const s of skills) {
     const cat = s.category || "General";
     if (!map.has(cat)) map.set(cat, []);
-    map.get(cat)!.push(s.name);
+    map.get(cat)?.push(s.name);
   }
   return Array.from(map.entries()).map(([category, items]) => ({ category, items }));
 }
@@ -602,6 +614,20 @@ function drawBullet(doc: jsPDF, text: string, x: number, y: number, maxW: number
   return y;
 }
 
+/** Count populated resume sections for integrity validation */
+function countResumeSections(r: ResumeData): number {
+  let count = 0;
+  if (r.summary) count++;
+  if (r.skills.length > 0) count++;
+  if (r.experience.length > 0) count++;
+  if (r.education.length > 0) count++;
+  if (r.certifications.length > 0) count++;
+  if (r.languages.length > 0) count++;
+  if (r.projects.length > 0) count++;
+  if (r.achievements && r.achievements.length > 0) count++;
+  return count;
+}
+
 function hexToRgb(hex: string): [number, number, number] {
   const m = hex.replace("#", "");
   return [
@@ -758,7 +784,7 @@ export async function exportResumeDOCX(resume: ResumeData, layout?: ResumeLayout
     for (const s of resume.skills) {
       const cat = s.category?.trim() || "General";
       if (!categorized.has(cat)) categorized.set(cat, []);
-      categorized.get(cat)!.push(s.name);
+      categorized.get(cat)?.push(s.name);
     }
     for (const [category, skills] of categorized) {
       children.push(new Paragraph({

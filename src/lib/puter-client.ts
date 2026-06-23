@@ -60,7 +60,8 @@ export function getPuterAuthStatus(): PuterAuthStatus {
       }
     }
     return "not_authenticated";
-  } catch {
+  } catch (err) {
+    console.warn("[puterClient] Auth status check failed:", err instanceof Error ? err.message : err);
     return "session_expired";
   }
 }
@@ -73,7 +74,8 @@ export async function getPuterUser(): Promise<any | null> {
   if (!isPuterLoaded() || getPuterAuthStatus() !== "authenticated") return null;
   try {
     return await window.puter.auth.getUser();
-  } catch {
+  } catch (err) {
+    console.warn("[puterClient] getUser failed:", err instanceof Error ? err.message : err);
     return null;
   }
 }
@@ -136,7 +138,8 @@ export async function discoverPuterModels(): Promise<PuterModel[]> {
           }
         }
       }
-    } catch {
+    } catch (err) {
+      console.warn("[puterClient] listModels failed, falling back to curated list:", err instanceof Error ? err.message : err);
       // Fall through to curated list
     }
   }
@@ -499,7 +502,7 @@ function extractPuterText(resp: any): string {
   if (resp?.message?.role === "assistant" && typeof resp.message.content === "string") {
     return resp.message.content;
   }
-  try { return JSON.stringify(resp); } catch { return String(resp ?? ""); }
+  try { return JSON.stringify(resp); } catch (err) { console.warn("[puterClient] extractPuterText JSON.stringify failed:", err instanceof Error ? err.message : err); return String(resp ?? ""); }
 }
 
 /**

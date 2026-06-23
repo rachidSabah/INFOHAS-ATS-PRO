@@ -1,6 +1,7 @@
 // CORS proxy for testing AI provider connections
 // The browser can't call provider APIs directly due to CORS — this route proxies the request
 import { NextRequest, NextResponse } from "next/server";
+import { isAllowedProviderUrl, BLOCKED_PROXY_HEADERS } from "@/lib/ssrf-allowlist";
 
 export const runtime = "edge";
 
@@ -13,12 +14,27 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: false, message: "baseUrl is required" }, { status: 400 });
     }
 
+    // SSRF check — reject requests to non-allowed hosts
+    if (!isAllowedProviderUrl(baseUrl)) {
+      return NextResponse.json(
+        { ok: false, message: "Provider URL not allowed. Only known AI provider APIs are supported." },
+        { status: 403 },
+      );
+    }
+
     // Build headers
     const headers: Record<string, string> = {
       "Content-Type": "application/json",
     };
     if (headersJson) {
-      try { Object.assign(headers, JSON.parse(headersJson)); } catch {}
+      try {
+        const parsed = JSON.parse(headersJson);
+        for (const [key, value] of Object.entries(parsed)) {
+          if (!BLOCKED_PROXY_HEADERS.has(key.toLowerCase())) {
+            headers[key] = String(value);
+          }
+        }
+      } catch (e) { console.warn("[ProviderTest] Invalid headersJson:", e); }
     }
     if (apiKey) {
       // === GOOGLE GEMINI ===

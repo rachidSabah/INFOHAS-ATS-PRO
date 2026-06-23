@@ -809,6 +809,22 @@ export async function runOptimizationPipeline(input: PipelineInput): Promise<Pip
     log("Quality Assurance", qaLog);
     emitProgress(4, qaLog);
 
+    // HARDENING: Make QA factual consistency failures fatal
+    // If the AI fabricated employers, education, certifications, or metrics,
+    // the optimized resume is NOT trustworthy — restore original.
+    if (result.qa.factualConsistency && !result.qa.factualConsistency.passed) {
+      const issueCount = result.qa.factualConsistency.issueCount;
+      if (issueCount >= 3) {
+        log("Quality Assurance", `⚠ FATAL: ${issueCount} factual inconsistencies detected. Restoring original resume.`);
+        emitProgress(4, `AI hallucinated ${issueCount} facts. Original resume preserved.`);
+        result.optimizedResume = resume;
+        result.status = "failed";
+        result.error = `AI optimization produced ${issueCount} factual inconsistencies (hallucinated content). Original resume preserved. Please retry.`;
+      } else {
+        log("Quality Assurance", `⚠ WARNING: ${issueCount} minor factual issues. Proceeding but flagging for review.`);
+      }
+    }
+
     // === ATS Analysis (After) ===
     result.afterATS = analyzeATS(result.optimizedResume!, jd);
     const beforeScore = result.beforeATS.scores.ats;
@@ -819,9 +835,13 @@ export async function runOptimizationPipeline(input: PipelineInput): Promise<Pip
   } catch (e: any) {
     steps[4].status = "failed";
     steps[4].error = e?.message ?? "QA failed";
-    log("Quality Assurance", `⚠ QA failed: ${e?.message}. Optimized resume may still be usable.`);
-    emitProgress(4, `QA failed: ${e?.message}. Continuing…`);
-    // Non-fatal — return the optimized resume even if QA failed
+    log("Quality Assurance", `⚠ QA CRASHED: ${e?.message}. This is a critical failure — the optimized resume cannot be trusted.`);
+    emitProgress(4, `QA crashed: ${e?.message}. Marking optimization as failed.`);
+    // QA crash is FATAL — if QA can't even run, we can't trust the output.
+    // Restore original resume and mark as failed so UI shows the retry message.
+    result.optimizedResume = resume;
+    result.status = "failed";
+    result.error = `QA validation crashed: ${e?.message}. The optimized resume may be corrupt. Please retry.`;
   }
 
   // ========================================================================
@@ -990,7 +1010,7 @@ export async function runOptimizationPipeline(input: PipelineInput): Promise<Pip
         let directiveConfig: OptimizerDirectiveConfig | null = null;
         try {
           directiveConfig = (useApp.getState() as any)?.optimizerDirective ?? null;
-        } catch {}
+        } catch (directiveErr) { console.warn("[Orchestrator] Failed to read optimizerDirective:", directiveErr instanceof Error ? directiveErr.message : directiveErr); }
 
         const pageFill = validatePageFill(result.optimizedResume, directiveConfig);
         console.log(`[Pipeline Page Fill] ${pageFill.summary}`);
@@ -1229,7 +1249,7 @@ CONTENT REQUIREMENTS:
   console.info(`[Optimizer] Provider: ${result.provider}, Response length: ${result.text?.length ?? 0} chars, Tokens est: ${result.tokensEstimate}`);
 
   // Reject local fallback — no AI provider actually executed
-  if (result.provider === "Local Engine (offline mode)" || (result.text?.length ?? 0) < 500) {
+  if (result.isLocalEngine || result.provider === "Local Engine (offline mode)" || (result.text?.length ?? 0) < 500) {
     throw new Error(
       "No AI provider available. Optimization could not be completed. " +
       "Configure an API provider in Settings or sign in to Puter."
@@ -1537,7 +1557,7 @@ CONTENT REQUIREMENTS:
     let directiveConfig: OptimizerDirectiveConfig | null = null;
     try {
       directiveConfig = (useApp.getState() as any)?.optimizerDirective ?? null;
-    } catch {}
+    } catch (directiveErr2) { console.warn("[Orchestrator] Failed to read optimizerDirective:", directiveErr2 instanceof Error ? directiveErr2.message : directiveErr2); }
 
     const pageFill = validatePageFill(normalizedResume, directiveConfig);
     console.log(

@@ -4,6 +4,7 @@
 
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
+import { isAllowedProviderUrl } from "@/lib/ssrf-allowlist";
 
 // ============================================================================
 // Rate Limiting (in-memory, per-worker — best-effort on edge)
@@ -42,65 +43,6 @@ if (typeof setInterval !== "undefined") {
 }
 
 // ============================================================================
-// SSRF Protection — allowed hostnames for provider proxy routes
-// ============================================================================
-
-const ALLOWED_PROVIDER_HOSTS = new Set([
-  "api.openai.com",
-  "api.anthropic.com",
-  "generativelanguage.googleapis.com",
-  "api.groq.com",
-  "api.deepseek.com",
-  "integrate.api.nvidia.com",
-  "openrouter.ai",
-  "api.opencode.com",
-  "opencode.ai",
-  "api.perplexity.ai",
-  "api.mistral.ai",
-  "api.cohere.com",
-  "api.together.xyz",
-  "api.z.ai",
-  "api.aimlapi.com",
-  "api.azure.com",
-  "api-inference.huggingface.co",
-  "api.puter.com",
-  "api.cohere.ai",
-  "bedrock-runtime.us-east-1.amazonaws.com",
-  "bedrock-runtime.us-west-2.amazonaws.com",
-]);
-
-function isAllowedProviderHost(urlStr: string): boolean {
-  try {
-    const url = new URL(urlStr);
-    const hostname = url.hostname.toLowerCase();
-
-    // Block internal/private IPs
-    if (
-      hostname === "localhost" ||
-      hostname === "127.0.0.1" ||
-      hostname === "0.0.0.0" ||
-      hostname.startsWith("192.168.") ||
-      hostname.startsWith("10.") ||
-      hostname.startsWith("172.16.") ||
-      hostname.endsWith(".local") ||
-      hostname.endsWith(".internal")
-    ) {
-      return false;
-    }
-
-    // Block link-local and metadata endpoints
-    if (hostname.startsWith("169.254.") || hostname === "metadata.google.internal") {
-      return false;
-    }
-
-    // Only allow known provider hostnames
-    return ALLOWED_PROVIDER_HOSTS.has(hostname);
-  } catch {
-    return false; // Invalid URL
-  }
-}
-
-// ============================================================================
 // Routes that should be disabled in production
 // ============================================================================
 
@@ -136,6 +78,8 @@ export function middleware(request: NextRequest) {
   }
 
   // === 3. SSRF protection for provider proxy routes ===
+  // Uses shared isAllowedProviderUrl from ssrf-allowlist.ts — single source of truth
+  // with proper 172.16.0.0/12 blocking (172.16-31.x.x) and all provider hosts.
   if (
     pathname.startsWith("/api/providers/chat") ||
     pathname.startsWith("/api/providers/models") ||
@@ -146,7 +90,7 @@ export function middleware(request: NextRequest) {
     // the query param fallback. The actual body validation happens in the
     // route handler — this is a first-pass check.
     const baseUrl = request.nextUrl.searchParams.get("baseUrl");
-    if (baseUrl && !isAllowedProviderHost(baseUrl)) {
+    if (baseUrl && !isAllowedProviderUrl(baseUrl)) {
       return NextResponse.json(
         { error: "Provider URL not allowed. Only known AI provider APIs are supported." },
         { status: 403 },

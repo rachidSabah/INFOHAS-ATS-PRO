@@ -280,7 +280,7 @@ export async function syncAllFromCloud(store: any): Promise<void> {
           if (backup.length > 0) {
             store.setState({ resumes: backup });
           }
-        } catch {}
+        } catch (err) { console.warn("[cloudApi] Resumes backup restore failed:", err instanceof Error ? err.message : err); }
       }
     }
     if (coverLetters.length) store.setState({ coverLetters });
@@ -290,7 +290,7 @@ export async function syncAllFromCloud(store: any): Promise<void> {
         try {
           const backup = JSON.parse(localStorage.getItem("resumeai-coverletters-backup") || "[]");
           if (backup.length > 0) store.setState({ coverLetters: backup });
-        } catch {}
+        } catch (err) { console.warn("[cloudApi] Cover letters backup restore failed:", err instanceof Error ? err.message : err); }
       }
     }
     if (jobDescriptions.length) store.setState({ jobDescriptions });
@@ -312,7 +312,7 @@ export async function syncAllFromCloud(store: any): Promise<void> {
               api.createJobDescription(jd).catch(() => {});
             }
           }
-        } catch {}
+        } catch (err) { console.warn("[cloudApi] Job descriptions backup restore failed:", err instanceof Error ? err.message : err); }
       }
     }
     if (interviews.length) store.setState({ interviews });
@@ -321,7 +321,7 @@ export async function syncAllFromCloud(store: any): Promise<void> {
         try {
           const backup = JSON.parse(localStorage.getItem("resumeai-interviews-backup") || "[]");
           if (backup.length > 0) store.setState({ interviews: backup });
-        } catch {}
+        } catch (err) { console.warn("[cloudApi] Interviews backup restore failed:", err instanceof Error ? err.message : err); }
       }
     }
     if (atsReports.length) store.setState({ atsReports });
@@ -330,7 +330,7 @@ export async function syncAllFromCloud(store: any): Promise<void> {
         try {
           const backup = JSON.parse(localStorage.getItem("resumeai-ats-backup") || "[]");
           if (backup.length > 0) store.setState({ atsReports: backup });
-        } catch {}
+        } catch (err) { console.warn("[cloudApi] ATS reports backup restore failed:", err instanceof Error ? err.message : err); }
       }
     }
     if (providers.length) store.setState({ providers });
@@ -407,7 +407,7 @@ export async function syncAllFromCloud(store: any): Promise<void> {
       if (rawProviderSettings) {
         let ps: any = null;
         if (typeof rawProviderSettings === "string") {
-          try { ps = JSON.parse(rawProviderSettings); } catch {}
+          try { ps = JSON.parse(rawProviderSettings); } catch (err) { console.warn("[cloudApi] Provider settings JSON parse failed:", err instanceof Error ? err.message : err); }
         } else if (typeof rawProviderSettings === "object") {
           ps = rawProviderSettings;
         }
@@ -428,7 +428,7 @@ export async function syncAllFromCloud(store: any): Promise<void> {
                   store.setState({ providerSettings: { ...store.getState().providerSettings, ...ls } });
                 }
               }
-            } catch {}
+            } catch (err) { console.warn("[cloudApi] Provider settings localStorage restore failed:", err instanceof Error ? err.message : err); }
           }
         }
       }
@@ -443,7 +443,7 @@ export async function syncAllFromCloud(store: any): Promise<void> {
 function safeJson(s: any, fallback: any) {
   if (s === null || s === undefined) return fallback;
   if (typeof s === "object") return s;
-  try { return JSON.parse(s); } catch { return fallback; }
+  try { return JSON.parse(s); } catch (err) { console.warn("[cloudApi] safeJson parse failed:", err instanceof Error ? err.message : err); return fallback; }
 }
 function safeArray(s: any): any[] { const v = safeJson(s, []); return Array.isArray(v) ? v : []; }
 function safeObj(s: any): Record<string, any> { const v = safeJson(s, {}); return v && typeof v === "object" ? v : {}; }

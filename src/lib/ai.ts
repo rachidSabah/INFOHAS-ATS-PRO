@@ -707,6 +707,9 @@ export interface AICallResult {
   provider: string;
   latencyMs: number;
   tokensEstimate: number;
+  /** If true, this response came from the local offline engine, NOT a real AI provider.
+   *  Callers should treat this as a degraded/fallback result and warn the user. */
+  isLocalEngine?: boolean;
 }
 
 const estTokens = (s: string) => Math.ceil(s.length / 4);
@@ -1669,6 +1672,7 @@ export async function callAI(opts: AICallOptions): Promise<AICallResult> {
     provider: "Local Engine (offline mode)",
     latencyMs: Math.round(performance.now() - t0),
     tokensEstimate: estTokens(opts.userPrompt),
+    isLocalEngine: true, // HARDENING: Flag so callers know this is NOT a real AI response
   };
 }
 

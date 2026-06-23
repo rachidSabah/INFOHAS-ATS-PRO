@@ -15,7 +15,7 @@ export class PuterProvider implements AIProviderAdapter {
       if (window.puter.auth?.isSignedIn && !window.puter.auth.isSignedIn()) {
         await window.puter.auth.signIn();
       }
-    } catch { /* anonymous OK for some endpoints */ }
+    } catch (err) { console.warn("[puter] Anonymous signIn check failed:", err instanceof Error ? err.message : err); }
 
     // Normalize model names: Puter API expects lowercase-hyphenated names like
     // "gemini-2.0-flash" but users may have "Gemini 2.0 Flash" in their settings.

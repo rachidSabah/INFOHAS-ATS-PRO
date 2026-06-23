@@ -269,7 +269,7 @@ function persistSession(user: User) {
       user,
       expiresAt: Date.now() + 7 * 24 * 60 * 60 * 1000, // 7-day session expiry
     }));
-  } catch {}
+  } catch (syncErr) { console.warn("[store] Operation failed:", syncErr instanceof Error ? syncErr.message : syncErr); }
 }
 
 function restoreSession(): User | null {
@@ -287,7 +287,8 @@ function restoreSession(): User | null {
       return session.user as User;
     }
     return null;
-  } catch {
+  } catch (sessionErr) {
+    console.warn("[store] Session restore failed:", sessionErr instanceof Error ? sessionErr.message : sessionErr);
     return null;
   }
 }
@@ -296,7 +297,7 @@ function clearSession() {
   if (typeof window === "undefined") return;
   try {
     localStorage.removeItem(SESSION_KEY);
-  } catch {}
+  } catch (syncErr) { console.warn("[store] Operation failed:", syncErr instanceof Error ? syncErr.message : syncErr); }
 }
 
 // === Hydration-safe session restore ===
@@ -315,7 +316,7 @@ function clearSession() {
 const _restoredUser = restoreSession();
 // Set the user-id for API calls immediately (pure side-effect, no React state)
 if (_restoredUser && typeof window !== "undefined") {
-  try { setUserId(_restoredUser.id); } catch {}
+  try { setUserId(_restoredUser.id); } catch (syncErr) { console.warn("[store] Operation failed:", syncErr instanceof Error ? syncErr.message : syncErr); }
 }
 // Flag the store that we have a pending rehydration — page.tsx will call
 // rehydrateSession() in a useEffect to apply the restored user/theme/reports
@@ -387,7 +388,7 @@ export const useApp = create<AppState>()(
               return { ...SEED_PROVIDER_SETTINGS, ...ls };
             }
           }
-        } catch {}
+        } catch (syncErr) { console.warn("[store] Operation failed:", syncErr instanceof Error ? syncErr.message : syncErr); }
         return SEED_PROVIDER_SETTINGS;
       })(),
       prompts: SEED_PROMPTS,
@@ -435,7 +436,7 @@ export const useApp = create<AppState>()(
           let restoredReports: any[] = [];
           try {
             restoredReports = JSON.parse(localStorage.getItem("resumeai-review-reports-backup") || "[]");
-          } catch { restoredReports = []; }
+          } catch (parseErr) { console.warn("[store] Review reports backup parse failed:", parseErr instanceof Error ? parseErr.message : parseErr); restoredReports = []; }
           const savedTheme = (typeof localStorage !== "undefined" && localStorage.getItem("resumeai-theme") === "dark") ? "dark" as const : "light" as const;
           set({
             user: restored,
@@ -481,7 +482,7 @@ export const useApp = create<AppState>()(
         // (imported lazily to avoid a circular dependency at module load)
         try {
           import("./agents/supervisor").then(({ resetSupervisor }) => resetSupervisor());
-        } catch {}
+        } catch (syncErr) { console.warn("[store] Operation failed:", syncErr instanceof Error ? syncErr.message : syncErr); }
         // Reset active*Id fields so a different user signing in next doesn't
         // inherit the previous user's resume/JD/cover-letter/interview selection
         // (which could cause the Optimizer to auto-load the wrong JD, etc.).
@@ -560,7 +561,7 @@ export const useApp = create<AppState>()(
         set((s) => ({ users: [...s.users, newUser] }));
         // === BUG 2 FIX: sync the new email/password user to D1 so they
         // appear in the admin User Approval page. ===
-        cloudApiSafe(createUser)(newUser).catch(() => {});
+        cloudApiSafe(createUser)(newUser).catch((e) => { console.warn("[store] Cloud sync failed:", e instanceof Error ? e.message : e); });
         useApp.getState().log({ actor: normalizedEmail, action: "User registered (pending approval)", category: "auth", details: `Name: ${newUser.name}`, severity: "warning" });
         // Auto-sign-in the new user (they'll see the pending approval screen)
         // RACE-FIX: setUserId BEFORE set() so cloud-API calls carry the
@@ -638,7 +639,7 @@ export const useApp = create<AppState>()(
               lastLoginAt: updatedUser.lastLoginAt,
               status: updatedUser.status,
               role: updatedUser.role,
-            }).catch(() => {});
+            }).catch((e) => { console.warn("[store] Cloud sync failed:", e instanceof Error ? e.message : e); });
             if (shouldAutoApprove) {
               useApp.getState().log({ actor: puterEmail, action: "Puter user auto-approved on sign-in", category: "auth", details: `Name: ${updatedUser.name}`, severity: "info" });
             } else {
@@ -679,11 +680,12 @@ export const useApp = create<AppState>()(
             // were only stored in the Zustand `users` array (in-memory) —
             // never persisted to D1. So when the admin pages loaded and
             // queried D1 via api.getUsers(), the Puter user was missing. ===
-            cloudApiSafe(createUser)(newUser).catch(() => {});
+            cloudApiSafe(createUser)(newUser).catch((e) => { console.warn("[store] Cloud sync failed:", e instanceof Error ? e.message : e); });
             useApp.getState().log({ actor: puterEmail, action: "User registered via Puter (auto-approved)", category: "auth", details: `Name: ${newUser.name}`, severity: "info" });
             return { ok: true, user: newUser };
           }
-        } catch {
+        } catch (puterErr) {
+          console.warn("[store] Puter sign-in failed:", puterErr instanceof Error ? puterErr.message : puterErr);
           return { ok: false, error: "Puter sign-in was cancelled or failed." };
         }
       },
@@ -695,44 +697,44 @@ export const useApp = create<AppState>()(
       // === Admin: User Management Actions ===
       approveUser: (userId) => {
         set((s) => ({ users: s.users.map((u) => (u.id === userId ? { ...u, status: "approved", updatedAt: new Date().toISOString() } : u)) }));
-        cloudApiSafe(updateUser)(userId, { status: "approved" }).catch(() => {});
+        cloudApiSafe(updateUser)(userId, { status: "approved" }).catch((e) => { console.warn("[store] Cloud sync failed:", e instanceof Error ? e.message : e); });
         const u = get().users.find((x) => x.id === userId);
         useApp.getState().log({ actor: get().user?.email ?? "admin", action: "User approved", category: "admin", details: u?.email ?? userId, severity: "info" });
       },
       suspendUser: (userId) => {
         set((s) => ({ users: s.users.map((u) => (u.id === userId ? { ...u, status: "suspended", updatedAt: new Date().toISOString() } : u)) }));
-        cloudApiSafe(updateUser)(userId, { status: "suspended" }).catch(() => {});
+        cloudApiSafe(updateUser)(userId, { status: "suspended" }).catch((e) => { console.warn("[store] Cloud sync failed:", e instanceof Error ? e.message : e); });
         const u = get().users.find((x) => x.id === userId);
         useApp.getState().log({ actor: get().user?.email ?? "admin", action: "User suspended", category: "admin", details: u?.email ?? userId, severity: "warning" });
       },
       unsuspendUser: (userId) => {
         set((s) => ({ users: s.users.map((u) => (u.id === userId ? { ...u, status: "approved", updatedAt: new Date().toISOString() } : u)) }));
-        cloudApiSafe(updateUser)(userId, { status: "approved" }).catch(() => {});
+        cloudApiSafe(updateUser)(userId, { status: "approved" }).catch((e) => { console.warn("[store] Cloud sync failed:", e instanceof Error ? e.message : e); });
         const u = get().users.find((x) => x.id === userId);
         useApp.getState().log({ actor: get().user?.email ?? "admin", action: "User unsuspended", category: "admin", details: u?.email ?? userId, severity: "info" });
       },
       deleteUser: (userId) => {
         set((s) => ({ users: s.users.map((u) => (u.id === userId ? { ...u, status: "deleted", updatedAt: new Date().toISOString() } : u)) }));
-        cloudApiSafe(updateUser)(userId, { status: "deleted" }).catch(() => {});
+        cloudApiSafe(updateUser)(userId, { status: "deleted" }).catch((e) => { console.warn("[store] Cloud sync failed:", e instanceof Error ? e.message : e); });
         const u = get().users.find((x) => x.id === userId);
         useApp.getState().log({ actor: get().user?.email ?? "admin", action: "User deleted (soft)", category: "admin", details: u?.email ?? userId, severity: "error" });
       },
       promoteToAdmin: (userId) => {
         set((s) => ({ users: s.users.map((u) => (u.id === userId ? { ...u, role: "admin", updatedAt: new Date().toISOString() } : u)) }));
-        cloudApiSafe(updateUser)(userId, { role: "admin" }).catch(() => {});
+        cloudApiSafe(updateUser)(userId, { role: "admin" }).catch((e) => { console.warn("[store] Cloud sync failed:", e instanceof Error ? e.message : e); });
         const u = get().users.find((x) => x.id === userId);
         useApp.getState().log({ actor: get().user?.email ?? "admin", action: "User promoted to admin", category: "admin", details: u?.email ?? userId, severity: "info" });
       },
       demoteToUser: (userId) => {
         set((s) => ({ users: s.users.map((u) => (u.id === userId ? { ...u, role: "user", updatedAt: new Date().toISOString() } : u)) }));
-        cloudApiSafe(updateUser)(userId, { role: "user" }).catch(() => {});
+        cloudApiSafe(updateUser)(userId, { role: "user" }).catch((e) => { console.warn("[store] Cloud sync failed:", e instanceof Error ? e.message : e); });
         const u = get().users.find((x) => x.id === userId);
         useApp.getState().log({ actor: get().user?.email ?? "admin", action: "User demoted to user", category: "admin", details: u?.email ?? userId, severity: "info" });
       },
       resetUserPassword: (userId, newPassword) => {
         const hash = hashPassword(newPassword);
         set((s) => ({ users: s.users.map((u) => (u.id === userId ? { ...u, passwordHash: hash, updatedAt: new Date().toISOString() } : u)) }));
-        cloudApiSafe(updateUser)(userId, { passwordHash: hash }).catch(() => {});
+        cloudApiSafe(updateUser)(userId, { passwordHash: hash }).catch((e) => { console.warn("[store] Cloud sync failed:", e instanceof Error ? e.message : e); });
         const u = get().users.find((x) => x.id === userId);
         useApp.getState().log({ actor: get().user?.email ?? "admin", action: "Password reset by admin", category: "admin", details: u?.email ?? userId, severity: "warning" });
       },
@@ -751,7 +753,7 @@ export const useApp = create<AppState>()(
           user: s.user ? { ...s.user, name: trimmed, lastActiveAt: new Date().toISOString() } : s.user,
           users: s.users.map((u) => (u.id === userId ? { ...u, name: trimmed, updatedAt: new Date().toISOString() } : u)),
         }));
-        if (userId) cloudApiSafe(updateUser)(userId, { name: trimmed }).catch(() => {});
+        if (userId) cloudApiSafe(updateUser)(userId, { name: trimmed }).catch((e) => { console.warn("[store] Cloud sync failed:", e instanceof Error ? e.message : e); });
         // Re-persist the session so the new name survives refresh
         const updated = get().user;
         if (updated) persistSession(updated);
@@ -767,7 +769,7 @@ export const useApp = create<AppState>()(
           user: s.user ? { ...s.user, email: trimmed, role: newRole, lastActiveAt: new Date().toISOString() } : s.user,
           users: s.users.map((u) => (u.id === userId ? { ...u, email: trimmed, role: newRole, updatedAt: new Date().toISOString() } : u)),
         }));
-        if (userId) cloudApiSafe(updateUser)(userId, { email: trimmed }).catch(() => {});
+        if (userId) cloudApiSafe(updateUser)(userId, { email: trimmed }).catch((e) => { console.warn("[store] Cloud sync failed:", e instanceof Error ? e.message : e); });
         // Re-persist the session so the new email survives refresh
         const updated = get().user;
         if (updated) persistSession(updated);
@@ -795,7 +797,7 @@ export const useApp = create<AppState>()(
           user: { ...s.user, passwordHash: hash, lastActiveAt: new Date().toISOString() },
           users: s.users.map((u) => (u.id === userId ? { ...u, passwordHash: hash, updatedAt: new Date().toISOString() } : u)),
         });
-        cloudApiSafe(updateUser)(userId, { passwordHash: hash }).catch(() => {});
+        cloudApiSafe(updateUser)(userId, { passwordHash: hash }).catch((e) => { console.warn("[store] Cloud sync failed:", e instanceof Error ? e.message : e); });
         // Re-persist the session so the new password hash survives refresh
         const updated = get().user;
         if (updated) persistSession(updated);
@@ -819,13 +821,13 @@ export const useApp = create<AppState>()(
       addResume: (r) => {
         set((s) => ({ resumes: [r, ...s.resumes] }));
         // Persist to cloud (D1 via Worker)
-        cloudApiSafe(createResume)(r).catch(() => {});
+        cloudApiSafe(createResume)(r).catch((e) => { console.warn("[store] Cloud sync failed:", e instanceof Error ? e.message : e); });
         // Also backup to localStorage as a safety net (in case cloud API is unreachable)
         if (typeof localStorage !== "undefined") {
           try {
             const existing = JSON.parse(localStorage.getItem("resumeai-resumes-backup") || "[]");
             localStorage.setItem("resumeai-resumes-backup", JSON.stringify([r, ...existing.filter((x: any) => x.id !== r.id)].slice(0, 50)));
-          } catch {}
+          } catch (syncErr) { console.warn("[store] Operation failed:", syncErr instanceof Error ? syncErr.message : syncErr); }
         }
       },
       updateResume: (id, patch) => {
@@ -834,14 +836,14 @@ export const useApp = create<AppState>()(
             r.id === id ? { ...r, ...patch, updatedAt: new Date().toISOString() } : r
           ),
         }));
-        cloudApiSafe(updateResume)(id, patch).catch(() => {});
+        cloudApiSafe(updateResume)(id, patch).catch((e) => { console.warn("[store] Cloud sync failed:", e instanceof Error ? e.message : e); });
         // Also update localStorage backup
         if (typeof localStorage !== "undefined") {
           try {
             const existing = JSON.parse(localStorage.getItem("resumeai-resumes-backup") || "[]");
             const updated = existing.map((r: any) => r.id === id ? { ...r, ...patch, updatedAt: new Date().toISOString() } : r);
             localStorage.setItem("resumeai-resumes-backup", JSON.stringify(updated));
-          } catch {}
+          } catch (syncErr) { console.warn("[store] Operation failed:", syncErr instanceof Error ? syncErr.message : syncErr); }
         }
       },
       removeResume: (id) => {
@@ -849,7 +851,7 @@ export const useApp = create<AppState>()(
           resumes: s.resumes.filter((r) => r.id !== id),
           activeResumeId: s.activeResumeId === id ? s.resumes[0]?.id ?? null : s.activeResumeId,
         }));
-        cloudApiSafe(deleteResume)(id).catch(() => {});
+        cloudApiSafe(deleteResume)(id).catch((e) => { console.warn("[store] Cloud sync failed:", e instanceof Error ? e.message : e); });
       },
       setActiveResume: (id) => set({ activeResumeId: id }),
 
@@ -860,14 +862,14 @@ export const useApp = create<AppState>()(
         // stale source with missing fields.
         const safeJ = normalizeJD(j);
         set((s) => ({ jobDescriptions: [safeJ, ...s.jobDescriptions] }));
-        cloudApiSafe(createJobDescription)(safeJ).catch(() => {});
+        cloudApiSafe(createJobDescription)(safeJ).catch((e) => { console.warn("[store] Cloud sync failed:", e instanceof Error ? e.message : e); });
         // Defensive localStorage backup so parsed JDs survive browser refresh
         // even when the Cloudflare Worker / D1 is unreachable or returns empty.
         if (typeof localStorage !== "undefined") {
           try {
             const existing = JSON.parse(localStorage.getItem("resumeai-jds-backup") || "[]");
             localStorage.setItem("resumeai-jds-backup", JSON.stringify([safeJ, ...existing.filter((x: any) => x.id !== safeJ.id)].slice(0, 100)));
-          } catch {}
+          } catch (syncErr) { console.warn("[store] Operation failed:", syncErr instanceof Error ? syncErr.message : syncErr); }
         }
       },
       removeJD: (id) => {
@@ -875,25 +877,25 @@ export const useApp = create<AppState>()(
           jobDescriptions: s.jobDescriptions.filter((j) => j.id !== id),
           activeJdId: s.activeJdId === id ? (s.jobDescriptions.find((j) => j.id !== id)?.id ?? null) : s.activeJdId,
         }));
-        cloudApiSafe(deleteJobDescription)(id).catch(() => {});
+        cloudApiSafe(deleteJobDescription)(id).catch((e) => { console.warn("[store] Cloud sync failed:", e instanceof Error ? e.message : e); });
         // Also remove from localStorage backup
         if (typeof localStorage !== "undefined") {
           try {
             const existing = JSON.parse(localStorage.getItem("resumeai-jds-backup") || "[]");
             localStorage.setItem("resumeai-jds-backup", JSON.stringify(existing.filter((x: any) => x.id !== id)));
-          } catch {}
+          } catch (syncErr) { console.warn("[store] Operation failed:", syncErr instanceof Error ? syncErr.message : syncErr); }
         }
       },
       setActiveJD: (id) => set({ activeJdId: id }),
 
       addCoverLetter: (c) => {
         set((s) => ({ coverLetters: [c, ...s.coverLetters] }));
-        cloudApiSafe(createCoverLetter)(c).catch(() => {});
+        cloudApiSafe(createCoverLetter)(c).catch((e) => { console.warn("[store] Cloud sync failed:", e instanceof Error ? e.message : e); });
         if (typeof localStorage !== "undefined") {
           try {
             const existing = JSON.parse(localStorage.getItem("resumeai-coverletters-backup") || "[]");
             localStorage.setItem("resumeai-coverletters-backup", JSON.stringify([c, ...existing.filter((x: any) => x.id !== c.id)].slice(0, 50)));
-          } catch {}
+          } catch (syncErr) { console.warn("[store] Operation failed:", syncErr instanceof Error ? syncErr.message : syncErr); }
         }
       },
       updateCoverLetter: (id, patch) => {
@@ -902,57 +904,57 @@ export const useApp = create<AppState>()(
             c.id === id ? { ...c, ...patch, updatedAt: new Date().toISOString() } : c
           ),
         }));
-        cloudApiSafe(updateCoverLetter)(id, patch).catch(() => {});
+        cloudApiSafe(updateCoverLetter)(id, patch).catch((e) => { console.warn("[store] Cloud sync failed:", e instanceof Error ? e.message : e); });
         if (typeof localStorage !== "undefined") {
           try {
             const existing = JSON.parse(localStorage.getItem("resumeai-coverletters-backup") || "[]");
             const updated = existing.map((x: any) => x.id === id ? { ...x, ...patch, updatedAt: new Date().toISOString() } : x);
             localStorage.setItem("resumeai-coverletters-backup", JSON.stringify(updated));
-          } catch {}
+          } catch (syncErr) { console.warn("[store] Operation failed:", syncErr instanceof Error ? syncErr.message : syncErr); }
         }
       },
       removeCoverLetter: (id) => {
         set((s) => ({ coverLetters: s.coverLetters.filter((c) => c.id !== id) }));
-        cloudApiSafe(deleteCoverLetter)(id).catch(() => {});
+        cloudApiSafe(deleteCoverLetter)(id).catch((e) => { console.warn("[store] Cloud sync failed:", e instanceof Error ? e.message : e); });
         if (typeof localStorage !== "undefined") {
           try {
             const existing = JSON.parse(localStorage.getItem("resumeai-coverletters-backup") || "[]");
             localStorage.setItem("resumeai-coverletters-backup", JSON.stringify(existing.filter((x: any) => x.id !== id)));
-          } catch {}
+          } catch (syncErr) { console.warn("[store] Operation failed:", syncErr instanceof Error ? syncErr.message : syncErr); }
         }
       },
       setActiveCoverLetter: (id) => set({ activeCoverLetterId: id }),
 
       addInterview: (i) => {
         set((s) => ({ interviews: [i, ...s.interviews] }));
-        cloudApiSafe(createInterview)(i).catch(() => {});
+        cloudApiSafe(createInterview)(i).catch((e) => { console.warn("[store] Cloud sync failed:", e instanceof Error ? e.message : e); });
         if (typeof localStorage !== "undefined") {
           try {
             const existing = JSON.parse(localStorage.getItem("resumeai-interviews-backup") || "[]");
             localStorage.setItem("resumeai-interviews-backup", JSON.stringify([i, ...existing.filter((x: any) => x.id !== i.id)].slice(0, 50)));
-          } catch {}
+          } catch (syncErr) { console.warn("[store] Operation failed:", syncErr instanceof Error ? syncErr.message : syncErr); }
         }
       },
       removeInterview: (id) => {
         set((s) => ({ interviews: s.interviews.filter((i) => i.id !== id) }));
-        cloudApiSafe(deleteInterview)(id).catch(() => {});
+        cloudApiSafe(deleteInterview)(id).catch((e) => { console.warn("[store] Cloud sync failed:", e instanceof Error ? e.message : e); });
         if (typeof localStorage !== "undefined") {
           try {
             const existing = JSON.parse(localStorage.getItem("resumeai-interviews-backup") || "[]");
             localStorage.setItem("resumeai-interviews-backup", JSON.stringify(existing.filter((x: any) => x.id !== id)));
-          } catch {}
+          } catch (syncErr) { console.warn("[store] Operation failed:", syncErr instanceof Error ? syncErr.message : syncErr); }
         }
       },
       setActiveInterview: (id) => set({ activeInterviewId: id }),
 
       addATSReport: (r) => {
         set((s) => ({ atsReports: [r, ...s.atsReports] }));
-        cloudApiSafe(createATSReport)(r).catch(() => {});
+        cloudApiSafe(createATSReport)(r).catch((e) => { console.warn("[store] Cloud sync failed:", e instanceof Error ? e.message : e); });
         if (typeof localStorage !== "undefined") {
           try {
             const existing = JSON.parse(localStorage.getItem("resumeai-ats-backup") || "[]");
             localStorage.setItem("resumeai-ats-backup", JSON.stringify([r, ...existing.filter((x: any) => x.id !== r.id)].slice(0, 50)));
-          } catch {}
+          } catch (syncErr) { console.warn("[store] Operation failed:", syncErr instanceof Error ? syncErr.message : syncErr); }
         }
       },
 
@@ -969,7 +971,7 @@ export const useApp = create<AppState>()(
           try {
             const existing = JSON.parse(localStorage.getItem("resumeai-review-reports-backup") || "[]");
             localStorage.setItem("resumeai-review-reports-backup", JSON.stringify([r, ...existing.filter((x: any) => x.id !== r.id)].slice(0, 30)));
-          } catch {}
+          } catch (syncErr) { console.warn("[store] Operation failed:", syncErr instanceof Error ? syncErr.message : syncErr); }
         }
       },
       updateReviewReport: (id, patch) => {
@@ -983,7 +985,7 @@ export const useApp = create<AppState>()(
             const existing = JSON.parse(localStorage.getItem("resumeai-review-reports-backup") || "[]");
             const updated = existing.map((r: any) => r.id === id ? { ...r, ...patch, updatedAt: new Date().toISOString() } : r);
             localStorage.setItem("resumeai-review-reports-backup", JSON.stringify(updated));
-          } catch {}
+          } catch (syncErr) { console.warn("[store] Operation failed:", syncErr instanceof Error ? syncErr.message : syncErr); }
         }
       },
       removeReviewReport: (id) => {
@@ -992,18 +994,18 @@ export const useApp = create<AppState>()(
           try {
             const existing = JSON.parse(localStorage.getItem("resumeai-review-reports-backup") || "[]");
             localStorage.setItem("resumeai-review-reports-backup", JSON.stringify(existing.filter((x: any) => x.id !== id)));
-          } catch {}
+          } catch (syncErr) { console.warn("[store] Operation failed:", syncErr instanceof Error ? syncErr.message : syncErr); }
         }
       },
 
       // === AI PROVIDERS — sync to D1 ===
       addProvider: (p) => {
         set((s) => ({ providers: [...s.providers, p] }));
-        cloudApiSafe(createProvider)(p).catch(() => {});
+        cloudApiSafe(createProvider)(p).catch((e) => { console.warn("[store] Cloud sync failed:", e instanceof Error ? e.message : e); });
       },
       updateProvider: (id, patch) => {
         set((s) => ({ providers: s.providers.map((p) => (p.id === id ? { ...p, ...patch, updatedAt: new Date().toISOString() } : p)) }));
-        cloudApiSafe(updateProvider)(id, patch).catch(() => {});
+        cloudApiSafe(updateProvider)(id, patch).catch((e) => { console.warn("[store] Cloud sync failed:", e instanceof Error ? e.message : e); });
       },
       removeProvider: (id) => {
         set((s) => ({
@@ -1015,7 +1017,7 @@ export const useApp = create<AppState>()(
             fallbackProviderIds: s.providerSettings.fallbackProviderIds.filter((fid) => fid !== id),
           },
         }));
-        cloudApiSafe(deleteProvider)(id).catch(() => {});
+        cloudApiSafe(deleteProvider)(id).catch((e) => { console.warn("[store] Cloud sync failed:", e instanceof Error ? e.message : e); });
       },
       duplicateProvider: (id) => {
         const src = get().providers.find((p) => p.id === id);
@@ -1033,7 +1035,7 @@ export const useApp = create<AppState>()(
           lastUsedAt: undefined,
         };
         set((s) => ({ providers: [...s.providers, copy] }));
-        cloudApiSafe(createProvider)(copy).catch(() => {});
+        cloudApiSafe(createProvider)(copy).catch((e) => { console.warn("[store] Cloud sync failed:", e instanceof Error ? e.message : e); });
         return newId;
       },
       setDefaultProvider: (id) => {
@@ -1042,7 +1044,7 @@ export const useApp = create<AppState>()(
           providerSettings: { ...s.providerSettings, defaultProviderId: id },
         }));
         // Update all providers in D1 (isDefault changed for multiple)
-        get().providers.forEach((p) => cloudApiSafe(updateProvider)(p.id, { isDefault: p.id === id }).catch(() => {}));
+        get().providers.forEach((p) => cloudApiSafe(updateProvider)(p.id, { isDefault: p.id === id }).catch((e) => { console.warn("[store] Cloud sync failed:", e instanceof Error ? e.message : e); }));
       },
       toggleFallback: (id) => {
         set((s) => {
@@ -1058,7 +1060,7 @@ export const useApp = create<AppState>()(
           };
         });
         const p = get().providers.find((x) => x.id === id);
-        if (p) cloudApiSafe(updateProvider)(id, { isFallback: p.isFallback }).catch(() => {});
+        if (p) cloudApiSafe(updateProvider)(id, { isFallback: p.isFallback }).catch((e) => { console.warn("[store] Cloud sync failed:", e instanceof Error ? e.message : e); });
       },
       reorderFallback: (id, direction) => {
         set((s) => {
@@ -1113,37 +1115,37 @@ export const useApp = create<AppState>()(
         const settings = get().providerSettings;
         cloudApiSafe(updateBranding)({
           providerSettings: settings,
-        }).catch(() => {});
+        }).catch((e) => { console.warn("[store] Cloud sync failed:", e instanceof Error ? e.message : e); });
         // === ALSO backup to localStorage (survives even when D1 is down) ===
         if (typeof localStorage !== "undefined") {
           try {
             localStorage.setItem("resumeai-provider-settings", JSON.stringify(settings));
-          } catch {}
+          } catch (syncErr) { console.warn("[store] Operation failed:", syncErr instanceof Error ? syncErr.message : syncErr); }
         }
       },
 
       addPrompt: (p) => {
         set((s) => ({ prompts: [...s.prompts, p] }));
-        cloudApiSafe(createPrompt)(p).catch(() => {});
+        cloudApiSafe(createPrompt)(p).catch((e) => { console.warn("[store] Cloud sync failed:", e instanceof Error ? e.message : e); });
       },
       updatePrompt: (id, patch) => {
         set((s) => ({
           prompts: s.prompts.map((p) => (p.id === id ? { ...p, ...patch, version: p.version + 1 } : p)),
         }));
-        cloudApiSafe(updatePrompt)(id, patch).catch(() => {});
+        cloudApiSafe(updatePrompt)(id, patch).catch((e) => { console.warn("[store] Cloud sync failed:", e instanceof Error ? e.message : e); });
       },
       removePrompt: (id) => {
         set((s) => ({ prompts: s.prompts.filter((p) => p.id !== id) }));
-        cloudApiSafe(deletePrompt)(id).catch(() => {});
+        cloudApiSafe(deletePrompt)(id).catch((e) => { console.warn("[store] Cloud sync failed:", e instanceof Error ? e.message : e); });
       },
 
       updateBranding: (patch) => {
         set((s) => ({ branding: { ...s.branding, ...patch } }));
-        cloudApiSafe(updateBranding)({ ...get().branding, ...patch }).catch(() => {});
+        cloudApiSafe(updateBranding)({ ...get().branding, ...patch }).catch((e) => { console.warn("[store] Cloud sync failed:", e instanceof Error ? e.message : e); });
       },
       updateFlag: (k, v) => {
         set((s) => ({ flags: { ...s.flags, [k]: v } }));
-        cloudApiSafe(updateFlag)(k, v).catch(() => {});
+        cloudApiSafe(updateFlag)(k, v).catch((e) => { console.warn("[store] Cloud sync failed:", e instanceof Error ? e.message : e); });
       },
       updateOptimizerDirective: (patch) => {
         set((s) => ({ optimizerDirective: { ...s.optimizerDirective, ...patch } }));
@@ -1151,17 +1153,17 @@ export const useApp = create<AppState>()(
         // We reuse the updateBranding cloud API since optimizerDirective is a
         // settings blob like branding. The cloud API stores it under a
         // dedicated key in the settings table.
-        cloudApiSafe(cloudApi.updateBranding as any)({ optimizerDirective: { ...get().optimizerDirective, ...patch } }).catch(() => {});
+        cloudApiSafe(cloudApi.updateBranding as any)({ optimizerDirective: { ...get().optimizerDirective, ...patch } }).catch((e) => { console.warn("[store] Cloud sync failed:", e instanceof Error ? e.message : e); });
         useApp.getState().log({ actor: get().user?.email ?? "admin", action: "Optimizer directive updated", category: "admin", details: Object.keys(patch).join(", "), severity: "info" });
       },
       resetOptimizerDirective: () => {
         set({ optimizerDirective: SEED_OPTIMIZER_DIRECTIVE });
-        cloudApiSafe(cloudApi.updateBranding as any)({ optimizerDirective: SEED_OPTIMIZER_DIRECTIVE }).catch(() => {});
+        cloudApiSafe(cloudApi.updateBranding as any)({ optimizerDirective: SEED_OPTIMIZER_DIRECTIVE }).catch((e) => { console.warn("[store] Cloud sync failed:", e instanceof Error ? e.message : e); });
         useApp.getState().log({ actor: get().user?.email ?? "admin", action: "Optimizer directive reset to defaults", category: "admin", details: "All parameters restored to factory defaults", severity: "warning" });
       },
       updateAIDevSettings: (patch) => {
         set((s) => ({ aiDevSettings: { ...s.aiDevSettings, ...patch } }));
-        cloudApiSafe(cloudApi.updateBranding as any)({ aiDevSettings: { ...get().aiDevSettings, ...patch } }).catch(() => {});
+        cloudApiSafe(cloudApi.updateBranding as any)({ aiDevSettings: { ...get().aiDevSettings, ...patch } }).catch((e) => { console.warn("[store] Cloud sync failed:", e instanceof Error ? e.message : e); });
         useApp.getState().log({ actor: get().user?.email ?? "admin", action: "AI Dev Agent settings updated", category: "admin", details: Object.keys(patch).join(", "), severity: "info" });
       },
       addAIDevHistory: (entry) => {
@@ -1213,7 +1215,7 @@ export const useApp = create<AppState>()(
             ...s.logs,
           ].slice(0, 500),
         }));
-        cloudApiSafe(createAuditLog)({ id: uid("l"), timestamp: new Date().toISOString(), ...entry }).catch(() => {});
+        cloudApiSafe(createAuditLog)({ id: uid("l"), timestamp: new Date().toISOString(), ...entry }).catch((e) => { console.warn("[store] Cloud sync failed:", e instanceof Error ? e.message : e); });
       },
       clearLogs: () => set({ logs: [] }),
 
