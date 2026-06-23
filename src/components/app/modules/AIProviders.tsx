@@ -52,6 +52,14 @@ export function AIProviders() {
   const settings = useApp((s) => s.providerSettings);
   const setView = useApp((s) => s.setView);
 
+  // Provider auth state — MUST be declared before the tab state that references them
+  const [puterStatus, setPuterStatus] = useState<ProviderAuthStatus>({
+    connected: false, authenticated: false, email: null, expiresAt: null, models: [], sharedAdminAccount: false,
+  });
+  const [zaiStatus, setZaiStatus] = useState<ProviderAuthStatus>({
+    connected: false, authenticated: false, email: null, expiresAt: null, models: [], sharedAdminAccount: false,
+  });
+
   // Default to auth tab if no providers are authenticated — the user needs to
   // connect Puter or Z.ai before anything works. Once authenticated, show providers.
   const [tab, setTab] = useState<Tab>(!puterStatus.authenticated && !zaiStatus.authenticated ? "auth" : "providers");
@@ -60,14 +68,6 @@ export function AIProviders() {
   const [testing, setTesting] = useState<AIProvider | null>(null);
   const [q, setQ] = useState("");
   const [zaiApiKeyInput, setZaiApiKeyInput] = useState("");
-
-  // Provider auth state
-  const [puterStatus, setPuterStatus] = useState<ProviderAuthStatus>({
-    connected: false, authenticated: false, email: null, expiresAt: null, models: [], sharedAdminAccount: false,
-  });
-  const [zaiStatus, setZaiStatus] = useState<ProviderAuthStatus>({
-    connected: false, authenticated: false, email: null, expiresAt: null, models: [], sharedAdminAccount: false,
-  });
 
   // Refresh auth status from providers
   const refreshAuthStatus = useCallback(() => {
