@@ -884,18 +884,18 @@ export async function runOptimizationPipeline(input: PipelineInput): Promise<Pip
     // === QUALITY GATES ===
     const qualityErrors: string[] = [];
 
-    // Gate 1: Experience must exist
-    if (!result.optimizedResume.experience || result.optimizedResume.experience.length === 0) {
+    // Gate 1: Experience must not be dropped (only if original had experience)
+    if ((!result.optimizedResume.experience || result.optimizedResume.experience.length === 0) && (resume.experience?.length ?? 0) > 0) {
       qualityErrors.push("Experience section is empty");
     }
 
-    // Gate 2: Education must exist
-    if (!result.optimizedResume.education || result.optimizedResume.education.length === 0) {
+    // Gate 2: Education must not be dropped (only if original had education)
+    if ((!result.optimizedResume.education || result.optimizedResume.education.length === 0) && (resume.education?.length ?? 0) > 0) {
       qualityErrors.push("Education section is empty");
     }
 
-    // Gate 3: Skills must exist
-    if (!result.optimizedResume.skills || result.optimizedResume.skills.length === 0) {
+    // Gate 3: Skills must not be dropped (only if original had skills)
+    if ((!result.optimizedResume.skills || result.optimizedResume.skills.length === 0) && (resume.skills?.length ?? 0) > 0) {
       qualityErrors.push("Skills section is empty");
     }
 
@@ -1561,13 +1561,13 @@ function mapAviationResultToResumeData(result: AviationOptimizeResult, original:
     dateOfBirth: result.resume.dateOfBirth || original.dateOfBirth,
     summary: String(result.resume.summary || ""),
     experience: (result.resume.experience ?? []).length > 0
-      ? result.resume.experience.map((e: any) => ({
+      ? result.resume.experience.map((e: any, i: number) => ({
           id: uid("e"),
           title: String(e.title || ""),
           company: String(e.company || ""),
           location: flattenLocation(e.location) || "",
           startDate: String(e.startDate || ""),
-          endDate: String(e.endDate || "Present"),
+          endDate: String(e.endDate || original.experience?.[i]?.endDate || ""),
           bullets: Array.isArray(e.bullets) ? e.bullets.map((b: any) => flattenValue(b)) : [],
         }))
       : original.experience,

@@ -1833,12 +1833,13 @@ function localRewrite(prompt: string): string {
  * - PRESERVE ALL original dates verbatim
  */
 function localOptimize(prompt: string): string {
-  // Try to extract the source resume from the prompt
-  const resumeMatch = prompt.match(/SOURCE RESUME.*?:\s*(\{.*?\})\s*\n\nTARGET/s);
+  // Extract the source resume JSON from the prompt using balanced brace matching
   let resume: any = {};
-  try {
-    if (resumeMatch) resume = JSON.parse(resumeMatch[1]);
-  } catch {}
+  const firstBrace = prompt.indexOf("{");
+  const lastBrace = prompt.lastIndexOf("}");
+  if (firstBrace !== -1 && lastBrace > firstBrace) {
+    try { resume = JSON.parse(prompt.slice(firstBrace, lastBrace + 1)); } catch {}
+  }
 
   const name = resume?.name || "Your Name";
   const headline = resume?.headline || "";
