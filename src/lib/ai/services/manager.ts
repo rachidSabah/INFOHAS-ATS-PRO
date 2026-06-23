@@ -145,7 +145,13 @@ export class ProviderManager {
       try {
         data = JSON.parse(responseText);
       } catch {
-        data = { ok: false, message: "Proxy returned a non-JSON response." };
+        // The proxy returned HTML (likely a 500 error page from Cloudflare Pages)
+        // Include the HTTP status code and first chars of the response for debugging
+        const preview = responseText.slice(0, 100).replace(/\n/g, " ").trim();
+        data = {
+          ok: false,
+          message: `Proxy returned a non-JSON response (HTTP ${res.status}). ${res.status === 500 ? "The API route may be misconfigured on the deployment. Try refreshing the page or redeploying." : ""} Response: "${preview}"`,
+        };
       }
 
       // Log the test

@@ -88,10 +88,26 @@ export async function POST(req: NextRequest) {
 
     if (!res.ok) {
       const errText = await res.text().catch(() => "");
+      // Try to extract a meaningful error message from various API error formats
+      let errorMessage = errText.slice(0, 300);
+      try {
+        const errJson = JSON.parse(errText);
+        if (errJson?.error?.message) {
+          errorMessage = errJson.error.message;
+        } else if (errJson?.error?.type && errJson?.error?.message) {
+          errorMessage = `${errJson.error.type}: ${errJson.error.message}`;
+        } else if (errJson?.error?.code && errJson?.error?.message) {
+          errorMessage = `Error ${errJson.error.code}: ${errJson.error.message}`;
+        } else if (errJson?.message) {
+          errorMessage = errJson.message;
+        }
+      } catch {
+        // Not JSON — use raw text
+      }
       return NextResponse.json({
         ok: false,
         latencyMs,
-        error: `API returned HTTP ${res.status}: ${errText.slice(0, 200)}`,
+        error: `API returned HTTP ${res.status}: ${errorMessage}`,
       }, { status: res.status });
     }
 

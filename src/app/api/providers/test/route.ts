@@ -111,10 +111,37 @@ export async function POST(req: NextRequest) {
 
     if (!res.ok) {
       const errText = await res.text().catch(() => "");
+      // Try to extract a meaningful error message from various API error formats
+      let errorMessage = errText.slice(0, 300);
+      try {
+        const errJson = JSON.parse(errText);
+        // OpenAI format: { error: { message: "..." } }
+        if (errJson?.error?.message) {
+          errorMessage = errJson.error.message;
+        }
+        // Anthropic format: { error: { type: "...", message: "..." } }
+        else if (errJson?.error?.type && errJson?.error?.message) {
+          errorMessage = `${errJson.error.type}: ${errJson.error.message}`;
+        }
+        // OpenCode/Zen format: { type: "error", error: { type: "AuthError", message: "..." } }
+        else if (errJson?.error?.type && errJson?.error?.message) {
+          errorMessage = `${errJson.error.type}: ${errJson.error.message}`;
+        }
+        // Z.ai format: { error: { code: "1000", message: "..." } }
+        else if (errJson?.error?.code && errJson?.error?.message) {
+          errorMessage = `Error ${errJson.error.code}: ${errJson.error.message}`;
+        }
+        // Generic: just use the message if available
+        else if (errJson?.message) {
+          errorMessage = errJson.message;
+        }
+      } catch {
+        // Not JSON — use raw text
+      }
       return NextResponse.json({
         ok: false,
         latencyMs,
-        message: `API returned HTTP ${res.status} ${res.statusText}${errText ? `: ${errText.slice(0, 150)}` : ""}`,
+        message: `API returned HTTP ${res.status} ${res.statusText}: ${errorMessage}`,
       });
     }
 
