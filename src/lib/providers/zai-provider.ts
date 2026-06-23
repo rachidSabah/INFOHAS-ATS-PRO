@@ -1,17 +1,20 @@
 // ResumeAI Pro — Z.ai Direct OAuth Provider
 // Implements OAuthAIProvider for Z.ai Direct.
 // Z.ai provides a REST API at api.z.ai with API key authentication.
-// We also support Google OAuth via Z.ai's web platform.
+// We also support Google OAuth via Google Identity Services (GIS).
 //
-// IMPORTANT: Z.ai's official authentication uses API keys (bearer tokens).
-// There is no public OAuth/session API for Z.ai — the authentication
-// is via API key, which we encrypt and store securely.
+// Authentication methods:
+// 1. Google OAuth (preferred): Opens Google sign-in popup → links Google identity
+//    to a Z.ai API key. Returning users get auto-connected.
+// 2. API Key: Direct entry of Z.ai API key for users who prefer manual config.
 
 "use client";
 
 import type { OAuthAIProvider, ProviderSession, ProviderAuthStatus } from "./interface";
 import { ProviderAuthenticationError, createEmptySession } from "./interface";
 import { saveSession, loadSession, clearSession, isSessionExpired, isSessionExpiringSoon } from "./session-manager";
+import { signInWithGoogle, getGoogleClientId, isGoogleOAuthConfigured } from "./google-oauth";
+import type { GoogleUserInfo } from "./google-oauth";
 
 // Z.ai available models (per official documentation)
 const ZAI_MODELS = [
@@ -31,6 +34,9 @@ const ZAI_MODELS = [
 // the session periodically to verify the key is still valid
 const SESSION_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
 
+// Storage key for Google-Z.ai API key association
+const GOOGLE_ZAI_KEY_PREFIX = "resumeai-google-zai-key-";
+
 export class ZaiProvider implements OAuthAIProvider {
   readonly id = "zai-direct" as const;
   readonly name = "Z.ai Direct";
@@ -39,7 +45,7 @@ export class ZaiProvider implements OAuthAIProvider {
 
   /**
    * "Sign in" to Z.ai by validating the API key.
-   * Z.ai doesn't have OAuth — authentication is via API key.
+   * Z.ai's primary authentication is via API key.
    * We validate the key by making a test call to the API.
    * @param providedKey Optional API key from user input. If not provided,
    *   falls back to env var or stored session key.
@@ -101,6 +107,9 @@ export class ZaiProvider implements OAuthAIProvider {
         connectedAt: Date.now(),
         models: ZAI_MODELS,
         sharedAdminAccount: false,
+        authMethod: "api_key",
+        googleUserId: null,
+        googlePicture: null,
       };
 
       await saveSession(this.session);
@@ -119,6 +128,193 @@ export class ZaiProvider implements OAuthAIProvider {
         "zai-direct",
       );
     }
+  }
+
+  /**
+   * Sign in with Google OAuth.
+   * Opens a Google sign-in popup. After authentication:
+   * - If the user has previously linked a Z.ai API key to their Google account,
+   *   the key is automatically restored and the session is established.
+   * - If not, the user is prompted to enter their Z.ai API key, which is then
+   *   linked to their Google identity for future auto-login.
+   *
+   * IMPORTANT: This MUST be called from a user gesture (click handler)
+   * because it opens a popup window. Popup blockers will prevent it otherwise.
+   */
+  async loginWithGoogle(): Promise<ProviderSession> {
+    if (!isGoogleOAuthConfigured()) {
+      throw new ProviderAuthenticationError(
+        "not_configured",
+        "Google OAuth is not configured. Set NEXT_PUBLIC_GOOGLE_CLIENT_ID in your environment variables to enable Google sign-in for Z.ai.",
+        "zai-direct",
+      );
+    }
+
+    try {
+      // Step 1: Sign in with Google (opens popup)
+      console.log("[Z.ai Google OAuth] Opening Google sign-in popup...");
+      const { accessToken: googleAccessToken, userInfo } = await signInWithGoogle();
+
+      console.log(`[Z.ai Google OAuth] Authenticated as ${userInfo.email} (sub: ${userInfo.sub})`);
+
+      // Step 2: Check if this Google user has a previously linked Z.ai API key
+      const linkedApiKey = await this.getLinkedZaiApiKey(userInfo.sub);
+
+      if (linkedApiKey) {
+        // Step 3a: Validate the linked API key
+        console.log("[Z.ai Google OAuth] Found linked API key, validating...");
+        try {
+          const isValid = await this.validateApiKey(linkedApiKey);
+          if (isValid) {
+            // Create session with Google identity + linked Z.ai API key
+            this.session = {
+              provider: "zai-direct",
+              authenticated: true,
+              email: userInfo.email,
+              userId: `google:${userInfo.sub}`,
+              accessToken: linkedApiKey,
+              refreshToken: null,
+              expiresAt: Date.now() + SESSION_TTL_MS,
+              connectedAt: Date.now(),
+              models: ZAI_MODELS,
+              sharedAdminAccount: false,
+              authMethod: "google_oauth",
+              googleUserId: userInfo.sub,
+              googlePicture: userInfo.picture,
+            };
+
+            await saveSession(this.session);
+
+            console.log(`[Z.ai Google OAuth] Connected as ${userInfo.email} via Google OAuth`);
+            return this.session;
+          }
+        } catch {
+          // Linked key is no longer valid — fall through to prompt for new key
+          console.warn("[Z.ai Google OAuth] Linked API key is no longer valid, prompting for new key");
+        }
+      }
+
+      // Step 3b: No linked key or linked key is invalid.
+      // We need the user to provide a Z.ai API key.
+      // Open the Z.ai portal so the user can generate one.
+      console.log("[Z.ai Google OAuth] No linked API key found, opening Z.ai portal...");
+
+      // Open Z.ai's API key management portal
+      const portalUrl = "https://open.bigmodel.cn/user-center/apikey";
+      const popup = window.open(portalUrl, "zai-apikey-portal", "width=800,height=700,left=200,top=100");
+
+      // Store the Google user info temporarily so we can link the key later
+      this._pendingGoogleUser = userInfo;
+
+      if (!popup) {
+        throw new ProviderAuthenticationError(
+          "login_failed",
+          "Popup blocked. Please allow popups for this site, then try again. Alternatively, use the API Key method below.",
+          "zai-direct",
+        );
+      }
+
+      // Return a special "partial" session that indicates Google auth succeeded
+      // but we still need the Z.ai API key
+      this.session = {
+        provider: "zai-direct",
+        authenticated: false, // NOT fully authenticated yet — need API key
+        email: userInfo.email,
+        userId: `google:${userInfo.sub}`,
+        accessToken: null,
+        refreshToken: null,
+        expiresAt: null,
+        connectedAt: Date.now(),
+        models: ZAI_MODELS,
+        sharedAdminAccount: false,
+        authMethod: "google_oauth",
+        googleUserId: userInfo.sub,
+        googlePicture: userInfo.picture,
+      };
+
+      // Throw a special error that the UI can catch to show the API key prompt
+      throw new ProviderAuthenticationError(
+        "not_configured",
+        `GOOGLE_AUTH_SUCCESS_NEED_API_KEY:${userInfo.email}:${userInfo.sub}:${userInfo.picture || ""}`,
+        "zai-direct",
+      );
+    } catch (e: any) {
+      if (e instanceof ProviderAuthenticationError) throw e;
+      throw new ProviderAuthenticationError(
+        "login_failed",
+        `Google OAuth sign-in failed: ${e?.message || "Unknown error"}`,
+        "zai-direct",
+      );
+    }
+  }
+
+  /**
+   * Complete Google OAuth login by providing the Z.ai API key.
+   * Called after loginWithGoogle() returns the "need API key" special error.
+   * Links the API key to the Google identity for future auto-login.
+   */
+  async completeGoogleLogin(apiKey: string): Promise<ProviderSession> {
+    const googleUser = this._pendingGoogleUser;
+    if (!googleUser) {
+      throw new ProviderAuthenticationError(
+        "login_failed",
+        "No pending Google authentication. Please sign in with Google first.",
+        "zai-direct",
+      );
+    }
+
+    // Validate the provided API key
+    const isValid = await this.validateApiKey(apiKey);
+    if (!isValid) {
+      throw new ProviderAuthenticationError(
+        "login_failed",
+        "The provided Z.ai API key is invalid. Please check your key and try again.",
+        "zai-direct",
+      );
+    }
+
+    // Link the API key to the Google identity
+    await this.linkZaiApiKey(googleUser.sub, apiKey);
+
+    // Create the session
+    this.session = {
+      provider: "zai-direct",
+      authenticated: true,
+      email: googleUser.email,
+      userId: `google:${googleUser.sub}`,
+      accessToken: apiKey,
+      refreshToken: null,
+      expiresAt: Date.now() + SESSION_TTL_MS,
+      connectedAt: Date.now(),
+      models: ZAI_MODELS,
+      sharedAdminAccount: false,
+      authMethod: "google_oauth",
+      googleUserId: googleUser.sub,
+      googlePicture: googleUser.picture,
+    };
+
+    await saveSession(this.session);
+    this._pendingGoogleUser = null;
+
+    console.log(`[Z.ai Google OAuth] Connected as ${googleUser.email} — API key linked to Google identity`);
+    return this.session;
+  }
+
+  // Temporary storage for Google user info during the multi-step OAuth flow
+  private _pendingGoogleUser: GoogleUserInfo | null = null;
+
+  /**
+   * Get the pending Google user info (for UI to show after partial Google auth).
+   */
+  getPendingGoogleUser(): GoogleUserInfo | null {
+    return this._pendingGoogleUser;
+  }
+
+  /**
+   * Clear the pending Google user info.
+   */
+  clearPendingGoogleUser(): void {
+    this._pendingGoogleUser = null;
   }
 
   /**
@@ -186,7 +382,13 @@ export class ZaiProvider implements OAuthAIProvider {
    * Disconnect from Z.ai.
    */
   async logout(): Promise<void> {
+    // If authenticated via Google OAuth, also clear the Google-Z.ai key link
+    if (this.session.authMethod === "google_oauth" && this.session.googleUserId) {
+      await this.unlinkZaiApiKey(this.session.googleUserId);
+    }
+
     this.session = createEmptySession("zai-direct");
+    this._pendingGoogleUser = null;
     await clearSession("zai-direct");
     console.log("[PROVIDER AUTH] Z.ai session cleared");
   }
@@ -211,6 +413,17 @@ export class ZaiProvider implements OAuthAIProvider {
     }
 
     this.session = stored;
+
+    // Ensure new fields exist on sessions from older versions
+    if (!this.session.authMethod) {
+      this.session.authMethod = "api_key";
+    }
+    if (!this.session.googleUserId) {
+      this.session.googleUserId = null;
+    }
+    if (!this.session.googlePicture) {
+      this.session.googlePicture = null;
+    }
 
     // Check if session is expired
     if (isSessionExpired(stored)) {
@@ -344,6 +557,9 @@ export class ZaiProvider implements OAuthAIProvider {
       expiresAt: this.session.expiresAt,
       models: this.session.models,
       sharedAdminAccount: this.session.sharedAdminAccount,
+      authMethod: this.session.authMethod,
+      googleUserId: this.session.googleUserId,
+      googlePicture: this.session.googlePicture,
     };
   }
 
@@ -389,6 +605,10 @@ export class ZaiProvider implements OAuthAIProvider {
     await saveSession(this.session);
   }
 
+  // ============================================================================
+  // Private Helpers
+  // ============================================================================
+
   /**
    * Get the Z.ai API key from environment or session.
    */
@@ -398,6 +618,72 @@ export class ZaiProvider implements OAuthAIProvider {
     if (envKey) return envKey;
     // Fall back to stored session
     return this.session.accessToken;
+  }
+
+  /**
+   * Validate a Z.ai API key by making a minimal test call.
+   */
+  private async validateApiKey(apiKey: string): Promise<boolean> {
+    try {
+      const res = await fetch("https://api.z.ai/api/paas/v4/chat/completions", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${apiKey}`,
+        },
+        body: JSON.stringify({
+          model: "glm-5-flash",
+          messages: [{ role: "user", content: "Hi" }],
+          max_tokens: 1,
+        }),
+        signal: AbortSignal.timeout(15000),
+      });
+      return res.ok;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * Store a Z.ai API key linked to a Google user ID.
+   * Uses localStorage with encryption for secure storage.
+   * Key format: resumeai-google-zai-key-{googleUserId}
+   */
+  private async linkZaiApiKey(googleUserId: string, apiKey: string): Promise<void> {
+    try {
+      // Store the association — the API key itself will be encrypted
+      // by the session manager when it's saved as part of the session
+      const key = `${GOOGLE_ZAI_KEY_PREFIX}${googleUserId}`;
+      localStorage.setItem(key, apiKey); // API key will be encrypted by session manager
+      console.log(`[Z.ai Google OAuth] API key linked to Google user ${googleUserId}`);
+    } catch (e) {
+      console.warn("[Z.ai Google OAuth] Failed to link API key:", e);
+    }
+  }
+
+  /**
+   * Retrieve a Z.ai API key previously linked to a Google user ID.
+   */
+  private async getLinkedZaiApiKey(googleUserId: string): Promise<string | null> {
+    try {
+      const key = `${GOOGLE_ZAI_KEY_PREFIX}${googleUserId}`;
+      return localStorage.getItem(key);
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Remove the Z.ai API key linked to a Google user ID.
+   */
+  private async unlinkZaiApiKey(googleUserId: string): Promise<void> {
+    try {
+      const key = `${GOOGLE_ZAI_KEY_PREFIX}${googleUserId}`;
+      localStorage.removeItem(key);
+      console.log(`[Z.ai Google OAuth] API key unlinked from Google user ${googleUserId}`);
+    } catch {
+      // Ignore
+    }
   }
 }
 

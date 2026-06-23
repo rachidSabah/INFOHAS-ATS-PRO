@@ -69,6 +69,9 @@ export class PuterProvider implements OAuthAIProvider {
         connectedAt: Date.now(),
         models: PUTER_MODELS,
         sharedAdminAccount: false,
+        authMethod: "puter_oauth",
+        googleUserId: null,
+        googlePicture: null,
       };
 
       await saveSession(this.session);
@@ -174,6 +177,17 @@ export class PuterProvider implements OAuthAIProvider {
     }
 
     this.session = stored;
+
+    // Ensure new fields exist on sessions from older versions
+    if (!this.session.authMethod) {
+      this.session.authMethod = "puter_oauth";
+    }
+    if (!this.session.googleUserId) {
+      this.session.googleUserId = null;
+    }
+    if (!this.session.googlePicture) {
+      this.session.googlePicture = null;
+    }
 
     // Check if session is expired
     if (isSessionExpired(stored)) {
@@ -299,6 +313,9 @@ export class PuterProvider implements OAuthAIProvider {
       expiresAt: this.session.expiresAt,
       models: this.session.models,
       sharedAdminAccount: this.session.sharedAdminAccount,
+      authMethod: this.session.authMethod,
+      googleUserId: this.session.googleUserId,
+      googlePicture: this.session.googlePicture,
     };
   }
 

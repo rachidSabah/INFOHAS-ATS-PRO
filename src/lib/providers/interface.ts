@@ -20,6 +20,12 @@ export interface ProviderSession {
   models: string[];
   /** Whether this is a shared admin account for all users */
   sharedAdminAccount: boolean;
+  /** How the user authenticated */
+  authMethod: "api_key" | "google_oauth" | "puter_oauth" | null;
+  /** Google user ID (sub claim) when authenticated via Google OAuth */
+  googleUserId: string | null;
+  /** Google user profile picture URL */
+  googlePicture: string | null;
 }
 
 export interface ProviderAuthStatus {
@@ -29,6 +35,9 @@ export interface ProviderAuthStatus {
   expiresAt: number | null;
   models: string[];
   sharedAdminAccount: boolean;
+  authMethod: "api_key" | "google_oauth" | "puter_oauth" | null;
+  googleUserId: string | null;
+  googlePicture: string | null;
 }
 
 export interface ProviderAuthError {
@@ -54,6 +63,14 @@ export interface OAuthAIProvider {
    * @param providedKey Optional API key (for Z.ai Direct).
    */
   login(providedKey?: string): Promise<ProviderSession>;
+
+  /**
+   * Authenticate with Google OAuth.
+   * Opens Google sign-in popup, then establishes a session.
+   * Only supported by providers that allow Google-linked auth.
+   * @throws ProviderAuthenticationError if Google OAuth is not configured.
+   */
+  loginWithGoogle?(): Promise<ProviderSession>;
 
   /**
    * Refresh the current session using the stored refresh token.
@@ -152,5 +169,8 @@ export function createEmptySession(provider: ProviderSession["provider"]): Provi
     connectedAt: null,
     models: [],
     sharedAdminAccount: false,
+    authMethod: null,
+    googleUserId: null,
+    googlePicture: null,
   };
 }
