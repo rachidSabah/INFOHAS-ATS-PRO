@@ -1145,22 +1145,31 @@ async function callUserProvider(
       throw new Error(`Provider "${provider.name}" is in cooldown (previously rate-limited or auth-failed). Skipping.`);
     }
 
-    const proxyRes = await fetch("/api/providers/chat", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        baseUrl,
-        apiKey: provider.apiKey,
-        authType,
-        headersJson: provider.headersJson,
-        model: provider.modelName || "gpt-4o-mini",
-        messages,
-        maxTokens: opts.maxTokens ?? provider.maxTokens ?? 4096,
-        temperature: opts.temperature ?? provider.temperature ?? 0.7,
-        responsePath: provider.responsePath,
-        timeout: provider.timeout ?? 30,
-      }),
-    });
+    const ac = new AbortController();
+    const fetchTimeoutMs = Math.min((provider.timeout ?? 30) * 1000 + 5000, 65000);
+    const fetchTimer = setTimeout(() => ac.abort(), fetchTimeoutMs);
+    let proxyRes: Response;
+    try {
+      proxyRes = await fetch("/api/providers/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          baseUrl,
+          apiKey: provider.apiKey,
+          authType,
+          headersJson: provider.headersJson,
+          model: provider.modelName || "gpt-4o-mini",
+          messages,
+          maxTokens: opts.maxTokens ?? provider.maxTokens ?? 4096,
+          temperature: opts.temperature ?? provider.temperature ?? 0.7,
+          responsePath: provider.responsePath,
+          timeout: provider.timeout ?? 30,
+        }),
+        signal: ac.signal,
+      });
+    } finally {
+      clearTimeout(fetchTimer);
+    }
 
     const proxyData = await proxyRes.json();
     if (!proxyData.ok) {
