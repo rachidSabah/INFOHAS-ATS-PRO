@@ -406,8 +406,21 @@ app.get("/api/resumes", async (c) => {
   return c.json({ resumes });
 });
 
+/** Ensure the user exists in the users table — auto-create if missing. */
+async function ensureUserExists(db: D1Database, userId: string): Promise<void> {
+  if (userId === "anonymous") return; // skip for anonymous
+  const existing = await db.prepare("SELECT id FROM users WHERE id = ?").bind(userId).first();
+  if (!existing) {
+    const now = new Date().toISOString();
+    await db.prepare(
+      "INSERT INTO users (id, email, username, name, role, status, provider, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
+    ).bind(userId, `${userId}@placeholder.local`, userId, userId, "user", "active", "email", now, now).run();
+  }
+}
+
 app.post("/api/resumes", async (c) => {
   const userId = getUserId(c.req.raw) || "anonymous";
+  await ensureUserExists(c.env.DB, userId);
   const body = await parseBody(c.req.raw);
   const id = body.id || uuid("r");
   const now = new Date().toISOString();
