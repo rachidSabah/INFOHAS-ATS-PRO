@@ -148,7 +148,6 @@ export function ProviderAuthCard({
     try {
       await onLogout();
       toast.success(`${providerName} disconnected.`);
-      setShowGoogleKeyPrompt(false);
     } catch (e: any) {
       toast.error(e?.message || `Failed to disconnect ${providerName}.`);
     } finally {
