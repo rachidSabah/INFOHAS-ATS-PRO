@@ -76,7 +76,7 @@ export class PuterProvider implements OAuthAIProvider {
   async loadAccounts(): Promise<void> {
     try {
       // First try API
-      let data = null;
+      let data: any = null;
       try {
         const res = await fetch("/api/providers/puter/accounts");
         if (res.ok) {

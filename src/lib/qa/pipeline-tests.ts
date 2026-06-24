@@ -119,7 +119,7 @@ export function validatePipelineOrder(
 
   let lastIndex = -1;
   for (const stage of executedStages) {
-    const idx = expected.indexOf(stage);
+    const idx = (expected as string[]).indexOf(stage);
     if (idx === -1) {
       outOfOrder.push(stage);
     } else if (idx <= lastIndex) {

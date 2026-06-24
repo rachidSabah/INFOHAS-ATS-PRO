@@ -45,6 +45,7 @@ export interface ResumeExperience {
   startDate: string;
   endDate: string; // "Present" or "YYYY-MM"
   bullets: string[];
+  old_bullets?: string[];
 }
 
 export interface ResumeEducation {

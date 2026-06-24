@@ -1338,9 +1338,8 @@ export async function callAI(opts: AICallOptions): Promise<AICallResult> {
   // This prevents the "silent fallback → fake optimization" bug.
   if (!opts.preferServer && typeof window !== "undefined") {
     try {
-      const { getPuterProvider, getZaiProvider, ProviderAuthenticationError: AuthError } = await import("./providers");
+      const { getPuterProvider, ProviderAuthenticationError: AuthError } = await import("./providers");
       const puterProvider = getPuterProvider();
-      const zaiProvider = getZaiProvider();
 
       // Check if the default provider requires auth but isn't authenticated.
       // Use tryRefresh() to handle expired sessions correctly (no TOCTOU race).
@@ -1381,33 +1380,6 @@ export async function callAI(opts: AICallOptions): Promise<AICallResult> {
   // Z.ai is an API provider that works without browser auth — it should be
   // preferred over Puter for document tasks.
   if (!opts.preferServer) {
-    // 0) Try Z.ai Direct OAuth provider (if authenticated)
-    try {
-      const { getZaiProvider } = await import("./providers");
-      const zaiProvider = getZaiProvider();
-      // Use tryRefresh() to handle expired sessions — no TOCTOU race
-      if (await zaiProvider.tryRefresh()) {
-        const result = await zaiProvider.generate({
-          systemPrompt: opts.systemPrompt,
-          userPrompt: opts.userPrompt,
-          maxTokens: opts.maxTokens,
-          temperature: opts.temperature,
-        });
-        console.info(`[AI] Using Z.ai Direct OAuth provider`);
-        return {
-          text: result.text,
-          provider: result.provider,
-          latencyMs: result.latencyMs,
-          tokensEstimate: estTokens(opts.userPrompt + (opts.systemPrompt ?? "")),
-        };
-      }
-    } catch (e: any) {
-      if (e.name === "ProviderAuthenticationError") {
-        throw e; // Surface auth errors — no silent fallback
-      }
-      console.warn("[AI] Z.ai Direct OAuth provider failed, trying Puter:", e?.message);
-    }
-
     // 1) Try Puter.js — the free, keyless BROWSER-AUTH provider.
     //
     // Puter is used for interactive/development tasks always, and for document

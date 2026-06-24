@@ -114,7 +114,7 @@ export function runFullQASuite(opts: {
   allResults.push(...pipelineTests);
 
   // === 3. Cache Tests ===
-  const cacheResults = [];
+  const cacheResults: any[] = [];
   if (opts.cacheStats) {
     cacheResults.push(...validateCacheStats(opts.cacheStats));
   }
@@ -186,7 +186,10 @@ export function runFullQASuite(opts: {
 
   // === 5. Optimization Quality Gates ===
   if (opts.optimizationResult) {
-    const gateResult = runQualityGates(opts.optimizationResult);
+    const gateResult = runQualityGates({
+      ...opts.optimizationResult,
+      optimizedCharCount: opts.optimizationResult.charCount,
+    });
     const qualityTests = qualityGatesToQATests(gateResult);
     suites.push({
       name: "Optimization Quality Gates",
@@ -330,10 +333,10 @@ export function runFullQASuite(opts: {
   } else if (criticalFailures.length > 0) {
     suggestions.push(`${criticalFailures.length} critical failure(s) require immediate attention`);
   }
-  if (coverage.provider.total > 0 && coverage.provider.failed > 0) {
+  if (coverageMap.provider.total > 0 && coverageMap.provider.failed > 0) {
     suggestions.push("Fix provider configuration issues before deploying");
   }
-  if (coverage.cache.failed > 0) {
+  if (coverageMap.cache.failed > 0) {
     suggestions.push("Purge corrupted cache entries before user traffic");
   }
 

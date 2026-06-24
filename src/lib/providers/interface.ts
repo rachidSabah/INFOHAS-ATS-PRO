@@ -41,10 +41,13 @@ export interface ProviderAuthStatus {
   authMethod: "api_key" | "google_oauth" | "puter_oauth" | null;
   googleUserId: string | null;
   googlePicture: string | null;
+  accounts?: any[];
+  autoRotate?: boolean;
+  useGlobally?: boolean;
 }
 
 export interface ProviderAuthError {
-  code: "auth_required" | "session_expired" | "refresh_failed" | "login_failed" | "not_configured";
+  code: "auth_required" | "session_expired" | "refresh_failed" | "login_failed" | "not_configured" | "quota_exhausted";
   message: string;
   provider: string;
 }

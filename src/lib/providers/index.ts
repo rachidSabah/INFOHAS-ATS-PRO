@@ -29,15 +29,6 @@ export async function restoreAllProviderSessions(): Promise<ProviderSession[]> {
     console.warn("[Provider Auth] Puter session restore failed:", e?.message);
   }
 
-  // Restore Z.ai session
-  try {
-    const zaiProvider = getZaiProvider();
-    const zaiSession = await zaiProvider.restore();
-    if (zaiSession) sessions.push(zaiSession);
-  } catch (e: any) {
-    console.warn("[Provider Auth] Z.ai session restore failed:", e?.message);
-  }
-
   return sessions;
 }
 
@@ -48,12 +39,8 @@ export async function restoreAllProviderSessions(): Promise<ProviderSession[]> {
  */
 export async function isAnyProviderAuthenticated(): Promise<boolean> {
   const puterProvider = getPuterProvider();
-  const zaiProvider = getZaiProvider();
   // Try refresh first — if session is expired, tryRefresh will attempt to renew it
-  const puterOk = await puterProvider.tryRefresh();
-  if (puterOk) return true;
-  const zaiOk = await zaiProvider.tryRefresh();
-  return zaiOk;
+  return await puterProvider.tryRefresh();
 }
 
 /**
@@ -62,8 +49,7 @@ export async function isAnyProviderAuthenticated(): Promise<boolean> {
  */
 export function isAnyProviderAuthenticatedSync(): boolean {
   const puterProvider = getPuterProvider();
-  const zaiProvider = getZaiProvider();
-  return puterProvider.isAuthenticated() || zaiProvider.isAuthenticated();
+  return puterProvider.isAuthenticated();
 }
 
 /**
@@ -73,12 +59,6 @@ export function isAnyProviderAuthenticatedSync(): boolean {
  * Uses tryRefresh() to handle expired sessions.
  */
 export async function getAuthenticatedProvider(): Promise<{ provider: "puter" | "zai-direct"; generate: (opts: any) => Promise<{ text: string; provider: string; latencyMs: number }> } | null> {
-  // Check Z.ai first (it's an API provider — preferred for document tasks)
-  const zaiProvider = getZaiProvider();
-  if (await zaiProvider.tryRefresh()) {
-    return { provider: "zai-direct", generate: (opts) => zaiProvider.generate(opts) };
-  }
-
   // Then check Puter (browser-auth — works but may need popup)
   const puterProvider = getPuterProvider();
   if (await puterProvider.tryRefresh()) {

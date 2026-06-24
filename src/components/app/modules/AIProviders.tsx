@@ -17,11 +17,9 @@ import { ProviderEditor } from "./AIProviderEditor";
 import { ProviderAnalytics } from "./ProviderAnalytics";
 import { ProviderLogsTable } from "./ProviderLogsTable";
 import { TestConnectionModal } from "./TestConnectionModal";
-import { ProviderAuthCard } from "./ProviderAuthCard";
 import { PuterAuthCard } from "./PuterAuthCard";
-import { getPuterProvider, isGoogleOAuthConfigured } from "@/lib/providers";
+import { getPuterProvider } from "@/lib/providers";
 import type { ProviderAuthStatus } from "@/lib/providers/interface";
-import type { GoogleUserInfo } from "@/lib/providers/google-oauth";
 import {
   AreaChart, Area, BarChart, Bar, PieChart, Pie, Cell,
   XAxis, YAxis, Tooltip, ResponsiveContainer, Legend,
@@ -29,7 +27,6 @@ import {
 
 const PROVIDER_TYPES: { type: AIProviderType; label: string; icon: string; defaultUrl?: string; defaultModel?: string; authType?: "bearer" | "header" | "query" | "none" }[] = [
   { type: "puter", label: "Puter.js (Free)", icon: "Sparkles", defaultUrl: "https://api.puter.com", defaultModel: "claude-sonnet-4" },
-  { type: "z-ai-fallback", label: "Z.ai Fallback (built-in)", icon: "Cpu", defaultUrl: "internal", defaultModel: "glm-4.6" },
   { type: "openai", label: "OpenAI", icon: "Bot", defaultUrl: "https://api.openai.com/v1", defaultModel: "gpt-4o-mini", authType: "bearer" },
   { type: "claude", label: "Anthropic Claude", icon: "Bot", defaultUrl: "https://api.anthropic.com/v1", defaultModel: "claude-3-5-sonnet-20241022", authType: "header" },
   { type: "gemini", label: "Google Gemini", icon: "Bot", defaultUrl: "https://generativelanguage.googleapis.com/v1beta", defaultModel: "gemini-2.0-flash", authType: "bearer" },
@@ -60,15 +57,12 @@ export function AIProviders() {
   });
   
 
-  // Default to auth tab if no providers are authenticated — the user needs to
-  // connect Puter or Z.ai before anything works. Once authenticated, show providers.
-  const [tab, setTab] = useState<Tab>(!puterStatus.authenticated ? "auth" : "providers");
+  // Default to providers tab if Puter is authenticated; otherwise show auth
+  const [tab, setTab] = useState<Tab>(puterStatus.authenticated ? "providers" : "auth");
   const [showAdd, setShowAdd] = useState(false);
   const [editing, setEditing] = useState<AIProvider | null>(null);
   const [testing, setTesting] = useState<AIProvider | null>(null);
   const [q, setQ] = useState("");
-  
-  const [pendingGoogleUser, setPendingGoogleUser] = useState<GoogleUserInfo | null>(null);
 
   // Refresh auth status from providers
   const refreshAuthStatus = useCallback(() => {
@@ -149,7 +143,7 @@ export function AIProviders() {
       <div className="flex gap-1 p-1 bg-secondary rounded-lg w-fit">
         {[
           { id: "providers" as const, label: "Providers", icon: "List" },
-          { id: "auth" as const, label: !puterStatus.authenticated && !zaiStatus.authenticated ? "Sign In" : "OAuth Auth", icon: !puterStatus.authenticated && !zaiStatus.authenticated ? "LogIn" : "Shield" },
+          { id: "auth" as const, label: !puterStatus.authenticated ? "Sign In" : "OAuth Auth", icon: !puterStatus.authenticated ? "LogIn" : "Shield" },
           { id: "analytics" as const, label: "Usage Analytics", icon: "BarChart3" },
           { id: "logs" as const, label: "Error Logs", icon: "ScrollText" },
         ].map((t) => (
@@ -159,7 +153,7 @@ export function AIProviders() {
             className={`flex items-center gap-1.5 px-4 py-2 rounded-md text-sm font-medium transition ${tab === t.id ? "bg-card shadow-sm text-brand" : "text-muted-foreground hover:text-foreground"}`}
           >
             <Icon name={t.icon} className="w-4 h-4" /> {t.label}
-            {t.id === "auth" && !puterStatus.authenticated && !zaiStatus.authenticated && (
+            {t.id === "auth" && !puterStatus.authenticated && (
               <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
             )}
           </button>
@@ -170,14 +164,14 @@ export function AIProviders() {
       {tab === "providers" && (
         <>
           {/* Auth required banner — shown when no OAuth providers are connected */}
-          {!puterStatus.authenticated && !zaiStatus.authenticated && (
+          {!puterStatus.authenticated && (
             <Card className="border-amber-300 dark:border-amber-700 bg-amber-50/50 dark:bg-amber-950/20">
               <CardContent className="p-4 flex items-start gap-3">
                 <Icon name="AlertTriangle" className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
                 <div className="flex-1">
                   <p className="text-sm font-medium text-amber-700 dark:text-amber-400">No AI provider authenticated</p>
                   <p className="text-xs text-amber-600/80 dark:text-amber-500/80 mt-0.5">
-                    Connect Puter.js (free, Google OAuth) or Z.ai Direct (Google OAuth or API key) to enable resume optimization. Without authentication, the optimizer cannot run.
+                    Connect Puter.js (free, Google OAuth) to enable resume optimization. Without authentication, the optimizer cannot run.
                   </p>
                   <Button
                     variant="outline"
@@ -227,7 +221,7 @@ export function AIProviders() {
                       <tr key={p.id} className="border-b border-border hover:bg-secondary/30">
                         <td className="px-4 py-3">
                           <div className="flex items-center gap-2">
-                            <div className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0" style={{ background: `${p.type === "puter" ? "#F59E0B" : p.type === "z-ai-fallback" ? "#1154A3" : "#94A3B8"}15`, color: p.type === "puter" ? "#F59E0B" : p.type === "z-ai-fallback" ? "#1154A3" : "#475569" }}>
+                            <div className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0" style={{ background: `${p.type === "puter" ? "#F59E0B" : "#94A3B8"}15`, color: p.type === "puter" ? "#F59E0B" : "#475569" }}>
                               <Icon name={cfg?.icon ?? "Cpu"} className="w-4 h-4" />
                             </div>
                             <div className="min-w-0">
