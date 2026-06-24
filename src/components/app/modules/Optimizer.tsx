@@ -18,6 +18,7 @@ import { EditableA4Preview } from "@/components/resume/EditableA4Preview";
 import { AIRLINE_ATS_PROFILES, AIRLINE_OPTIONS, DEFAULT_APP_SETTINGS, type AppSettings } from "@/lib/ats-directives";
 import { INDUSTRY_PROFILES, INDUSTRY_OPTIONS, detectIndustry, type IndustryAtsProfile } from "@/lib/industry-ats";
 import { runOptimizationPipeline, type PipelineResult as AgentPipelineResult, type PipelineProgress } from "@/lib/agents";
+import { clearAllProviderCooldowns } from "@/lib/ai";
 import { PipelineProgressView } from "@/components/optimizer/PipelineProgressView";
 import { PipelineResults } from "@/components/optimizer/PipelineResults";
 import { InterviewPrepSuite } from "@/components/interview/InterviewPrepSuite";
@@ -299,6 +300,9 @@ export function Optimizer() {
     setPipelineError(null);
     setOptimizedResume(null);
     setAfterReport(null);
+    // Clear all per-provider cooldowns so a fresh optimization attempt
+    // gets a clean slate and tries all providers from scratch.
+    clearAllProviderCooldowns();
 
     const directiveConfig = useApp.getState().optimizerDirective;
     const usingOverride = !!directiveConfig?.customDirectiveOverride?.trim();

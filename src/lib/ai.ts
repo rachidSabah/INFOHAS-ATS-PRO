@@ -801,6 +801,69 @@ function withTimeout<T>(promise: Promise<T>, ms: number, label = "operation"): P
 const PUTER_COOLDOWN_KEY = "resumeai-puter-cooldown-until";
 const PUTER_COOLDOWN_MS = 5 * 60 * 1000; // 5 minutes
 
+// ============================================================================
+// Per-provider cooldown — prevents retry-storms when all external providers
+// return 429 (rate limit) or 401 (billing required).
+// Stored in sessionStorage so it resets on page refresh but persists during
+// the same optimization session.
+// ============================================================================
+const PROVIDER_COOLDOWN_PREFIX = "resumeai-provider-cooldown-";
+const PROVIDER_429_COOLDOWN_MS = 3 * 60 * 1000;  // 3 minutes for rate limits
+const PROVIDER_401_COOLDOWN_MS = 30 * 60 * 1000; // 30 minutes for billing failures (don't retry billing issues)
+
+/** Returns true if a named provider is in cooldown. */
+function isProviderInCooldown(providerId: string): boolean {
+  if (typeof window === "undefined") return false;
+  try {
+    const key = PROVIDER_COOLDOWN_PREFIX + providerId;
+    const v = window.sessionStorage?.getItem(key);
+    if (!v) return false;
+    const until = parseInt(v, 10);
+    if (Number.isNaN(until)) return false;
+    if (Date.now() >= until) {
+      window.sessionStorage.removeItem(key);
+      return false;
+    }
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Marks a provider as rate-limited (429) for PROVIDER_429_COOLDOWN_MS. */
+function markProvider429Cooldown(providerId: string): void {
+  if (typeof window === "undefined") return;
+  try {
+    const key = PROVIDER_COOLDOWN_PREFIX + providerId;
+    window.sessionStorage?.setItem(key, String(Date.now() + PROVIDER_429_COOLDOWN_MS));
+    console.warn(`[AI] Provider "${providerId}" is rate-limited — entering 3-minute cooldown.`);
+  } catch { /* ignore */ }
+}
+
+/** Marks a provider as billing-failed (401) for PROVIDER_401_COOLDOWN_MS. */
+function markProvider401Cooldown(providerId: string): void {
+  if (typeof window === "undefined") return;
+  try {
+    const key = PROVIDER_COOLDOWN_PREFIX + providerId;
+    window.sessionStorage?.setItem(key, String(Date.now() + PROVIDER_401_COOLDOWN_MS));
+    console.warn(`[AI] Provider "${providerId}" returned 401 (billing/auth failure) — skipping for 30 minutes.`);
+  } catch { /* ignore */ }
+}
+
+/** Clears all provider cooldowns (e.g. on manual retry or settings change). */
+export function clearAllProviderCooldowns(): void {
+  if (typeof window === "undefined") return;
+  try {
+    const keysToRemove: string[] = [];
+    for (let i = 0; i < window.sessionStorage.length; i++) {
+      const k = window.sessionStorage.key(i);
+      if (k && k.startsWith(PROVIDER_COOLDOWN_PREFIX)) keysToRemove.push(k);
+    }
+    keysToRemove.forEach((k) => window.sessionStorage.removeItem(k));
+    console.info("[AI] All provider cooldowns cleared.");
+  } catch { /* ignore */ }
+}
+
 /** Returns true if Puter is currently in cooldown (should be skipped). */
 function isPuterInCooldown(): boolean {
   if (typeof window === "undefined") return false;
@@ -1041,6 +1104,12 @@ async function callUserProvider(
     const messages: Array<{ role: string; content: string }> = [];
     if (opts.systemPrompt) messages.push({ role: "system", content: opts.systemPrompt });
     messages.push({ role: "user", content: opts.userPrompt });
+
+    // Check provider-level cooldown before making the request
+    const providerCooldownId = provider.id || provider.name || provider.type;
+    if (isProviderInCooldown(providerCooldownId)) {
+      throw new Error(`Provider "${provider.name}" is in cooldown (previously rate-limited or auth-failed). Skipping.`);
+    }
 
     const proxyRes = await fetch("/api/providers/chat", {
       method: "POST",
@@ -1308,6 +1377,12 @@ export async function callAI(opts: AICallOptions): Promise<AICallResult> {
       const providerErrors: string[] = [`Puter: ${e?.message || e}`];
 
       for (const fallbackProvider of secondary) {
+        const fbCooldownId = fallbackProvider.id || fallbackProvider.name || fallbackProvider.type;
+        if (isProviderInCooldown(fbCooldownId)) {
+          console.info(`[AI] Skipping ${fallbackProvider.name} — in cooldown.`);
+          providerErrors.push(`${fallbackProvider.name}: in cooldown (rate-limited or auth-failed)`);
+          continue;
+        }
         console.log(`[ROUTER]\nProvider selected: ${fallbackProvider.name}`);
         try {
           const text = await withTimeout(
@@ -1324,27 +1399,22 @@ export async function callAI(opts: AICallOptions): Promise<AICallResult> {
             tokensEstimate: estTokens(finalOpts.userPrompt + (finalOpts.systemPrompt ?? "")),
           };
         } catch (secErr: any) {
-          providerErrors.push(`${fallbackProvider.name}: ${secErr?.message || secErr}`);
-          console.warn(`[AI] Secondary provider ${fallbackProvider.name} failed: ${secErr?.message || secErr}`);
+          const secErrMsg = secErr?.message || String(secErr);
+          // Mark provider cooldowns on terminal errors
+          if (secErr?.statusCode === 429 || /429/.test(secErrMsg) || /rate.?limit/i.test(secErrMsg) || /FreeUsageLimitError/i.test(secErrMsg)) {
+            markProvider429Cooldown(fbCooldownId);
+          } else if (secErr?.statusCode === 401 || /401/.test(secErrMsg) || /billing/i.test(secErrMsg) || /payment/i.test(secErrMsg) || /CreditsError/i.test(secErrMsg)) {
+            markProvider401Cooldown(fbCooldownId);
+          }
+          providerErrors.push(`${fallbackProvider.name}: ${secErrMsg}`);
+          console.warn(`[AI] Secondary provider ${fallbackProvider.name} failed: ${secErrMsg}`);
         }
       }
 
-      // All providers exhausted
-      if (opts.isOptimizerCall || taskCategory === "document") {
-        throw new OptimizationProviderExhaustedError(
-          `All AI providers failed for this request.\n${providerErrors.map((e, i) => `  ${i + 1}. ${e}`).join("\n")}`
-        );
-      }
-      const text = localGenerate(finalOpts);
-      assert(text !== "", "Provider response is empty");
-      if (!text || text.length === 0) throw new ProviderReturnedEmptyResponse();
-      return {
-        text,
-        provider: "Local Engine (offline mode)",
-        latencyMs: Math.round(performance.now() - t0),
-        tokensEstimate: estTokens(finalOpts.userPrompt),
-        isLocalEngine: true,
-      };
+      // All providers exhausted — always throw; never fall to local engine which produces fake output
+      throw new OptimizationProviderExhaustedError(
+        `All AI providers failed for this request.\n${providerErrors.map((e, i) => `  ${i + 1}. ${e}`).join("\n")}`
+      );
     }
   }
 
@@ -1365,11 +1435,16 @@ export async function callAI(opts: AICallOptions): Promise<AICallResult> {
       tokensEstimate: estTokens(finalOpts.userPrompt + (finalOpts.systemPrompt ?? "")),
     };
   } catch (e: any) {
-    if (e?.message?.includes("429") || e?.statusCode === 429) {
+    const primaryCooldownId = provider.id || provider.name || provider.type;
+    const eMsg = e?.message || String(e);
+    if (e?.statusCode === 429 || /429/.test(eMsg) || /rate.?limit/i.test(eMsg) || /FreeUsageLimitError/i.test(eMsg)) {
       console.log("[PROVIDER]\nPrimary provider returned 429.");
+      markProvider429Cooldown(primaryCooldownId);
+    } else if (e?.statusCode === 401 || /401/.test(eMsg) || /billing/i.test(eMsg) || /payment/i.test(eMsg) || /CreditsError/i.test(eMsg)) {
+      markProvider401Cooldown(primaryCooldownId);
     }
-    providerErrors.push(`${provider.name}: ${e?.message || e}`);
-    console.warn(`[AI] Primary provider ${provider.name} failed: ${e?.message || e}. Trying fallbacks...`);
+    providerErrors.push(`${provider.name}: ${eMsg}`);
+    console.warn(`[AI] Primary provider ${provider.name} failed: ${eMsg}. Trying fallbacks...`);
 
     // Check if Puter is active & authenticated as fallback
     const state = useApp.getState();
@@ -1422,6 +1497,12 @@ export async function callAI(opts: AICallOptions): Promise<AICallResult> {
       (p: any) => p.isActive && p.type !== "puter" && p.id !== provider.id
     );
     for (const altProvider of otherSecondary) {
+      const altCooldownId = altProvider.id || altProvider.name || altProvider.type;
+      if (isProviderInCooldown(altCooldownId)) {
+        console.info(`[AI] Skipping ${altProvider.name} — in cooldown.`);
+        providerErrors.push(`${altProvider.name}: in cooldown (rate-limited or auth-failed)`);
+        continue;
+      }
       console.log(`[ROUTER]\nProvider selected: ${altProvider.name}`);
       try {
         const text = await withTimeout(
@@ -1438,29 +1519,23 @@ export async function callAI(opts: AICallOptions): Promise<AICallResult> {
           tokensEstimate: estTokens(finalOpts.userPrompt + (finalOpts.systemPrompt ?? "")),
         };
       } catch (altErr: any) {
-        providerErrors.push(`${altProvider.name}: ${altErr?.message || altErr}`);
-        console.warn(`[AI] Alternate provider ${altProvider.name} failed: ${altErr?.message || altErr}`);
+        const altErrMsg = altErr?.message || String(altErr);
+        // Mark provider cooldowns on terminal errors
+        if (altErr?.statusCode === 429 || /429/.test(altErrMsg) || /rate.?limit/i.test(altErrMsg) || /FreeUsageLimitError/i.test(altErrMsg)) {
+          markProvider429Cooldown(altCooldownId);
+        } else if (altErr?.statusCode === 401 || /401/.test(altErrMsg) || /billing/i.test(altErrMsg) || /payment/i.test(altErrMsg) || /CreditsError/i.test(altErrMsg)) {
+          markProvider401Cooldown(altCooldownId);
+        }
+        providerErrors.push(`${altProvider.name}: ${altErrMsg}`);
+        console.warn(`[AI] Alternate provider ${altProvider.name} failed: ${altErrMsg}`);
       }
     }
 
-    // All providers exhausted — hard fail for optimizer calls
-    if (opts.isOptimizerCall || taskCategory === "document") {
-      throw new OptimizationProviderExhaustedError(
-        `All AI providers failed for this optimization request.\n${providerErrors.map((e, i) => `  ${i + 1}. ${e}`).join("\n")}`
-      );
-    }
-
-    // Non-optimizer calls can use local engine as last resort
-    const text = localGenerate(finalOpts);
-    assert(text !== "", "Provider response is empty");
-    if (!text || text.length === 0) throw new ProviderReturnedEmptyResponse();
-    return {
-      text,
-      provider: "Local Engine (offline mode)",
-      latencyMs: Math.round(performance.now() - t0),
-      tokensEstimate: estTokens(finalOpts.userPrompt),
-      isLocalEngine: true,
-    };
+    // All providers exhausted — always throw; never silently fall to local engine
+    // when ALL real providers have failed (local engine produces fake output).
+    throw new OptimizationProviderExhaustedError(
+      `All AI providers failed for this optimization request.\n${providerErrors.map((e, i) => `  ${i + 1}. ${e}`).join("\n")}`
+    );
   }
 }
 
