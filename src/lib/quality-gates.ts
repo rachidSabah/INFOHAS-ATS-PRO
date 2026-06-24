@@ -89,21 +89,32 @@ export interface QualityReport {
 /**
  * Extract verifiable facts from a resume.
  * These facts must be preserved (or only rephrased) in the optimized version.
+ *
+ * CRITICAL: Only extract REAL metrics — percentages and explicit counts
+ * with units. Do NOT extract bare numbers (dates, IDs, phone digits, etc.)
+ * which cause false hallucination flags.
  */
 export function extractResumeFacts(resume: ResumeData): ResumeFact[] {
   const facts: ResumeFact[] = [];
   const fullText = JSON.stringify(resume);
 
-  // Extract metrics (numbers, percentages, counts)
-  // Regex: \d+%, \d+\+, \d+ years, \d+ passengers, etc.
-  const metricRegex = /\b(\d+(?:[.,]\d+)?(?:%|\+|\s*(?:years?|passengers?|customers?|clients?|sales?|users?|hours?|months?|days?))?)\b/gi;
+  // ONLY extract real metrics:
+  //   - Percentages: "15%", "20.5%"
+  //   - Explicit counts with units: "5 years", "200 passengers", "30 customers"
+  // Do NOT extract bare numbers (06, 26, 8, etc.) which are usually
+  // dates, IDs, phone digits, or structural numbers.
+  const metricRegex = /(\d+(?:[.,]\d+)?%|\d+\+\s*(?:years?|passengers?|customers?|clients?|sales?|users?|hours?|months?|days?)|\d+\s*(?:years?|passengers?|customers?|clients?|sales|users|hours|months|days))/gi;
   let match: RegExpExecArray | null;
   while ((match = metricRegex.exec(fullText)) !== null) {
     const text = match[1].trim();
-    // Skip years (1900-2099) and small counts (1-4)
+    // Skip years (1900-2099)
     if (/^(19|20)\d{2}$/.test(text)) continue;
+    // Skip very small counts (1-9) — these are usually structural, not metrics
     if (/^\d{1}$/.test(text)) continue;
-    facts.push({ text, type: "metric", verified: false });
+    // Only add if it has a % or a unit word — bare numbers are NOT metrics
+    if (text.includes("%") || /\d+\s*(?:years?|passengers?|customers?|clients?|sales|users|hours|months|days)/i.test(text)) {
+      facts.push({ text, type: "metric", verified: false });
+    }
   }
 
   // Extract employers (company names from experience)
@@ -609,8 +620,9 @@ export function repairHallucinations(
   const originalFacts = extractResumeFacts(original);
   const validMetrics = new Set(originalFacts.filter((f) => f.type === "metric").map((f) => f.text.toLowerCase()));
 
-  // Metric regex — matches numbers with units
-  const metricRegex = /\b(\d+(?:[.,]\d+)?(?:%|\+|\s*(?:years?|passengers?|customers?|clients?|sales?|revenue?|users?|hours?|months?|days?))?)\b/gi;
+  // Metric regex — ONLY matches real metrics (percentages + counts with units)
+  // Do NOT match bare numbers (06, 26, 8) which are dates/IDs/structural
+  const metricRegex = /(\d+(?:[.,]\d+)?%|\d+\s*(?:years?|passengers?|customers?|clients?|sales|revenue|users|hours|months|days))/gi;
 
   /**
    * Rewrite a bullet/sentence: remove hallucinated metrics and replace

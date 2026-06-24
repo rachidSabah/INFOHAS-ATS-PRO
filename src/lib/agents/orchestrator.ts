@@ -1146,7 +1146,10 @@ async function _runOptimizationPipelineInner(input: PipelineInput, watchdog: Opt
       log("Quality Assurance", `⚠ ${qualityErrors.length} quality issue(s) detected: ${qualityErrors.join("; ")}. Optimization completed — please review.`);
       emitProgress(4, `⚠ ${qualityErrors.length} quality issues detected. Optimization completed — review recommended.`);
     } else {
-      log("Quality Assurance", `✓ All quality gates passed.`);
+      // Include the actual QA check count to avoid UI/backend mismatch
+      const qaPassed = result.qa?.checks?.filter((c) => c.passed).length ?? "?";
+      const qaTotal = result.qa?.checks?.length ?? "?";
+      log("Quality Assurance", `✓ Pipeline quality gates passed. QA checks: ${qaPassed}/${qaTotal}.`);
     }
 
     // === DYNAMIC PAGE FILL VALIDATION (spec: 90-98% page fill target) ===
