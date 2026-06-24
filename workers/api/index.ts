@@ -859,17 +859,12 @@ app.put("/api/settings/branding", async (c) => {
   const body = await parseBody(c.req.raw);
   const now = new Date().toISOString();
 
-  // Migration 0006 is now applied to production, so provider_settings_json
-  // and ai_routing_settings_json always exist. We no longer need the
-  // columnExists() PRAGMA check on every PUT — that was adding ~10-30ms
-  // of latency per write.
-  //
-  // If a future deploy runs against a D1 instance that doesn't have migration
-  // 0006 applied, the UPDATE will fail with "no such column", which is caught
-  // by the try/catch below AND by the global onError handler (which returns
-  // a structured 500 with a migration hint).
-  // Convert undefined → null for all values (D1 doesn't accept undefined)
-  const n = (v: any) => (v === undefined ? null : v);
+  let existing: any = {};
+  try {
+    existing = await c.env.DB.prepare("SELECT * FROM branding WHERE id = 1").first() || {};
+  } catch (e) {}
+
+  const n = (bodyValue: any, dbField: string) => bodyValue !== undefined ? bodyValue : (existing[dbField] ?? null);
 
   const updates: string[] = [
     "app_name = ?", "tagline = ?", "primary_color = ?", "accent_color = ?",
@@ -878,11 +873,12 @@ app.put("/api/settings/branding", async (c) => {
     "provider_settings_json = ?", "ai_routing_settings_json = ?",
   ];
   const values: any[] = [
-    n(body.appName), n(body.tagline), n(body.primaryColor), n(body.accentColor),
-    n(body.logoUrl), n(body.emailFromName), n(body.emailFromAddress),
-    n(body.pdfFooterText), now,
-    body.providerSettings ? JSON.stringify(body.providerSettings) : null,
-    body.aiRoutingSettings ? JSON.stringify(body.aiRoutingSettings) : null,
+    n(body.appName, "app_name") || "ResumeAI Pro", // Enforce NOT NULL default
+    n(body.tagline, "tagline"), n(body.primaryColor, "primary_color"), n(body.accentColor, "accent_color"),
+    n(body.logoUrl, "logo_url"), n(body.emailFromName, "email_from_name"), n(body.emailFromAddress, "email_from_address"),
+    n(body.pdfFooterText, "pdf_footer_text"), now,
+    body.providerSettings !== undefined ? JSON.stringify(body.providerSettings) : existing.provider_settings_json,
+    body.aiRoutingSettings !== undefined ? JSON.stringify(body.aiRoutingSettings) : existing.ai_routing_settings_json,
   ];
 
   values.push("1"); // WHERE id = 1

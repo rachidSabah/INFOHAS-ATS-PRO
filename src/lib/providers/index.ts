@@ -4,14 +4,14 @@
 export type { OAuthAIProvider, ProviderSession, ProviderAuthStatus, ProviderAuthError } from "./interface";
 export { ProviderAuthenticationError, createEmptySession } from "./interface";
 export { getPuterProvider, PuterProvider } from "./puter-provider";
-export { getZaiProvider, ZaiProvider } from "./zai-provider";
+
 export { isGoogleOAuthConfigured, getGoogleClientId, signInWithGoogle } from "./google-oauth";
 export type { GoogleUserInfo, GoogleOAuthResult } from "./google-oauth";
 export { saveSession, loadSession, clearSession, isSessionExpired, isSessionExpiringSoon, getAllSessions } from "./session-manager";
 
 import type { ProviderSession } from "./interface";
 import { getPuterProvider } from "./puter-provider";
-import { getZaiProvider } from "./zai-provider";
+
 
 /**
  * Restore all provider sessions on app startup.

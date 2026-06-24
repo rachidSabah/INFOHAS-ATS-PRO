@@ -19,7 +19,7 @@ import { ProviderLogsTable } from "./ProviderLogsTable";
 import { TestConnectionModal } from "./TestConnectionModal";
 import { ProviderAuthCard } from "./ProviderAuthCard";
 import { PuterAuthCard } from "./PuterAuthCard";
-import { getPuterProvider, getZaiProvider, isGoogleOAuthConfigured } from "@/lib/providers";
+import { getPuterProvider, isGoogleOAuthConfigured } from "@/lib/providers";
 import type { ProviderAuthStatus } from "@/lib/providers/interface";
 import type { GoogleUserInfo } from "@/lib/providers/google-oauth";
 import {
@@ -58,9 +58,7 @@ export function AIProviders() {
   const [puterStatus, setPuterStatus] = useState<ProviderAuthStatus>({
     connected: false, authenticated: false, email: null, expiresAt: null, models: [], sharedAdminAccount: false, authMethod: null, googleUserId: null, googlePicture: null,
   });
-  const [zaiStatus, setZaiStatus] = useState<ProviderAuthStatus>({
-    connected: false, authenticated: false, email: null, expiresAt: null, models: [], sharedAdminAccount: false, authMethod: null, googleUserId: null, googlePicture: null,
-  });
+  
 
   // Default to auth tab if no providers are authenticated — the user needs to
   // connect Puter or Z.ai before anything works. Once authenticated, show providers.
@@ -69,7 +67,7 @@ export function AIProviders() {
   const [editing, setEditing] = useState<AIProvider | null>(null);
   const [testing, setTesting] = useState<AIProvider | null>(null);
   const [q, setQ] = useState("");
-  const [zaiApiKeyInput, setZaiApiKeyInput] = useState("");
+  
   const [pendingGoogleUser, setPendingGoogleUser] = useState<GoogleUserInfo | null>(null);
 
   // Refresh auth status from providers
@@ -78,8 +76,7 @@ export function AIProviders() {
       setPuterStatus(getPuterProvider().getStatus());
     } catch (e) { console.warn("[AIProviders] Puter status check failed:", e instanceof Error ? e.message : e); }
     try {
-      setZaiStatus(getZaiProvider().getStatus());
-    } catch (e) { console.warn("[AIProviders] Z.ai status check failed:", e instanceof Error ? e.message : e); }
+      
   }, []);
 
   // Restore sessions on mount and switch to providers tab if already authenticated
@@ -134,7 +131,7 @@ export function AIProviders() {
           { label: "Healthy", value: healthyCount, icon: "Heart", color: "#10B981" },
           { label: "Total requests", value: totalReqs.toLocaleString(), icon: "Activity", color: "#F59E0B" },
           { label: "Est. cost", value: `$${totalCost.toFixed(4)}`, icon: "DollarSign", color: "#8B5CF6" },
-          { label: "OAuth Auth", value: [puterStatus.authenticated, zaiStatus.authenticated].filter(Boolean).length, icon: "Shield", color: "#10B981" },
+          { label: "OAuth Auth", value: [puterStatus.authenticated].filter(Boolean).length, icon: "Shield", color: "#10B981" },
         ].map((s) => (
           <Card key={s.label}>
             <CardContent className="p-4 flex items-center gap-3">
@@ -301,160 +298,6 @@ export function AIProviders() {
           </div>
 
           <div className="grid gap-4 md:grid-cols-2">
-            {/* Z.ai Direct Auth */}
-            <div className="space-y-3">
-              <ProviderAuthCard
-                providerId="zai-direct"
-                providerName="Z.ai Direct"
-                iconName="Cpu"
-                brandColor="#1154A3"
-                description="Sign in with Google or API key"
-                models={zaiStatus.models.length > 0 ? zaiStatus.models : ["glm-4.6", "glm-5", "glm-5.1", "glm-5.2", "glm-5-air", "glm-5-flash", "codegeex-4"]}
-                status={zaiStatus}
-                onLogin={async () => {
-                  // If API key input is filled, use it; otherwise auto-login from env var
-                  const session = await getZaiProvider().login(zaiApiKeyInput || undefined);
-                  refreshAuthStatus();
-                }}
-                onLoginWithGoogle={isGoogleOAuthConfigured() ? async () => {
-                  try {
-                    await getZaiProvider().loginWithGoogle();
-                    // If we get here, Google auth + linked API key worked — refresh status
-                    refreshAuthStatus();
-                  } catch (e: any) {
-                    // Check if this is the special "need API key" error
-                    if (e?.message?.startsWith("GOOGLE_AUTH_SUCCESS_NEED_API_KEY:")) {
-                      const parts = e.message.split(":");
-                      const email = parts[1] || "";
-                      const sub = parts[2] || "";
-                      const picture = parts[3] || "";
-                      setPendingGoogleUser({
-                        sub,
-                        email,
-                        email_verified: true,
-                        name: email.split("@")[0],
-                        given_name: "",
-                        family_name: "",
-                        picture: picture || "",
-                        locale: "en",
-                      });
-                      refreshAuthStatus();
-                    } else {
-                      throw e; // Re-throw for the ProviderAuthCard to handle
-                    }
-                  }
-                } : undefined}
-                onCompleteGoogleLogin={async (apiKey: string) => {
-                  const session = await getZaiProvider().completeGoogleLogin(apiKey);
-                  setPendingGoogleUser(null);
-                  refreshAuthStatus();
-                }}
-                pendingGoogleUser={pendingGoogleUser}
-                onClearPendingGoogleUser={() => {
-                  setPendingGoogleUser(null);
-                  getZaiProvider().clearPendingGoogleUser();
-                }}
-                onRefresh={async () => {
-                  await getZaiProvider().refresh();
-                  refreshAuthStatus();
-                }}
-                onLogout={async () => {
-                  await getZaiProvider().logout();
-                  setPendingGoogleUser(null);
-                  refreshAuthStatus();
-                }}
-                onToggleShared={async (enabled) => {
-                  await getZaiProvider().setSharedAdminAccount(enabled);
-                  refreshAuthStatus();
-                }}
-              />
-              {/* API Key input — shown when not connected and Google OAuth is not in progress */}
-              {!zaiStatus.authenticated && !pendingGoogleUser && (
-                <Card className="border-blue-200 dark:border-blue-800 bg-blue-50/30 dark:bg-blue-950/10">
-                  <CardContent className="p-4 space-y-3">
-                    <Label htmlFor="zai-api-key" className="text-xs font-medium flex items-center gap-1.5">
-                      <Icon name="Key" className="w-3.5 h-3.5" /> Paste API Key
-                    </Label>
-                    <div className="flex gap-2">
-                      <Input
-                        id="zai-api-key"
-                        type="password"
-                        placeholder="Paste your Z.ai API key..."
-                        value={zaiApiKeyInput}
-                        onChange={(e) => setZaiApiKeyInput(e.target.value)}
-                        className="h-9 text-xs font-mono"
-                        onKeyDown={(e) => {
-                          if (e.key === "Enter" && zaiApiKeyInput.trim()) {
-                            getZaiProvider().login(zaiApiKeyInput.trim()).then(() => {
-                              refreshAuthStatus();
-                              toast.success("Z.ai Direct connected successfully!");
-                              setZaiApiKeyInput("");
-                            }).catch((err: any) => {
-                              toast.error(err?.message || "Failed to connect Z.ai Direct.");
-                            });
-                          }
-                        }}
-                      />
-                      <Button
-                        size="sm"
-                        className="h-9 gap-1.5 shrink-0"
-                        style={{ background: "#1154A3" }}
-                        onClick={async () => {
-                          if (!zaiApiKeyInput.trim()) {
-                            toast.error("Please paste your Z.ai API key.");
-                            return;
-                          }
-                          try {
-                            await getZaiProvider().login(zaiApiKeyInput.trim());
-                            refreshAuthStatus();
-                            toast.success("Z.ai Direct connected successfully!");
-                            setZaiApiKeyInput("");
-                          } catch (e: any) {
-                            toast.error(e?.message || "Failed to connect Z.ai Direct.");
-                          }
-                        }}
-                      >
-                        <Icon name="Plug" className="w-3.5 h-3.5" /> Connect
-                      </Button>
-                    </div>
-                    <div className="flex items-center justify-between">
-                      <p className="text-[10px] text-muted-foreground">
-                        Get your key from{" "}
-                        <a href="https://open.bigmodel.cn/user-center/apikey" target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline font-medium">
-                          Z.ai API Key Manager
-                        </a>
-                      </p>
-                      {process.env.NEXT_PUBLIC_ZAI_API_KEY && (
-                        <Badge variant="outline" className="text-[9px] gap-1">
-                          <Icon name="Zap" className="w-2.5 h-2.5" /> Auto-configured
-                        </Badge>
-                      )}
-                    </div>
-                    {/* Google OAuth setup hint */}
-                    {!isGoogleOAuthConfigured() && (
-                      <div className="flex items-start gap-2 p-2 bg-amber-50 dark:bg-amber-950/20 rounded-md border border-amber-200 dark:border-amber-800">
-                        <Icon name="Info" className="w-3.5 h-3.5 text-amber-600 shrink-0 mt-0.5" />
-                        <div className="text-[10px] text-amber-700 dark:text-amber-400 space-y-1">
-                          <p className="font-medium">Enable Google Sign-In for Z.ai</p>
-                          <p className="text-amber-600/80 dark:text-amber-500/80">
-                            Add your Google OAuth Client ID to <code className="font-mono text-[9px] bg-amber-100 dark:bg-amber-900/40 px-1 py-0.5 rounded">NEXT_PUBLIC_GOOGLE_CLIENT_ID</code> in your <code className="font-mono text-[9px] bg-amber-100 dark:bg-amber-900/40 px-1 py-0.5 rounded">.env</code> file, then redeploy.
-                          </p>
-                          <a
-                            href="https://console.cloud.google.com/apis/credentials"
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="inline-flex items-center gap-1 text-blue-600 hover:underline font-medium"
-                          >
-                            <Icon name="ExternalLink" className="w-3 h-3" /> Get Client ID from Google Cloud Console
-                          </a>
-                        </div>
-                      </div>
-                    )}
-                  </CardContent>
-                </Card>
-              )}
-            </div>
-
             {/* Puter.js Auth (Multi-Account) */}
             <PuterAuthCard status={puterStatus} onRefreshStatus={refreshAuthStatus} />
           </div>
@@ -466,8 +309,7 @@ export function AIProviders() {
               <div className="text-sm text-blue-700 dark:text-blue-300 space-y-1">
                 <p className="font-medium">How Provider Authentication Works</p>
                 <ul className="text-xs space-y-0.5 text-blue-600/80 dark:text-blue-400/80">
-                  <li>• <strong>Z.ai Direct</strong> supports both Google OAuth and API key authentication. Google sign-in links your Google account to your Z.ai API key for future auto-login.</li>
-                  <li>• <strong>Puter.js</strong> uses Google OAuth via a browser popup. Sign in once and your session persists across reloads.</li>
+                                    <li>• <strong>Puter.js</strong> uses Google OAuth via a browser popup. Sign in once and your session persists across reloads.</li>
                   <li>• When a provider is authenticated, it becomes available in the AI routing chain for all optimization requests.</li>
                   <li>• <strong>Shared Admin Account</strong> mode lets all users on this instance use your authenticated session — ideal for team deployments.</li>
                   <li>• Authentication errors are <strong>never silently ignored</strong> — you will always see a clear "Authentication required" message.</li>
