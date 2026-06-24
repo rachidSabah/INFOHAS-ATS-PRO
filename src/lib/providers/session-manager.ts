@@ -53,7 +53,7 @@ async function getEncryptionKey(): Promise<CryptoKey> {
  * Encrypt a string value using AES-GCM.
  * Returns base64-encoded ciphertext.
  */
-async function encryptValue(plaintext: string | null): Promise<string | null> {
+export async function encryptValue(plaintext: string | null): Promise<string | null> {
   if (!plaintext) return null;
   try {
     const key = await getEncryptionKey();
@@ -83,7 +83,7 @@ async function encryptValue(plaintext: string | null): Promise<string | null> {
 /**
  * Decrypt a value encrypted by encryptValue().
  */
-async function decryptValue(ciphertext: string | null): Promise<string | null> {
+export async function decryptValue(ciphertext: string | null): Promise<string | null> {
   if (!ciphertext) return null;
   try {
     const key = await getEncryptionKey();

@@ -4,6 +4,6 @@ export const runtime = "edge";
 
 export async function POST(req: NextRequest) {
   const body = await req.json().catch(() => ({}));
-  console.log(`[PUTER] Connected: ${body.email}`);
+  console.log(`[PUTER] Auto rotating account.\\n[PUTER] Switched: ${body.id}`);
   return NextResponse.json({ ok: true });
 }

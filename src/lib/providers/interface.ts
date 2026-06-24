@@ -26,6 +26,9 @@ export interface ProviderSession {
   googleUserId: string | null;
   /** Google user profile picture URL */
   googlePicture: string | null;
+  accounts?: any[]; // For multi-account providers like Puter
+  autoRotate?: boolean;
+  useGlobally?: boolean;
 }
 
 export interface ProviderAuthStatus {

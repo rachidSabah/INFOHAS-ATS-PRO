@@ -18,6 +18,7 @@ import { ProviderAnalytics } from "./ProviderAnalytics";
 import { ProviderLogsTable } from "./ProviderLogsTable";
 import { TestConnectionModal } from "./TestConnectionModal";
 import { ProviderAuthCard } from "./ProviderAuthCard";
+import { PuterAuthCard } from "./PuterAuthCard";
 import { getPuterProvider, getZaiProvider, isGoogleOAuthConfigured } from "@/lib/providers";
 import type { ProviderAuthStatus } from "@/lib/providers/interface";
 import type { GoogleUserInfo } from "@/lib/providers/google-oauth";
@@ -454,32 +455,8 @@ export function AIProviders() {
               )}
             </div>
 
-            {/* Puter.js Auth */}
-            <ProviderAuthCard
-              providerId="puter"
-              providerName="Puter.js"
-              iconName="Sparkles"
-              brandColor="#F59E0B"
-              description="Free browser-auth with Google OAuth"
-              models={["claude-sonnet-4-5", "gpt-5.4-nano", "gpt-4o", "gemini-2.5-flash", "deepseek-chat"]}
-              status={puterStatus}
-              onLogin={async () => {
-                const session = await getPuterProvider().login();
-                refreshAuthStatus();
-              }}
-              onRefresh={async () => {
-                await getPuterProvider().refresh();
-                refreshAuthStatus();
-              }}
-              onLogout={async () => {
-                await getPuterProvider().logout();
-                refreshAuthStatus();
-              }}
-              onToggleShared={async (enabled) => {
-                await getPuterProvider().setSharedAdminAccount(enabled);
-                refreshAuthStatus();
-              }}
-            />
+            {/* Puter.js Auth (Multi-Account) */}
+            <PuterAuthCard status={puterStatus} onRefreshStatus={refreshAuthStatus} />
           </div>
 
           {/* Auth info box */}
