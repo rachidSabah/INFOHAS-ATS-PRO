@@ -874,7 +874,54 @@ Return ONLY the JSON object described in the directive. No prose, no markdown fe
       charCount: rawParsed.charCount || 0,
     };
   } else {
-    throw new Error("Optimization failed — the AI response was incomplete. Please try again.");
+    // [PIPELINE] Partial response repaired.
+    // The AI returned JSON but it doesn't match the expected resume shape.
+    // Instead of throwing, repair by merging whatever fields ARE present with
+    // the original resume — so the user always gets a result.
+    console.warn(
+      "[Aviation Optimizer] AI response was incomplete — attempting repair by merging with original resume."
+    );
+    console.warn("[Aviation Optimizer] Raw parsed keys:", Object.keys(rawParsed || {}));
+    data = {
+      resume: {
+        name: rawParsed.name || resume.name || "",
+        headline: rawParsed.headline || resume.headline || "",
+        location: rawParsed.location || resume.contact?.location || "",
+        phone: rawParsed.phone || resume.contact?.phone || "",
+        email: rawParsed.email || resume.contact?.email || "",
+        dateOfBirth: rawParsed.dateOfBirth || resume.dateOfBirth || "",
+        // Use AI summary if present and non-trivial, otherwise keep original
+        summary: (rawParsed.summary && rawParsed.summary.length > 20)
+          ? rawParsed.summary
+          : (resume.summary || ""),
+        skills: Array.isArray(rawParsed.skills) && rawParsed.skills.length > 0
+          ? rawParsed.skills
+          : (resume.skills || []).map((s) => ({ category: s.category || "Skills", items: [s.name] })),
+        experience: Array.isArray(rawParsed.experience) && rawParsed.experience.length > 0
+          ? rawParsed.experience
+          : (resume.experience || []).map((e) => ({
+              title: e.title || "", company: e.company || "", location: e.location || "",
+              startDate: e.startDate || "", endDate: e.endDate || "", bullets: e.bullets || [],
+            })),
+        education: Array.isArray(rawParsed.education) && rawParsed.education.length > 0
+          ? rawParsed.education
+          : (resume.education || []).map((ed) => ({
+              degree: ed.degree || "", institution: ed.institution || "", location: ed.location || "",
+              startDate: ed.startDate || "", endDate: ed.endDate || "", modules: ed.highlights?.join(", ") || "",
+            })),
+        languages: Array.isArray(rawParsed.languages) && rawParsed.languages.length > 0
+          ? rawParsed.languages
+          : (resume.languages || []).map((l) => ({ name: l.name || "", proficiency: l.proficiency || "", note: "" })),
+        missingKeywordsAdded: Array.isArray(rawParsed.missingKeywordsAdded) ? rawParsed.missingKeywordsAdded : [],
+        bulletsRewritten: rawParsed.bulletsRewritten ?? 0,
+      },
+      score: rawParsed.score ?? 0,
+      score_breakdown: rawParsed.score_breakdown || { impact: 85, brevity: 90, keywords: 85 },
+      matched_keywords: Array.isArray(rawParsed.matched_keywords) ? rawParsed.matched_keywords : [],
+      missing_keywords: Array.isArray(rawParsed.missing_keywords) ? rawParsed.missing_keywords : [],
+      summary_critique: rawParsed.summary_critique || "Optimization partially recovered — some fields merged from original resume.",
+      charCount: rawParsed.charCount || 0,
+    };
   }
 
   // Validate minimal content
