@@ -1075,15 +1075,14 @@ The 'questions' array MUST contain exactly 9 objects. The 'readinessScore' MUST 
       normalized.readinessScore = normalized.readinessScore > 0 ? normalized.readinessScore : 50;
 
       if (aiCount === 0) {
-        // AI returned 0 questions — use ALL fallback questions and mark as
-        // COMPLETED (not failed) so the user gets a usable interview package.
-        // The fallback questions are tailored to the resume + JD, so they're
-        // still useful even without AI generation.
-        updateContext({ interviewPackage: normalized });
+        // AI returned 0 questions — this is a degraded result. Mark FAILED so
+        // the user knows the interview prep is not AI-tailored.
+        updateContext({ interviewPackage: null });
         updateAgent(agentId, {
-          status: "completed",
+          status: "failed",
           completedAt: new Date().toISOString(),
-          log: `Interview package generated with fallback questions: ${normalized.questions.length} questions, readiness ${normalized.readinessScore}/100. (AI returned 0 — using templated fallbacks)`,
+          error: "AI returned 0 parseable interview questions.",
+          log: `✗ Interview generation failed: AI returned 0 parseable questions.`,
         });
         return;
       } else {

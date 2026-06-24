@@ -1914,7 +1914,7 @@ Return ONLY valid JSON:
       timeoutMs: PIPELINE_STEP_CALL_TIMEOUT_MS,
     });
 
-    let data: { issues?: string[]; suggestions?: string[]; confidence?: number };
+    let data: { issues: string[]; suggestions: string[]; confidence: number };
     try {
       data = extractJSON(result.text);
     } catch {
@@ -1928,20 +1928,13 @@ Return ONLY valid JSON:
       };
     }
 
-    // Defensive: AI may return {confidence: 85} without issues/suggestions arrays.
-    // Use ?? [] BEFORE accessing .length to prevent "Cannot read properties of
-    // undefined (reading 'length')" crash.
-    const issues = Array.isArray(data.issues) ? data.issues : [];
-    const suggestions = Array.isArray(data.suggestions) ? data.suggestions : [];
-    const confidence = typeof data.confidence === "number" ? data.confidence : 50;
-
     return {
       triggered: true,
       reason,
-      notes: `Reflected on ${qa.checks.filter((c) => !c.passed).length} failed QA checks. Identified ${issues.length} issues and ${suggestions.length} suggestions.`,
-      issues,
-      suggestions,
-      confidence,
+      notes: `Reflected on ${qa.checks.filter((c) => !c.passed).length} failed QA checks. Identified ${data.issues.length} issues and ${data.suggestions.length} suggestions.`,
+      issues: data.issues ?? [],
+      suggestions: data.suggestions ?? [],
+      confidence: typeof data.confidence === "number" ? data.confidence : 50,
     };
   } catch (e: any) {
     return {
