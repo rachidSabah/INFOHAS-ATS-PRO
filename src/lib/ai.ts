@@ -966,15 +966,49 @@ export function extractJSON<T = any>(raw: string): T {
     // fall through
   }
 
-  // Step 3: extract first { ... last }
+  // Step 3: extract balanced JSON object {...} using brace depth
   const firstBrace = cleaned.indexOf("{");
-  const lastBrace = cleaned.lastIndexOf("}");
-  if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
-    const slice = cleaned.slice(firstBrace, lastBrace + 1);
-    try {
-      return JSON.parse(slice) as T;
-    } catch {
-      // fall through
+  if (firstBrace !== -1) {
+    let depth = 0;
+    let inString = false;
+    let escape = false;
+    for (let i = firstBrace; i < cleaned.length; i++) {
+      const ch = cleaned[i];
+      if (inString) {
+        if (escape) {
+          escape = false;
+          continue;
+        }
+        if (ch === "\\") {
+          escape = true;
+          continue;
+        }
+        if (ch === '"') {
+          inString = false;
+          continue;
+        }
+        continue;
+      }
+      if (ch === '"') {
+        inString = true;
+        continue;
+      }
+      if (ch === "{") {
+        depth++;
+        continue;
+      }
+      if (ch === "}") {
+        depth--;
+        if (depth === 0) {
+          const slice = cleaned.slice(firstBrace, i + 1);
+          try {
+            return JSON.parse(slice) as T;
+          } catch {
+            // fall through
+          }
+          break;
+        }
+      }
     }
   }
 
