@@ -1073,6 +1073,13 @@ async function _runOptimizationPipelineInner(input: PipelineInput, watchdog: Opt
       //
       // We restore the original resume (preserve) and mark the optimization as
       // failed so the UI can show the retry message.
+      console.warn(
+        `[Pipeline] Quality gates failed — marking optimization as FAILED. ` +
+        `provider=${result.provider}, charCount=${result.charCount ?? 0}, ` +
+        `experience entries=${result.optimizedResume?.experience?.length ?? 0}, ` +
+        `education entries=${result.optimizedResume?.education?.length ?? 0}, ` +
+        `skills count=${result.optimizedResume?.skills?.length ?? 0}`
+      );
       log("Quality Assurance", `⚠ AI optimization failed: ${qualityErrors.join("; ")}. Original resume preserved. Please retry.`);
       emitProgress(4, `AI optimization failed. Original resume preserved. Please retry.`);
       result.optimizedResume = resume;
@@ -1130,6 +1137,19 @@ async function _runOptimizationPipelineInner(input: PipelineInput, watchdog: Opt
   }
 
   if (result.status !== "failed") result.status = "completed";
+
+  // Diagnostic: log final pipeline outcome so we can see if it completed
+  // successfully or failed, and what the key metrics are.
+  console.info(
+    `[Pipeline] COMPLETE — status=${result.status}, ` +
+    `provider=${result.provider}, ` +
+    `charCount=${result.charCount ?? 0}, ` +
+    `metCharTarget=${result.metCharTarget}, ` +
+    `atsBefore=${result.beforeATS?.scores.ats ?? "?"}, ` +
+    `atsAfter=${result.afterATS?.scores.ats ?? "?"}, ` +
+    `error=${result.error ?? "(none)"}`
+  );
+
   // Final 100% progress emission
   if (input.onProgress) {
     input.onProgress({

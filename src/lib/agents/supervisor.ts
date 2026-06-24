@@ -795,12 +795,24 @@ export async function handleOptimizationRequested(
       && result.status !== "failed"
       && (result.charCount ?? 0) >= 2200;
     if (!isRealOptimization) {
+      // Diagnostic: surface WHY the result was rejected so the user can see
+      // exactly which gate failed (provider, status, or charCount).
+      const reason = result.provider === "Local Engine (offline mode)"
+        ? `provider is Local Engine`
+        : result.status === "failed"
+        ? `status is "failed"`
+        : `charCount ${result.charCount ?? 0} < 2200`;
+      console.warn(
+        `[Supervisor] Optimization rejected — ${reason}. ` +
+        `provider=${result.provider}, status=${result.status}, ` +
+        `charCount=${result.charCount ?? 0}, error=${result.error ?? "(none)"}`
+      );
       cache.delete(cacheK);
       throw new Error(
         result.error
         || (result.provider === "Local Engine (offline mode)"
           ? "No AI provider available. Optimization could not be completed. Configure an API provider in Settings or sign in to Puter."
-          : "Optimization produced insufficient content. Please try again or reduce resume content.")
+          : `Optimization produced insufficient content (charCount=${result.charCount ?? 0}, provider=${result.provider}). Please try again or reduce resume content.`)
       );
     }
     setCached(cacheK, result);
