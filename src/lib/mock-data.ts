@@ -78,12 +78,12 @@ export const SEED_PROVIDERS: AIProvider[] = [
     isDefault: true,  // Default for document tasks
     isBuiltIn: true,
     allowedForRegularUsers: true,
-    timeout: 30000,
+    timeout: 60000,
     maxTokens: 4096,
     temperature: 0.7,
     retryAttempts: 2,
     rateLimitPerMinute: 60,
-    modelName: "deepseek-v4-flash-free",
+    modelName: "mimo-v2.5-free",
     enabledModels: ["deepseek-v4-flash-free", "mimo-v2.5-free", "minimax-m2.5-free", "nemotron-3-super-free", "north-mini-code-free", "big-pickle", "claude-sonnet-4-5", "gpt-5", "gemini-3-flash", "claude-opus-4-8", "gpt-5.5"],
     streamingEnabled: true,
     authType: "bearer",
@@ -115,7 +115,7 @@ export const SEED_PROVIDERS: AIProvider[] = [
     isActive: false,
     isBuiltIn: false,
     allowedForRegularUsers: false,
-    timeout: 30000,
+    timeout: 60000,
     maxTokens: 4096,
     temperature: 0.7,
     retryAttempts: 3,
@@ -146,7 +146,7 @@ export const SEED_PROVIDERS: AIProvider[] = [
     isActive: false,
     isBuiltIn: false,
     allowedForRegularUsers: false,
-    timeout: 30000,
+    timeout: 60000,
     maxTokens: 4096,
     temperature: 0.7,
     retryAttempts: 3,
@@ -177,7 +177,7 @@ export const SEED_PROVIDERS: AIProvider[] = [
     isActive: false,
     isBuiltIn: false,
     allowedForRegularUsers: false,
-    timeout: 30000,
+    timeout: 60000,
     maxTokens: 4096,
     temperature: 0.7,
     retryAttempts: 3,
@@ -208,7 +208,7 @@ export const SEED_PROVIDERS: AIProvider[] = [
     isActive: false,
     isBuiltIn: false,
     allowedForRegularUsers: false,
-    timeout: 30000,
+    timeout: 60000,
     maxTokens: 4096,
     temperature: 0.7,
     retryAttempts: 3,
@@ -239,7 +239,7 @@ export const SEED_PROVIDERS: AIProvider[] = [
     isActive: false,
     isBuiltIn: false,
     allowedForRegularUsers: false,
-    timeout: 30000,
+    timeout: 60000,
     maxTokens: 4096,
     temperature: 0.7,
     retryAttempts: 3,
@@ -274,7 +274,7 @@ export const SEED_PROVIDERS: AIProvider[] = [
     isActive: false,  // User activates by adding their Google AI Studio API key
     isBuiltIn: false,
     allowedForRegularUsers: false,
-    timeout: 30000,
+    timeout: 60000,
     maxTokens: 8192,
     temperature: 0.7,
     retryAttempts: 3,
@@ -328,13 +328,16 @@ const NVIDIA_PROVIDER: AIProvider = {
   // tokens. The optimizer needs ~8k tokens for a full resume JSON; 4096
   // was truncating the output mid-section, causing empty experience/education.
   maxTokens: 8192,
-  temperature: 0.7,
+  // Lowered from 0.7 → 0.2: the optimizer overwrites this to 0.15 per-call,
+  // but this fallback reduces creativity on non-optimizer calls. Higher temps
+  // cause Llama models to fabricate employers/metrics on structured JSON tasks.
+  temperature: 0.2,
   retryAttempts: 2,
   rateLimitPerMinute: 40,
-  // Switched default from llama-3.1-70b → llama-3.3-70b: the 3.3 variant
-  // has significantly better instruction-following and produces far fewer
-  // hallucinated employers/metrics on structured JSON tasks.
-  modelName: "meta/llama-3.3-70b-instruct",
+  // Switched from llama-3.3-70b → llama-4-scout-17b: Llama 4 Scout has
+  // significantly better instruction-following than the 3.x series and
+  // produces far fewer hallucinated employers/metrics on structured JSON tasks.
+  modelName: "meta/llama-4-scout-17b-16e-instruct",
   enabledModels: ["meta/llama-3.3-70b-instruct", "meta/llama-3.1-70b-instruct", "meta/llama-4-scout-17b-16e-instruct", "meta/llama-3.1-405b-instruct"],
   streamingEnabled: true,
   authType: "bearer",

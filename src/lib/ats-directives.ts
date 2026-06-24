@@ -756,7 +756,10 @@ Return ONLY the JSON object described in the directive. No prose, no markdown fe
     systemPrompt: antiHallucinationPreamble + split.system,
     userPrompt: (split.user ? split.user + "\n\n---\n\n" : "") + userPrompt,
     maxTokens: 8000,
-    temperature: 0.45,
+    // Low temperature (0.15) minimizes hallucination for factual resume data.
+    // Llama models at 0.3-0.4 routinely invent employers and metrics; 0.15
+    // keeps output deterministic enough to preserve factual consistency.
+    temperature: 0.15,
     taskCategory: "document",
     // Aviation Optimizer ships the same ~22k-char directive + 8k output tokens
     // as the standard Resume Optimizer — needs the extended timeout to avoid

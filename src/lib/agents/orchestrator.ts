@@ -1375,10 +1375,13 @@ CONTENT REQUIREMENTS:
       education: resume.education.map((ed) => ({ degree: ed.degree, field: ed.field, institution: ed.institution, location: ed.location, startDate: ed.startDate, endDate: ed.endDate, highlights: ed.highlights })),
       skills: resume.skills.map((s) => ({ name: s.name, category: s.category })),
       languages: resume.languages,
-      certifications: resume.certifications,
-    })}\n\nTARGET JOB DESCRIPTION:\n${jd.rawText ?? JSON.stringify({ title: jd.title, company: jd.company, responsibilities: jd.responsibilities, requiredSkills: jd.requiredSkills, keywords: jd.keywords })}\n\n${intelligenceContext}\n\nReturn ONLY the JSON object described in the directive. No prose, no markdown fences.`,
-    maxTokens: 8000,
-    temperature: 0.4,
+        certifications: resume.certifications,
+      })}\n\nTARGET JOB DESCRIPTION:\n${jd.rawText ?? JSON.stringify({ title: jd.title, company: jd.company, responsibilities: jd.responsibilities, requiredSkills: jd.requiredSkills, keywords: jd.keywords })}\n\n${intelligenceContext}\n\nReturn ONLY the JSON object described in the directive. No prose, no markdown fences.`,
+      maxTokens: 8000,
+      // Low temperature (0.15) minimizes hallucination for factual resume data.
+      // Llama models at 0.3-0.4 routinely invent employers and metrics; 0.15
+      // keeps output deterministic enough to preserve factual consistency.
+      temperature: 0.15,
     taskCategory: "document",
     // Resume Optimizer ships a ~22k-char directive + 8k output tokens.
     // The default 60s timeout was killing legitimate in-flight requests
