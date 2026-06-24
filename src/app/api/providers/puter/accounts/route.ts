@@ -7,7 +7,7 @@ export async function GET(req: NextRequest) {
   try {
     const ctx = getRequestContext();
     const userId = req.headers.get("X-User-Id") || "anonymous";
-    const cache = ctx?.env?.CACHE;
+    const cache = (ctx?.env as any)?.CACHE;
     if (!cache) return NextResponse.json({ activeAccount: null, accounts: [], autoRotate: true, useGlobally: false });
 
     const raw = await cache.get(`puter_sessions_${userId}`);
@@ -32,7 +32,7 @@ export async function POST(req: NextRequest) {
     const body = await req.json();
     const ctx = getRequestContext();
     const userId = req.headers.get("X-User-Id") || "anonymous";
-    const cache = ctx?.env?.CACHE;
+    const cache = (ctx?.env as any)?.CACHE;
     if (cache) {
        await cache.put(`puter_sessions_${userId}`, JSON.stringify(body));
     }

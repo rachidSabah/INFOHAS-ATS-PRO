@@ -831,6 +831,7 @@ export type ViewKey =
   | "optimizer-directive"
   | "ai-dev-agent"
   | "ai-workspace"
+  | "ai-achievement"
   | "downloads"
   | "settings"
   | "linkedin-import"

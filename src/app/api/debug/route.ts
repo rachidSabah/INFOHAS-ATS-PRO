@@ -60,7 +60,7 @@ interface DebugResponse {
   };
 }
 
-export async function GET(_req: NextRequest): Promise<NextResponse<DebugResponse>> {
+export async function GET(_req: NextRequest): Promise<NextResponse<DebugResponse | { error: string }>> {
   // Extra runtime guard — also enforced by middleware, but belt-and-suspenders
   if (process.env.NODE_ENV === "production") {
     return NextResponse.json({ error: "Not found" }, { status: 404 });
