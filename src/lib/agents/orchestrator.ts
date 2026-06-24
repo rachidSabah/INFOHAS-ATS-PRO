@@ -845,35 +845,75 @@ async function _runOptimizationPipelineInner(input: PipelineInput, watchdog: Opt
     result.metCharTarget = result.charCount >= 2500 && result.charCount <= 3100;
 
     // ========================================================================
-    // [QUALITY GATES] Run comprehensive quality validation on the optimized
-    // resume. All gates are ADVISORY — they log warnings and trigger retry,
-    // but NEVER hard-reject. The user always gets a result.
+    // [SELF-HEALING ENGINE] Run quality gates + auto-repair.
+    //
+    // Instead of rejecting when hallucinations or content issues are detected,
+    // REPAIR the resume in-place:
+    //   1. Run quality gates → detect issues
+    //   2. If issues found → runSelfHealing() repairs them
+    //   3. Use the REPAIRED resume as the result
+    //   4. Only retry the full optimization if repair didn't help
+    //
+    // The user ALWAYS gets a result. Repair is preferred over rejection.
     // ========================================================================
     try {
-      const { runQualityGates } = await import("../quality-gates");
-      const qualityReport = runQualityGates(resume, result.optimizedResume!);
+      const { runQualityGates, runSelfHealing } = await import("../quality-gates");
+      let qualityReport = runQualityGates(resume, result.optimizedResume!);
 
-      if (qualityReport.shouldRetry && optimizeAttempt < maxOptimizeAttempts) {
-        console.warn(
-          `[Quality Gates] Optimization quality low (score ${qualityReport.overallScore}/100). ` +
-          `Retrying with stricter prompt. Reasons: ${qualityReport.retryReasons.join(", ")}`
+      // If quality issues detected, attempt self-healing BEFORE retrying
+      if (qualityReport.shouldRetry) {
+        console.info(
+          `[Self-Healing] Quality issues detected (score ${qualityReport.overallScore}/100). ` +
+          `Attempting repair before retry. Reasons: ${qualityReport.retryReasons.join(", ")}`
         );
-        log("Resume Optimizer", `⚠ Quality score ${qualityReport.overallScore}/100 — retrying with stricter prompt.`);
-        emitProgress(3, `Quality check: ${qualityReport.overallScore}/100. Retrying for better quality…`);
-        // Force a retry by throwing — the catch block will retry
-        throw new Error(`Quality gate retry: ${qualityReport.retryReasons.join(", ")}`);
+        log("Resume Optimizer", `⚠ Quality issues detected — running self-healing repair...`);
+        emitProgress(3, `Self-healing: repairing ${qualityReport.retryReasons.length} issue(s)...`);
+
+        // Run the self-healing repair
+        const jdKeywords = jd.keywords ?? [];
+        const healingResult = runSelfHealing(result.optimizedResume!, resume, jdKeywords);
+
+        if (healingResult.repairsMade.length > 0) {
+          // Use the repaired resume
+          result.optimizedResume = healingResult.repairedResume;
+          result.charCount = JSON.stringify(healingResult.repairedResume).length;
+          qualityReport = healingResult.newQualityReport;
+
+          log("Resume Optimizer",
+            `✓ Self-healing complete: ${healingResult.hallucinationsRemoved} hallucinations removed, ` +
+            `${healingResult.repairsMade.length} repairs. New quality score: ${qualityReport.overallScore}/100`
+          );
+          emitProgress(3, `✓ Self-healing repaired ${healingResult.repairsMade.length} issue(s). Quality: ${qualityReport.overallScore}/100`);
+
+          // Log each repair for transparency
+          for (const repair of healingResult.repairsMade) {
+            console.info(`[Self-Healing] ${repair}`);
+          }
+        }
+
+        // Only retry if repair didn't improve quality enough AND we have attempts left
+        if (qualityReport.shouldRetry && optimizeAttempt < maxOptimizeAttempts) {
+          console.warn(
+            `[Self-Healing] Repair insufficient (score ${qualityReport.overallScore}/100). ` +
+            `Retrying optimization (attempt ${optimizeAttempt + 1}/${maxOptimizeAttempts}).`
+          );
+          log("Resume Optimizer", `⚠ Repair insufficient — retrying optimization for better quality.`);
+          emitProgress(3, `Retrying optimization (attempt ${optimizeAttempt + 1})...`);
+          throw new Error(`Quality gate retry after repair: ${qualityReport.retryReasons.join(", ")}`);
+        }
       }
 
+      // Log final quality status
       if (qualityReport.overallScore < 75) {
-        log("Resume Optimizer", `⚠ Quality score ${qualityReport.overallScore}/100 — optimization completed but quality issues detected. Review recommended.`);
-        emitProgress(3, `⚠ Optimization completed with quality issues (score ${qualityReport.overallScore}/100).`);
+        log("Resume Optimizer", `⚠ Quality score ${qualityReport.overallScore}/100 — optimization completed with issues. Review recommended.`);
+        emitProgress(3, `⚠ Optimization completed (quality ${qualityReport.overallScore}/100). Review recommended.`);
       } else {
         log("Resume Optimizer", `✓ Quality score: ${qualityReport.overallScore}/100`);
       }
     } catch (qualityErr: any) {
       // If the quality gate itself threw (not the retry trigger), log and continue
-      if (!qualityErr?.message?.startsWith("Quality gate retry:")) {
-        console.warn("[Quality Gates] Validation failed (non-fatal):", qualityErr?.message);
+      if (!qualityErr?.message?.startsWith("Quality gate retry")) {
+        console.warn("[Self-Healing] Validation failed (non-fatal):", qualityErr?.message);
       } else {
         // Re-throw the retry trigger so the catch block handles it
         throw qualityErr;

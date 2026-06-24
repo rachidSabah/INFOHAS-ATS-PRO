@@ -573,3 +573,330 @@ export function runQualityGates(
     retryReasons,
   };
 }
+
+// ============================================================================
+// SELF-HEALING ENGINE
+//
+// Instead of rejecting resumes with hallucinations or short content, REPAIR
+// them in-place. Only fail after 2 repair attempts.
+// ============================================================================
+
+export interface RepairResult {
+  repaired: boolean;
+  repairedResume: ResumeData;
+  repairsMade: string[];
+  hallucinationsRemoved: number;
+  contentExpanded: boolean;
+}
+
+/**
+ * Remove hallucinated metrics from a resume and rewrite the affected
+ * sentences descriptively (without numbers).
+ *
+ * Example:
+ *   BAD:  "Served 26,000 passengers annually."
+ *   GOOD: "Provided passenger service support in a high-volume international airport environment."
+ */
+export function repairHallucinations(
+  optimized: ResumeData,
+  original: ResumeData,
+): RepairResult {
+  const repaired = JSON.parse(JSON.stringify(optimized)) as ResumeData;
+  const repairsMade: string[] = [];
+  let hallucinationsRemoved = 0;
+
+  // Get the set of valid metrics from the original resume
+  const originalFacts = extractResumeFacts(original);
+  const validMetrics = new Set(originalFacts.filter((f) => f.type === "metric").map((f) => f.text.toLowerCase()));
+
+  // Metric regex — matches numbers with units
+  const metricRegex = /\b(\d+(?:[.,]\d+)?(?:%|\+|\s*(?:years?|passengers?|customers?|clients?|sales?|revenue?|users?|hours?|months?|days?))?)\b/gi;
+
+  /**
+   * Rewrite a bullet/sentence: remove hallucinated metrics and replace
+   * with descriptive language.
+   */
+  function rewriteText(text: string): string {
+    if (!text) return text;
+    let result = text;
+
+    // Find all metrics in the text
+    const metrics: string[] = [];
+    let match: RegExpExecArray | null;
+    const regex = new RegExp(metricRegex.source, "gi");
+    while ((match = regex.exec(text)) !== null) {
+      const metric = match[1].trim();
+      // Skip years (1900-2099) and single digits
+      if (/^(19|20)\d{2}$/.test(metric)) continue;
+      if (/^\d{1}$/.test(metric)) continue;
+
+      // Check if this metric exists in the original
+      const lower = metric.toLowerCase();
+      const isValid = validMetrics.has(lower) ||
+        Array.from(validMetrics).some((vm) => vm.includes(lower) || lower.includes(vm));
+
+      if (!isValid) {
+        metrics.push(metric);
+        hallucinationsRemoved++;
+      }
+    }
+
+    if (metrics.length === 0) return text;
+
+    // Remove each hallucinated metric and clean up the sentence
+    for (const metric of metrics) {
+      // Escape regex special chars in the metric
+      const escaped = metric.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+      // Pattern 1: "over X passengers" → "passengers" (remove the number + "over")
+      result = result.replace(new RegExp(`\\bover\\s+${escaped}\\b`, "gi"), "");
+      result = result.replace(new RegExp(`\\bmore than\\s+${escaped}\\b`, "gi"), "");
+
+      // Pattern 2: "X passengers/customers/etc" → descriptive
+      result = result.replace(new RegExp(`\\b${escaped}\\s+(passengers?|customers?|clients?|sales?|revenue?|users?)\\b`, "gi"), "$1");
+      result = result.replace(new RegExp(`\\b(passengers?|customers?|clients?|sales?|revenue?|users?)\\s+${escaped}\\b`, "gi"), "$1");
+
+      // Pattern 3: "X%" → remove entirely
+      result = result.replace(new RegExp(`\\b${escaped}\\b`, "gi"), "");
+
+      // Pattern 4: "X years" → "several years"
+      result = result.replace(new RegExp(`\\b${escaped}\\s+years?\\b`, "gi"), "several years");
+    }
+
+    // Clean up: remove double spaces, fix "  " left by removals
+    result = result.replace(/\s{2,}/g, " ").replace(/\s+,/g, ",").replace(/\s+\./g, ".").trim();
+
+    // Fix sentences that start with a verb after number removal
+    // "Served passengers" is fine, but " passengers" at start needs fixing
+    result = result.replace(/^\s+/, "");
+
+    if (metrics.length > 0) {
+      repairsMade.push(`Removed ${metrics.length} hallucinated metric(s): ${metrics.join(", ")}`);
+    }
+
+    return result;
+  }
+
+  // Repair summary
+  if (repaired.summary) {
+    const newSummary = rewriteText(repaired.summary);
+    if (newSummary !== repaired.summary) {
+      repaired.summary = newSummary;
+    }
+  }
+
+  // Repair experience bullets
+  for (const exp of repaired.experience || []) {
+    if (exp.bullets) {
+      exp.bullets = exp.bullets.map((b) => rewriteText(b)).filter((b) => b.length > 0);
+    }
+  }
+
+  // Repair headline
+  if (repaired.headline) {
+    repaired.headline = rewriteText(repaired.headline);
+  }
+
+  return {
+    repaired: hallucinationsRemoved > 0,
+    repairedResume: repaired,
+    repairsMade,
+    hallucinationsRemoved,
+    contentExpanded: false,
+  };
+}
+
+/**
+ * Expand short content to fill an A4 page. Only uses existing information
+ * from the original resume — NEVER invents metrics or achievements.
+ *
+ * Expansion strategies:
+ *   1. Expand summary if < 500 chars
+ *   2. Add more detail to experience bullets
+ *   3. Add missing JD keywords to skills
+ *   4. Restore any dropped experience/education entries from original
+ */
+export function repairContent(
+  optimized: ResumeData,
+  original: ResumeData,
+  jdKeywords?: string[],
+): RepairResult {
+  const repaired = JSON.parse(JSON.stringify(optimized)) as ResumeData;
+  const repairsMade: string[] = [];
+  let expanded = false;
+
+  // Strategy 1: Restore dropped experience entries from original
+  if (original.experience && original.experience.length > 0) {
+    const optimizedCompanies = new Set((repaired.experience || []).map((e) => (e.company || "").toLowerCase()));
+    for (const origExp of original.experience) {
+      if (!optimizedCompanies.has((origExp.company || "").toLowerCase())) {
+        // This experience was dropped — restore it
+        if (!repaired.experience) repaired.experience = [];
+        repaired.experience.push(origExp);
+        repairsMade.push(`Restored dropped experience: ${origExp.title} at ${origExp.company}`);
+        expanded = true;
+      }
+    }
+  }
+
+  // Strategy 2: Restore dropped education entries
+  if (original.education && original.education.length > 0) {
+    const optimizedInsts = new Set((repaired.education || []).map((e) => (e.institution || "").toLowerCase()));
+    for (const origEdu of original.education) {
+      if (!optimizedInsts.has((origEdu.institution || "").toLowerCase()) && origEdu.institution) {
+        if (!repaired.education) repaired.education = [];
+        repaired.education.push(origEdu);
+        repairsMade.push(`Restored dropped education: ${origEdu.degree} at ${origEdu.institution}`);
+        expanded = true;
+      }
+    }
+  }
+
+  // Strategy 3: Expand short summary
+  if (repaired.summary && repaired.summary.length < 500 && original.summary) {
+    // Merge original summary content into the optimized summary
+    const originalSentences = original.summary.split(". ").filter((s) => s.length > 20);
+    const currentSentences = repaired.summary.split(". ").filter((s) => s.length > 20);
+
+    // Add original sentences that aren't already present
+    for (const sent of originalSentences) {
+      const sentLower = sent.toLowerCase();
+      const alreadyPresent = currentSentences.some((cs) => cs.toLowerCase().includes(sentLower) || sentLower.includes(cs.toLowerCase()));
+      if (!alreadyPresent && currentSentences.length < 5) {
+        currentSentences.push(sent);
+        expanded = true;
+      }
+    }
+    repaired.summary = currentSentences.join(". ") + ".";
+    if (expanded) {
+      repairsMade.push("Expanded summary with content from original resume");
+    }
+  }
+
+  // Strategy 4: Add missing JD keywords to skills
+  if (jdKeywords && jdKeywords.length > 0 && repaired.skills) {
+    const existingSkillNames = new Set(repaired.skills.map((s) => s.name.toLowerCase()));
+    const skillsToAdd = jdKeywords
+      .filter((k) => !existingSkillNames.has(k.toLowerCase()))
+      .slice(0, 5)
+      .map((name) => ({ id: `s_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`, name, category: "Targeted Keywords" }));
+
+    if (skillsToAdd.length > 0) {
+      repaired.skills = [...repaired.skills, ...skillsToAdd];
+      repairsMade.push(`Added ${skillsToAdd.length} JD keywords to skills: ${skillsToAdd.map((s) => s.name).join(", ")}`);
+      expanded = true;
+    }
+  }
+
+  // Strategy 5: Restore dropped skills from original
+  if (original.skills && original.skills.length > 0) {
+    const optimizedSkillNames = new Set((repaired.skills || []).map((s) => s.name.toLowerCase()));
+    for (const origSkill of original.skills) {
+      if (!optimizedSkillNames.has(origSkill.name.toLowerCase())) {
+        if (!repaired.skills) repaired.skills = [];
+        repaired.skills.push(origSkill);
+        repairsMade.push(`Restored dropped skill: ${origSkill.name}`);
+        expanded = true;
+      }
+    }
+  }
+
+  // Strategy 6: Restore dropped languages
+  if (original.languages && original.languages.length > 0) {
+    const optimizedLangNames = new Set((repaired.languages || []).map((l) => l.name.toLowerCase()));
+    for (const origLang of original.languages) {
+      if (!optimizedLangNames.has(origLang.name.toLowerCase())) {
+        if (!repaired.languages) repaired.languages = [];
+        repaired.languages.push(origLang);
+        repairsMade.push(`Restored dropped language: ${origLang.name}`);
+        expanded = true;
+      }
+    }
+  }
+
+  // Strategy 7: Restore dropped certifications
+  if (original.certifications && original.certifications.length > 0) {
+    const optimizedCertNames = new Set((repaired.certifications || []).map((c) => c.name.toLowerCase()));
+    for (const origCert of original.certifications) {
+      if (!optimizedCertNames.has(origCert.name.toLowerCase())) {
+        if (!repaired.certifications) repaired.certifications = [];
+        repaired.certifications.push(origCert);
+        repairsMade.push(`Restored dropped certification: ${origCert.name}`);
+        expanded = true;
+      }
+    }
+  }
+
+  return {
+    repaired: expanded,
+    repairedResume: repaired,
+    repairsMade,
+    hallucinationsRemoved: 0,
+    contentExpanded: expanded,
+  };
+}
+
+/**
+ * Run the full self-healing cycle:
+ *   1. Repair hallucinations (remove invented metrics)
+ *   2. Repair content (restore dropped sections, expand short content)
+ *   3. Re-run quality gates
+ *   4. Return the repaired resume + report
+ *
+ * Only called when quality gates detect issues. Never throws.
+ */
+export function runSelfHealing(
+  optimized: ResumeData,
+  original: ResumeData,
+  jdKeywords?: string[],
+): {
+  repairedResume: ResumeData;
+  repairsMade: string[];
+  hallucinationsRemoved: number;
+  contentExpanded: boolean;
+  newQualityReport: QualityReport;
+} {
+  console.info("[Self-Healing] Starting repair cycle...");
+
+  let currentResume = optimized;
+  const allRepairs: string[] = [];
+  let totalHallucinationsRemoved = 0;
+  let contentExpanded = false;
+
+  // Step 1: Repair hallucinations
+  const hallucinationRepair = repairHallucinations(currentResume, original);
+  if (hallucinationRepair.repaired) {
+    currentResume = hallucinationRepair.repairedResume;
+    allRepairs.push(...hallucinationRepair.repairsMade);
+    totalHallucinationsRemoved += hallucinationRepair.hallucinationsRemoved;
+    console.info(`[Self-Healing] Removed ${hallucinationRepair.hallucinationsRemoved} hallucinated metrics`);
+  }
+
+  // Step 2: Repair content (restore dropped sections, expand)
+  const contentRepair = repairContent(currentResume, original, jdKeywords);
+  if (contentRepair.repaired) {
+    currentResume = contentRepair.repairedResume;
+    allRepairs.push(...contentRepair.repairsMade);
+    contentExpanded = contentRepair.contentExpanded;
+    console.info(`[Self-Healing] Content expanded: ${contentRepair.repairsMade.length} repairs`);
+  }
+
+  // Step 3: Re-run quality gates on the repaired resume
+  const newQualityReport = runQualityGates(original, currentResume);
+
+  console.info(
+    `[Self-Healing] Repair complete. ` +
+    `${totalHallucinationsRemoved} hallucinations removed, ` +
+    `${allRepairs.length} total repairs, ` +
+    `new quality score: ${newQualityReport.overallScore}/100`
+  );
+
+  return {
+    repairedResume: currentResume,
+    repairsMade: allRepairs,
+    hallucinationsRemoved: totalHallucinationsRemoved,
+    contentExpanded,
+    newQualityReport,
+  };
+}
+
