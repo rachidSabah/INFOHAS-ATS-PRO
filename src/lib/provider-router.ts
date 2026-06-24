@@ -92,8 +92,8 @@ export function canProviderHandleTask(p: AIProvider, taskCategory: TaskCategory)
 
   switch (taskCategory) {
     case "document":
-      // Document tasks MUST use API providers — never Puter
-      return isApiProvider(p) && !isBrowserAuthProvider(p);
+      // Document tasks allow any active provider (including Puter if authenticated)
+      return true;
     case "interactive":
       // Interactive tasks can use any provider
       return true;
@@ -153,7 +153,7 @@ export function routeProvider(taskCategory: TaskCategory): RouteResult {
   }
 
   // Priority order for API providers (for document tasks)
-  const apiPriorityOrder = ["opencode", "deepseek", "openrouter", "groq", "openai", "claude", "gemini", "mistral", "cohere", "perplexity", "together", "huggingface", "custom", "z-ai-fallback"];
+  const apiPriorityOrder = ["opencode", "deepseek", "openrouter", "groq", "openai", "claude", "gemini", "mistral", "cohere", "perplexity", "together", "huggingface", "custom"];
 
   // 1. Check user's configured default
   let primary: AIProvider | null = null;
@@ -227,7 +227,6 @@ export const DOCUMENT_ROUTING_POLICY = [
   "together",
   "huggingface",
   "custom",
-  "z-ai-fallback",
 ] as const;
 
 /**

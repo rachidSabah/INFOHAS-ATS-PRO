@@ -48,13 +48,19 @@ function isCacheable(data: unknown): boolean {
   if (data === null || data === undefined) return false;
   if (typeof data === "string" && data.trim().length === 0) return false;
   if (typeof data === "object") {
-    // Reject error-like objects
-    const obj = data as Record<string, unknown>;
-    if (obj.error && !obj.data) return false;
+    const obj = data as Record<string, any>;
+    // Reject error-like objects, rate limits (429), timeouts, and auth failures
+    if (obj.error || obj.providerError || obj.provider429 || obj.providerTimeout || obj.authenticationFailure || obj.providerResponseEmpty) {
+      return false;
+    }
     // Reject empty objects
     if (Object.keys(obj).length === 0) return false;
+    // Reject failed status
+    if (obj.status === "failed") return false;
+    // Reject partial or incomplete optimizations
+    if (obj.isPartial || obj.partial === true || obj.cachedPartialOptimization === true) return false;
     // Reject offline/local-engine fallback markers
-    if (obj.source === "offline" || obj.source === "local-engine") return false;
+    if (obj.source === "offline" || obj.source === "local-engine" || obj.provider === "Local Engine (offline mode)") return false;
     if (obj.fallback === true) return false;
   }
   return true;

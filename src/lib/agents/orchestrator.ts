@@ -1063,6 +1063,12 @@ export async function runOptimizationPipeline(input: PipelineInput): Promise<Pip
       log: "Pipeline complete.",
     });
   }
+
+  // Assert Quality Gate: status must be completed or failed with non-null error
+  if (!(result.status === "completed" || result.error != null)) {
+    throw new Error("Quality Gate: Pipeline result must be completed or have a non-null error");
+  }
+
   return result;
 }
 

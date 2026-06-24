@@ -857,6 +857,7 @@ export async function handleOptimizationRequested(
     setState((prev) => ({ ...prev, isRunning: false }));
     return result;
   } catch (e: any) {
+    cache.delete(cacheK);
     updateAgent("supervisor", { status: "failed", error: e?.message ?? "Optimization failed", log: `✗ ${e?.message}` });
     setState((prev) => ({ ...prev, isRunning: false }));
     // Return the failed PipelineResult (if it exists) instead of null,

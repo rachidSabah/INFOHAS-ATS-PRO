@@ -31,6 +31,64 @@ declare global {
   }
 }
 
+export class ProviderUnavailableError extends Error {
+  constructor(message: string = "No AI provider available.") {
+    super(message);
+    this.name = "ProviderUnavailableError";
+  }
+}
+
+export class ProviderReturnedEmptyResponse extends Error {
+  constructor(message: string = "The AI provider returned an empty response.\nPlease retry or switch providers.") {
+    super(message);
+    this.name = "ProviderReturnedEmptyResponse";
+    console.log("[PROVIDER]\nEmpty response detected.");
+  }
+}
+
+export async function selectProvider(): Promise<any> {
+  const state: any = useApp.getState();
+  const providers: any[] = state?.providers || [];
+  const settings = state?.providerSettings || {};
+
+  // 1. Puter (if authenticated)
+  const puter = providers.find((p: any) => p.type === "puter");
+  let puterAuthenticated = false;
+  if (puter && puter.isActive) {
+    try {
+      const { getPuterProvider } = await import("./providers/puter-provider");
+      const puterProvider = getPuterProvider();
+      puterAuthenticated = await puterProvider.tryRefresh();
+    } catch {
+      puterAuthenticated = false;
+    }
+  }
+
+  if (puter && puter.isActive && puterAuthenticated) {
+    return puter;
+  }
+
+  // 2. Secondary providers
+  const secondary = providers.filter((p: any) => p.isActive && p.type !== "puter");
+  if (secondary.length > 0) {
+    const defaultId = settings.defaultProviderId;
+    const defaultSec = secondary.find((p) => p.id === defaultId);
+    if (defaultSec) return defaultSec;
+    return secondary[0];
+  }
+
+  // 3. Offline Engine
+  return { id: "local-engine", name: "Local Engine (offline mode)", type: "local" };
+}
+
+function assert(condition: boolean, message?: string) {
+  if (!condition) {
+    throw new Error(message || "Assertion failed");
+  }
+}
+
+console.log("[PROVIDER]\nZ.ai removed from registry.");
+
 // ============================================================================
 // Puter.js helpers — user-initiated auth + status checks
 // ============================================================================
@@ -1167,483 +1225,230 @@ async function callUserProvider(
  */
 export async function callAI(opts: AICallOptions): Promise<AICallResult> {
   const t0 = performance.now();
-  const taskCategory = opts.taskCategory || "document"; // default: document (API only, no Puter)
+  const taskCategory = opts.taskCategory || "document";
 
-  // ============================================================
-  // 0) PROVIDER ROUTING — use the Provider Router
-  // ============================================================
-  // For document tasks (Resume, ATS, Cover Letter, Interview, PDF):
-  //   → API providers ONLY (never Puter)
-  // For interactive tasks (Chat, Playground, Assistant):
-  //   → any provider (including Puter)
-  // For development tasks (AI Dev Agent, Builder):
-  //   → any provider
-  if (!opts.preferServer && typeof window !== "undefined") {
-    // Declare outside try so the catch block can reference it for error logging.
-    let failedProviderName: string | null = null;
-    try {
-      const state: any = useApp.getState();
-      const providers: any[] = state?.providers || [];
-      const settings = state?.providerSettings || {};
-
-      // Use the proper provider router instead of inline logic
-      const { routeProvider } = await import("./provider-router");
-      const route = routeProvider(taskCategory);
-      let defaultProvider = route.primary;
-
-
-      if (defaultProvider) {
-        failedProviderName = defaultProvider.name || "unknown";
-        // === P1.5: Token overflow protection ===
-        // CRITICAL FIX: The optimizer directive (systemPrompt) must NEVER be truncated.
-        // It contains one-page enforcement rules, page format, validation, font rules, etc.
-        // If total prompt exceeds the token limit, only truncate the userPrompt (resume+JD content).
-        const systemText = opts.systemPrompt ?? "";
-        const userText = opts.userPrompt;
-        const totalTokens = estTokens(systemText + userText);
-        const maxTokens = MAX_INPUT_TOKENS; // 8,000
-        if (totalTokens > maxTokens) {
-          const systemTokens = estTokens(systemText);
-          const userTokens = estTokens(userText);
-          const userBudget = Math.max(0, maxTokens - systemTokens); // Reserve all space for systemPrompt directive
-
-          console.warn(
-            `[AI] Prompt exceeds token limit: ${totalTokens} > ${maxTokens}. ` +
-            `Truncating USER PROMPT ONLY. System prompt (directive) is protected. ` +
-            `System: ${systemTokens} tokens. User budget: ${userBudget} tokens.`,
-          );
-
-          opts = {
-            ...opts,
-            userPrompt: truncatePromptToTokenLimit(opts.userPrompt, userBudget),
-            // systemPrompt: NEVER truncated — it contains the optimizer directive
-          };
-        }
-
-        // === CRITICAL: Directive validation (optimizer ONLY) ===
-        // The optimizer directive (systemPrompt) must contain one-page rules.
-        // IMPORTANT: Only validate when isOptimizerCall is true.
-        // Other document-task calls (JI, Company Intel, Skill Gap, QA, Reflection)
-        // do NOT contain one-page compression directives and must NOT be validated here.
-        if (opts.isOptimizerCall && opts.systemPrompt) {
-          const finalPrompt = (opts.systemPrompt ?? "") + opts.userPrompt;
-
-          // Debug logging
-          if (process.env.NODE_ENV !== "test") {
-            console.group("[Optimizer Directive — FINAL]");
-            console.log("Directive chars:", (opts.systemPrompt ?? "").length);
-            console.log("Directive included:", (opts.systemPrompt ?? "")?.includes("PAGE FORMAT"));
-            console.log("One-page included:", (opts.systemPrompt ?? "").includes("ONE PAGE") || finalPrompt.includes("ONE-PAGE COMPRESSION"));
-            console.log("Contains assert(pdf.pages === 1):", (opts.systemPrompt ?? "").includes("assert(pdf.pages === 1)"));
-            console.log("Contains NEVER create page two:", (opts.systemPrompt ?? "").includes("NEVER create page two") || finalPrompt.includes("NEVER create page two"));
-            console.log("Contains ONE-PAGE COMPRESSION:", (opts.systemPrompt ?? "").includes("ONE-PAGE COMPRESSION") || finalPrompt.includes("ONE-PAGE COMPRESSION"));
-            console.log("Prompt length:", finalPrompt.length);
-            console.groupEnd();
-          }
-
-          // Soft validation — warn if expected patterns are missing but don't abort.
-          // Custom directive overrides may intentionally use different wording.
-          // The orchestrator/ats-directives already validated directive integrity
-          // before reaching this point, so we just do a sanity check here.
-          if (process.env.NODE_ENV !== "test") {
-            const hasCompressionRule =
-              finalPrompt.includes("ONE-PAGE COMPRESSION") ||
-              finalPrompt.includes("CONTENT COMPRESSION") ||
-              finalPrompt.includes("Compression Engine") ||
-              finalPrompt.includes("content compression");
-            const hasPageAssertion =
-              finalPrompt.includes("assert(pdf.pages === 1)") ||
-              finalPrompt.includes("Maximum pages: 1") ||
-              finalPrompt.includes("EXACTLY 1") ||
-              finalPrompt.includes("ONE PAGE") ||
-              finalPrompt.includes("ONE A4 PAGE");
-            const hasNoSecondPage =
-              finalPrompt.includes("NEVER create page two") ||
-              finalPrompt.includes("NEVER generate a second page") ||
-              finalPrompt.includes("one A4 page") ||
-              finalPrompt.includes("one page only");
-
-            if (!hasCompressionRule || !hasPageAssertion || !hasNoSecondPage) {
-              console.warn("[AI] Optimizer directive soft validation — some expected patterns missing:", {
-                hasCompressionRule,
-                hasPageAssertion,
-                hasNoSecondPage,
-                directiveLength: (opts.systemPrompt ?? "").length,
-              });
-              // DO NOT throw — the optimization should proceed.
-              // Missing patterns may be covered by alternative wording in custom overrides.
-            }
-          }
-        }
-
-        // === P1.5: AI Response Diagnostics ===
-        const diag = startAICall({
-          provider: failedProviderName ?? "unknown",
-          model: defaultProvider.modelName,
-          taskCategory,
-          systemPrompt: opts.systemPrompt,
-          userPrompt: opts.userPrompt,
-          maxTokens: opts.maxTokens,
-        });
-
-        try {
-          const text = await callUserProvider(defaultProvider, opts);
-          if (text && text.trim().length > 0) {
-            console.info(`[AI] Using user-configured default provider: ${defaultProvider.name} (${defaultProvider.modelName || "default model"})`);
-            diag.succeed(text, { finishReason: "stop", normalizedResponse: text.slice(0, 500) });
-            return {
-              text,
-              provider: defaultProvider.name,
-              latencyMs: Math.round(performance.now() - t0),
-              tokensEstimate: estTokens(opts.userPrompt + (opts.systemPrompt ?? "")),
-            };
-          }
-          diag.fail(new Error("Provider returned empty response"));
-        } catch (e: any) {
-          diag.fail(e);
-          // Rate-limit handling: trigger fallback offer for OpenCode Zen free
-          if (isRateLimitError(e) && isOpenCodeZenFree(defaultProvider)) {
-            try {
-              const state = useApp.getState();
-              const fallbacks = getRecommendedFallbacks(state.providers, defaultProvider?.id);
-              if (fallbacks.length > 0) {
-                state.openFallbackOffer(fallbacks, defaultProvider?.id ?? null);
-              }
-            } catch (e) { console.warn("[AI] Fallback offer failed:", e); }
-          }
-          throw e;
-        }
-      }
-    } catch (e: any) {
-      // Log the failure with context. If it's a "Failed to fetch" network error,
-      // surface a clearer hint — the user's API provider URL is likely wrong,
-      // unreachable, or CORS-blocked.
-      if (isFailedToFetchError(e)) {
-        console.warn(`[AI] Provider "${failedProviderName}" unreachable (Failed to fetch). The URL may be wrong, CORS-blocked, or the provider is offline. Falling through to next provider.`);
-      } else {
-        console.warn(`[AI] Provider "${failedProviderName}" failed, falling back to next provider:`, e?.message || e);
-      }
-      // Note: diag.fail() is called inside the try block if the provider returned
-      // empty. If the provider THREW, we don't have a diag handle here, so we
-      // skip diagnostics for thrown errors (the warning above is sufficient).
-    }
+  // Check token limits and truncate userPrompt if needed
+  let finalOpts = { ...opts };
+  const systemText = opts.systemPrompt ?? "";
+  const userText = opts.userPrompt ?? "";
+  const totalTokens = estTokens(systemText + userText);
+  const maxTokens = MAX_INPUT_TOKENS;
+  if (totalTokens > maxTokens) {
+    const systemTokens = estTokens(systemText);
+    const userBudget = Math.max(0, maxTokens - systemTokens);
+    finalOpts.userPrompt = truncatePromptToTokenLimit(opts.userPrompt, userBudget);
   }
 
-  // ============================================================
-  // 0.5) OAUTH PROVIDER AUTH CHECK
-  // ============================================================
-  // If Puter or Z.ai is the configured default/fallback provider,
-  // check if they're authenticated. If NOT authenticated, throw
-  // ProviderAuthenticationError instead of silently falling to local engine.
-  // This prevents the "silent fallback → fake optimization" bug.
-  if (!opts.preferServer && typeof window !== "undefined") {
-    try {
-      const { getPuterProvider, ProviderAuthenticationError: AuthError } = await import("./providers");
-      const puterProvider = getPuterProvider();
+  // Select provider using selectProvider()
+  const provider = await selectProvider();
+  assert(provider !== null, "Provider is null");
 
-      // Check if the default provider requires auth but isn't authenticated.
-      // Use tryRefresh() to handle expired sessions correctly (no TOCTOU race).
-      const state: any = useApp.getState();
-      const providers: any[] = state?.providers || [];
-      const settings = state?.providerSettings || {};
-      const defaultId = settings.defaultProviderId;
-      const defaultProvider = providers.find((p: any) => p.id === defaultId);
-
-      if (defaultProvider?.type === "puter") {
-        const puterOk = await puterProvider.tryRefresh();
-        if (!puterOk) {
-          throw new AuthError(
-            "auth_required",
-            "Puter authentication required. Please sign in from Provider Settings.",
-            "puter",
-          );
-        }
-      }
-    } catch (e: any) {
-      if (e.name === "ProviderAuthenticationError") {
-        throw e; // Surface to the caller — no silent fallback
-      }
-      // Other errors during auth check are non-fatal
-      console.warn("[AI] Provider auth check failed (non-fatal):", e?.message);
-    }
+  // Logging selected provider
+  console.log(`[ROUTER]\nProvider selected: ${provider.name === "Puter.js" ? "Puter" : provider.name}`);
+  if ((opts.isOptimizerCall || taskCategory === "document") && provider.type === "puter") {
+    console.log("[ROUTER]\nIndustry ATS Mode using Puter.");
   }
 
-  // === ALLOW PUTER FOR DOCUMENT TASKS AS FALLBACK ===
-  // We only reach this point if:
-  //   (a) No API provider was found/eligible, OR
-  //   (b) The API provider was found but callUserProvider() threw an error.
-  // In both cases, Puter should be tried as a fallback — even for document tasks.
-  // This fixes the "JD parsing fails with AI-over-API" bug where the API
-  // provider returned empty/invalid, and Puter was never tried as a fallback.
-  //
-  // NEW: Also try the Z.ai Direct OAuth provider as a fallback before Puter.
-  // Z.ai is an API provider that works without browser auth — it should be
-  // preferred over Puter for document tasks.
-  if (!opts.preferServer) {
-    // 1) Try Puter.js — the free, keyless BROWSER-AUTH provider.
-    //
-    // Puter is used for interactive/development tasks always, and for document
-    // tasks ONLY when no API providers are configured OR the API provider failed.
-    // ATS, cover letter, interview, PDF) — those require API providers only.
-    //
-    // Per https://docs.puter.com/AI/chat/:
-    //   - "all essential methods in Puter handle authentication automatically"
-    //   - puter.auth.signIn() "must be triggered by a user action (such as a click
-    //     event) because it opens a popup window. Most browsers block popups that
-    //     are not initiated by user interactions."
-    //
-    // So we do NOT call signIn() from here (it would be blocked as a non-user-initiated
-    // popup). Instead, we just call puter.ai.chat() directly. If the user is not
-    // signed in, Puter will either:
-    //   (a) auto-create a temporary user (if the app allows it), or
-    //   (b) reject the call with an auth error — in which case we fall through to
-    //       the next provider. The UI exposes a "Sign in to Puter" button that the
-    //       user can click (a real user gesture) to authenticate before retrying.
-    //
-    // Model: omit the `model` option to use Puter's default (currently gpt-5.4-nano
-    // per the docs), which is free and reliably available. Previously we hardcoded
-    // "claude-sonnet-4" (404 — Anthropic deprecated that exact ID) and then
-    // "gpt-4o-mini" (works but is not the documented default). Using the default
-    // avoids model-name drift.
-    //
-    // Skip Puter entirely if it's in cooldown — don't even attempt the call.
-    const puterInCooldown = isPuterInCooldown();
+  // Execute the selected provider
+  if (provider.type === "local") {
+    // Check if document/optimizer task - throw error instead of silent local fallback
+    if (opts.isOptimizerCall || taskCategory === "document") {
+      throw new ProviderUnavailableError(
+        "No AI provider available. (No offline fallback allowed for Industry ATS Mode)"
+      );
+    }
+    const text = localGenerate(finalOpts);
+    assert(text !== "", "Provider response is empty");
+    if (text === "" || text == null || text.length === 0) {
+      throw new ProviderReturnedEmptyResponse("The AI provider returned an empty response.\nPlease retry or switch providers.");
+    }
+    return {
+      text,
+      provider: "Local Engine (offline mode)",
+      latencyMs: Math.round(performance.now() - t0),
+      tokensEstimate: estTokens(finalOpts.userPrompt),
+      isLocalEngine: true,
+    };
+  }
+
+  if (provider.type === "puter") {
+    const { getPuterProvider } = await import("./providers/puter-provider");
+    const puterProvider = getPuterProvider();
     try {
-      if (!puterInCooldown && typeof window !== "undefined" && window.puter?.ai?.chat) {
-        // Ensure user is signed in (consistent with puter.ts adapter)
+      const resp = await puterProvider.generate({
+        systemPrompt: finalOpts.systemPrompt,
+        userPrompt: finalOpts.userPrompt,
+        maxTokens: finalOpts.maxTokens,
+        temperature: finalOpts.temperature,
+        model: provider.modelName,
+      });
+
+      const text = resp.text;
+      assert(text !== "", "Provider response is empty");
+      if (text === "" || text == null || text.length === 0) {
+        throw new ProviderReturnedEmptyResponse("The AI provider returned an empty response.\nPlease retry or switch providers.");
+      }
+
+      return {
+        text,
+        provider: "Puter.js",
+        latencyMs: Math.round(performance.now() - t0),
+        tokensEstimate: estTokens(finalOpts.userPrompt + (finalOpts.systemPrompt ?? "")),
+      };
+    } catch (e: any) {
+      // If Puter fails, we fall back to secondary providers in the pool!
+      console.warn(`[AI] Puter failed: ${e?.message || e}. Trying secondary providers...`);
+      // Find secondary providers
+      const state = useApp.getState();
+      const providers = state.providers || [];
+      const secondary = providers.filter((p: any) => p.isActive && p.type !== "puter");
+      if (secondary.length > 0) {
+        const fallbackProvider = secondary[0]; // try first secondary
+        console.log(`[ROUTER]\nProvider selected: ${fallbackProvider.name}`);
         try {
-          if (window.puter.auth?.isSignedIn && !window.puter.auth.isSignedIn()) {
-            await window.puter.auth.signIn();
+          const text = await callUserProvider(fallbackProvider, finalOpts);
+          assert(text !== "", "Provider response is empty");
+          if (text === "" || text == null || text.length === 0) {
+            throw new ProviderReturnedEmptyResponse("The AI provider returned an empty response.\nPlease retry or switch providers.");
           }
-        } catch { /* anonymous OK for some endpoints */ }
-
-        const messages = opts.systemPrompt
-          ? [
-              { role: "system", content: opts.systemPrompt },
-              { role: "user", content: opts.userPrompt },
-            ]
-          : [{ role: "user", content: opts.userPrompt }];
-
-        // Build options — only pass model if the user has explicitly chosen one
-        // via the Puter provider settings. Otherwise let Puter pick its default.
-        const MODEL_ALIASES: Record<string, string> = {
-          "gpt-5.4-nano": "gpt-5.4-nano", "gpt 5.4 nano": "gpt-5.4-nano",
-          "gpt-5-nano": "gpt-5-nano", "gpt 5 nano": "gpt-5-nano",
-          "claude-sonnet-4-5": "claude-sonnet-4-5", "claude sonnet 4 5": "claude-sonnet-4-5",
-          "gemini-2.5-flash": "gemini-2.5-flash", "gemini 2.5 flash": "gemini-2.5-flash",
-          "gpt-4o-mini": "gpt-4o-mini", "gpt 4o mini": "gpt-4o-mini",
-        };
-        const chatOpts: any = {
-          max_tokens: opts.maxTokens ?? 4096,
-          temperature: opts.temperature ?? 0.7,
-        };
-        // Check if the user configured a specific Puter model in provider settings
-        try {
-          const state: any = useApp.getState();
-          const puterProvider = (state?.providers || []).find(
-            (p: any) => p.type === "puter" && p.isActive && p.modelName,
-          );
-          if (puterProvider?.modelName) {
-            const raw = puterProvider.modelName.toLowerCase();
-            chatOpts.model = MODEL_ALIASES[raw] || puterProvider.modelName;
-          }
-        } catch {
-          // ignore — use Puter default
-        }
-
-        // Wrap in a 45s timeout — Puter can be slow on first call (cold start).
-        const resp: any = await withTimeout(
-          window.puter.ai.chat(messages, chatOpts),
-          45000,
-          "Puter AI chat",
-        );
-
-        // Parse the response — Puter returns a ChatResponse object per the docs:
-        //   { message: { role: "assistant", content: "..." } }
-        // But it can also return a string or other shapes depending on the model.
-        let text = "";
-        if (typeof resp === "string") {
-          text = resp;
-        } else if (resp?.message?.content) {
-          // Standard ChatResponse shape
-          text = Array.isArray(resp.message.content)
-            ? resp.message.content.map((c: any) => c?.text ?? "").join("")
-            : String(resp.message.content);
-        } else if (resp?.text) {
-          text = resp.text;
-        } else if (resp?.message?.role === "assistant" && typeof resp.message.content === "string") {
-          text = resp.message.content;
-        } else if (resp?.toString && typeof resp.toString === "function") {
-          // Some responses are objects with a useful toString()
-          const str = resp.toString();
-          if (str && str !== "[object Object]") text = str;
-        }
-        if (!text) {
-          // Last resort — stringify
-          try {
-            text = JSON.stringify(resp);
-          } catch {
-            text = String(resp ?? "");
-          }
-        }
-
-        if (text && text.trim().length > 0) {
           return {
             text,
-            provider: "Puter.js",
+            provider: fallbackProvider.name,
             latencyMs: Math.round(performance.now() - t0),
-            tokensEstimate: estTokens(opts.userPrompt + (opts.systemPrompt ?? "")),
+            tokensEstimate: estTokens(finalOpts.userPrompt + (finalOpts.systemPrompt ?? "")),
           };
+        } catch (secErr: any) {
+          // If secondary also fails, fallback to Offline Engine
+          console.warn(`[AI] Secondary provider ${fallbackProvider.name} failed: ${secErr?.message || secErr}. Trying local fallback...`);
         }
-      } else if (puterInCooldown) {
-        // Puter is in cooldown — skip silently (don't warn, the user already knows).
-        console.debug("[AI] Puter in cooldown — skipping to next provider");
-      } else if (typeof window !== "undefined" && !window.puter) {
-        // Puter.js script not yet loaded — this is common on first render.
-        // Don't warn (it's noisy); just fall through to the next provider.
-        console.debug("[AI] Puter.js not yet loaded, skipping to next provider");
       }
-    } catch (e: any) {
-      const msg = e?.message || String(e || "");
-      // If Puter hit its usage cap, enter cooldown so we stop retrying.
-      if (isPuterQuotaError(e)) {
-        markPuterCooldown();
-        console.warn("[AI] Puter usage cap hit — entering 5-minute cooldown. Falling through to next provider.");
-      } else if (/auth|sign.?in|unauthor|401|403/i.test(msg)) {
-        // Detect auth errors specifically so the UI can prompt the user to sign in
-        console.warn("[AI] Puter auth required — user should sign in via the Puter button. Error:", msg);
-      } else {
-        console.warn("[AI] Puter.js failed, trying next provider:", msg);
+      
+      // Fallback to local
+      if (opts.isOptimizerCall || taskCategory === "document") {
+        throw new ProviderUnavailableError(
+          "No AI provider available. (No offline fallback allowed for Industry ATS Mode)"
+        );
       }
+      const text = localGenerate(finalOpts);
+      assert(text !== "", "Provider response is empty");
+      if (text === "" || text == null || text.length === 0) {
+        throw new ProviderReturnedEmptyResponse("The AI provider returned an empty response.\nPlease retry or switch providers.");
+      }
+      return {
+        text,
+        provider: "Local Engine (offline mode)",
+        latencyMs: Math.round(performance.now() - t0),
+        tokensEstimate: estTokens(finalOpts.userPrompt),
+        isLocalEngine: true,
+      };
     }
   }
 
-  if (!opts.preferLocal) {
-    // 2) Try server fallback (z-ai-web-dev-sdk)
-    try {
-      // Also expose the Z.ai key via NEXT_PUBLIC_ prefix for Cloudflare Pages
-      // where server-side env vars are not available at runtime.
-      const zaiKey = process.env.NEXT_PUBLIC_ZAI_API_KEY;
-      if (zaiKey) {
-        // Direct client-side call to Z.ai API — avoids the server-side route
-        // which may not have the env var on Cloudflare Pages
-        const messages = [
-          { role: "system", content: opts.systemPrompt || "You are ResumeAI Pro, a helpful assistant for resume and career tasks." },
-          { role: "user", content: opts.userPrompt },
-        ];
-        const res = await fetch("https://api.z.ai/api/paas/v4/chat/completions", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "Authorization": `Bearer ${zaiKey}`,
-          },
-          body: JSON.stringify({
-            model: "glm-4.6",
-            messages,
-            temperature: opts.temperature ?? 0.7,
-            max_tokens: opts.maxTokens ?? 4096,
-          }),
-          signal: AbortSignal.timeout(30000),
+  // Secondary/API Provider
+  try {
+    const text = await callUserProvider(provider, finalOpts);
+    assert(text !== "", "Provider response is empty");
+    if (text === "" || text == null || text.length === 0) {
+      throw new ProviderReturnedEmptyResponse("The AI provider returned an empty response.\nPlease retry or switch providers.");
+    }
+    return {
+      text,
+      provider: provider.name,
+      latencyMs: Math.round(performance.now() - t0),
+      tokensEstimate: estTokens(finalOpts.userPrompt + (finalOpts.systemPrompt ?? "")),
+    };
+  } catch (e: any) {
+    if (e?.message?.includes("429") || (e?.statusCode === 429)) {
+      console.log("[PROVIDER]\nNvidia returned 429.");
+    }
+    console.warn(`[AI] Primary provider ${provider.name} failed: ${e?.message || e}. Trying fallbacks...`);
+    
+    // Check if Puter is active & authenticated
+    const state = useApp.getState();
+    const providers = state.providers || [];
+    const puter = providers.find((p: any) => p.type === "puter" && p.isActive);
+    let puterAuthenticated = false;
+    if (puter) {
+      try {
+        const { getPuterProvider } = await import("./providers/puter-provider");
+        const puterProvider = getPuterProvider();
+        puterAuthenticated = await puterProvider.tryRefresh();
+      } catch {
+        puterAuthenticated = false;
+      }
+    }
+
+    if (puter && puterAuthenticated) {
+      console.log("[ROUTER]\nProvider selected: Puter");
+      if (opts.isOptimizerCall || taskCategory === "document") {
+        console.log("[ROUTER]\nIndustry ATS Mode using Puter.");
+      }
+      try {
+        const { getPuterProvider } = await import("./providers/puter-provider");
+        const puterProvider = getPuterProvider();
+        const resp = await puterProvider.generate({
+          systemPrompt: finalOpts.systemPrompt,
+          userPrompt: finalOpts.userPrompt,
+          maxTokens: finalOpts.maxTokens,
+          temperature: finalOpts.temperature,
+          model: puter.modelName,
         });
-        if (res.ok) {
-          const data = await res.json();
-          const text = data?.choices?.[0]?.message?.content ?? "";
-          if (text && text.trim().length > 0) {
-            return {
-              text,
-              provider: "Z.ai Fallback",
-              latencyMs: Math.round(performance.now() - t0),
-              tokensEstimate: estTokens(opts.userPrompt + (opts.systemPrompt ?? "")),
-            };
-          }
+        const text = resp.text;
+        assert(text !== "", "Provider response is empty");
+        if (text === "" || text == null || text.length === 0) {
+          throw new ProviderReturnedEmptyResponse("The AI provider returned an empty response.\nPlease retry or switch providers.");
         }
+        return {
+          text,
+          provider: "Puter.js",
+          latencyMs: Math.round(performance.now() - t0),
+          tokensEstimate: estTokens(finalOpts.userPrompt + (finalOpts.systemPrompt ?? "")),
+        };
+      } catch (puterErr: any) {
+        console.warn(`[AI] Puter fallback failed: ${puterErr?.message || puterErr}`);
       }
-
-      // Also try the server-side route as backup
-      const res = await fetch("/api/ai/chat", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          systemPrompt: opts.systemPrompt,
-          userPrompt: opts.userPrompt,
-          maxTokens: opts.maxTokens,
-          temperature: opts.temperature,
-        }),
-      });
-      if (res.ok) {
-        const data = await res.json();
-        if (data?.text && data.text.trim().length > 0) {
-          return {
-            text: data.text,
-            provider: "Z.ai Fallback",
-            latencyMs: Math.round(performance.now() - t0),
-            tokensEstimate: estTokens(opts.userPrompt + (opts.systemPrompt ?? "")),
-          };
-        }
-      }
-    } catch (e) {
-      console.warn("[AI] Server fallback failed, using local generator:", e);
     }
+
+    // Try other secondary providers
+    const otherSecondary = providers.filter((p: any) => p.isActive && p.type !== "puter" && p.id !== provider.id);
+    for (const altProvider of otherSecondary) {
+      console.log(`[ROUTER]\nProvider selected: ${altProvider.name}`);
+      try {
+        const text = await callUserProvider(altProvider, finalOpts);
+        assert(text !== "", "Provider response is empty");
+        if (text === "" || text == null || text.length === 0) {
+          throw new ProviderReturnedEmptyResponse("The AI provider returned an empty response.\nPlease retry or switch providers.");
+        }
+        return {
+          text,
+          provider: altProvider.name,
+          latencyMs: Math.round(performance.now() - t0),
+          tokensEstimate: estTokens(finalOpts.userPrompt + (finalOpts.systemPrompt ?? "")),
+        };
+      } catch (altErr: any) {
+        console.warn(`[AI] Alternate provider ${altProvider.name} failed: ${altErr?.message || altErr}`);
+      }
+    }
+
+    // Finally fallback to local
+    if (opts.isOptimizerCall || taskCategory === "document") {
+      throw new ProviderUnavailableError(
+        "No AI provider available. (No offline fallback allowed for Industry ATS Mode)"
+      );
+    }
+    const text = localGenerate(finalOpts);
+    assert(text !== "", "Provider response is empty");
+    if (text === "" || text == null || text.length === 0) {
+      throw new ProviderReturnedEmptyResponse("The AI provider returned an empty response.\nPlease retry or switch providers.");
+    }
+    return {
+      text,
+      provider: "Local Engine (offline mode)",
+      latencyMs: Math.round(performance.now() - t0),
+      tokensEstimate: estTokens(finalOpts.userPrompt),
+      isLocalEngine: true,
+    };
   }
-
-  // 3) Local deterministic fallback — always works, even offline
-  //
-  // CRITICAL RULE: The offline engine may activate ONLY if ALL providers fail.
-  // It must NEVER activate because:
-  //   - provider not logged in
-  //   - session expired
-  //   - refresh failed
-  // Those are authentication errors, not provider failures.
-  // When those occur, ProviderAuthenticationError is thrown above.
-  //
-  // If we reach this point, it means all providers (including Z.ai and Puter)
-  // genuinely failed — network errors, rate limits, invalid responses, etc.
-  //
-  // HARDENING: Document/optimizer tasks NEVER use the local engine — the
-  // deterministic fallback cannot produce reliable AI-optimized resumes.
-  if (opts.isOptimizerCall || opts.taskCategory === "document") {
-    console.error("[AI] Document task failed — no fallback available.");
-    throw new Error("AI optimization failed: All configured providers are unreachable or returned errors. Please check your provider settings, API keys, and network connection. (No offline fallback allowed for this task)");
-  }
-
-  // SECURITY: Reject oversized prompts (>20000 chars).
-  // The local engine is a deterministic fallback — it cannot meaningfully process
-  // large prompts and would produce garbage. Better to fail loudly than return
-  // a fake result that looks like a real AI response.
-  const promptLen = (opts.userPrompt || "").length;
-  const MAX_LOCAL_ENGINE_PROMPT = 20_000;
-  const MAX_LOCAL_ENGINE_SUMMARY = 500;
-
-  if (promptLen > MAX_LOCAL_ENGINE_PROMPT) {
-    console.error(`[AI] Local Engine REJECTED: prompt too large (${promptLen} chars > ${MAX_LOCAL_ENGINE_PROMPT} limit). All providers failed — cannot process this request.`);
-    throw new Error(
-      `All AI providers failed and the local engine cannot process this request ` +
-      `(prompt is ${promptLen} characters, which exceeds the offline limit of ${MAX_LOCAL_ENGINE_PROMPT}). ` +
-      `Please check your internet connection and try again.`
-    );
-  }
-
-  console.warn("[AI] All providers failed. Falling back to Local Engine (offline mode). This should only happen when all providers are genuinely unavailable.");
-  const text = localGenerate(opts);
-
-  // SECURITY: Validate local engine output — reject if it looks like a full optimization
-  // for a large resume that the local engine can't actually handle properly.
-  // The local engine is only acceptable for simple/short prompts.
-  if (text.length > MAX_LOCAL_ENGINE_SUMMARY && opts.isOptimizerCall) {
-    console.error(`[AI] Local Engine REJECTED: optimizer call produced ${text.length} chars of output — too large for offline mode. Throwing error instead of returning potentially incorrect optimization.`);
-    throw new Error(
-      `All AI providers failed and the local engine cannot reliably optimize your resume offline. ` +
-      `Please check your internet connection and try again.`
-    );
-  }
-
-  return {
-    text,
-    provider: "Local Engine (offline mode)",
-    latencyMs: Math.round(performance.now() - t0),
-    tokensEstimate: estTokens(opts.userPrompt),
-    isLocalEngine: true, // HARDENING: Flag so callers know this is NOT a real AI response
-  };
 }
 
 /**

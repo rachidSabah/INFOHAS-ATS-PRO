@@ -58,7 +58,7 @@ export function isAnyProviderAuthenticatedSync(): boolean {
  * or null if none are authenticated.
  * Uses tryRefresh() to handle expired sessions.
  */
-export async function getAuthenticatedProvider(): Promise<{ provider: "puter" | "zai-direct"; generate: (opts: any) => Promise<{ text: string; provider: string; latencyMs: number }> } | null> {
+export async function getAuthenticatedProvider(): Promise<{ provider: "puter"; generate: (opts: any) => Promise<{ text: string; provider: string; latencyMs: number }> } | null> {
   // Then check Puter (browser-auth — works but may need popup)
   const puterProvider = getPuterProvider();
   if (await puterProvider.tryRefresh()) {

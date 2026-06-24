@@ -956,67 +956,503 @@ function RollbackTab() {
 // ============================================================================
 
 function DebugTab() {
-  const [running, setRunning] = useState(false);
-  const [result, setResult] = useState<any>(null);
+  const issues = useApp((s) => s.aiHealingIssues);
+  const setIssues = useApp((s) => s.setAIHealingIssues);
+  const updateIssue = useApp((s) => s.updateAIHealingIssue);
+  
+  const report = useApp((s) => s.aiHealingReport);
+  const setReport = useApp((s) => s.setAIHealingReport);
+  
+  const progress = useApp((s) => s.aiHealingProgress);
+  const setProgress = useApp((s) => s.setAIHealingProgress);
 
-  const run = async () => {
-    setRunning(true);
+  const [selectedIssueId, setSelectedIssueId] = useState<string | null>(null);
+  const [selectedIssueIds, setSelectedIssueIds] = useState<string[]>([]);
+  const [editingPatchId, setEditingPatchId] = useState<string | null>(null);
+  const [editingPatchContent, setEditingPatchContent] = useState<string>("");
+
+  const selectedIssue = issues.find((i) => i.id === selectedIssueId);
+
+  const runScan = async () => {
+    setProgress({ status: "scanning", currentStep: "Scanning codebase for issues...", progressPercent: 5 });
     try {
-      const r = await runAutonomousDebug();
-      setResult(r);
-      toast.success(`Debug scan complete: ${r.issues.length} issues found, ${r.generatedPatches.length} patches generated`);
+      const results = await runDetailedDebugScan();
+      setIssues(results);
+      setReport(null);
+      if (results.length > 0) {
+        setSelectedIssueId(results[0].id);
+      }
+      toast.success(`Scan complete! Found ${results.length} issues.`);
+    } catch (e: any) {
+      toast.error(`Scan failed: ${e?.message || e}`);
     } finally {
-      setRunning(false);
+      setProgress({ status: "idle", currentStep: "", progressPercent: 0 });
     }
   };
 
+  const runHealAll = async () => {
+    if (issues.length === 0) {
+      toast.warning("Please run a debug scan first.");
+      return;
+    }
+    toast.info("Starting AI Healer Engineering Agent...");
+    try {
+      await healMultipleIssues(issues);
+      toast.success("Healing session complete!");
+    } catch (e: any) {
+      toast.error(`Healing failed: ${e?.message || e}`);
+    }
+  };
+
+  const runHealSelected = async () => {
+    if (selectedIssueIds.length === 0) {
+      toast.warning("No issues selected.");
+      return;
+    }
+    toast.info(`Healing ${selectedIssueIds.length} selected issues...`);
+    try {
+      await healMultipleIssues(issues, selectedIssueIds);
+      toast.success("Healing complete for selected issues!");
+    } catch (e: any) {
+      toast.error(`Healing failed: ${e?.message || e}`);
+    }
+  };
+
+  const runGeneratePatchOnly = async () => {
+    if (!selectedIssueId) {
+      toast.warning("Please select an issue first.");
+      return;
+    }
+    const target = issues.find((i) => i.id === selectedIssueId);
+    if (!target) return;
+    toast.info("Generating patch only (skipping validation/apply)...");
+    try {
+      await healIssue(target, true);
+      toast.success("Patch generated!");
+    } catch (e: any) {
+      toast.error(`Failed to generate patch: ${e?.message || e}`);
+    }
+  };
+
+  const runRollbackLastFix = () => {
+    const patches = useApp.getState().aiPatches;
+    const applied = patches.filter((p) => p.status === "applied" || p.status === "approved");
+    if (applied.length === 0) {
+      toast.info("No applied fixes found to rollback.");
+      return;
+    }
+    const last = applied[0];
+    const r = rollbackPatch(last.id, "Emergency rollback from Autonomous Debug Mode");
+    if (r.success) {
+      toast.success(`Successfully rolled back fix: ${last.title}`);
+    } else {
+      toast.error(`Rollback failed: ${r.message}`);
+    }
+  };
+
+  const toggleSelectIssue = (id: string) => {
+    setSelectedIssueIds((prev) =>
+      prev.includes(id) ? prev.filter((i) => i !== id) : [...prev, id]
+    );
+  };
+
+  const handleApprove = (id: string) => {
+    updateIssue(id, { status: "fixed" });
+    toast.success("Patch approved and committed to staging!");
+  };
+
+  const handleReject = (id: string) => {
+    updateIssue(id, { status: "open", patch: undefined });
+    toast.error("Patch rejected.");
+  };
+
+  const handleRollback = (id: string) => {
+    updateIssue(id, { status: "open" });
+    toast.info("Patch rolled back.");
+  };
+
+  const startEdit = (issue: AIHealingIssue) => {
+    setEditingPatchId(issue.id);
+    setEditingPatchContent(issue.patch || "");
+  };
+
+  const saveEdit = (id: string) => {
+    updateIssue(id, { patch: editingPatchContent });
+    setEditingPatchId(null);
+    toast.success("Patch edits saved.");
+  };
+
+  const PIPELINE_STEPS = [
+    { label: "Debug Scan", state: "scanning" },
+    { label: "Issue Classification", state: "classifying" },
+    { label: "Root Cause Analysis", state: "analyzing" },
+    { label: "Generate Fix", state: "fixing" },
+    { label: "Patch File", state: "fixing" },
+    { label: "Type Check", state: "validating" },
+    { label: "Lint", state: "validating" },
+    { label: "Build", state: "validating" },
+    { label: "Integration Tests", state: "validating" },
+    { label: "Regression Tests", state: "validating" },
+    { label: "Present Patch", state: "completed" },
+    { label: "Await Approval", state: "completed" },
+    { label: "Commit", state: "completed" }
+  ];
+
+  const getStepStatus = (index: number) => {
+    if (progress.status === "idle") return "pending";
+    const currentStepIndex = PIPELINE_STEPS.findIndex((s) => s.state === progress.status);
+    if (index < currentStepIndex) return "passed";
+    if (index === currentStepIndex) return "active";
+    return "pending";
+  };
+
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="text-lg flex items-center gap-2"><Icon name="Bug" className="w-4 h-4 text-brand" /> Autonomous Debug Mode</CardTitle>
-        <CardDescription>The AI scans logs, routes, APIs, build output, and console errors — then generates fixes (requires approval before applying).</CardDescription>
-      </CardHeader>
-      <CardContent className="space-y-3">
-        <Button onClick={run} disabled={running} className="bg-brand hover:bg-brand-dark text-white gap-2">
-          <Icon name={running ? "Loader2" : "Bug"} className={`w-4 h-4 ${running ? "animate-spin" : ""}`} />
-          {running ? "Scanning..." : "Run Debug Scan"}
-        </Button>
-        {result && (
-          <div className="space-y-3">
-            {result.issues.length > 0 && (
-              <div>
-                <div className="text-sm font-semibold mb-2">Issues Found ({result.issues.length})</div>
-                <div className="space-y-2">
-                  {result.issues.map((issue: any, i: number) => (
-                    <div key={i} className="rounded-lg border border-border p-2">
-                      <div className="flex items-center gap-2 mb-1">
-                        <Badge variant={issue.severity === "critical" || issue.severity === "error" ? "danger" : "warning"} className="text-[10px] capitalize">{issue.severity}</Badge>
-                        <Badge variant="outline" className="text-[10px] capitalize">{issue.area}</Badge>
-                      </div>
-                      <div className="text-sm">{issue.description}</div>
-                      <div className="text-xs text-emerald-700 dark:text-emerald-400 mt-1">Fix: {issue.suggestedFix}</div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-            {result.generatedPatches.length > 0 && (
-              <div>
-                <div className="text-sm font-semibold mb-2">Generated Patches ({result.generatedPatches.length})</div>
-                <div className="space-y-2">
-                  {result.generatedPatches.map((p: any, i: number) => (
-                    <div key={i} className="rounded-lg border border-border p-2">
-                      <div className="text-sm font-medium">{p.title}</div>
-                      <pre className="text-xs p-2 rounded bg-secondary/40 overflow-auto max-h-40 font-mono mt-1">{p.diff}</pre>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
+    <div className="space-y-6">
+      {/* Controls Card */}
+      <Card className="bg-card border border-border shadow-md">
+        <CardContent className="p-4 flex flex-wrap gap-2 items-center justify-between">
+          <div className="flex flex-wrap gap-2">
+            <Button onClick={runScan} disabled={progress.status !== "idle"} variant="outline" className="gap-2 border-primary text-primary hover:bg-primary/5">
+              <Icon name="Play" className="w-4 h-4" /> Run Debug Scan
+            </Button>
+            <Button onClick={runHealAll} disabled={progress.status !== "idle" || issues.length === 0} className="bg-emerald-600 hover:bg-emerald-700 text-white gap-2">
+              <Icon name="Sparkles" className="w-4 h-4" /> Heal All Issues
+            </Button>
+            <Button onClick={runHealSelected} disabled={progress.status !== "idle" || selectedIssueIds.length === 0} className="bg-violet-600 hover:bg-violet-700 text-white gap-2">
+              <Icon name="CheckSquare" className="w-4 h-4" /> Heal Selected ({selectedIssueIds.length})
+            </Button>
+            <Button onClick={runGeneratePatchOnly} disabled={progress.status !== "idle" || !selectedIssueId} variant="secondary" className="gap-2">
+              <Icon name="FileCode" className="w-4 h-4" /> Generate Patch Only
+            </Button>
           </div>
-        )}
-      </CardContent>
-    </Card>
+          <Button onClick={runRollbackLastFix} variant="destructive" className="gap-2">
+            <Icon name="Undo2" className="w-4 h-4" /> Rollback Last Fix
+          </Button>
+        </CardContent>
+      </Card>
+
+      {/* Healer Pipeline Stepper */}
+      {progress.status !== "idle" && (
+        <Card className="border border-violet-200 dark:border-violet-850 bg-violet-50/20 dark:bg-violet-950/10">
+          <CardHeader className="py-3">
+            <CardTitle className="text-sm font-semibold flex items-center gap-2 text-violet-700 dark:text-violet-400">
+              <Icon name="Loader2" className="w-4 h-4 animate-spin" /> Healer Execution Pipeline
+            </CardTitle>
+            <CardDescription className="text-xs text-violet-600/80 dark:text-violet-400/80">
+              {progress.currentStep}
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="pb-4">
+            <div className="flex flex-wrap items-center gap-1 text-[10px] sm:text-xs">
+              {PIPELINE_STEPS.map((step, idx) => {
+                const status = getStepStatus(idx);
+                return (
+                  <div key={idx} className="flex items-center gap-1">
+                    <span
+                      className={`px-2 py-1 rounded-md font-medium border transition-colors duration-300 ${
+                        status === "passed"
+                          ? "bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950/20 dark:text-emerald-400 dark:border-emerald-800"
+                          : status === "active"
+                          ? "bg-violet-600 text-white border-violet-600 animate-pulse"
+                          : "bg-secondary text-muted-foreground border-border"
+                      }`}
+                    >
+                      {step.label}
+                    </span>
+                    {idx < PIPELINE_STEPS.length - 1 && (
+                      <Icon name="ChevronRight" className="w-3 h-3 text-muted-foreground/50" />
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Healing Report Summary */}
+      {report && (
+        <Card className="border-2 border-emerald-500 bg-emerald-500/5 overflow-hidden">
+          <div className="bg-emerald-600 text-white px-4 py-2 font-display text-sm font-bold flex items-center justify-between">
+            <span>Self-Heal Report Summary</span>
+            <Badge variant="outline" className="text-white border-white bg-emerald-700/50">Build: {report.buildStatus}</Badge>
+          </div>
+          <CardContent className="p-4 grid grid-cols-2 md:grid-cols-4 gap-4">
+            <div className="p-3 bg-card border border-border rounded-lg text-center shadow-sm">
+              <p className="text-xs text-muted-foreground mb-1">Issues Found</p>
+              <p className="text-2xl font-bold font-display">{report.issuesFound}</p>
+            </div>
+            <div className="p-3 bg-card border border-emerald-200 dark:border-emerald-950 rounded-lg text-center shadow-sm">
+              <p className="text-xs text-emerald-600 dark:text-emerald-400 mb-1">✓ Auto Fixed</p>
+              <p className="text-2xl font-bold text-emerald-600 dark:text-emerald-400 font-display">{report.autoFixed}</p>
+            </div>
+            <div className="p-3 bg-card border border-amber-200 dark:border-amber-950 rounded-lg text-center shadow-sm">
+              <p className="text-xs text-amber-600 dark:text-amber-400 mb-1">⚠ Needs Review</p>
+              <p className="text-2xl font-bold text-amber-600 dark:text-amber-400 font-display">{report.needsReview}</p>
+            </div>
+            <div className="p-3 bg-card border border-red-200 dark:border-red-950 rounded-lg text-center shadow-sm">
+              <p className="text-xs text-red-600 dark:text-red-400 mb-1">❌ Failed</p>
+              <p className="text-2xl font-bold text-red-600 dark:text-red-400 font-display">{report.failed}</p>
+            </div>
+          </CardContent>
+          <div className="bg-emerald-550/10 px-4 py-2 text-xs text-muted-foreground border-t border-emerald-500/10 flex justify-between">
+            <span>Files Changed: <strong className="text-foreground">{report.filesChanged}</strong></span>
+            <span>Tests Passed: <strong className="text-foreground">{report.testsPassed}</strong></span>
+          </div>
+        </Card>
+      )}
+
+      {/* Main Grid: Issues List & Patch Review */}
+      <div className="grid lg:grid-cols-5 gap-6">
+        {/* Issues List */}
+        <Card className="lg:col-span-2 border border-border">
+          <CardHeader className="py-4">
+            <CardTitle className="text-base flex items-center justify-between">
+              <span>Issues Found ({issues.length})</span>
+              <div className="flex items-center gap-1.5 text-xs font-normal">
+                <span className="text-emerald-600 font-semibold">✓ {issues.filter(i => i.status === "fixed").length}</span>
+                <span className="text-amber-600 font-semibold">⚠ {issues.filter(i => i.status === "needs_review").length}</span>
+                <span className="text-red-600 font-semibold">❌ {issues.filter(i => i.status === "failed").length}</span>
+              </div>
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="p-3 max-h-[600px] overflow-y-auto space-y-2">
+            {issues.length === 0 ? (
+              <div className="text-center py-12 text-muted-foreground text-sm">
+                <Icon name="Search" className="w-8 h-8 text-muted-foreground/30 mx-auto mb-2" />
+                Run a debug scan to inspect the repository.
+              </div>
+            ) : (
+              issues.map((issue) => {
+                const isSelected = selectedIssueId === issue.id;
+                const isChecked = selectedIssueIds.includes(issue.id);
+                return (
+                  <div
+                    key={issue.id}
+                    onClick={() => setSelectedIssueId(issue.id)}
+                    className={`p-3 rounded-lg border text-left cursor-pointer transition-all ${
+                      isSelected
+                        ? "border-violet-500 bg-violet-50/10 dark:bg-violet-950/5 ring-1 ring-violet-500"
+                        : "border-border hover:bg-secondary/40"
+                    }`}
+                  >
+                    <div className="flex items-start gap-2.5">
+                      <input
+                        type="checkbox"
+                        checked={isChecked}
+                        onClick={(e) => e.stopPropagation()}
+                        onChange={() => toggleSelectIssue(issue.id)}
+                        className="mt-1 accent-violet-600 w-3.5 h-3.5"
+                      />
+                      <div className="min-w-0 flex-1">
+                        <div className="flex flex-wrap items-center gap-1.5 mb-1.5">
+                          <Badge
+                            variant={
+                              issue.severity === "critical" || issue.severity === "error"
+                                ? "danger"
+                                : issue.severity === "warning"
+                                ? "warning"
+                                : "outline"
+                            }
+                            className="text-[9px] px-1.5 py-0 capitalize"
+                          >
+                            {issue.severity}
+                          </Badge>
+                          <Badge variant="outline" className="text-[9px] px-1.5 py-0 capitalize font-semibold bg-secondary/30">
+                            {issue.area}
+                          </Badge>
+                          <span className="ml-auto">
+                            {issue.status === "fixed" ? (
+                              <Badge className="bg-emerald-100 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-400 text-[9px] border-emerald-200">✓ Fixed</Badge>
+                            ) : issue.status === "needs_review" ? (
+                              <Badge className="bg-amber-100 text-amber-700 dark:bg-amber-950/40 dark:text-amber-400 text-[9px] border-amber-200">⚠ Needs Review</Badge>
+                            ) : issue.status === "failed" ? (
+                              <Badge className="bg-red-100 text-red-700 dark:bg-red-950/40 dark:text-red-400 text-[9px] border-red-200">❌ Failed</Badge>
+                            ) : (
+                              <Badge variant="outline" className="text-[9px] text-muted-foreground border-border">Open</Badge>
+                            )}
+                          </span>
+                        </div>
+                        <h4 className="font-semibold text-sm truncate text-foreground">{issue.title}</h4>
+                        <p className="text-xs text-muted-foreground line-clamp-2 mt-0.5">{issue.description}</p>
+                        {issue.file && (
+                          <div className="text-[10px] font-mono text-muted-foreground/70 truncate mt-1">
+                            {issue.file.split("/").pop()}:{issue.line}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })
+            )}
+          </CardContent>
+        </Card>
+
+        {/* Patch Review Panel */}
+        <Card className="lg:col-span-3 border border-border">
+          <CardHeader className="py-4">
+            <CardTitle className="text-base flex items-center gap-2">
+              <Icon name="GitCompare" className="w-4 h-4 text-violet-600" />
+              Patch Review Screen
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="p-4 space-y-4">
+            {!selectedIssue ? (
+              <div className="text-center py-20 text-muted-foreground text-sm">
+                <Icon name="GitPullRequest" className="w-10 h-10 text-muted-foreground/30 mx-auto mb-2" />
+                Select an issue to view its diagnostic data and patch details.
+              </div>
+            ) : (
+              <div className="space-y-4">
+                {/* Meta details */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 bg-secondary/20 p-3 rounded-lg border border-border">
+                  <div>
+                    <span className="text-[10px] text-muted-foreground uppercase block font-semibold">File</span>
+                    <a
+                      href={`file:///${selectedIssue.file}`}
+                      className="text-xs font-mono font-medium text-primary hover:underline truncate block"
+                    >
+                      {selectedIssue.file || "n/a"}
+                    </a>
+                  </div>
+                  <div>
+                    <span className="text-[10px] text-muted-foreground uppercase block font-semibold">Issue</span>
+                    <span className="text-xs font-semibold text-foreground block">{selectedIssue.title}</span>
+                  </div>
+                </div>
+
+                {/* Root Cause Card */}
+                {selectedIssue.rootCause && (
+                  <div className="p-3 bg-secondary/10 border border-border rounded-lg">
+                    <span className="text-[10px] text-muted-foreground uppercase font-semibold block mb-0.5">Root Cause</span>
+                    <p className="text-xs text-foreground font-medium">{selectedIssue.rootCause}</p>
+                  </div>
+                )}
+
+                {/* AI Reasoning / Confidence */}
+                {selectedIssue.confidence && (
+                  <div className="grid sm:grid-cols-3 gap-4 items-center">
+                    <div className="sm:col-span-1 bg-secondary/30 rounded-lg p-3 text-center border border-border">
+                      <span className="text-[10px] text-muted-foreground uppercase block font-semibold mb-1">AI Confidence</span>
+                      <span className="text-xl font-bold text-violet-600 font-display">{selectedIssue.confidence}%</span>
+                    </div>
+                    <div className="sm:col-span-2 p-3 bg-violet-50/15 dark:bg-violet-950/5 border border-violet-100 dark:border-violet-900 rounded-lg text-left">
+                      <span className="text-[10px] text-violet-600 dark:text-violet-400 uppercase font-semibold block mb-0.5">Reasoning</span>
+                      <p className="text-xs text-muted-foreground italic font-medium">{selectedIssue.reasoning}</p>
+                    </div>
+                  </div>
+                )}
+
+                {/* Validation Stats */}
+                {selectedIssue.patch && (
+                  <div className="grid grid-cols-3 gap-2 text-center text-xs">
+                    <div className="p-2 bg-secondary/20 rounded-md border border-border">
+                      <span className="text-[10px] text-muted-foreground block uppercase font-semibold">Build</span>
+                      <strong className={selectedIssue.buildStatus === "PASS" ? "text-emerald-600" : "text-red-600"}>
+                        {selectedIssue.buildStatus || "PENDING"}
+                      </strong>
+                    </div>
+                    <div className="p-2 bg-secondary/20 rounded-md border border-border">
+                      <span className="text-[10px] text-muted-foreground block uppercase font-semibold">Tests</span>
+                      <strong className={selectedIssue.testStatus === "PASS" ? "text-emerald-600" : "text-red-600"}>
+                        {selectedIssue.testStatus || "PENDING"}
+                      </strong>
+                    </div>
+                    <div className="p-2 bg-secondary/20 rounded-md border border-border">
+                      <span className="text-[10px] text-muted-foreground block uppercase font-semibold">Risk</span>
+                      <strong className={selectedIssue.risk === "LOW" ? "text-emerald-600" : selectedIssue.risk === "MEDIUM" ? "text-amber-600" : "text-red-600"}>
+                        {selectedIssue.risk || "n/a"}
+                      </strong>
+                    </div>
+                  </div>
+                )}
+
+                {/* Patch diff display */}
+                {selectedIssue.patch && (
+                  <div>
+                    <span className="text-[10px] text-muted-foreground uppercase font-semibold block mb-1">Generated Patch (Unified Diff)</span>
+                    {editingPatchId === selectedIssue.id ? (
+                      <div className="space-y-2">
+                        <Textarea
+                          value={editingPatchContent}
+                          onChange={(e) => setEditingPatchContent(e.target.value)}
+                          rows={8}
+                          className="font-mono text-xs p-3 border border-primary bg-secondary/10"
+                        />
+                        <div className="flex gap-2">
+                          <Button size="sm" onClick={() => saveEdit(selectedIssue.id)} className="bg-emerald-600 hover:bg-emerald-700 text-white">Save Changes</Button>
+                          <Button size="sm" variant="ghost" onClick={() => setEditingPatchId(null)}>Cancel</Button>
+                        </div>
+                      </div>
+                    ) : (
+                      <pre className="text-xs p-3 rounded-lg bg-secondary/40 border border-border overflow-auto max-h-60 font-mono text-left whitespace-pre">
+                        {selectedIssue.patch.split("\n").map((line, lIdx) => {
+                          const isAdd = line.startsWith("+") && !line.startsWith("+++");
+                          const isDel = line.startsWith("-") && !line.startsWith("---");
+                          return (
+                            <span
+                              key={lIdx}
+                              className={isAdd ? "text-emerald-600 bg-emerald-500/5 block font-semibold" : isDel ? "text-red-600 bg-red-500/5 block font-semibold" : "block"}
+                            >
+                              {line}
+                            </span>
+                          );
+                        })}
+                      </pre>
+                    )}
+                  </div>
+                )}
+
+                {/* Patch review actions */}
+                <div className="flex gap-2 flex-wrap border-t border-border pt-3 mt-3">
+                  {selectedIssue.patch && editingPatchId !== selectedIssue.id && (
+                    <>
+                      {selectedIssue.status !== "fixed" && (
+                        <Button
+                          onClick={() => handleApprove(selectedIssue.id)}
+                          className="bg-emerald-600 hover:bg-emerald-700 text-white gap-2"
+                        >
+                          <Icon name="Check" className="w-4 h-4" /> Approve & Commit
+                        </Button>
+                      )}
+                      <Button
+                        onClick={() => handleReject(selectedIssue.id)}
+                        variant="destructive"
+                        className="gap-2"
+                      >
+                        <Icon name="X" className="w-4 h-4" /> Reject Patch
+                      </Button>
+                      <Button
+                        onClick={() => startEdit(selectedIssue)}
+                        variant="secondary"
+                        className="gap-2"
+                      >
+                        <Icon name="Edit3" className="w-4 h-4" /> Edit Patch
+                      </Button>
+                      {selectedIssue.status === "fixed" && (
+                        <Button
+                          onClick={() => handleRollback(selectedIssue.id)}
+                          className="bg-amber-600 hover:bg-amber-700 text-white gap-2"
+                        >
+                          <Icon name="Undo2" className="w-4 h-4" /> Rollback patch
+                        </Button>
+                      )}
+                    </>
+                  )}
+                  {!selectedIssue.patch && (
+                    <div className="text-xs text-muted-foreground flex items-center gap-1.5 p-2 bg-secondary/20 rounded-md border border-border w-full justify-center">
+                      <Icon name="AlertTriangle" className="w-4 h-4 text-amber-500" />
+                      No patch generated yet. Click <strong>Heal Selected</strong> or <strong>Generate Patch Only</strong>.
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      </div>
+    </div>
   );
 }
 

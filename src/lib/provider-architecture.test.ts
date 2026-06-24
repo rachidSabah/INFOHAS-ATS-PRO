@@ -117,10 +117,10 @@ describe("Task Classification", () => {
   });
 });
 
-describe("Provider Routing — Puter Exclusion for Document Tasks", () => {
-  it("PREVENTS Puter from handling document tasks", () => {
+describe("Provider Routing — Puter Inclusion for Document Tasks", () => {
+  it("ALLOWS Puter to handle document tasks", () => {
     const puter = mockPuterProvider({ isActive: true });
-    expect(canProviderHandleTask(puter, "document")).toBe(false);
+    expect(canProviderHandleTask(puter, "document")).toBe(true);
   });
 
   it("ALLOWS Puter for interactive tasks", () => {
