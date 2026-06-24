@@ -71,8 +71,15 @@ export async function selectProvider(): Promise<any> {
     return puter;
   }
 
-  // 2. Secondary providers
-  const secondary = providers.filter((p: any) => p.isActive && p.type !== "puter");
+  // 2. Secondary providers — only include those with an API key configured
+  // (providers without keys will fail with 401 and waste pipeline time)
+  const secondary = providers.filter((p: any) =>
+    p.isActive &&
+    p.type !== "puter" &&
+    p.type !== "local" &&
+    // Must have an API key (unless it's a no-auth provider like Puter)
+    (p.apiKey || p.type === "custom" && p.authType === "none")
+  );
   if (secondary.length > 0) {
     const defaultId = settings.defaultProviderId;
     const defaultSec = secondary.find((p) => p.id === defaultId);
@@ -1474,7 +1481,7 @@ export async function callAI(opts: AICallOptions): Promise<AICallResult> {
       console.warn(`[AI] Puter failed: ${e?.message || e}. Trying secondary providers...`);
       const state = useApp.getState();
       const allProviders = state.providers || [];
-      const secondary = allProviders.filter((p: any) => p.isActive && p.type !== "puter");
+      const secondary = allProviders.filter((p: any) => p.isActive && p.type !== "puter" && p.type !== "local" && (p.apiKey || (p.type === "custom" && p.authType === "none")));
       const providerErrors: string[] = [`Puter: ${e?.message || e}`];
 
       for (const fallbackProvider of secondary) {
@@ -1623,7 +1630,7 @@ export async function callAI(opts: AICallOptions): Promise<AICallResult> {
 
   // Try all other active secondary providers
   const otherSecondary = allProviders.filter(
-    (p: any) => p.isActive && p.type !== "puter" && p.id !== provider.id
+    (p: any) => p.isActive && p.type !== "puter" && p.type !== "local" && p.id !== provider.id && (p.apiKey || (p.type === "custom" && p.authType === "none"))
   );
   for (const altProvider of otherSecondary) {
     const altCooldownId = altProvider.id || altProvider.name || altProvider.type;

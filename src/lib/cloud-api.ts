@@ -333,7 +333,60 @@ export async function syncAllFromCloud(store: any): Promise<void> {
         } catch (err) { console.warn("[cloudApi] ATS reports backup restore failed:", err instanceof Error ? err.message : err); }
       }
     }
-    if (providers.length) store.setState({ providers });
+    if (providers.length) {
+      // === CRITICAL FIX: Merge API keys + correct model names from seed defaults ===
+      // D1 often stores providers with EMPTY API keys (because they were saved
+      // without keys, or the keys weren't persisted for security). When D1
+      // providers have empty keys, we restore them from SEED_PROVIDERS (which
+      // read from environment variables like NEXT_PUBLIC_OPENCODE_API_KEY).
+      // Also fix model names: if the D1-stored model doesn't match any
+      // enabledModels entry, fall back to the seed default model.
+      const { SEED_PROVIDERS } = await import("./mock-data");
+      const seedById = new Map(SEED_PROVIDERS.map((p: any) => [p.id, p]));
+      // Also build a name-based lookup for custom providers that match seed names
+      const seedByName = new Map(SEED_PROVIDERS.map((p: any) => [p.name.toLowerCase(), p]));
+
+      const mergedProviders = providers.map((p: any) => {
+        // Try ID match first, then name match
+        const seed = seedById.get(p.id) || seedByName.get((p.name || "").toLowerCase());
+        if (!seed) return p; // truly custom provider — keep as-is
+
+        // Restore API key from seed if D1 has empty/missing key
+        if (!p.apiKey || p.apiKey.trim() === "") {
+          p.apiKey = seed.apiKey || "";
+        }
+        // Restore base URL from seed if D1 has empty/missing URL
+        if (!p.apiUrl || p.apiUrl.trim() === "") {
+          p.apiUrl = seed.apiUrl || seed.baseUrl || "";
+        }
+        if (!p.baseUrl || p.baseUrl.trim() === "") {
+          p.baseUrl = seed.baseUrl || seed.apiUrl || "";
+        }
+        // Fix model name: if the D1 model is not in the seed's enabledModels,
+        // use the seed's default model (which is known to work)
+        const enabledModels = seed.enabledModels || [];
+        if (p.modelName && enabledModels.length > 0 && !enabledModels.includes(p.modelName)) {
+          console.warn(
+            `[syncAllFromCloud] Provider "${p.name}" has model "${p.modelName}" ` +
+            `which is not in enabledModels. Restoring to seed default "${seed.modelName}".`
+          );
+          p.modelName = seed.modelName;
+        }
+        // If model name is empty, use seed default
+        if (!p.modelName || p.modelName.trim() === "") {
+          p.modelName = seed.modelName;
+        }
+        // Restore timeout/maxTokens from seed if D1 has 0 or invalid values
+        if (!p.timeout || p.timeout < 1000) {
+          p.timeout = seed.timeout;
+        }
+        if (!p.maxTokens || p.maxTokens < 100) {
+          p.maxTokens = seed.maxTokens;
+        }
+        return p;
+      });
+      store.setState({ providers: mergedProviders });
+    }
     if (prompts.length) store.setState({ prompts });
     if (logs.length) store.setState({ logs });
 
