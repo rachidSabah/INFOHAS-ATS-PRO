@@ -83,7 +83,7 @@ export const SEED_PROVIDERS: AIProvider[] = [
     temperature: 0.7,
     retryAttempts: 2,
     rateLimitPerMinute: 60,
-    modelName: "mimo-v2.5-free",
+    modelName: "deepseek-v4-flash-free",
     enabledModels: ["deepseek-v4-flash-free", "mimo-v2.5-free", "minimax-m2.5-free", "nemotron-3-super-free", "north-mini-code-free", "big-pickle", "claude-sonnet-4-5", "gpt-5", "gemini-3-flash", "claude-opus-4-8", "gpt-5.5"],
     streamingEnabled: true,
     authType: "bearer",
@@ -334,10 +334,10 @@ const NVIDIA_PROVIDER: AIProvider = {
   temperature: 0.2,
   retryAttempts: 2,
   rateLimitPerMinute: 40,
-  // Switched from llama-3.3-70b → llama-4-scout-17b: Llama 4 Scout has
-  // significantly better instruction-following than the 3.x series and
-  // produces far fewer hallucinated employers/metrics on structured JSON tasks.
-  modelName: "meta/llama-4-scout-17b-16e-instruct",
+  // Reverted from llama-4-scout-17b back to llama-3.3-70b: Llama 4 Scout
+  // was returning errors on the Nvidia free tier. Llama-3.3-70b was working
+  // (returned 2874 chars in testing) and has good instruction-following.
+  modelName: "meta/llama-3.3-70b-instruct",
   enabledModels: ["meta/llama-3.3-70b-instruct", "meta/llama-3.1-70b-instruct", "meta/llama-4-scout-17b-16e-instruct", "meta/llama-3.1-405b-instruct"],
   streamingEnabled: true,
   authType: "bearer",

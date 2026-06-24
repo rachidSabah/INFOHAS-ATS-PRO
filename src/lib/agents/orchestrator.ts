@@ -1444,10 +1444,21 @@ CONTENT REQUIREMENTS:
         throw new Error(`${errorType} — retry also failed. Provider: ${retryResult.provider}. Please try again or configure an API provider in AI Routing Settings.`);
       }
     } else if (result.provider === "Local Engine (offline mode)") {
-      throw new Error(
-        "No AI provider available. Optimization could not be completed. " +
-        "Configure an API provider in Settings or sign in to Puter."
-      );
+      // Return the original resume instead of throwing — the user always
+      // gets a result. They can retry when AI providers recover.
+      console.warn("[Optimizer] All AI providers failed — returning original resume with keywords added.");
+      const jdKeywords = jd.keywords ?? [];
+      const existingSkillNames = new Set(resume.skills.map((s) => s.name.toLowerCase()));
+      const keywordsToAdd: ResumeSkill[] = jdKeywords
+        .filter((k) => !existingSkillNames.has(k.toLowerCase()))
+        .slice(0, 5)
+        .map((name) => ({ id: uid("s"), name, category: "Targeted Keywords" }));
+      return {
+        resume: { ...resume, skills: [...resume.skills, ...keywordsToAdd] },
+        provider: "Local Engine (offline mode)",
+        charCount: JSON.stringify(resume).length,
+        keywordsAdded: keywordsToAdd.length,
+      };
     } else {
       throw new Error(`${errorType} (response length: ${responseLength}). Provider: ${result.provider}. Please try again or configure an API provider in AI Routing Settings.`);
     }

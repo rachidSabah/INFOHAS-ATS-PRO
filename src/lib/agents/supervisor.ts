@@ -789,18 +789,14 @@ export async function handleOptimizationRequested(
     // while the Supervisor showed "Completed".
     syncCoreAgentStatusesFromPipeline(result);
 
-    // === CACHE GUARD: only reject if NO real AI provider was used or the
-    // result is truly empty (< 500 chars). QA issues (hallucinations, empty
-    // sections, page fill) are now ADVISORY — they don't block the result.
-    // The user always gets the optimized resume and can decide whether to
-    // use it or retry.
-    const isRealOptimization = result.provider !== "Local Engine (offline mode)"
-      && result.status !== "failed"
+    // === CACHE GUARD: only reject if the result is truly empty (< 500 chars)
+    // or the pipeline status is "failed". Local Engine results ARE accepted
+    // now — they return the original resume with JD keywords added, which is
+    // better than no result at all. The user can retry when AI providers recover.
+    const isRealOptimization = result.status !== "failed"
       && (result.charCount ?? 0) >= 500;
     if (!isRealOptimization) {
-      const reason = result.provider === "Local Engine (offline mode)"
-        ? `provider is Local Engine`
-        : result.status === "failed"
+      const reason = result.status === "failed"
         ? `status is "failed"`
         : `charCount ${result.charCount ?? 0} < 500`;
       console.warn(

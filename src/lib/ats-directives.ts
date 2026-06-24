@@ -776,13 +776,59 @@ Return ONLY the JSON object described in the directive. No prose, no markdown fe
     `isLocalEngine: ${result.isLocalEngine === true}`
   );
 
-  // Reject local fallback — no AI provider actually executed
+  // If the local engine was used OR the response is too short, return the
+  // ORIGINAL resume with a warning instead of throwing. This ensures the
+  // user always gets a result — they can retry if the AI providers recover.
   if (result.provider === "Local Engine (offline mode)" || result.text.length < 500) {
-    throw new Error(
-      `No AI provider available. Optimization could not be completed ` +
-      `(provider=${result.provider}, responseLength=${result.text?.length ?? 0}). ` +
-      `Configure an API provider in Settings or sign in to Puter.`
+    console.warn(
+      `[Aviation Optimizer] Returning original resume — no AI provider produced ` +
+      `a valid response (provider=${result.provider}, responseLength=${result.text?.length ?? 0}).`
     );
+    // Map the original ResumeData to the AviationOptimizeResult shape
+    return {
+      resume: {
+        name: resume.name || "",
+        headline: resume.headline || "",
+        location: resume.contact?.location || "",
+        phone: resume.contact?.phone || "",
+        email: resume.contact?.email || "",
+        dateOfBirth: resume.dateOfBirth || "",
+        summary: resume.summary || "",
+        skills: (resume.skills || []).map((s) => ({
+          category: s.category || "Skills",
+          items: [s.name],
+        })),
+        experience: (resume.experience || []).map((e) => ({
+          title: e.title || "",
+          company: e.company || "",
+          location: e.location || "",
+          startDate: e.startDate || "",
+          endDate: e.endDate || "",
+          bullets: e.bullets || [],
+        })),
+        education: (resume.education || []).map((ed) => ({
+          degree: ed.degree || "",
+          institution: ed.institution || "",
+          location: ed.location || "",
+          startDate: ed.startDate || "",
+          endDate: ed.endDate || "",
+          modules: ed.highlights?.join(", ") || "",
+        })),
+        languages: (resume.languages || []).map((l) => ({
+          name: l.name || "",
+          proficiency: l.proficiency || "",
+          note: "",
+        })),
+        missingKeywordsAdded: [],
+        bulletsRewritten: 0,
+      },
+      score: 0,
+      score_breakdown: { impact: 0, brevity: 0, keywords: 0 },
+      matched_keywords: [],
+      missing_keywords: [],
+      summary_critique: "Optimization skipped — no AI provider was available. Original resume preserved.",
+      charCount: JSON.stringify(resume).length,
+    };
   }
 
   // Parse JSON — robustly handle markdown fences, prose preambles, trailing commentary
