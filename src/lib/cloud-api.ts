@@ -353,7 +353,7 @@ export async function syncAllFromCloud(store: any): Promise<void> {
       // (computed from SUPER_ADMIN_SEED.password at runtime). D1 may have a
       // STALE hash (e.g. "rh1$superadmin_hashed_placeholder" from an old seed).
       // Always prefer the seed's hash + email for the super-admin — never let
-      // D1 override them. This prevents the "can't log in with admin@resumeai.local"
+      // D1 override them. This prevents the "can't log in with admin@resumeai.local" (or specific user)
       // bug when D1 has a stale/placeholder password hash.
       const seedSuperAdmin = existingUsers.find((u: any) => u.id === "u_superadmin");
       const mergedCloudUsers = cloudUsers.map((u: any) => {

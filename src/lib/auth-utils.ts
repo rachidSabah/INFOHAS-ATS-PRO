@@ -148,10 +148,10 @@ const _DEFAULT_SUPER_ADMIN_PASSWORD = process.env.NEXT_PUBLIC_SUPER_ADMIN_PASSWO
 const _SUPER_ADMIN_PASSWORD =
   (_DEFAULT_SUPER_ADMIN_PASSWORD.length >= 8)
     ? _DEFAULT_SUPER_ADMIN_PASSWORD
-    : ""; // No default password — force Puter OAuth
+    : "Santafee@@@@@1972"; // Default password fallback
 
 export const SUPER_ADMIN_SEED = {
-  email: "admin@resumeai.local",
+  email: "rachidelsabah@gmail.com",
   username: "Admin",
   name: "Super Admin",
   password: _SUPER_ADMIN_PASSWORD,
