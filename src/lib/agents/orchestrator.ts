@@ -845,70 +845,56 @@ async function _runOptimizationPipelineInner(input: PipelineInput, watchdog: Opt
     result.metCharTarget = result.charCount >= 2500 && result.charCount <= 3100;
 
     // ========================================================================
-    // [SELF-HEALING ENGINE] Run quality gates + auto-repair.
+    // [V3 MULTI-AGENT PIPELINE] Post-optimization agents
     //
-    // Instead of rejecting when hallucinations or content issues are detected,
-    // REPAIR the resume in-place:
-    //   1. Run quality gates → detect issues
-    //   2. If issues found → runSelfHealing() repairs them
-    //   3. Use the REPAIRED resume as the result
-    //   4. Only retry the full optimization if repair didn't help
+    // After the Resume Writer produces the initial optimized resume, three
+    // specialized agents run in sequence to finalize it:
     //
-    // The user ALWAYS gets a result. Repair is preferred over rejection.
+    //   6. Keyword Embedding Agent — embeds missing JD keywords naturally
+    //   7. Fact Verification Agent — removes hallucinated metrics
+    //   8. Layout Optimization Agent — expands content to fill A4 page
+    //
+    // These agents run up to 3 attempts: repair → rerun → preserve.
+    // The user ALWAYS gets a result.
     // ========================================================================
     try {
-      const { runQualityGates, runSelfHealing } = await import("../quality-gates");
-      let qualityReport = runQualityGates(resume, result.optimizedResume!);
+      const { runV3PostOptimizationPipeline } = await import("../v3-agents");
+      log("Resume Optimizer", `Running V3 post-optimization agents: Keyword Embedding → Fact Verification → Layout Optimization...`);
+      emitProgress(3, `V3 agents: embedding keywords, verifying facts, optimizing layout...`);
 
-      // If quality issues detected, attempt self-healing.
-      // CRITICAL: After self-healing, ALWAYS accept the repaired result.
-      // Do NOT retry the full optimization — that just regenerates the same
-      // hallucinations. The repair already removed them.
-      if (qualityReport.shouldRetry) {
-        console.info(
-          `[Self-Healing] Quality issues detected (score ${qualityReport.overallScore}/100). ` +
-          `Running auto-repair. Reasons: ${qualityReport.retryReasons.join(", ")}`
-        );
-        log("Resume Optimizer", `Resume is being automatically repaired: removing unsupported metrics and expanding content to meet one-page requirements.`);
-        emitProgress(3, `Auto-repairing: ${qualityReport.retryReasons.length} issue(s)...`);
+      const v3Result = runV3PostOptimizationPipeline(result.optimizedResume!, resume, jd, 3);
 
-        // Run the self-healing repair
-        const jdKeywords = jd.keywords ?? [];
-        const healingResult = runSelfHealing(result.optimizedResume!, resume, jdKeywords);
+      // Use the V3-processed resume
+      result.optimizedResume = v3Result.resume;
+      result.charCount = v3Result.finalCharCount;
+      result.metCharTarget = v3Result.finalCharCount >= 2500 && v3Result.finalCharCount <= 3100;
 
-        if (healingResult.repairsMade.length > 0) {
-          // Use the repaired resume — ALWAYS accept it
-          result.optimizedResume = healingResult.repairedResume;
-          result.charCount = JSON.stringify(healingResult.repairedResume).length;
-          qualityReport = healingResult.newQualityReport;
-
-          log("Resume Optimizer",
-            `✓ Auto-repair complete: ${healingResult.hallucinationsRemoved} unsupported metrics removed, ` +
-            `${healingResult.repairsMade.length} repairs applied. Quality: ${qualityReport.overallScore}/100`
-          );
-          emitProgress(3, `✓ Auto-repair complete. Quality: ${qualityReport.overallScore}/100`);
-
-          // Log each repair for transparency
-          for (const repair of healingResult.repairsMade) {
-            console.info(`[Self-Healing] ${repair}`);
-          }
+      // Log agent reports
+      for (const report of v3Result.agentReports) {
+        for (const change of report.changes) {
+          console.info(`[V3 ${report.agentName}] ${change}`);
         }
-
-        // DO NOT retry — accept the repaired resume.
-        // The repair removed hallucinations and restored content.
-        // Retrying would regenerate the same hallucinations.
       }
+
+      log("Resume Optimizer",
+        `✓ V3 pipeline complete: ${v3Result.totalChanges} total changes, ` +
+        `${v3Result.hallucinationsRemoved} hallucinations removed, ` +
+        `${v3Result.keywordsEmbedded} keywords embedded, ` +
+        `${v3Result.finalCharCount} chars, ` +
+        `quality ${v3Result.qualityReport.overallScore}/100`
+      );
+      emitProgress(3, `✓ V3 agents complete. Quality: ${v3Result.qualityReport.overallScore}/100, ${v3Result.finalCharCount} chars`);
 
       // Log final quality status
-      if (qualityReport.overallScore < 75) {
-        log("Resume Optimizer", `⚠ Quality score ${qualityReport.overallScore}/100 — optimization completed with issues. Review recommended.`);
-        emitProgress(3, `⚠ Optimization completed (quality ${qualityReport.overallScore}/100). Review recommended.`);
+      if (v3Result.qualityReport.overallScore < 75) {
+        log("Resume Optimizer", `⚠ Quality score ${v3Result.qualityReport.overallScore}/100 — optimization completed with issues. Review recommended.`);
+        emitProgress(3, `⚠ Optimization completed (quality ${v3Result.qualityReport.overallScore}/100). Review recommended.`);
       } else {
-        log("Resume Optimizer", `✓ Quality score: ${qualityReport.overallScore}/100`);
+        log("Resume Optimizer", `✓ Quality score: ${v3Result.qualityReport.overallScore}/100`);
       }
-    } catch (qualityErr: any) {
-      // Quality gate errors are non-fatal — log and continue with the result
-      console.warn("[Self-Healing] Validation failed (non-fatal):", qualityErr?.message);
+    } catch (v3Err: any) {
+      // V3 pipeline errors are non-fatal — log and continue with the result
+      console.warn("[V3 Pipeline] Failed (non-fatal):", v3Err?.message);
     }
 
     step.completedAt = new Date().toISOString();

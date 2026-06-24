@@ -43,6 +43,7 @@
     "skills",
     "scripts",
     "mini-services",
-    "tool-results"
+    "tool-results",
+    "tests"
   ]
 }
