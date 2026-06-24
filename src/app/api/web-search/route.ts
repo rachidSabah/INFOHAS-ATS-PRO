@@ -1,7 +1,7 @@
 // Web Search API — performs live web research for company interview questions.
 // Edge Runtime compatible for Cloudflare Pages.
 //
-// Uses z-ai-web-dev-sdk (server-side only) to search for:
+// Uses Z.ai REST API to search for:
 //   - "<Company> interview questions"
 //   - "<Company> interview process"
 //   - "<Job Title> interview questions"

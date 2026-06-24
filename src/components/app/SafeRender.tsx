@@ -37,7 +37,7 @@ export class SafeRender extends Component<Props, State> {
   }
 
   componentDidCatch(error: Error, info: any) {
-    console.error(`[SafeRender${this.props.label ? `: ${this.props.label}` : ""}] Render crash:`, error, info);
+    console.warn(`[SafeRender${this.props.label ? `: ${this.props.label}` : ""}] Render crash:`, error, info);
   }
 
   render() {

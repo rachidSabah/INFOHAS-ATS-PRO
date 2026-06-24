@@ -122,7 +122,7 @@ ${industryContext}
 COVER LETTER STRUCTURE:
 1. Professional Greeting (address the hiring manager or "Dear Hiring Manager")
 2. Introduction (hook: why this role at this company excites you)
-3. Why This Company (reference the company's mission/values/position if known from JD)
+3. Why This Company (reference the company's mission/values/position if known from the job description)
 4. Why This Role (connect your experience to the specific responsibilities)
 5. Relevant Experience (2-3 key achievements from your resume that align with JD requirements)
 6. Value Proposition (what you bring that others don't)

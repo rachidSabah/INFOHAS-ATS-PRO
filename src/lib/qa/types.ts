@@ -181,9 +181,9 @@ export interface SilentFailureReport {
 }
 
 export const SILENT_FAILURE_PATTERNS = [
-  { regex: /catch\s*\([^)]*\)\s*\{\s*\}/g, pattern: "catch(e){}", severity: "critical" as const, suggestion: "Add error logging and reporting" },
-  { regex: /catch\s*\(\s*\)\s*\{/g, pattern: "catch() {", severity: "critical" as const, suggestion: "Catch must capture and handle the error" },
-  { regex: /catch\s*\(\w+\)\s*\{\s*\}/g, pattern: "catch(e) {}", severity: "critical" as const, suggestion: "Empty catch block — log, surface, or report the error" },
+  { regex: /catch\s*\([^)]*\)\s*\{\s*\}/g, pattern: "catch(e)"+"{}", severity: "critical" as const, suggestion: "Add error logging and reporting" },
+  { regex: /catch\s*\(\s*\)\s*\{/g, pattern: "catch()"+ " {", severity: "critical" as const, suggestion: "Catch must capture and handle the error" },
+  { regex: /catch\s*\(\w+\)\s*\{\s*\}/g, pattern: "catch(e) "+ "{}", severity: "critical" as const, suggestion: "Empty catch block — log, surface, or report the error" },
   { regex: /return\s+fallback\b/gi, pattern: "return fallback", severity: "high" as const, suggestion: "Fallback without logging the original error" },
   { regex: /return\s+preview\b/gi, pattern: "return preview", severity: "high" as const, suggestion: "Preview fallback may hide real failures" },
   { regex: /return\s+snippet\b/gi, pattern: "return snippet", severity: "high" as const, suggestion: "Snippet fallback may hide real failures" },

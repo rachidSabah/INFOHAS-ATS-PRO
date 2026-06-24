@@ -32,7 +32,7 @@ export async function POST(req: NextRequest) {
     const clampedTemperature = Math.min(Math.max(Number(temperature) || 0.7, 0), 2);
 
     // Call Z.ai API directly via fetch (Edge-compatible)
-    // The z-ai-web-dev-sdk isn't Edge-compatible, so we use the REST API.
+    // We use the REST API for Edge compatibility.
     // SECURITY: Prefer server-only ZAI_API_KEY over NEXT_PUBLIC_ variant.
     // NEXT_PUBLIC_ keys are exposed to the client bundle — avoid if possible.
     const ZAI_API_KEY = process.env.ZAI_API_KEY || "";
@@ -69,7 +69,7 @@ export async function POST(req: NextRequest) {
       // Log the real error server-side only — return generic message to client
       const errText = await res.text().catch(() => "");
       if (process.env.NODE_ENV !== "production") {
-        console.error("[/api/ai/chat] Upstream error:", res.status, errText.slice(0, 200));
+        console.warn("[/api/ai/chat] Upstream error:", res.status, errText.slice(0, 200));
       }
       return NextResponse.json(
         { error: "AI service temporarily unavailable. Please try again.", fallback: true },
@@ -80,12 +80,13 @@ export async function POST(req: NextRequest) {
     const data = await res.json();
     const text = data?.choices?.[0]?.message?.content ?? "";
     return NextResponse.json({ text, provider: "z-ai" });
-  } catch (e: any) {
-    console.error("[/api/ai/chat] error:", e);
+  } catch (e: unknown) {
+    const error = e as Error;
+    console.warn("[/api/ai/chat] error:", error);
     // Don't leak internal error details in production
     const msg = process.env.NODE_ENV === "production"
       ? "AI service temporarily unavailable. Please try again."
-      : (e?.message ?? "AI call failed");
+      : (error?.message ?? "AI call failed");
     return NextResponse.json(
       { error: msg, fallback: true },
       { status: 500 }

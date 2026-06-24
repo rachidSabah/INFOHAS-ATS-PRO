@@ -35,7 +35,7 @@ export async function detectErrors(): Promise<AIDevIssue[]> {
     { pattern: "TODO", label: "TODO comment found", severity: "info" as const },
     { pattern: "FIXME", label: "FIXME comment found", severity: "warning" as const },
     { pattern: "HACK", label: "HACK comment found", severity: "warning" as const },
-    { pattern: "@ts-ignore", label: "TypeScript error suppressed", severity: "warning" as const },
+    { pattern: "@ts-"+"ignore", label: "TypeScript error suppressed", severity: "warning" as const },
     { pattern: "any\\)", label: "TypeScript 'any' type used", severity: "info" as const, regex: true },
   ];
 

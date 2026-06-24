@@ -106,7 +106,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ models: models.sort() });
   } catch (e: unknown) {
     const message = e instanceof Error ? e.message : String(e);
-    console.error("[ProviderModels] Unhandled error:", message);
+    console.warn("[ProviderModels] Unhandled error:", message);
     return NextResponse.json({
       success: false, code: "PROVIDER_MODELS_FAILED", message,
     }, { status: 500 });

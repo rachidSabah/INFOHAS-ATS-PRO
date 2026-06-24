@@ -12,13 +12,13 @@ export const runtime = "edge";
 // Note: Edge workers are stateless across requests, but this cache helps when
 // the same worker handles rapid retries (e.g. user clicks "scrape" twice).
 interface CacheEntry {
-  data: any;
+  data: unknown;
   expiresAt: number;
 }
 const scrapeCache = new Map<string, CacheEntry>();
 const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
 
-function getCached(url: string): any | null {
+function getCached(url: string): unknown | null {
   const entry = scrapeCache.get(url);
   if (!entry) return null;
   if (Date.now() > entry.expiresAt) {

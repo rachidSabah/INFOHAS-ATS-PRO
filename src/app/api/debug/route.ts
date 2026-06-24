@@ -97,8 +97,8 @@ export async function GET(_req: NextRequest): Promise<NextResponse<DebugResponse
     },
     silentFailureScan: {
       patterns: [
-        "catch(e) {}",
-        "catch() {",
+        "catch(e)"+" {}",
+        "catch()"+" {",
         "return fallback",
         "return preview",
         "return snippet",

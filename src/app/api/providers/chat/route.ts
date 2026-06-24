@@ -154,7 +154,7 @@ export async function POST(req: NextRequest) {
       : isFetchFail
       ? "The provider endpoint is unreachable. Possible causes: wrong URL, CORS blocked, provider offline."
       : (e instanceof Error ? e.message : "Connection failed");
-    console.error("[ProviderChat] Unhandled error:", msg);
+    console.warn("[ProviderChat] Unhandled error:", msg);
     return NextResponse.json({
       ok: false, success: false, code: "PROVIDER_CHAT_FAILED",
       message: msg, latencyMs: 0,

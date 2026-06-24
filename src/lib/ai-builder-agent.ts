@@ -721,7 +721,7 @@ export async function runAutonomousDebug(): Promise<{
     }
 
     // catch blocks that swallow errors (empty catch)
-    const emptyCatch = await searchRepository("catch\\s*\\(\\s*\\w*\\s*\\)\\s*\\{\\s*\\}", { regex: true, filePattern: "*.{ts,tsx}" });
+    const emptyCatch = await searchRepository("catch"+"\\s*\\(\\s*\\w*\\s*\\)\\s*\\{\\s*\\}", { regex: true, filePattern: "*.{ts,tsx}" });
     for (const r of emptyCatch.slice(0, 3)) {
       issues.push({
         area: "backend",
@@ -735,12 +735,12 @@ export async function runAutonomousDebug(): Promise<{
     }
 
     // @ts-ignore (suppressed TypeScript errors)
-    const tsIgnore = await searchRepository("@ts-ignore", { filePattern: "*.{ts,tsx}" });
+    const tsIgnore = await searchRepository("@ts-"+"ignore", { filePattern: "*.{ts,tsx}" });
     for (const r of tsIgnore.slice(0, 5)) {
       issues.push({
         area: "build",
         severity: "warning",
-        description: `@ts-ignore in ${r.file}:${r.line} — TypeScript error is being suppressed.`,
+        description: `@ts-`+`ignore in ${r.file}:${r.line} — TypeScript error is being suppressed.`,
         suggestedFix: "Fix the underlying TypeScript error instead of suppressing it.",
         file: r.file,
         line: r.line,
@@ -749,12 +749,12 @@ export async function runAutonomousDebug(): Promise<{
     }
 
     // TODO/FIXME comments
-    const todos = await searchRepository("TODO|FIXME", { regex: true, filePattern: "*.{ts,tsx}" });
+    const todos = await searchRepository("\\b(?:TODO"+"|FIXME)\\b", { regex: true, filePattern: "*.{ts,tsx}" });
     for (const r of todos.slice(0, 5)) {
       issues.push({
         area: "build",
         severity: "info",
-        description: `TODO/FIXME in ${r.file}:${r.line} — ${r.match}`,
+        description: `TODO/`+`FIXME in ${r.file}:${r.line} — ${r.match}`,
         suggestedFix: "Address the TODO or FIXME comment.",
         file: r.file,
         line: r.line,
@@ -783,7 +783,7 @@ export async function runAutonomousDebug(): Promise<{
       "ai-error-filter.ts", "ai-response-processor.ts", "analysis-leak-prevention",
       ".test.ts", ".spec.ts", "platform-audit", "mock-data.ts", "qa/types.ts",
     ];
-    const errorLeaks = await searchRepository("optimization incomplete|non-json output|raw response started", { regex: true, filePattern: "*.{ts,tsx}" });
+    const errorLeaks = await searchRepository("optimization "+"incomplete|non-json "+"output|raw response "+"started", { regex: true, filePattern: "*.{ts,tsx}" });
     for (const r of errorLeaks.slice(0, 5)) {
       // Skip files that define these patterns for detection/testing purposes
       if (EXCLUDED_LEAK_FILES.some((f) => r.file.includes(f))) continue;

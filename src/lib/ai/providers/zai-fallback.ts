@@ -1,4 +1,4 @@
-// Z.ai fallback provider — uses the server-side /api/ai/chat route (z-ai-web-dev-sdk).
+// Z.ai fallback provider — uses the server-side /api/ai/chat route (REST API).
 import type { AIProviderAdapter, ChatRequest, ChatResponse, ProviderConfig } from "./interface";
 
 export class ZaiFallbackProvider implements AIProviderAdapter {
