@@ -352,18 +352,20 @@ export async function syncAllFromCloud(store: any): Promise<void> {
       // The seed super-admin (id: u_superadmin) has the CORRECT password hash
       // (computed from SUPER_ADMIN_SEED.password at runtime). D1 may have a
       // STALE hash (e.g. "rh1$superadmin_hashed_placeholder" from an old seed).
-      // Always prefer the seed's hash + email for the super-admin — never let
-      // D1 override them. This prevents the "can't log in with admin@resumeai.local" (or specific user)
-      // bug when D1 has a stale/placeholder password hash.
+      // Always prefer the seed's hash + email for the super-admin if the D1 hash
+      // is the exact stale placeholder from the initial migration, or if it's missing.
+      // If the D1 hash is different, it means the super-admin explicitly changed
+      // their password via the UI, so we MUST respect the updated D1 hash.
       const seedSuperAdmin = existingUsers.find((u: any) => u.id === "u_superadmin");
       const mergedCloudUsers = cloudUsers.map((u: any) => {
         if (u.id === "u_superadmin" && seedSuperAdmin) {
+          const isStaleHash = !u.passwordHash || u.passwordHash === "rh1$superadmin_hashed_placeholder";
           return {
             ...u,
-            email: seedSuperAdmin.email,           // always use the seed email
-            passwordHash: seedSuperAdmin.passwordHash,  // always use the seed hash
-            role: "super_admin",                   // always super_admin
-            status: "approved",                    // always approved
+            email: seedSuperAdmin.email,
+            passwordHash: isStaleHash ? seedSuperAdmin.passwordHash : u.passwordHash,
+            role: "super_admin",
+            status: "approved",
           };
         }
         return u;
