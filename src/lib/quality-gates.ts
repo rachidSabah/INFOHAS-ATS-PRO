@@ -948,42 +948,61 @@ export function runSelfHealing(
   contentExpanded: boolean;
   newQualityReport: QualityReport;
 } {
-  console.info("[Self-Healing] Starting repair cycle...");
+  console.info("[Self-Healing] Starting repair cycle (max 3 attempts)...");
 
   let currentResume = optimized;
   const allRepairs: string[] = [];
   let totalHallucinationsRemoved = 0;
   let contentExpanded = false;
+  const MAX_REPAIR_ATTEMPTS = 3;
 
-  // Step 1: Repair hallucinations
-  const hallucinationRepair = repairHallucinations(currentResume, original);
-  if (hallucinationRepair.repaired) {
-    currentResume = hallucinationRepair.repairedResume;
-    allRepairs.push(...hallucinationRepair.repairsMade);
-    totalHallucinationsRemoved += hallucinationRepair.hallucinationsRemoved;
-    console.info(`[Self-Healing] Removed ${hallucinationRepair.hallucinationsRemoved} hallucinated metrics`);
+  // Multi-attempt repair loop: keep repairing until quality stops improving
+  // or we hit the max attempts. Each attempt removes hallucinations + expands
+  // content. This handles cases where the first repair pass doesn't fully
+  // fix the issues (e.g., new hallucinations detected after expansion).
+  for (let attempt = 1; attempt <= MAX_REPAIR_ATTEMPTS; attempt++) {
+    let attemptRepairs = 0;
+
+    // Step 1: Repair hallucinations
+    const hallucinationRepair = repairHallucinations(currentResume, original);
+    if (hallucinationRepair.repaired) {
+      currentResume = hallucinationRepair.repairedResume;
+      allRepairs.push(...hallucinationRepair.repairsMade);
+      totalHallucinationsRemoved += hallucinationRepair.hallucinationsRemoved;
+      attemptRepairs += hallucinationRepair.hallucinationsRemoved;
+      console.info(`[Self-Healing] Attempt ${attempt}: Removed ${hallucinationRepair.hallucinationsRemoved} hallucinated metrics`);
+    }
+
+    // Step 2: Repair content (restore dropped sections, expand)
+    const contentRepair = repairContent(currentResume, original, jdKeywords);
+    if (contentRepair.repaired) {
+      currentResume = contentRepair.repairedResume;
+      allRepairs.push(...contentRepair.repairsMade);
+      if (contentRepair.contentExpanded) contentExpanded = true;
+      attemptRepairs += contentRepair.repairsMade.length;
+      console.info(`[Self-Healing] Attempt ${attempt}: Content expanded: ${contentRepair.repairsMade.length} repairs`);
+    }
+
+    // Step 3: Expand short bullets to fill A4 page
+    const beforeExpansionChars = JSON.stringify(currentResume).length;
+    currentResume = expandShortContent(currentResume);
+    const afterExpansionChars = JSON.stringify(currentResume).length;
+    if (afterExpansionChars > beforeExpansionChars) {
+      contentExpanded = true;
+      allRepairs.push(`Attempt ${attempt}: Expanded short bullets (+${afterExpansionChars - beforeExpansionChars} chars)`);
+      attemptRepairs++;
+    }
+
+    // If no repairs were made this attempt, we're done
+    if (attemptRepairs === 0) {
+      console.info(`[Self-Healing] Attempt ${attempt}: No more repairs needed — stopping.`);
+      break;
+    }
+
+    console.info(`[Self-Healing] Attempt ${attempt} complete: ${attemptRepairs} repairs applied`);
   }
 
-  // Step 2: Repair content (restore dropped sections, expand)
-  const contentRepair = repairContent(currentResume, original, jdKeywords);
-  if (contentRepair.repaired) {
-    currentResume = contentRepair.repairedResume;
-    allRepairs.push(...contentRepair.repairsMade);
-    contentExpanded = contentRepair.contentExpanded;
-    console.info(`[Self-Healing] Content expanded: ${contentRepair.repairsMade.length} repairs`);
-  }
-
-  // Step 3: Expand short bullets to fill A4 page
-  // This elaborates existing content — never invents metrics
-  const beforeExpansionChars = JSON.stringify(currentResume).length;
-  currentResume = expandShortContent(currentResume);
-  const afterExpansionChars = JSON.stringify(currentResume).length;
-  if (afterExpansionChars > beforeExpansionChars) {
-    contentExpanded = true;
-    allRepairs.push(`Expanded short bullets (+${afterExpansionChars - beforeExpansionChars} chars)`);
-  }
-
-  // Step 4: Re-run quality gates on the repaired resume
+  // Final step: Re-run quality gates on the repaired resume
   const newQualityReport = runQualityGates(original, currentResume);
 
   console.info(

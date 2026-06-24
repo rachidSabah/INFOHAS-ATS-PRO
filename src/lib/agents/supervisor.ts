@@ -1065,14 +1065,25 @@ The 'questions' array MUST contain exactly 9 objects. The 'readinessScore' MUST 
     };
 
     // === FALLBACK: if the AI returned fewer than 9 questions, generate
-    // fallback questions to reach the minimum. The spec requires ≥ 5
-    // (assertion), but we aim for 9. ===
+    // fallback questions to reach the minimum. The spec requires ≥ 9.
+    // ===
     if (normalized.questions.length < 9) {
       const fallbackQuestions = generateFallbackInterviewQuestions(resume, jd, company);
-      // Merge: keep AI questions first, add fallbacks to reach 9
+      // Merge: keep AI questions first, add ALL fallbacks to reach 9
       const aiCount = normalized.questions.length;
-      const needed = Math.max(5, 9 - aiCount); // minimum 5 fallback questions
+      const needed = Math.max(9 - aiCount, 9); // always at least 9 total
       normalized.questions = [...normalized.questions, ...fallbackQuestions.slice(0, needed)];
+      // If we still don't have 9 (fallback generated fewer), pad with generic questions
+      while (normalized.questions.length < 9) {
+        normalized.questions.push({
+          category: "General",
+          question: `Tell me about a time when you demonstrated leadership or initiative in a professional setting.`,
+          difficulty: "medium",
+          recommendedAnswer: "Use the STAR method to describe a specific situation where you took initiative, the actions you took, and the positive results that followed.",
+          talkingPoints: ["Specific situation", "Your initiative", "Measurable result"],
+          followUps: ["What did you learn?", "How would you approach it differently?"],
+        });
+      }
       normalized.readinessScore = normalized.readinessScore > 0 ? normalized.readinessScore : 50;
 
       if (aiCount === 0) {

@@ -1024,10 +1024,31 @@ export const useApp = create<AppState>()(
       addProvider: (p) => {
         set((s) => ({ providers: [...s.providers, p] }));
         cloudApiSafe(createProvider)(p).catch((e) => { console.warn("[store] Cloud sync failed:", e instanceof Error ? e.message : e); });
+        // [PROVIDER SYNC] After adding a provider, sync all providers with seed defaults
+        // to ensure API keys and model names stay consistent.
+        try {
+          import("./provider-sync").then(({ syncProviderConfigs }) => {
+            const currentProviders = get().providers as any[];
+            const { providers: syncedProviders } = syncProviderConfigs(currentProviders);
+            set({ providers: syncedProviders });
+          }).catch(() => {});
+        } catch { /* non-fatal */ }
       },
       updateProvider: (id, patch) => {
         set((s) => ({ providers: s.providers.map((p) => (p.id === id ? { ...p, ...patch, updatedAt: new Date().toISOString() } : p)) }));
         cloudApiSafe(updateProvider)(id, patch).catch((e) => { console.warn("[store] Cloud sync failed:", e instanceof Error ? e.message : e); });
+        // [PROVIDER SYNC] After updating a provider, sync all providers with seed defaults
+        // to ensure API keys and model names stay consistent (especially when a new API key is added).
+        try {
+          import("./provider-sync").then(({ syncProviderConfigs }) => {
+            const currentProviders = get().providers as any[];
+            const { providers: syncedProviders, result } = syncProviderConfigs(currentProviders);
+            if (result.repaired > 0 || result.backfilled > 0) {
+              set({ providers: syncedProviders });
+              console.info(`[PROVIDER SYNC] Provider updated. ${result.repaired} repaired, ${result.backfilled} backfilled.`);
+            }
+          }).catch(() => {});
+        } catch { /* non-fatal */ }
       },
       removeProvider: (id) => {
         set((s) => ({
