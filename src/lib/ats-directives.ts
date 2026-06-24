@@ -739,8 +739,21 @@ Return ONLY the JSON object described in the directive. No prose, no markdown fe
   }
 
   const split = splitOptimizationDirective(directive);
+  // Prepend a strict anti-hallucination guard to the system prompt.
+  // Free-tier models (Llama-3.1/3.3-70b) routinely invent metrics and
+  // employers when generating large JSON; this preamble reinforces the
+  // "never fabricate" rule BEFORE the directive content.
+  const antiHallucinationPreamble = `CRITICAL RULES (override everything else):
+1. NEVER invent employers, job titles, schools, degrees, or certifications that are not in the SOURCE RESUME.
+2. NEVER invent percentages, metrics, or numbers (e.g. "15% improvement", "98% satisfaction"). Only reuse numbers that appear verbatim in the SOURCE RESUME.
+3. NEVER change the candidate's name, email, phone, or locations.
+4. You may REPHRASE existing content and ADD keywords from the job description, but you may NOT FABRICATE facts.
+5. If the SOURCE RESUME has no metrics, write impactful bullets WITHOUT numbers (e.g. "Streamlined check-in procedures reducing wait times" — no percentage).
+
+`;
+
   const result = await callAI({
-    systemPrompt: split.system,
+    systemPrompt: antiHallucinationPreamble + split.system,
     userPrompt: (split.user ? split.user + "\n\n---\n\n" : "") + userPrompt,
     maxTokens: 8000,
     temperature: 0.45,

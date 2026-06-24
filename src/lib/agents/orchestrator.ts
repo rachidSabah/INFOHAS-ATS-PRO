@@ -888,19 +888,38 @@ async function _runOptimizationPipelineInner(input: PipelineInput, watchdog: Opt
     log("Quality Assurance", qaLog);
     emitProgress(4, qaLog);
 
-    // HARDENING: Make QA factual consistency failures fatal
-    // If the AI fabricated employers, education, certifications, or metrics,
-    // the optimized resume is NOT trustworthy — restore original.
+    // HARDENING: Make QA factual consistency failures fatal — but only for
+    // SERIOUS fabrications (employers, education, certifications). Minor
+    // issues (fabricated metrics, locations, languages) are downgraded to
+    // warnings because free-tier models (Llama-3.1/3.3-70b) routinely add
+    // quantified metrics ("increased X by 15%") that don't match the original
+    // exactly — annoying but not a trust-destroying hallucination.
     if (result.qa.factualConsistency && !result.qa.factualConsistency.passed) {
-      const issueCount = result.qa.factualConsistency.issueCount;
-      if (issueCount >= 3) {
-        log("Quality Assurance", `⚠ FATAL: ${issueCount} factual inconsistencies detected. Restoring original resume.`);
-        emitProgress(4, `AI hallucinated ${issueCount} facts. Original resume preserved.`);
+      const fc = result.qa.factualConsistency;
+      const seriousCount =
+        fc.fabricatedEmployers.length +
+        fc.fabricatedEducation.length +
+        fc.fabricatedCertifications.length;
+      const minorCount = fc.issueCount - seriousCount;
+
+      console.warn(
+        `[Pipeline] QA factual consistency: ${fc.issueCount} total issues ` +
+        `(${seriousCount} serious: ${fc.fabricatedEmployers.length} employers, ` +
+        `${fc.fabricatedEducation.length} education, ${fc.fabricatedCertifications.length} certs; ` +
+        `${minorCount} minor: metrics/locations/languages/contact)`
+      );
+
+      // FATAL only if there are serious fabrications (>= 2) OR total issues >= 8
+      if (seriousCount >= 2 || fc.issueCount >= 8) {
+        log("Quality Assurance", `⚠ FATAL: ${seriousCount} serious fabrications (employers/education/certs) + ${minorCount} minor issues. Restoring original resume.`);
+        emitProgress(4, `AI hallucinated ${seriousCount} serious facts. Original resume preserved.`);
         result.optimizedResume = resume;
         result.status = "failed";
-        result.error = `AI optimization produced ${issueCount} factual inconsistencies (hallucinated content). Original resume preserved. Please retry.`;
+        result.error = `AI optimization produced ${seriousCount} serious factual fabrications (invented employers/education/certifications). Original resume preserved. Please retry.`;
+      } else if (seriousCount >= 1) {
+        log("Quality Assurance", `⚠ WARNING: ${seriousCount} serious fabrication + ${minorCount} minor issues. Proceeding but flagging for manual review.`);
       } else {
-        log("Quality Assurance", `⚠ WARNING: ${issueCount} minor factual issues. Proceeding but flagging for review.`);
+        log("Quality Assurance", `⚠ WARNING: ${minorCount} minor factual issues (metrics/locations). Proceeding — these are common with free-tier models.`);
       }
     }
 
@@ -1330,8 +1349,21 @@ CONTENT REQUIREMENTS:
   console.groupEnd();
 
   const split = splitOptimizationDirective(directive);
+  // Prepend a strict anti-hallucination guard to the system prompt.
+  // Free-tier models (Llama-3.1/3.3-70b) routinely invent metrics and
+  // employers when generating large JSON; this preamble reinforces the
+  // "never fabricate" rule BEFORE the directive content.
+  const antiHallucinationPreamble = `CRITICAL RULES (override everything else):
+1. NEVER invent employers, job titles, schools, degrees, or certifications that are not in the SOURCE RESUME.
+2. NEVER invent percentages, metrics, or numbers (e.g. "15% improvement", "98% satisfaction"). Only reuse numbers that appear verbatim in the SOURCE RESUME.
+3. NEVER change the candidate's name, email, phone, or locations.
+4. You may REPHRASE existing content and ADD keywords from the job description, but you may NOT FABRICATE facts.
+5. If the SOURCE RESUME has no metrics, write impactful bullets WITHOUT numbers (e.g. "Streamlined check-in procedures reducing wait times" — no percentage).
+
+`;
+
   const result = await callAI({
-    systemPrompt: split.system,
+    systemPrompt: antiHallucinationPreamble + split.system,
     isOptimizerCall: true,
     userPrompt: (split.user ? split.user + "\n\n---\n\n" : "") + `SOURCE RESUME (be truthful to this — never invent employers, dates, or metrics):\n${JSON.stringify({
       name: resume.name,

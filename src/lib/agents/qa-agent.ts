@@ -107,6 +107,21 @@ export async function runQA(
     ? checkFactualConsistency(originalResume, optimizedResume)
     : undefined;
 
+  // Diagnostic: log specific fabricated items so we can see exactly what
+  // the AI hallucinated. This helps diagnose why the pipeline rejects results.
+  if (factualConsistency && factualConsistency.issueCount > 0) {
+    console.warn(
+      `[QA] Factual consistency FAILED — ${factualConsistency.issueCount} issues:\n` +
+      `  - Fabricated employers: [${factualConsistency.fabricatedEmployers.join(", ")}]\n` +
+      `  - Fabricated education: [${factualConsistency.fabricatedEducation.join(", ")}]\n` +
+      `  - Fabricated certifications: [${factualConsistency.fabricatedCertifications.join(", ")}]\n` +
+      `  - Fabricated metrics: [${factualConsistency.fabricatedMetrics.join(", ")}]\n` +
+      `  - Fabricated locations: [${(factualConsistency as any).fabricatedLocations?.join(", ") ?? ""}]\n` +
+      `  - Fabricated languages: [${(factualConsistency as any).fabricatedLanguages?.join(", ") ?? ""}]\n` +
+      `  - Contact changes: [${(factualConsistency as any).fabricatedContact?.join(", ") ?? ""}]`
+    );
+  }
+
   // === Professional tone (new — wires in isProfessionalResume + leak detection) ===
   const professionalTone = checkProfessionalTone(optimizedResume);
 

@@ -320,13 +320,22 @@ const NVIDIA_PROVIDER: AIProvider = {
   isDefault: false,
   isBuiltIn: false,
   allowedForRegularUsers: true,
-  timeout: 30000,
-  maxTokens: 4096,
+  // Bumped from 30s → 90s: Llama-3.3-70b on the 22k-char optimizer directive
+  // routinely takes 40-80s. The old 30s timeout was causing the proxy to
+  // abort mid-generation, producing truncated JSON that failed QA.
+  timeout: 90000,
+  // Bumped from 4096 → 8192: Llama-3.1/3.3-70b supports up to 8192 output
+  // tokens. The optimizer needs ~8k tokens for a full resume JSON; 4096
+  // was truncating the output mid-section, causing empty experience/education.
+  maxTokens: 8192,
   temperature: 0.7,
   retryAttempts: 2,
   rateLimitPerMinute: 40,
-  modelName: "meta/llama-3.1-70b-instruct",
-  enabledModels: ["meta/llama-3.1-70b-instruct", "meta/llama-3.3-70b-instruct", "meta/llama-4-scout-17b-16e-instruct", "meta/llama-3.1-405b-instruct"],
+  // Switched default from llama-3.1-70b → llama-3.3-70b: the 3.3 variant
+  // has significantly better instruction-following and produces far fewer
+  // hallucinated employers/metrics on structured JSON tasks.
+  modelName: "meta/llama-3.3-70b-instruct",
+  enabledModels: ["meta/llama-3.3-70b-instruct", "meta/llama-3.1-70b-instruct", "meta/llama-4-scout-17b-16e-instruct", "meta/llama-3.1-405b-instruct"],
   streamingEnabled: true,
   authType: "bearer",
   costPerInputToken: 0,
