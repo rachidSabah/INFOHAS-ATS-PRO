@@ -63,11 +63,11 @@ export function PipelineProgressView({ progress, isRunning, result, error, onRet
     if (result) {
       // Pipeline complete — derive status from the result
       if (displayStepIndex === 0) return "completed"; // Parsing always done
-      if (displayStepIndex === 7) return "completed"; // Export prep done
+      if (displayStepIndex === 7) return result.status === "failed" ? "pending" : "completed";
       const agentStep = result.steps[displayStepIndex - 1];
       return agentStep?.status ?? "skipped";
     }
-    if (!isRunning) return "pending";
+    if (!isRunning) return error && displayStepIndex > 0 ? (displayStepIndex <= currentStep ? "failed" : "pending") : "pending";
     // Map current progress step to display step
     // Orchestrator stepNumber is 1-based: 1=JI, 2=Company+SkillGap, 3=ATS, 4=Optim, 5=QA, 6=Reflection
     // Display step: 1=Parsing(done first), 2=JI, 3=Company+SkillGap, 4=ATS, 5=Optim, 6=QA, 7=Reflection, 8=Export
@@ -75,6 +75,7 @@ export function PipelineProgressView({ progress, isRunning, result, error, onRet
     if (displayStepIndex === 7) return "pending"; // Export prep not started
     const agentStepIndex = displayStepIndex - 1; // 0=JI, 1=Company+SkillGap, 2=ATS, 3=Optim, 4=QA, 5=Reflection
     const orchestratorStepNumber = currentStep; // 1-based from orchestrator
+    if (error && agentStepIndex === orchestratorStepNumber - 1) return "failed";
     if (agentStepIndex < orchestratorStepNumber - 1) return "completed";
     if (agentStepIndex === orchestratorStepNumber - 1) return "running";
     return "pending";

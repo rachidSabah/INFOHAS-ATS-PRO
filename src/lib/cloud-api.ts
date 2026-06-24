@@ -190,25 +190,7 @@ export const api = {
 
   // Settings
   getBranding: () => apiFetch<{ branding: any }>("/api/settings/branding"),
-  updateBranding: async (branding: any) => {
-    // Merge with existing D1 values to prevent NOT NULL constraint failures
-    // on required columns (appName, logo, company). Never write NULL.
-    let existingBranding: Record<string, any> = {};
-    try {
-      const existing = await apiFetch<{ branding: any }>("/api/settings/branding");
-      existingBranding = existing?.branding ?? {};
-    } catch {
-      // First call — no D1 row yet; seed defaults will be used
-    }
-    const payload = {
-      appName: branding.appName ?? existingBranding.appName ?? "ResumeAI Pro",
-      logo: branding.logo ?? existingBranding.logo ?? "",
-      company: branding.company ?? existingBranding.company ?? "",
-      ...branding,
-      appName: branding.appName ?? existingBranding.appName ?? "ResumeAI Pro",
-    };
-    return apiFetch("/api/settings/branding", { method: "PUT", body: JSON.stringify(payload) });
-  },
+  updateBranding: (branding: any) => apiFetch("/api/settings/branding", { method: "PUT", body: JSON.stringify(branding) }),
   getFlags: () => apiFetch<{ flags: Record<string, boolean> }>("/api/settings/flags"),
   updateFlag: (key: string, value: boolean) => apiFetch(`/api/settings/flags/${key}`, { method: "PUT", body: JSON.stringify({ value }) }),
 

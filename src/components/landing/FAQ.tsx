@@ -11,7 +11,7 @@ const FAQS = [
   },
   {
     q: "How does the AI work without me paying for an API key?",
-    a: "ResumeAI Pro uses Puter.js as its primary AI provider — when you click 'Sign in with Google' (or GitHub, etc.) inside the app, you authenticate with Puter and the AI calls run under your own free Puter account. We also support 15+ custom providers (OpenAI, Claude, Gemini, DeepSeek, Groq, Mistral, Cohere, Perplexity, OpenRouter, Together, HuggingFace, Ollama, Azure OpenAI, AWS Bedrock, and self-hosted LLMs) in the Super Admin dashboard.",
+    a: "ResumeAI Pro uses Puter.js as its primary AI provider — when you click 'Sign in with Google' (or GitHub, etc.) inside the app, you authenticate with Puter and the AI calls run under your own free Puter account. We also bundle a built-in Z.ai fallback, plus support for 15+ custom providers (OpenAI, Claude, Gemini, DeepSeek, Groq, Mistral, Cohere, Perplexity, OpenRouter, Together, HuggingFace, Ollama, Azure OpenAI, AWS Bedrock, and self-hosted LLMs) in the Super Admin dashboard.",
   },
   {
     q: "Will my resume really fit on one A4 page?",

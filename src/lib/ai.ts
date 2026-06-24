@@ -3,7 +3,7 @@
 //   0. User-configured default provider (from AI Providers settings) — FIRST priority.
 //      Honors the user's chosen model, API key, base URL, and auth type.
 //   1. Puter.js (free, user authenticates with Google/GitHub/etc via Puter). Loaded from layout.
-//   2. Server-side /api/ai/chat — used when Puter is unavailable.
+//   2. Server-side /api/ai/chat (Z.ai REST fallback) — used when Puter is unavailable.
 //   3. Local rule-based fallback (deterministic, always works as offline mode).
 //
 // All AI calls are wrapped in failover with try/catch + provider rotation.
@@ -28,16 +28,6 @@ export type { PuterMonthlyUsage };
 declare global {
   interface Window {
     puter?: any;
-  }
-}
-
-// ============================================================================
-// ProviderReturnedEmptyResponse — thrown when an AI provider returns empty content
-// ============================================================================
-export class ProviderReturnedEmptyResponse extends Error {
-  constructor(public providerName?: string) {
-    super(`The AI provider${providerName ? ` "${providerName}"` : ""} returned an empty response. Please retry or switch providers.`);
-    this.name = "ProviderReturnedEmptyResponse";
   }
 }
 
@@ -748,12 +738,10 @@ function withTimeout<T>(promise: Promise<T>, ms: number, label = "operation"): P
 // the same error path repeatedly — producing a "Failed to fetch" loop.
 // Instead, once Puter fails with a quota error, we skip Puter entirely
 // for the next 5 minutes. The user can still fall through to the server
-// fallback and local generator.
+// fallback (Z.ai) and local generator.
 
 const PUTER_COOLDOWN_KEY = "resumeai-puter-cooldown-until";
 const PUTER_COOLDOWN_MS = 5 * 60 * 1000; // 5 minutes
-const PUTER_ACCOUNT_INDEX_KEY = "resumeai-puter-account-index";
-const PUTER_MAX_ACCOUNTS = 3;
 
 /** Returns true if Puter is currently in cooldown (should be skipped). */
 function isPuterInCooldown(): boolean {
@@ -764,6 +752,7 @@ function isPuterInCooldown(): boolean {
     const until = parseInt(v, 10);
     if (Number.isNaN(until)) return false;
     if (Date.now() >= until) {
+      // Cooldown expired — clear it
       window.localStorage.removeItem(PUTER_COOLDOWN_KEY);
       return false;
     }
@@ -781,52 +770,6 @@ function markPuterCooldown(): void {
   } catch {
     // ignore — localStorage may be unavailable
   }
-}
-
-// ============================================================================
-// Multi-Account Puter Rotation
-// ============================================================================
-/**
- * Get the current Puter account index (0-based).
- * Each Puter account represents a separate browser sign-in session.
- * When one account hits quota, we rotate to the next.
- */
-function getPuterAccountIndex(): number {
-  if (typeof window === "undefined") return 0;
-  try {
-    const v = window.localStorage?.getItem(PUTER_ACCOUNT_INDEX_KEY);
-    if (!v) return 0;
-    const idx = parseInt(v, 10);
-    return Number.isNaN(idx) ? 0 : Math.max(0, Math.min(idx, PUTER_MAX_ACCOUNTS - 1));
-  } catch {
-    return 0;
-  }
-}
-
-/**
- * Rotate to the next Puter account.
- * Returns the new account index. If the last account was reached,
- * logs a warning and returns the current index (cooldown will activate instead).
- */
-function rotatePuterAccount(): number {
-  if (typeof window === "undefined") return 0;
-  const current = getPuterAccountIndex();
-  const next = (current + 1) % PUTER_MAX_ACCOUNTS;
-  try {
-    window.localStorage?.setItem(PUTER_ACCOUNT_INDEX_KEY, String(next));
-  } catch {
-    // ignore
-  }
-  if (next === 0) {
-    // Wrapped around — all accounts exhausted; enter cooldown
-    console.warn(`[ROUTER] All ${PUTER_MAX_ACCOUNTS} Puter accounts exhausted. Entering cooldown.`);
-    markPuterCooldown();
-  } else {
-    console.info(`[ROUTER] Rotating Puter account #${current + 1} → #${next + 1}`);
-    // Clear cooldown since we're switching accounts
-    try { window.localStorage?.removeItem(PUTER_COOLDOWN_KEY); } catch {}
-  }
-  return next;
 }
 
 /**
@@ -1220,7 +1163,7 @@ async function callUserProvider(
 }
 
 /**
-  * Main AI entrypoint. Tries user-default-provider → Puter → server → local fallback.
+ * Main AI entrypoint. Tries user-default-provider → Puter → server (z-ai) → local fallback.
  */
 export async function callAI(opts: AICallOptions): Promise<AICallResult> {
   const t0 = performance.now();
@@ -1347,7 +1290,6 @@ export async function callAI(opts: AICallOptions): Promise<AICallResult> {
           const text = await callUserProvider(defaultProvider, opts);
           if (text && text.trim().length > 0) {
             console.info(`[AI] Using user-configured default provider: ${defaultProvider.name} (${defaultProvider.modelName || "default model"})`);
-            console.info(`[PROVIDER] Provider selected: ${defaultProvider.name}`);
             diag.succeed(text, { finishReason: "stop", normalizedResponse: text.slice(0, 500) });
             return {
               text,
@@ -1356,10 +1298,7 @@ export async function callAI(opts: AICallOptions): Promise<AICallResult> {
               tokensEstimate: estTokens(opts.userPrompt + (opts.systemPrompt ?? "")),
             };
           }
-          // [ROUTER] Empty response detected — throw ProviderReturnedEmptyResponse
-          console.warn(`[PROVIDER] Empty response detected from ${defaultProvider.name}`);
-          diag.fail(new ProviderReturnedEmptyResponse(defaultProvider.name));
-          throw new ProviderReturnedEmptyResponse(defaultProvider.name);
+          diag.fail(new Error("Provider returned empty response"));
         } catch (e: any) {
           diag.fail(e);
           // Rate-limit handling: trigger fallback offer for OpenCode Zen free
@@ -1391,17 +1330,20 @@ export async function callAI(opts: AICallOptions): Promise<AICallResult> {
   }
 
   // ============================================================
-  // 0.5) PUTER AUTH CHECK
+  // 0.5) OAUTH PROVIDER AUTH CHECK
   // ============================================================
-  // If Puter is the configured default provider, check if authenticated.
-  // If NOT authenticated, throw ProviderAuthenticationError instead of
-  // silently falling to local engine. Prevents "silent fallback → fake
-  // optimization" bug.
+  // If Puter or Z.ai is the configured default/fallback provider,
+  // check if they're authenticated. If NOT authenticated, throw
+  // ProviderAuthenticationError instead of silently falling to local engine.
+  // This prevents the "silent fallback → fake optimization" bug.
   if (!opts.preferServer && typeof window !== "undefined") {
     try {
-      const { getPuterProvider, ProviderAuthenticationError: AuthError } = await import("./providers");
+      const { getPuterProvider, getZaiProvider, ProviderAuthenticationError: AuthError } = await import("./providers");
       const puterProvider = getPuterProvider();
+      const zaiProvider = getZaiProvider();
 
+      // Check if the default provider requires auth but isn't authenticated.
+      // Use tryRefresh() to handle expired sessions correctly (no TOCTOU race).
       const state: any = useApp.getState();
       const providers: any[] = state?.providers || [];
       const settings = state?.providerSettings || {};
@@ -1420,8 +1362,9 @@ export async function callAI(opts: AICallOptions): Promise<AICallResult> {
       }
     } catch (e: any) {
       if (e.name === "ProviderAuthenticationError") {
-        throw e;
+        throw e; // Surface to the caller — no silent fallback
       }
+      // Other errors during auth check are non-fatal
       console.warn("[AI] Provider auth check failed (non-fatal):", e?.message);
     }
   }
@@ -1433,7 +1376,38 @@ export async function callAI(opts: AICallOptions): Promise<AICallResult> {
   // In both cases, Puter should be tried as a fallback — even for document tasks.
   // This fixes the "JD parsing fails with AI-over-API" bug where the API
   // provider returned empty/invalid, and Puter was never tried as a fallback.
+  //
+  // NEW: Also try the Z.ai Direct OAuth provider as a fallback before Puter.
+  // Z.ai is an API provider that works without browser auth — it should be
+  // preferred over Puter for document tasks.
   if (!opts.preferServer) {
+    // 0) Try Z.ai Direct OAuth provider (if authenticated)
+    try {
+      const { getZaiProvider } = await import("./providers");
+      const zaiProvider = getZaiProvider();
+      // Use tryRefresh() to handle expired sessions — no TOCTOU race
+      if (await zaiProvider.tryRefresh()) {
+        const result = await zaiProvider.generate({
+          systemPrompt: opts.systemPrompt,
+          userPrompt: opts.userPrompt,
+          maxTokens: opts.maxTokens,
+          temperature: opts.temperature,
+        });
+        console.info(`[AI] Using Z.ai Direct OAuth provider`);
+        return {
+          text: result.text,
+          provider: result.provider,
+          latencyMs: result.latencyMs,
+          tokensEstimate: estTokens(opts.userPrompt + (opts.systemPrompt ?? "")),
+        };
+      }
+    } catch (e: any) {
+      if (e.name === "ProviderAuthenticationError") {
+        throw e; // Surface auth errors — no silent fallback
+      }
+      console.warn("[AI] Z.ai Direct OAuth provider failed, trying Puter:", e?.message);
+    }
+
     // 1) Try Puter.js — the free, keyless BROWSER-AUTH provider.
     //
     // Puter is used for interactive/development tasks always, and for document
@@ -1559,19 +1533,12 @@ export async function callAI(opts: AICallOptions): Promise<AICallResult> {
       }
     } catch (e: any) {
       const msg = e?.message || String(e || "");
-      // If Puter hit its usage cap, rotate to next account.
-      // Only enter cooldown when ALL accounts are exhausted.
+      // If Puter hit its usage cap, enter cooldown so we stop retrying.
       if (isPuterQuotaError(e)) {
-        const nextIdx = rotatePuterAccount();
-        const currentIdx = getPuterAccountIndex();
-        if (nextIdx < currentIdx) {
-          // Wrapped around — all accounts exhausted
-          console.warn(`[PROVIDER] All ${PUTER_MAX_ACCOUNTS} Puter accounts quota exhausted. Entering cooldown.`);
-          markPuterCooldown();
-        } else {
-          console.info(`[PROVIDER] Puter account #${currentIdx + 1} quota hit. Rotating to account #${currentIdx + 2}.`);
-        }
+        markPuterCooldown();
+        console.warn("[AI] Puter usage cap hit — entering 5-minute cooldown. Falling through to next provider.");
       } else if (/auth|sign.?in|unauthor|401|403/i.test(msg)) {
+        // Detect auth errors specifically so the UI can prompt the user to sign in
         console.warn("[AI] Puter auth required — user should sign in via the Puter button. Error:", msg);
       } else {
         console.warn("[AI] Puter.js failed, trying next provider:", msg);
@@ -1580,8 +1547,47 @@ export async function callAI(opts: AICallOptions): Promise<AICallResult> {
   }
 
   if (!opts.preferLocal) {
-    // 2) Try server-side fallback route
+    // 2) Try server fallback (z-ai-web-dev-sdk)
     try {
+      // Also expose the Z.ai key via NEXT_PUBLIC_ prefix for Cloudflare Pages
+      // where server-side env vars are not available at runtime.
+      const zaiKey = process.env.NEXT_PUBLIC_ZAI_API_KEY;
+      if (zaiKey) {
+        // Direct client-side call to Z.ai API — avoids the server-side route
+        // which may not have the env var on Cloudflare Pages
+        const messages = [
+          { role: "system", content: opts.systemPrompt || "You are ResumeAI Pro, a helpful assistant for resume and career tasks." },
+          { role: "user", content: opts.userPrompt },
+        ];
+        const res = await fetch("https://api.z.ai/api/paas/v4/chat/completions", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${zaiKey}`,
+          },
+          body: JSON.stringify({
+            model: "glm-4.6",
+            messages,
+            temperature: opts.temperature ?? 0.7,
+            max_tokens: opts.maxTokens ?? 4096,
+          }),
+          signal: AbortSignal.timeout(30000),
+        });
+        if (res.ok) {
+          const data = await res.json();
+          const text = data?.choices?.[0]?.message?.content ?? "";
+          if (text && text.trim().length > 0) {
+            return {
+              text,
+              provider: "Z.ai Fallback",
+              latencyMs: Math.round(performance.now() - t0),
+              tokensEstimate: estTokens(opts.userPrompt + (opts.systemPrompt ?? "")),
+            };
+          }
+        }
+      }
+
+      // Also try the server-side route as backup
       const res = await fetch("/api/ai/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -1595,10 +1601,9 @@ export async function callAI(opts: AICallOptions): Promise<AICallResult> {
       if (res.ok) {
         const data = await res.json();
         if (data?.text && data.text.trim().length > 0) {
-          console.info("[AI] Using server-side fallback route");
           return {
             text: data.text,
-            provider: "Server Fallback",
+            provider: "Z.ai Fallback",
             latencyMs: Math.round(performance.now() - t0),
             tokensEstimate: estTokens(opts.userPrompt + (opts.systemPrompt ?? "")),
           };
@@ -1619,7 +1624,7 @@ export async function callAI(opts: AICallOptions): Promise<AICallResult> {
   // Those are authentication errors, not provider failures.
   // When those occur, ProviderAuthenticationError is thrown above.
   //
-  // If we reach this point, it means all providers (including Puter)
+  // If we reach this point, it means all providers (including Z.ai and Puter)
   // genuinely failed — network errors, rate limits, invalid responses, etc.
   //
   // HARDENING: Document/optimizer tasks NEVER use the local engine — the
@@ -2245,6 +2250,8 @@ export function useAIProviders() {
 
 export function usePreferredProvider() {
   return useApp((s) =>
-    s.providers.find((p) => p.isActive) ?? null
+    s.providers.find((p) => p.isActive && p.type !== "z-ai-fallback") ??
+    s.providers.find((p) => p.isActive) ??
+    null
   );
 }

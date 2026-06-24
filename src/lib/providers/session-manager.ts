@@ -246,7 +246,7 @@ export function isSessionExpiringSoon(session: ProviderSession): boolean {
  */
 export async function getAllSessions(): Promise<ProviderSession[]> {
   const sessions: ProviderSession[] = [];
-  for (const provider of ["puter"] as const) {
+  for (const provider of ["puter", "zai-direct"] as const) {
     const session = await loadSession(provider);
     if (session) {
       sessions.push(session);

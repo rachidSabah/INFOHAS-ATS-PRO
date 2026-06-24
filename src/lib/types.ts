@@ -346,7 +346,8 @@ export type AIProviderType =
   | "azure-openai"
   | "bedrock"
   | "opencode"
-  | "custom";
+  | "custom"
+  | "z-ai-fallback";
 
 export interface AIProvider {
   id: string;

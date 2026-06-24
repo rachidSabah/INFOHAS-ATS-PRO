@@ -118,7 +118,12 @@ export class ProviderManager {
       }
     }
 
-    // All providers — route through the CORS proxy
+    // Z.ai fallback — use the internal adapter
+    if (provider.type === "z-ai-fallback" || !provider.baseUrl || provider.baseUrl === "internal") {
+      return ProviderRouter.testConnection(provider);
+    }
+
+    // All other providers — route through the CORS proxy
     try {
       const res = await fetch("/api/providers/test", {
         method: "POST",

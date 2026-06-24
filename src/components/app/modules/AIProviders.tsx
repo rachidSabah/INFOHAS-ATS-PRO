@@ -75,20 +75,18 @@ export function AIProviders() {
     try {
       setPuterStatus(getPuterProvider().getStatus());
     } catch (e) { console.warn("[AIProviders] Puter status check failed:", e instanceof Error ? e.message : e); }
-    try {
-      
   }, []);
 
   // Restore sessions on mount and switch to providers tab if already authenticated
   useEffect(() => {
     (async () => {
       let puterOk = false;
-      let zaiOk = false;
+      
       try { const s = await getPuterProvider().restore(); puterOk = !!s?.authenticated; } catch (e) { console.warn("[AIProviders] Puter restore failed:", e instanceof Error ? e.message : e); }
-      try { const s = await getZaiProvider().restore(); zaiOk = !!s?.authenticated; } catch (e) { console.warn("[AIProviders] Z.ai restore failed:", e instanceof Error ? e.message : e); }
+      
       refreshAuthStatus();
       // If already authenticated, show providers tab (not auth tab)
-      if (puterOk || zaiOk) {
+      if (puterOk) {
         setTab("providers");
       }
     })();

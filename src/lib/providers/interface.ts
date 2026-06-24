@@ -1,9 +1,10 @@
 // ResumeAI Pro — OAuth AI Provider Interface
 // Common abstraction for all OAuth-capable AI providers.
-// PuterProvider implements this interface.
+// PuterProvider and ZaiProvider implement this interface,
+// making future additions (OpenCode Auth, Claude Web, etc.) trivial.
 
 export interface ProviderSession {
-  provider: "puter";
+  provider: "puter" | "zai-direct";
   authenticated: boolean;
   email: string | null;
   userId: string | null;
@@ -50,11 +51,11 @@ export interface ProviderAuthError {
 
 /**
  * Common interface for all OAuth AI providers.
- * PuterProvider implements this interface.
+ * Each provider (Puter, Z.ai, etc.) implements this interface.
  */
 export interface OAuthAIProvider {
   /** Unique provider identifier */
-  readonly id: "puter";
+  readonly id: "puter" | "zai-direct";
   /** Human-readable provider name */
   readonly name: string;
 
@@ -66,7 +67,13 @@ export interface OAuthAIProvider {
    */
   login(providedKey?: string): Promise<ProviderSession>;
 
-
+  /**
+   * Authenticate with Google OAuth.
+   * Opens Google sign-in popup, then establishes a session.
+   * Only supported by providers that allow Google-linked auth.
+   * @throws ProviderAuthenticationError if Google OAuth is not configured.
+   */
+  loginWithGoogle?(): Promise<ProviderSession>;
 
   /**
    * Refresh the current session using the stored refresh token.
