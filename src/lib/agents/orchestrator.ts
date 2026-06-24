@@ -844,6 +844,42 @@ async function _runOptimizationPipelineInner(input: PipelineInput, watchdog: Opt
 
     result.metCharTarget = result.charCount >= 2500 && result.charCount <= 3100;
 
+    // ========================================================================
+    // [QUALITY GATES] Run comprehensive quality validation on the optimized
+    // resume. All gates are ADVISORY — they log warnings and trigger retry,
+    // but NEVER hard-reject. The user always gets a result.
+    // ========================================================================
+    try {
+      const { runQualityGates } = await import("../quality-gates");
+      const qualityReport = runQualityGates(resume, result.optimizedResume!);
+
+      if (qualityReport.shouldRetry && optimizeAttempt < maxOptimizeAttempts) {
+        console.warn(
+          `[Quality Gates] Optimization quality low (score ${qualityReport.overallScore}/100). ` +
+          `Retrying with stricter prompt. Reasons: ${qualityReport.retryReasons.join(", ")}`
+        );
+        log("Resume Optimizer", `⚠ Quality score ${qualityReport.overallScore}/100 — retrying with stricter prompt.`);
+        emitProgress(3, `Quality check: ${qualityReport.overallScore}/100. Retrying for better quality…`);
+        // Force a retry by throwing — the catch block will retry
+        throw new Error(`Quality gate retry: ${qualityReport.retryReasons.join(", ")}`);
+      }
+
+      if (qualityReport.overallScore < 75) {
+        log("Resume Optimizer", `⚠ Quality score ${qualityReport.overallScore}/100 — optimization completed but quality issues detected. Review recommended.`);
+        emitProgress(3, `⚠ Optimization completed with quality issues (score ${qualityReport.overallScore}/100).`);
+      } else {
+        log("Resume Optimizer", `✓ Quality score: ${qualityReport.overallScore}/100`);
+      }
+    } catch (qualityErr: any) {
+      // If the quality gate itself threw (not the retry trigger), log and continue
+      if (!qualityErr?.message?.startsWith("Quality gate retry:")) {
+        console.warn("[Quality Gates] Validation failed (non-fatal):", qualityErr?.message);
+      } else {
+        // Re-throw the retry trigger so the catch block handles it
+        throw qualityErr;
+      }
+    }
+
     step.completedAt = new Date().toISOString();
     step.durationMs = Date.now() - new Date(step.startedAt).getTime();
     step.status = "completed";
