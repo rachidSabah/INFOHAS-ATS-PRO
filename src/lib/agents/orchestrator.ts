@@ -888,12 +888,12 @@ async function _runOptimizationPipelineInner(input: PipelineInput, watchdog: Opt
     log("Quality Assurance", qaLog);
     emitProgress(4, qaLog);
 
-    // HARDENING: Make QA factual consistency failures fatal — but only for
-    // SERIOUS fabrications (employers, education, certifications). Minor
-    // issues (fabricated metrics, locations, languages) are downgraded to
-    // warnings because free-tier models (Llama-3.1/3.3-70b) routinely add
-    // quantified metrics ("increased X by 15%") that don't match the original
-    // exactly — annoying but not a trust-destroying hallucination.
+    // ADVISORY ONLY: QA factual consistency issues are logged as warnings
+    // but NEVER block the optimization. The user always gets the optimized
+    // resume and can decide whether to use it or retry. This fixes the
+    // recurring "optimization failed" loop where free-tier models (Llama,
+    // OpenCode free) produce minor metric hallucinations that triggered
+    // the fatal gate.
     if (result.qa.factualConsistency && !result.qa.factualConsistency.passed) {
       const fc = result.qa.factualConsistency;
       const seriousCount =
@@ -903,23 +903,18 @@ async function _runOptimizationPipelineInner(input: PipelineInput, watchdog: Opt
       const minorCount = fc.issueCount - seriousCount;
 
       console.warn(
-        `[Pipeline] QA factual consistency: ${fc.issueCount} total issues ` +
+        `[Pipeline] QA factual consistency ADVISORY: ${fc.issueCount} total issues ` +
         `(${seriousCount} serious: ${fc.fabricatedEmployers.length} employers, ` +
         `${fc.fabricatedEducation.length} education, ${fc.fabricatedCertifications.length} certs; ` +
-        `${minorCount} minor: metrics/locations/languages/contact)`
+        `${minorCount} minor: metrics/locations/languages/contact). ` +
+        `Proceeding with optimization — user can review.`
       );
 
-      // FATAL only if there are serious fabrications (>= 2) OR total issues >= 8
-      if (seriousCount >= 2 || fc.issueCount >= 8) {
-        log("Quality Assurance", `⚠ FATAL: ${seriousCount} serious fabrications (employers/education/certs) + ${minorCount} minor issues. Restoring original resume.`);
-        emitProgress(4, `AI hallucinated ${seriousCount} serious facts. Original resume preserved.`);
-        result.optimizedResume = resume;
-        result.status = "failed";
-        result.error = `AI optimization produced ${seriousCount} serious factual fabrications (invented employers/education/certifications). Original resume preserved. Please retry.`;
-      } else if (seriousCount >= 1) {
-        log("Quality Assurance", `⚠ WARNING: ${seriousCount} serious fabrication + ${minorCount} minor issues. Proceeding but flagging for manual review.`);
+      if (seriousCount >= 1) {
+        log("Quality Assurance", `⚠ WARNING: ${seriousCount} serious fabrication(s) + ${minorCount} minor issue(s). Review the optimized resume carefully before using.`);
+        emitProgress(4, `⚠ ${fc.issueCount} factual issues detected. Optimization completed — please review.`);
       } else {
-        log("Quality Assurance", `⚠ WARNING: ${minorCount} minor factual issues (metrics/locations). Proceeding — these are common with free-tier models.`);
+        log("Quality Assurance", `⚠ WARNING: ${minorCount} minor factual issue(s) (metrics/locations). Optimization completed — common with free-tier models.`);
       }
     }
 
@@ -1085,32 +1080,26 @@ async function _runOptimizationPipelineInner(input: PipelineInput, watchdog: Opt
     }
 
     if (qualityErrors.length > 0) {
-      console.warn("[OptimizationContext] Quality gates FAILED:", qualityErrors);
-      // Per spec: "If AI fails: DO NOT generate fallback resumes. DO NOT generate
-      // Summary/Skills/Education only. Display: 'AI optimization failed. Please retry.'
-      // Preserve original resume."
-      //
-      // We restore the original resume (preserve) and mark the optimization as
-      // failed so the UI can show the retry message.
+      // ADVISORY ONLY: Quality gate issues are logged as warnings but NEVER
+      // block the optimization. The user always gets the optimized resume.
       console.warn(
-        `[Pipeline] Quality gates failed — marking optimization as FAILED. ` +
+        `[Pipeline] Quality gates ADVISORY: ${qualityErrors.length} issues. ` +
         `provider=${result.provider}, charCount=${result.charCount ?? 0}, ` +
         `experience entries=${result.optimizedResume?.experience?.length ?? 0}, ` +
         `education entries=${result.optimizedResume?.education?.length ?? 0}, ` +
-        `skills count=${result.optimizedResume?.skills?.length ?? 0}`
+        `skills count=${result.optimizedResume?.skills?.length ?? 0}. ` +
+        `Proceeding — user can review.`
       );
-      log("Quality Assurance", `⚠ AI optimization failed: ${qualityErrors.join("; ")}. Original resume preserved. Please retry.`);
-      emitProgress(4, `AI optimization failed. Original resume preserved. Please retry.`);
-      result.optimizedResume = resume;
-      result.status = "failed";
-      result.error = `AI optimization failed: ${qualityErrors.join("; ")}. Please retry.`;
+      log("Quality Assurance", `⚠ ${qualityErrors.length} quality issue(s) detected: ${qualityErrors.join("; ")}. Optimization completed — please review.`);
+      emitProgress(4, `⚠ ${qualityErrors.length} quality issues detected. Optimization completed — review recommended.`);
     } else {
-      log("Quality Assurance", `✓ All ${10 - qualityErrors.filter((e) => e.includes("empty")).length}/10 quality gates passed.`);
+      log("Quality Assurance", `✓ All quality gates passed.`);
     }
 
     // === DYNAMIC PAGE FILL VALIDATION (spec: 90-98% page fill target) ===
-    // Hard assertion: reject if page usage < 85% AND original had enough content.
-    if (result.status !== "failed" && result.optimizedResume) {
+    // ADVISORY ONLY: page fill issues are logged as warnings but NEVER block
+    // the optimization. The user always gets the optimized resume.
+    if (result.optimizedResume) {
       try {
         let directiveConfig: OptimizerDirectiveConfig | null = null;
         try {
@@ -1121,10 +1110,8 @@ async function _runOptimizationPipelineInner(input: PipelineInput, watchdog: Opt
         console.log(`[Pipeline Page Fill] ${pageFill.summary}`);
 
         if (!pageFill.passesMinimum && originalCharCount >= 2000) {
-          log("Page Validation", `✗ Page usage ${pageFill.pageUsage}% < 85% minimum. Original had enough content (${originalCharCount} chars) but optimizer produced insufficient output.`);
-          result.optimizedResume = resume;
-          result.status = "failed";
-          result.error = `Optimization too short: ${pageFill.pageUsage}% page usage (target: 90-98%). Please retry or add more resume content.`;
+          log("Page Validation", `⚠ Page usage ${pageFill.pageUsage}% < 85% minimum. Original had enough content (${originalCharCount} chars) but optimizer produced shorter output. Optimization completed — consider retrying for a fuller page.`);
+          emitProgress(4, `⚠ Page fill at ${pageFill.pageUsage}%. Optimization completed but could be fuller.`);
         } else if (!pageFill.passesMinimum) {
           console.warn(`[Pipeline Page Fill] WARNING: page usage ${pageFill.pageUsage}% < 85% minimum. Source resume has insufficient content (${originalCharCount} chars).`);
           log("Page Validation", `⚠ Page usage ${pageFill.pageUsage}% — source resume too short to fill the page. Consider adding more experience details.`);

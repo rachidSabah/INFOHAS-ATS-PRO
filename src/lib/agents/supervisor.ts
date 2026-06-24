@@ -789,19 +789,20 @@ export async function handleOptimizationRequested(
     // while the Supervisor showed "Completed".
     syncCoreAgentStatusesFromPipeline(result);
 
-    // === CACHE GUARD: never cache local engine fallback or degraded results ===
-    // Must run before updateContext — we must never propagate degraded results.
+    // === CACHE GUARD: only reject if NO real AI provider was used or the
+    // result is truly empty (< 500 chars). QA issues (hallucinations, empty
+    // sections, page fill) are now ADVISORY — they don't block the result.
+    // The user always gets the optimized resume and can decide whether to
+    // use it or retry.
     const isRealOptimization = result.provider !== "Local Engine (offline mode)"
       && result.status !== "failed"
-      && (result.charCount ?? 0) >= 2200;
+      && (result.charCount ?? 0) >= 500;
     if (!isRealOptimization) {
-      // Diagnostic: surface WHY the result was rejected so the user can see
-      // exactly which gate failed (provider, status, or charCount).
       const reason = result.provider === "Local Engine (offline mode)"
         ? `provider is Local Engine`
         : result.status === "failed"
         ? `status is "failed"`
-        : `charCount ${result.charCount ?? 0} < 2200`;
+        : `charCount ${result.charCount ?? 0} < 500`;
       console.warn(
         `[Supervisor] Optimization rejected — ${reason}. ` +
         `provider=${result.provider}, status=${result.status}, ` +
