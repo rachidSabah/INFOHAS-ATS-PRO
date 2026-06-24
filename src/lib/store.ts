@@ -8,7 +8,7 @@ import type {
   OptimizerDirectiveConfig,
   AIDevAgentSettings, AIDevAgentHistory, AIDevReport,
   AITask, AIWorkspacePatch, AIGitBranch, AIGitCommit, AIRollback,
-  ResumeReviewReport,
+  ResumeReviewReport, AIHealingIssue, AIHealingReport,
 } from "./types";
 import {
   SEED_RESUMES, SEED_JDS, SEED_PROVIDERS, SEED_PROVIDER_LOGS, SEED_PROVIDER_SETTINGS,
@@ -97,6 +97,13 @@ interface AppState {
   aiBranches: AIGitBranch[];
   aiCommits: AIGitCommit[];
   aiRollbacks: AIRollback[];
+  aiHealingIssues: AIHealingIssue[];
+  aiHealingReport: AIHealingReport | null;
+  aiHealingProgress: {
+    status: "idle" | "scanning" | "classifying" | "analyzing" | "fixing" | "validating" | "completed";
+    currentStep: string;
+    progressPercent: number;
+  };
   logs: AuditLog[];
 
   // ui
@@ -207,6 +214,14 @@ interface AppState {
   addAIPatch: (patch: Omit<AIWorkspacePatch, "id" | "createdAt">) => void;
   updateAIPatch: (id: string, patch: Partial<AIWorkspacePatch>) => void;
   addAIRollback: (rollback: Omit<AIRollback, "id" | "rolledBackAt">) => void;
+  setAIHealingIssues: (issues: AIHealingIssue[]) => void;
+  updateAIHealingIssue: (id: string, patch: Partial<AIHealingIssue>) => void;
+  setAIHealingReport: (report: AIHealingReport | null) => void;
+  setAIHealingProgress: (progress: {
+    status: "idle" | "scanning" | "classifying" | "analyzing" | "fixing" | "validating" | "completed";
+    currentStep: string;
+    progressPercent: number;
+  }) => void;
 
   // logs
   log: (entry: Omit<AuditLog, "id" | "timestamp">) => void;
@@ -403,6 +418,13 @@ export const useApp = create<AppState>()(
       aiBranches: SEED_AI_BRANCHES,
       aiCommits: SEED_AI_COMMITS,
       aiRollbacks: SEED_AI_ROLLBACKS,
+      aiHealingIssues: [],
+      aiHealingReport: null,
+      aiHealingProgress: {
+        status: "idle",
+        currentStep: "",
+        progressPercent: 0,
+      },
       logs: SEED_LOGS,
 
       // SSR-safe: always start "light" — rehydrateSession() restores the real theme.
@@ -1206,6 +1228,22 @@ export const useApp = create<AppState>()(
       addAIRollback: (rollback) => {
         const full: AIRollback = { ...rollback, id: uid("rb"), rolledBackAt: new Date().toISOString() };
         set((s) => ({ aiRollbacks: [full, ...s.aiRollbacks].slice(0, 50) }));
+      },
+      setAIHealingIssues: (issues) => {
+        set({ aiHealingIssues: issues });
+      },
+      updateAIHealingIssue: (id, patch) => {
+        set((s) => ({
+          aiHealingIssues: s.aiHealingIssues.map((issue) =>
+            issue.id === id ? { ...issue, ...patch } : issue
+          ),
+        }));
+      },
+      setAIHealingReport: (report) => {
+        set({ aiHealingReport: report });
+      },
+      setAIHealingProgress: (progress) => {
+        set({ aiHealingProgress: progress });
       },
 
       log: (entry) => {

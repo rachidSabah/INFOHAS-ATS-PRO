@@ -15,7 +15,10 @@ import {
   runBuild, runTests, createStagingBranch, getCommitHistory, getBranches,
   runAutonomousDebug,
 } from "@/lib/ai-builder-agent";
-import type { AITask, AIWorkspacePatch, AIFile } from "@/lib/types";
+import {
+  runDetailedDebugScan, healIssue, healMultipleIssues
+} from "@/lib/autonomous-healing";
+import type { AITask, AIWorkspacePatch, AIFile, AIHealingIssue } from "@/lib/types";
 
 type Tab =
   | "overview"

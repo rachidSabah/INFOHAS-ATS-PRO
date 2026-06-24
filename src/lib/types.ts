@@ -854,5 +854,35 @@ export type ViewKey =
   | "ai-email-writer"
   | "ai-resume-review"
   | "ai-job-match"
-  | "ai-achievement"
   | "integrations";
+
+export interface AIHealingIssue {
+  id: string;
+  file?: string;
+  line?: number;
+  area: "frontend" | "backend" | "api" | "database" | "provider" | "pipeline" | "security" | "performance" | "system";
+  severity: "info" | "warning" | "error" | "critical";
+  title: string;
+  description: string;
+  suggestedFix: string;
+  status: "open" | "fixed" | "needs_review" | "failed";
+  rootCause?: string;
+  confidence?: number;
+  reasoning?: string;
+  patch?: string; // Unified git diff
+  buildStatus?: "PASS" | "FAIL" | "PENDING";
+  testStatus?: "PASS" | "FAIL" | "PENDING";
+  risk?: "LOW" | "MEDIUM" | "HIGH";
+  code?: string;
+}
+
+export interface AIHealingReport {
+  issuesFound: number;
+  autoFixed: number;
+  needsReview: number;
+  failed: number;
+  filesChanged: number;
+  testsPassed: number;
+  buildStatus: "PASS" | "FAIL";
+}
+
