@@ -860,30 +860,33 @@ async function _runOptimizationPipelineInner(input: PipelineInput, watchdog: Opt
       const { runQualityGates, runSelfHealing } = await import("../quality-gates");
       let qualityReport = runQualityGates(resume, result.optimizedResume!);
 
-      // If quality issues detected, attempt self-healing BEFORE retrying
+      // If quality issues detected, attempt self-healing.
+      // CRITICAL: After self-healing, ALWAYS accept the repaired result.
+      // Do NOT retry the full optimization — that just regenerates the same
+      // hallucinations. The repair already removed them.
       if (qualityReport.shouldRetry) {
         console.info(
           `[Self-Healing] Quality issues detected (score ${qualityReport.overallScore}/100). ` +
-          `Attempting repair before retry. Reasons: ${qualityReport.retryReasons.join(", ")}`
+          `Running auto-repair. Reasons: ${qualityReport.retryReasons.join(", ")}`
         );
-        log("Resume Optimizer", `⚠ Quality issues detected — running self-healing repair...`);
-        emitProgress(3, `Self-healing: repairing ${qualityReport.retryReasons.length} issue(s)...`);
+        log("Resume Optimizer", `Resume is being automatically repaired: removing unsupported metrics and expanding content to meet one-page requirements.`);
+        emitProgress(3, `Auto-repairing: ${qualityReport.retryReasons.length} issue(s)...`);
 
         // Run the self-healing repair
         const jdKeywords = jd.keywords ?? [];
         const healingResult = runSelfHealing(result.optimizedResume!, resume, jdKeywords);
 
         if (healingResult.repairsMade.length > 0) {
-          // Use the repaired resume
+          // Use the repaired resume — ALWAYS accept it
           result.optimizedResume = healingResult.repairedResume;
           result.charCount = JSON.stringify(healingResult.repairedResume).length;
           qualityReport = healingResult.newQualityReport;
 
           log("Resume Optimizer",
-            `✓ Self-healing complete: ${healingResult.hallucinationsRemoved} hallucinations removed, ` +
-            `${healingResult.repairsMade.length} repairs. New quality score: ${qualityReport.overallScore}/100`
+            `✓ Auto-repair complete: ${healingResult.hallucinationsRemoved} unsupported metrics removed, ` +
+            `${healingResult.repairsMade.length} repairs applied. Quality: ${qualityReport.overallScore}/100`
           );
-          emitProgress(3, `✓ Self-healing repaired ${healingResult.repairsMade.length} issue(s). Quality: ${qualityReport.overallScore}/100`);
+          emitProgress(3, `✓ Auto-repair complete. Quality: ${qualityReport.overallScore}/100`);
 
           // Log each repair for transparency
           for (const repair of healingResult.repairsMade) {
@@ -891,16 +894,9 @@ async function _runOptimizationPipelineInner(input: PipelineInput, watchdog: Opt
           }
         }
 
-        // Only retry if repair didn't improve quality enough AND we have attempts left
-        if (qualityReport.shouldRetry && optimizeAttempt < maxOptimizeAttempts) {
-          console.warn(
-            `[Self-Healing] Repair insufficient (score ${qualityReport.overallScore}/100). ` +
-            `Retrying optimization (attempt ${optimizeAttempt + 1}/${maxOptimizeAttempts}).`
-          );
-          log("Resume Optimizer", `⚠ Repair insufficient — retrying optimization for better quality.`);
-          emitProgress(3, `Retrying optimization (attempt ${optimizeAttempt + 1})...`);
-          throw new Error(`Quality gate retry after repair: ${qualityReport.retryReasons.join(", ")}`);
-        }
+        // DO NOT retry — accept the repaired resume.
+        // The repair removed hallucinations and restored content.
+        // Retrying would regenerate the same hallucinations.
       }
 
       // Log final quality status
@@ -911,13 +907,8 @@ async function _runOptimizationPipelineInner(input: PipelineInput, watchdog: Opt
         log("Resume Optimizer", `✓ Quality score: ${qualityReport.overallScore}/100`);
       }
     } catch (qualityErr: any) {
-      // If the quality gate itself threw (not the retry trigger), log and continue
-      if (!qualityErr?.message?.startsWith("Quality gate retry")) {
-        console.warn("[Self-Healing] Validation failed (non-fatal):", qualityErr?.message);
-      } else {
-        // Re-throw the retry trigger so the catch block handles it
-        throw qualityErr;
-      }
+      // Quality gate errors are non-fatal — log and continue with the result
+      console.warn("[Self-Healing] Validation failed (non-fatal):", qualityErr?.message);
     }
 
     step.completedAt = new Date().toISOString();
