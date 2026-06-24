@@ -10,8 +10,8 @@
 
 "use client";
 
-import { withTimeout, OptimizationProviderExhaustedError, AI_CALL_TIMEOUT_MS } from "./pipeline-watchdog";
-export { OptimizationProviderExhaustedError } from "./pipeline-watchdog";
+import { withTimeout, OptimizationProviderExhaustedError, AI_CALL_TIMEOUT_MS, OPTIMIZER_CALL_TIMEOUT_MS, PROVIDER_TIMEOUT_COOLDOWN_MS } from "./pipeline-watchdog";
+export { OptimizationProviderExhaustedError, OPTIMIZER_CALL_TIMEOUT_MS } from "./pipeline-watchdog";
 
 import { useApp } from "./store";
 import { startAICall, truncatePromptToTokenLimit, checkTokenLimit, MAX_INPUT_TOKENS } from "./ai-diagnostics";
@@ -759,6 +759,13 @@ export interface AICallOptions {
   // Only the optimizer call should have this set; JI, Company, SkillGap, QA, Reflection
   // should NOT, because their prompts don't contain one-page compression directives.
   isOptimizerCall?: boolean;
+  /**
+   * Per-call timeout override in milliseconds. Defaults to AI_CALL_TIMEOUT_MS (60s).
+   * The Resume / Aviation Optimizer call should pass OPTIMIZER_CALL_TIMEOUT_MS (120s)
+   * because it ships a ~22k-char directive + 8k output tokens and legitimately
+   * takes 70–110s on slower free-tier providers.
+   */
+  timeoutMs?: number;
 }
 
 export interface AICallResult {
@@ -810,6 +817,7 @@ const PUTER_COOLDOWN_MS = 5 * 60 * 1000; // 5 minutes
 const PROVIDER_COOLDOWN_PREFIX = "resumeai-provider-cooldown-";
 const PROVIDER_429_COOLDOWN_MS = 3 * 60 * 1000;  // 3 minutes for rate limits
 const PROVIDER_401_COOLDOWN_MS = 30 * 60 * 1000; // 30 minutes for billing failures (don't retry billing issues)
+// NOTE: PROVIDER_TIMEOUT_COOLDOWN_MS is imported from pipeline-watchdog.ts (90s)
 
 /** Returns true if a named provider is in cooldown. */
 function isProviderInCooldown(providerId: string): boolean {
@@ -848,6 +856,32 @@ function markProvider401Cooldown(providerId: string): void {
     window.sessionStorage?.setItem(key, String(Date.now() + PROVIDER_401_COOLDOWN_MS));
     console.warn(`[AI] Provider "${providerId}" returned 401 (billing/auth failure) — skipping for 30 minutes.`);
   } catch { /* ignore */ }
+}
+
+/**
+ * Marks a provider as TIMED OUT for PROVIDER_TIMEOUT_COOLDOWN_MS (90s).
+ *
+ * Unlike 429/401 cooldowns (which signal "don't retry for a long time"),
+ * a timeout cooldown is SHORT — just long enough to skip the same provider
+ * on the NEXT pipeline step within the same optimization run. This prevents
+ * the failure pattern where every step retries the same slow provider,
+ * burning the entire pipeline budget on repeated 60s timeouts.
+ */
+function markProviderTimeoutCooldown(providerId: string): void {
+  if (typeof window === "undefined") return;
+  try {
+    const key = PROVIDER_COOLDOWN_PREFIX + providerId;
+    window.sessionStorage?.setItem(key, String(Date.now() + PROVIDER_TIMEOUT_COOLDOWN_MS));
+    console.warn(`[AI] Provider "${providerId}" timed out — skipping for ${PROVIDER_TIMEOUT_COOLDOWN_MS / 1000}s.`);
+  } catch { /* ignore */ }
+}
+
+/** Returns true if the error looks like a timeout (AbortError or timeout message). */
+function isTimeoutError(err: any): boolean {
+  if (!err) return false;
+  if (err?.name === "AbortError") return true;
+  const msg = (err?.message || String(err)).toLowerCase();
+  return /timed out|timeout/i.test(msg);
 }
 
 /** Clears all provider cooldowns (e.g. on manual retry or settings change). */
@@ -1339,6 +1373,13 @@ export async function callAI(opts: AICallOptions): Promise<AICallResult> {
   const t0 = performance.now();
   const taskCategory = opts.taskCategory || "document";
 
+  // Per-call timeout — defaults to AI_CALL_TIMEOUT_MS (60s), but the
+  // Resume / Aviation Optimizer call passes OPTIMIZER_CALL_TIMEOUT_MS (120s)
+  // because it ships a ~22k-char directive + 8k output tokens.
+  const callTimeoutMs = opts.timeoutMs && opts.timeoutMs > 0
+    ? Math.min(opts.timeoutMs, 180_000) // hard cap at 3 min to protect pipeline budget
+    : AI_CALL_TIMEOUT_MS;
+
   // Check token limits and truncate userPrompt if needed
   let finalOpts = { ...opts };
   const systemText = opts.systemPrompt ?? "";
@@ -1391,7 +1432,7 @@ export async function callAI(opts: AICallOptions): Promise<AICallResult> {
           temperature: finalOpts.temperature,
           model: provider.modelName,
         }),
-        AI_CALL_TIMEOUT_MS,
+        callTimeoutMs,
         "Puter.generate"
       );
 
@@ -1426,7 +1467,7 @@ export async function callAI(opts: AICallOptions): Promise<AICallResult> {
         try {
           const text = await withTimeout(
             callUserProvider(fallbackProvider, finalOpts),
-            AI_CALL_TIMEOUT_MS,
+            callTimeoutMs,
             `${fallbackProvider.name}.generate`
           );
           assert(text !== "", "Provider response is empty");
@@ -1444,14 +1485,32 @@ export async function callAI(opts: AICallOptions): Promise<AICallResult> {
             markProvider429Cooldown(fbCooldownId);
           } else if (secErr?.statusCode === 401 || /401/.test(secErrMsg) || /billing/i.test(secErrMsg) || /payment/i.test(secErrMsg) || /CreditsError/i.test(secErrMsg)) {
             markProvider401Cooldown(fbCooldownId);
+          } else if (isTimeoutError(secErr)) {
+            markProviderTimeoutCooldown(fbCooldownId);
           }
           providerErrors.push(`${fallbackProvider.name}: ${secErrMsg}`);
           console.warn(`[AI] Secondary provider ${fallbackProvider.name} failed: ${secErrMsg}`);
         }
       }
 
-      // All providers exhausted — fall back to local engine for best-effort output
-      return fallbackToLocalEngine(finalOpts, t0, providerErrors);
+      // All providers exhausted — fall back to local engine for best-effort output.
+      // (Inline equivalent of the non-Puter branch's localGenerate fallback.
+      //  Previously called fallbackToLocalEngine() which was never defined —
+      //  this fixes that latent ReferenceError.)
+      console.warn("[AI] Puter + all secondary providers failed. Falling back to local engine.");
+      const localText = localGenerate(finalOpts);
+      if (localText) {
+        return {
+          text: localText,
+          provider: "Local Engine (fallback)",
+          latencyMs: Math.round(performance.now() - t0),
+          tokensEstimate: estTokens(finalOpts.userPrompt + (finalOpts.systemPrompt ?? "")),
+          isLocalEngine: true,
+        };
+      }
+      throw new OptimizationProviderExhaustedError(
+        `All AI providers failed for this request.\n${providerErrors.map((e, i) => `  ${i + 1}. ${e}`).join("\n")}`
+      );
     }
   }
 
@@ -1464,7 +1523,7 @@ export async function callAI(opts: AICallOptions): Promise<AICallResult> {
     try {
       const text = await withTimeout(
         callUserProvider(provider, finalOpts),
-        AI_CALL_TIMEOUT_MS,
+        callTimeoutMs,
         `${provider.name}.generate`
       );
       assert(text !== "", "Provider response is empty");
@@ -1482,6 +1541,10 @@ export async function callAI(opts: AICallOptions): Promise<AICallResult> {
         markProvider429Cooldown(primaryCooldownId);
       } else if (e?.statusCode === 401 || /401/.test(eMsg) || /billing/i.test(eMsg) || /payment/i.test(eMsg) || /CreditsError/i.test(eMsg)) {
         markProvider401Cooldown(primaryCooldownId);
+      } else if (isTimeoutError(e)) {
+        // Short cooldown so the next pipeline step skips this slow provider
+        // instead of burning another full callTimeoutMs on the same endpoint.
+        markProviderTimeoutCooldown(primaryCooldownId);
       }
       providerErrors.push(`${provider.name}: ${eMsg}`);
       console.warn(`[AI] Primary provider ${provider.name} failed: ${eMsg}. Trying fallbacks...`);
@@ -1519,7 +1582,7 @@ export async function callAI(opts: AICallOptions): Promise<AICallResult> {
           temperature: finalOpts.temperature,
           model: puter.modelName,
         }),
-        AI_CALL_TIMEOUT_MS,
+        callTimeoutMs,
         "Puter.generate (fallback)"
       );
       const text = resp.text;
@@ -1552,7 +1615,7 @@ export async function callAI(opts: AICallOptions): Promise<AICallResult> {
     try {
       const text = await withTimeout(
         callUserProvider(altProvider, finalOpts),
-        AI_CALL_TIMEOUT_MS,
+        callTimeoutMs,
         `${altProvider.name}.generate`
       );
       assert(text !== "", "Provider response is empty");
@@ -1569,6 +1632,8 @@ export async function callAI(opts: AICallOptions): Promise<AICallResult> {
         markProvider429Cooldown(altCooldownId);
       } else if (altErr?.statusCode === 401 || /401/.test(altErrMsg) || /billing/i.test(altErrMsg) || /payment/i.test(altErrMsg) || /CreditsError/i.test(altErrMsg)) {
         markProvider401Cooldown(altCooldownId);
+      } else if (isTimeoutError(altErr)) {
+        markProviderTimeoutCooldown(altCooldownId);
       }
       providerErrors.push(`${altProvider.name}: ${altErrMsg}`);
       console.warn(`[AI] Alternate provider ${altProvider.name} failed: ${altErrMsg}`);

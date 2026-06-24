@@ -50,6 +50,7 @@ import {
   OptimizationProviderExhaustedError,
   withTimeout,
   PIPELINE_TIMEOUT_MS,
+  OPTIMIZER_CALL_TIMEOUT_MS,
 } from "../pipeline-watchdog";
 
 // ============================================================================
@@ -559,7 +560,7 @@ export async function runOptimizationPipeline(input: PipelineInput): Promise<Pip
     // Ensure watchdog is always stopped
     watchdog.stop();
     if (err instanceof OptimizationTimeoutError) {
-      console.error("[Pipeline] 120s hard timeout reached. Aborting optimization.");
+      console.error("[Pipeline] 300s hard timeout reached. Aborting optimization.");
       return {
         optimizedResume: input.resume,
         beforeATS: null,
@@ -571,7 +572,7 @@ export async function runOptimizationPipeline(input: PipelineInput): Promise<Pip
         reflection: null,
         steps: [],
         status: "failed",
-        error: "Optimization timed out after 120 seconds. Please retry. If the issue persists, check your AI provider connection.",
+        error: "Optimization timed out after 300 seconds. Please retry. If the issue persists, check your AI provider connection.",
         provider: "none",
         charCount: 0,
         metCharTarget: false,
@@ -1321,6 +1322,10 @@ CONTENT REQUIREMENTS:
     maxTokens: 8000,
     temperature: 0.4,
     taskCategory: "document",
+    // Resume Optimizer ships a ~22k-char directive + 8k output tokens.
+    // The default 60s timeout was killing legitimate in-flight requests
+    // on free-tier providers (OpenCode free, Nvidia build-free, etc.).
+    timeoutMs: OPTIMIZER_CALL_TIMEOUT_MS,
   });
 
   // Process the AI response through the full leak-prevention pipeline
@@ -1373,6 +1378,9 @@ CONTENT REQUIREMENTS:
         maxTokens: 8000,
         temperature: 0.4,
         taskCategory: "document",
+        // Same extended timeout as the primary optimizer call — the retry
+        // payload is just as large.
+        timeoutMs: OPTIMIZER_CALL_TIMEOUT_MS,
       });
       console.info(`[Optimizer] Retry response: Provider: ${retryResult.provider}, Length: ${retryResult.text?.length ?? 0}`);
       if (retryResult.provider === "Local Engine (offline mode)" || (retryResult.text?.length ?? 0) < 500) {

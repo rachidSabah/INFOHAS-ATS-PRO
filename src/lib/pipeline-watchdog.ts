@@ -13,21 +13,49 @@
 
 "use client";
 
-/** Total pipeline hard-timeout (120 s). */
-export const PIPELINE_TIMEOUT_MS = 120_000;
+/**
+ * Total pipeline hard-timeout.
+ *
+ * Bumped from 120s → 300s (5 min) so the 6-step pipeline has enough headroom
+ * when the Resume Optimizer step legitimately needs 90–120s on slower free-tier
+ * providers (e.g. OpenCode free models with an ~22k-char directive + 8k output
+ * tokens). The previous 120s cap was being hit whenever ONE provider timed out
+ * at 60s and the next step then re-tried the same provider, blowing the budget.
+ */
+export const PIPELINE_TIMEOUT_MS = 300_000;
 
 /** Per-step stall threshold — if a step is "running" for longer than this, it's stalled. */
-export const STEP_STALL_MS = 90_000;
+export const STEP_STALL_MS = 240_000;
 
 /** Default per-AI-call timeout (60 s). */
 export const AI_CALL_TIMEOUT_MS = 60_000;
+
+/**
+ * Extended per-AI-call timeout for the Resume / Aviation Optimizer call.
+ *
+ * The optimizer ships a ~22k-char directive + a serialized resume + JD + 8k
+ * output tokens. Free-tier models (OpenCode free, Nvidia build-free, etc.)
+ * routinely take 70–110s on this payload. The default 60s timeout was killing
+ * legitimate in-flight requests, then the pipeline retried the same provider
+ * on the next step and ran into the 120s pipeline cap.
+ */
+export const OPTIMIZER_CALL_TIMEOUT_MS = 120_000;
+
+/**
+ * Short cooldown applied when a provider TIMES OUT (not 429/401).
+ *
+ * Long enough to skip the same broken provider on subsequent pipeline steps
+ * within a single optimization run, short enough that the user can retry
+ * manually without waiting for a long ban to expire.
+ */
+export const PROVIDER_TIMEOUT_COOLDOWN_MS = 90_000; // 90 seconds
 
 // ============================================================================
 // Custom errors
 // ============================================================================
 
 export class OptimizationTimeoutError extends Error {
-  constructor(message = "Optimization timed out after 120 seconds.") {
+  constructor(message = "Optimization timed out after 300 seconds.") {
     super(message);
     this.name = "OptimizationTimeoutError";
   }

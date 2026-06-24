@@ -15,7 +15,7 @@
 // so it inherits the full failover chain. The "Gemini" name is preserved for compatibility
 // with the original spec — in practice any provider can serve it.
 
-import { callAI, extractJSON, getOptimizerDirective } from "./ai";
+import { callAI, extractJSON, getOptimizerDirective, OPTIMIZER_CALL_TIMEOUT_MS } from "./ai";
 import { splitOptimizationDirective } from "./ai-diagnostics";
 import { INDUSTRY_PROFILES } from "./industry-ats";
 import type { OptimizerDirectiveConfig, ResumeData } from "./types";
@@ -745,6 +745,10 @@ Return ONLY the JSON object described in the directive. No prose, no markdown fe
     maxTokens: 8000,
     temperature: 0.45,
     taskCategory: "document",
+    // Aviation Optimizer ships the same ~22k-char directive + 8k output tokens
+    // as the standard Resume Optimizer — needs the extended timeout to avoid
+    // being killed mid-generation on free-tier providers.
+    timeoutMs: OPTIMIZER_CALL_TIMEOUT_MS,
   });
 
   // Reject local fallback — no AI provider actually executed
