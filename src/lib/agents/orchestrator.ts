@@ -723,8 +723,13 @@ export async function runOptimizationPipeline(input: PipelineInput): Promise<Pip
       optimizeAttempt++;
       try {
         if (aviationMode) {
+          console.info(`[ROUTER] Industry ATS Mode using ${aviationMode.airlineProfile}.`);
           log("Resume Optimizer", `Aviation ATS mode → ${aviationMode.airlineProfile}. Calling aviationOptimize() with unified directive…`);
           const aviationResult = await aviationOptimize(resume, jd.rawText ?? "", aviationMode.airlineProfile, aviationMode.settings);
+          // Quality gate: assert provider response is not empty
+          if (!aviationResult || !aviationResult.score) {
+            throw new Error("Industry ATS Mode optimization returned empty result — no AI provider available.");
+          }
           result.optimizedResume = mapAviationResultToResumeData(aviationResult, resume);
           result.provider = "aviation-ats";
           result.charCount = aviationResult.charCount;
@@ -774,7 +779,8 @@ export async function runOptimizationPipeline(input: PipelineInput): Promise<Pip
     steps[3].error = e?.message ?? "Optimizer failed";
     log("Resume Optimizer", `✗ Optimizer failed: ${e?.message}. Preserving original resume.`);
     emitProgress(3, `Optimization failed. Original resume preserved.`);
-    result.optimizedResume = resume; // Restore original
+    console.error(`[ROUTER] Optimization failed — no fallback available. Error: ${e?.message ?? "Unknown"}`);
+    result.optimizedResume = resume;
     result.status = "failed";
     result.error = e?.message ?? "Optimizer failed";
     result.provider = "Local Engine (offline mode)";

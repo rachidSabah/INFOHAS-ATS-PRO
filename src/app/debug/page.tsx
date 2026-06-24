@@ -27,7 +27,7 @@ interface DebugResponse {
   environment: {
     nodeEnv: string | undefined;
     hasDatabase: boolean;
-    hasZaiKey: boolean;
+
     providerCount: number;
     configuredProviders: string[];
   };
@@ -247,21 +247,6 @@ export default function DebugDashboardPage() {
                     variant="outline"
                   >
                     {data.environment.hasDatabase ? "Connected" : "Missing"}
-                  </Badge>
-                </div>
-                <div className="flex items-center justify-between p-3 bg-muted/50 rounded-lg">
-                  <span className="text-sm text-muted-foreground">
-                    ZAI API Key
-                  </span>
-                  <Badge
-                    className={`text-xs ${
-                      data.environment.hasZaiKey
-                        ? "bg-green-100 text-green-700 dark:bg-green-950/30 dark:text-green-400 border-green-200 dark:border-green-800"
-                        : "bg-amber-100 text-amber-700 dark:bg-amber-950/30 dark:text-amber-400 border-amber-200 dark:border-amber-800"
-                    }`}
-                    variant="outline"
-                  >
-                    {data.environment.hasZaiKey ? "Configured" : "Not set"}
                   </Badge>
                 </div>
                 <div className="flex items-center justify-between p-3 bg-muted/50 rounded-lg">

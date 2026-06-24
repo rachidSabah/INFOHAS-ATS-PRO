@@ -16,7 +16,7 @@ interface DebugResponse {
   environment: {
     nodeEnv: string | undefined;
     hasDatabase: boolean;
-    hasZaiKey: boolean;
+
     providerCount: number;
     configuredProviders: string[];
   };
@@ -91,7 +91,7 @@ export async function GET(_req: NextRequest): Promise<NextResponse<DebugResponse
     environment: {
       nodeEnv: process.env.NODE_ENV,
       hasDatabase: !!process.env.DATABASE_URL,
-      hasZaiKey: !!process.env.ZAI_API_KEY,
+
       providerCount: configuredCount,
       configuredProviders,
     },

@@ -93,8 +93,7 @@ export const SEED_PROVIDERS: AIProvider[] = [
     usage: { requests: 0, tokens: 0, errors: 0, avgLatencyMs: 0, cost: 0 },
     health: { consecutiveFailures: 0, consecutiveSuccesses: 0 },
   },
-  // === Z.ai Fallback removed — user has OpenCode + NVIDIA + Mistral + Puter ===
-  // The Z.ai fallback required a server-side API key that wasn't configured,
+  // === User has OpenCode + NVIDIA + Mistral + Puter ===
   // and it showed as a confusing "built-in" provider in the UI.
   // === Super-admin-only providers (inactive by default — add API key to activate) ===
   {
@@ -406,10 +405,10 @@ export const SEED_PROVIDER_LOGS: AIProviderLog[] = [
   },
   {
     id: "pl_3",
-    providerId: "p_zai",
-    providerName: "Z.ai Fallback (built-in)",
+    providerId: "p_opencode",
+    providerName: "OpenCode Zen",
     requestType: "chat",
-    modelName: "glm-4.6",
+    modelName: "deepseek-v4-flash-free",
     status: "success",
     latencyMs: 980,
     inputTokens: 820,
@@ -434,10 +433,10 @@ export const SEED_PROVIDER_LOGS: AIProviderLog[] = [
   },
   {
     id: "pl_5",
-    providerId: "p_zai",
-    providerName: "Z.ai Fallback (built-in)",
+    providerId: "p_opencode",
+    providerName: "OpenCode Zen",
     requestType: "chat",
-    modelName: "glm-4.6",
+    modelName: "deepseek-v4-flash-free",
     status: "error",
     latencyMs: 5023,
     errorMessage: "Network timeout (5s exceeded)",

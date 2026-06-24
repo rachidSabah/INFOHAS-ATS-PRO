@@ -42,7 +42,6 @@ export const LEAK_PATTERNS: RegExp[] = [
   /\b(claude|claude-sonnet|claude-opus|claude-haiku|gpt-4o?-?mini?|gpt-5?-?nano?|gpt-3\.5|gpt-4|chatgpt|openai)\b/i,
   /\b(deepseek|deepseek-v[34]|deepseek-chat|deepseek-coder|deepseek-r1)\b/i,
   /\b(putern?\.?js|puter\.com|puter\s?auth)\b/i,
-  /\b(z\.?ai|z-ai|glm-4|glm-5|chatglm)\b/i,
   /\b(gemini|gemini-pro|gemini-flash|gemini-ultra|google\s?ai|bard|palm)\b/i,
   /\b(mistral|mixtral|codestral|mistral-large|mistral-small)\b/i,
   /\b(cohere|command-r|command-r\+|coral|capybara)\b/i,

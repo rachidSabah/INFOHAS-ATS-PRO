@@ -7,7 +7,6 @@ import { geminiProvider } from "../providers/gemini";
 import { ollamaProvider } from "../providers/ollama";
 import { puterProvider } from "../providers/puter";
 import { customProvider } from "../providers/custom";
-import { zaiFallbackProvider } from "../providers/zai-fallback";
 
 // OpenCode Zen uses the OpenAI-compatible API schema
 const opencodeProvider = new OpenAICompatibleProvider("opencode");
@@ -30,7 +29,6 @@ const REGISTRY: Record<string, AIProviderAdapter> = {
   puter: puterProvider,
   custom: customProvider,
   bedrock: customProvider,
-  "z-ai-fallback": zaiFallbackProvider,
 };
 
 export class ProviderFactory {
