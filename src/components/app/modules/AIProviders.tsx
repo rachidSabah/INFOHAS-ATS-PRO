@@ -62,7 +62,7 @@ export function AIProviders() {
 
   // Default to auth tab if no providers are authenticated — the user needs to
   // connect Puter or Z.ai before anything works. Once authenticated, show providers.
-  const [tab, setTab] = useState<Tab>(!puterStatus.authenticated && !zaiStatus.authenticated ? "auth" : "providers");
+  const [tab, setTab] = useState<Tab>(!puterStatus.authenticated ? "auth" : "providers");
   const [showAdd, setShowAdd] = useState(false);
   const [editing, setEditing] = useState<AIProvider | null>(null);
   const [testing, setTesting] = useState<AIProvider | null>(null);
