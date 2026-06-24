@@ -39,10 +39,12 @@ function isAllowedProviderUrl(urlStr: string): boolean {
 }
 
 export async function POST(req: NextRequest) {
+  // Hoisted so the catch block can reference it in the timeout error message.
+  let proxyTimeoutMs = 30_000;
   try {
     const raw = await req.text().catch(() => "");
     const body = raw ? JSON.parse(raw) : {};
-    const { baseUrl, apiKey, authType, headersJson, model, messages, maxTokens, temperature, responsePath } = body;
+    const { baseUrl, apiKey, authType, headersJson, model, messages, maxTokens, temperature, responsePath, timeoutMs } = body;
 
     if (!baseUrl) {
       return NextResponse.json({ ok: false, error: "baseUrl is required" }, { status: 400 });
@@ -97,8 +99,14 @@ export async function POST(req: NextRequest) {
     };
 
     const controller = new AbortController();
-    const timeoutMs = Math.min((body.timeout || 30) * 1000, 60000);
-    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+    // Respect the client-requested timeoutMs (sent by callUserProvider for
+    // optimizer calls that need up to 120s). Fall back to body.timeout (in
+    // seconds) for older clients. Hard cap at 180s to protect the edge runtime.
+    const clientTimeoutMs = typeof timeoutMs === "number" && timeoutMs > 0
+      ? Math.min(timeoutMs, 180_000)
+      : (body.timeout || 30) * 1000;
+    proxyTimeoutMs = Math.min(clientTimeoutMs, 180_000);
+    const timeoutId = setTimeout(() => controller.abort(), proxyTimeoutMs);
 
     const t0 = performance.now();
     const res = await fetch(url, {
@@ -151,14 +159,18 @@ export async function POST(req: NextRequest) {
     const isAbort = e instanceof Error && e.name === "AbortError";
     const isFetchFail = e instanceof Error && (e.message.includes("fetch") || e.message.includes("Failed to fetch"));
     const msg = isAbort
-      ? "Request timed out"
+      ? `Provider request timed out after ${proxyTimeoutMs / 1000}s`
       : isFetchFail
       ? "The provider endpoint is unreachable. Possible causes: wrong URL, CORS blocked, provider offline."
       : (e instanceof Error ? e.message : "Connection failed");
     console.warn("[ProviderChat] Unhandled error:", msg);
+    // Return BOTH `error` and `message` so clients checking either field work.
+    // The timeout message includes "timed out" so client-side isTimeoutError()
+    // can detect it and apply the timeout cooldown.
     return NextResponse.json({
       ok: false, success: false, code: "PROVIDER_CHAT_FAILED",
-      message: msg, latencyMs: 0,
+      error: msg, message: msg, latencyMs: 0,
+      isTimeout: isAbort,
     });
   }
 }

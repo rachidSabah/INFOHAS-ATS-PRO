@@ -14,6 +14,7 @@
 "use client";
 
 import { callAI, extractJSON } from "./ai";
+import { PIPELINE_STEP_CALL_TIMEOUT_MS } from "./pipeline-watchdog";
 import type { JobDescription } from "./types";
 
 export interface JobIntelligence {
@@ -133,6 +134,9 @@ Return ONLY valid JSON:
       maxTokens: 3000,
       temperature: 0.3,
       taskCategory: "document",
+      // Free-tier models (OpenCode free, Nvidia build-free) can take 40-80s
+      // even on this smaller prompt. The default 60s was too tight.
+      timeoutMs: PIPELINE_STEP_CALL_TIMEOUT_MS,
     });
 
     // Reject local fallback BEFORE parsing — it returns empty/placeholder data

@@ -51,6 +51,7 @@ import {
   withTimeout,
   PIPELINE_TIMEOUT_MS,
   OPTIMIZER_CALL_TIMEOUT_MS,
+  PIPELINE_STEP_CALL_TIMEOUT_MS,
 } from "../pipeline-watchdog";
 
 // ============================================================================
@@ -814,9 +815,14 @@ async function _runOptimizationPipelineInner(input: PipelineInput, watchdog: Opt
         // Provider exhaustion is a non-retryable fatal error
         if (e instanceof OptimizationProviderExhaustedError) {
           optimizeError = e.message;
+          console.warn(`[Pipeline] Resume Optimizer: provider exhausted (non-retryable). ${e.message}`);
           break;
         }
         optimizeError = e?.message || "Unknown error";
+        // Surface the failure in the browser console so it's diagnosable
+        // without opening DevTools state inspectors. The UI log() call only
+        // updates step.log — it does NOT console.log.
+        console.warn(`[Pipeline] Resume Optimizer attempt ${optimizeAttempt}/${maxOptimizeAttempts} failed: ${optimizeError}`);
         log("Resume Optimizer", `Attempt ${optimizeAttempt} failed: ${optimizeError}`);
         if (optimizeAttempt < maxOptimizeAttempts) {
           log("Resume Optimizer", "Retrying optimization…");
@@ -1851,6 +1857,8 @@ Return ONLY valid JSON:
       maxTokens: 1500,
       temperature: 0.3,
       taskCategory: "document",
+      // Free-tier models can take 40-80s on this prompt.
+      timeoutMs: PIPELINE_STEP_CALL_TIMEOUT_MS,
     });
 
     let data: { issues: string[]; suggestions: string[]; confidence: number };

@@ -42,6 +42,16 @@ export const AI_CALL_TIMEOUT_MS = 60_000;
 export const OPTIMIZER_CALL_TIMEOUT_MS = 120_000;
 
 /**
+ * Medium per-AI-call timeout for supporting pipeline steps
+ * (Job Intelligence, Company Intelligence, Skill Gap, Reflection).
+ *
+ * These calls ship smaller prompts (1-3k tokens output) but free-tier
+ * models can still take 40-80s on them. The default 60s was too tight
+ * when combined with the 30s proxy cap (which has been fixed separately).
+ */
+export const PIPELINE_STEP_CALL_TIMEOUT_MS = 90_000;
+
+/**
  * Short cooldown applied when a provider TIMES OUT (not 429/401).
  *
  * Long enough to skip the same broken provider on subsequent pipeline steps

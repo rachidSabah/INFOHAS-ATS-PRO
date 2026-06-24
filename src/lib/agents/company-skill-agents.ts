@@ -21,6 +21,7 @@
 import type { ResumeData, JobDescription } from "../types";
 import type { JobIntelligence } from "../job-intelligence";
 import { callAI, extractJSON } from "../ai";
+import { PIPELINE_STEP_CALL_TIMEOUT_MS } from "../pipeline-watchdog";
 
 // ============================================================================
 // CompanyIntelligenceAgent
@@ -98,6 +99,8 @@ Be specific to ${companyName}. If information is not available for a field, use 
     maxTokens: 1800,
     temperature: 0.3,
     taskCategory: "document",
+    // Free-tier models can take 40-80s on this prompt.
+    timeoutMs: PIPELINE_STEP_CALL_TIMEOUT_MS,
   });
 
   // Reject local fallback — it returns empty/placeholder data
@@ -231,6 +234,8 @@ Be honest. If the candidate is a poor match, say so. The bridging strategy must 
     maxTokens: 2200,
     temperature: 0.3,
     taskCategory: "document",
+    // Free-tier models can take 40-80s on this prompt.
+    timeoutMs: PIPELINE_STEP_CALL_TIMEOUT_MS,
   });
 
   // Reject local fallback — it returns empty/placeholder data

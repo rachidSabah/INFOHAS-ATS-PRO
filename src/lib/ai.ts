@@ -1179,8 +1179,19 @@ async function callUserProvider(
       throw new Error(`Provider "${provider.name}" is in cooldown (previously rate-limited or auth-failed). Skipping.`);
     }
 
+    // Determine the effective timeout for this call.
+    // opts.timeoutMs is set by callAI for the Resume/Aviation Optimizer call
+    // (OPTIMIZER_CALL_TIMEOUT_MS = 120s). Default to provider.timeout or 30s.
+    const effectiveTimeoutMs = opts.timeoutMs && opts.timeoutMs > 0
+      ? opts.timeoutMs
+      : (provider.timeout ?? 30) * 1000;
+
     const ac = new AbortController();
-    const fetchTimeoutMs = Math.min((provider.timeout ?? 30) * 1000 + 5000, 65000);
+    // Give the inner fetch a 5s buffer BEYOND the effective timeout so the
+    // proxy's AbortController (which respects timeoutMs) fires first and
+    // returns a proper timeout error — instead of the client fetch aborting
+    // with a generic AbortError that doesn't trigger cooldown logic.
+    const fetchTimeoutMs = Math.min(effectiveTimeoutMs + 5000, 185_000);
     const fetchTimer = setTimeout(() => ac.abort(), fetchTimeoutMs);
     let proxyRes: Response;
     try {
@@ -1197,7 +1208,10 @@ async function callUserProvider(
           maxTokens: opts.maxTokens ?? provider.maxTokens ?? 4096,
           temperature: opts.temperature ?? provider.temperature ?? 0.7,
           responsePath: provider.responsePath,
-          timeout: provider.timeout ?? 30,
+          // Send BOTH for backward compat: timeout (seconds, old) + timeoutMs (ms, new).
+          // The proxy prefers timeoutMs when present.
+          timeout: Math.floor(effectiveTimeoutMs / 1000),
+          timeoutMs: effectiveTimeoutMs,
         }),
         signal: ac.signal,
       });
@@ -1207,7 +1221,14 @@ async function callUserProvider(
 
     const proxyData = await proxyRes.json();
     if (!proxyData.ok) {
-      throw new Error(proxyData.error || `Provider "${provider.name}" returned an error`);
+      // The proxy returns `error` AND `message` (and `isTimeout` for aborts).
+      // Use all three to construct a timeout-detectable error message.
+      const errMsg = proxyData.error || proxyData.message || `Provider "${provider.name}" returned an error`;
+      const err: any = new Error(errMsg);
+      if (proxyData.isTimeout === true) {
+        err.name = "AbortError"; // so isTimeoutError() detects it
+      }
+      throw err;
     }
     const text = (proxyData.text || "").trim();
     if (!text) {

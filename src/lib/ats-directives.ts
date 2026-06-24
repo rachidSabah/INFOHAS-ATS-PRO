@@ -751,11 +751,21 @@ Return ONLY the JSON object described in the directive. No prose, no markdown fe
     timeoutMs: OPTIMIZER_CALL_TIMEOUT_MS,
   });
 
+  // Diagnostic logging — matches the standard optimizer's log so we can see
+  // which provider served the call and whether the response was big enough.
+  console.info(
+    `[Aviation Optimizer] Provider: ${result.provider}, ` +
+    `Response length: ${result.text?.length ?? 0} chars, ` +
+    `Tokens est: ${result.tokensEstimate}, ` +
+    `isLocalEngine: ${result.isLocalEngine === true}`
+  );
+
   // Reject local fallback — no AI provider actually executed
   if (result.provider === "Local Engine (offline mode)" || result.text.length < 500) {
     throw new Error(
-      "No AI provider available. Optimization could not be completed. " +
-      "Configure an API provider in Settings or sign in to Puter."
+      `No AI provider available. Optimization could not be completed ` +
+      `(provider=${result.provider}, responseLength=${result.text?.length ?? 0}). ` +
+      `Configure an API provider in Settings or sign in to Puter.`
     );
   }
 
