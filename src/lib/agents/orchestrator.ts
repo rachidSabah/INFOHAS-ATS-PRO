@@ -44,6 +44,13 @@ import { runQA, type QAResult } from "./qa-agent";
 import { analyzeCompanyIntelligence, analyzeSkillGap, type CompanyIntelligence, type SkillGapIntelligence } from "./company-skill-agents";
 import { uid, useApp } from "../store";
 import type { ResumeSkill } from "../types";
+import {
+  OptimizationWatchdog,
+  OptimizationTimeoutError,
+  OptimizationProviderExhaustedError,
+  withTimeout,
+  PIPELINE_TIMEOUT_MS,
+} from "../pipeline-watchdog";
 
 // ============================================================================
 // AI response normalization helpers
@@ -530,6 +537,57 @@ export interface ReflectionResult {
  * @returns A PipelineResult with all intermediate artifacts + the optimized resume.
  */
 export async function runOptimizationPipeline(input: PipelineInput): Promise<PipelineResult> {
+  // ============================================================
+  // Phase 15-24: Wrap the entire pipeline in a 120s hard timeout
+  // and an OptimizationWatchdog for per-step stall detection.
+  // ============================================================
+  const watchdog = new OptimizationWatchdog({
+    onStall: (stepName, elapsedMs) => {
+      console.error(
+        `[Watchdog] Pipeline STALL: "${stepName}" has been running for ${Math.round(elapsedMs / 1000)}s. This indicates a deadlock.`
+      );
+    },
+  });
+
+  try {
+    return await withTimeout(
+      _runOptimizationPipelineInner(input, watchdog),
+      PIPELINE_TIMEOUT_MS,
+      "runOptimizationPipeline"
+    );
+  } catch (err: any) {
+    // Ensure watchdog is always stopped
+    watchdog.stop();
+    if (err instanceof OptimizationTimeoutError) {
+      console.error("[Pipeline] 120s hard timeout reached. Aborting optimization.");
+      return {
+        optimizedResume: input.resume,
+        beforeATS: null,
+        afterATS: null,
+        jobIntelligence: null,
+        companyIntelligence: null,
+        skillGap: null,
+        qa: null,
+        reflection: null,
+        steps: [],
+        status: "failed",
+        error: "Optimization timed out after 120 seconds. Please retry. If the issue persists, check your AI provider connection.",
+        provider: "none",
+        charCount: 0,
+        metCharTarget: false,
+      };
+    }
+    throw err;
+  } finally {
+    watchdog.stop();
+  }
+}
+
+/**
+ * Inner pipeline (unwrapped). Called by runOptimizationPipeline which provides
+ * the 120s timeout and watchdog lifecycle management.
+ */
+async function _runOptimizationPipelineInner(input: PipelineInput, watchdog: OptimizationWatchdog): Promise<PipelineResult> {
   const { resume, jd, userDirectives, aviationMode, checkExport = false, enableReflection = true } = input;
 
   // ============================================================
@@ -608,8 +666,14 @@ export async function runOptimizationPipeline(input: PipelineInput): Promise<Pip
     step.startedAt = new Date().toISOString();
     log("Job Intelligence", "Analyzing job description for skills, keywords, and industry context…");
     emitProgress(0, "Analyzing job description…");
-
-    result.jobIntelligence = await analyzeJobIntelligence(jd);
+    const jiHandle = watchdog.startStep("Job Intelligence");
+    try {
+      result.jobIntelligence = await analyzeJobIntelligence(jd);
+      jiHandle.complete();
+    } catch (jiErr: any) {
+      jiHandle.fail(jiErr);
+      throw jiErr;
+    }
 
     step.completedAt = new Date().toISOString();
     step.durationMs = Date.now() - new Date(step.startedAt).getTime();
@@ -721,6 +785,7 @@ export async function runOptimizationPipeline(input: PipelineInput): Promise<Pip
 
     while (optimizeAttempt < maxOptimizeAttempts && !optimizeResult) {
       optimizeAttempt++;
+      const optHandle = watchdog.startStep(`Resume Optimizer (attempt ${optimizeAttempt})`);
       try {
         if (aviationMode) {
           log("Resume Optimizer", `Aviation ATS mode → ${aviationMode.airlineProfile}. Calling aviationOptimize() with unified directive…`);
@@ -742,7 +807,14 @@ export async function runOptimizationPipeline(input: PipelineInput): Promise<Pip
           );
           optimizeResult = optimizeAttemptResult;
         }
+        optHandle.complete();
       } catch (e: any) {
+        optHandle.fail(e);
+        // Provider exhaustion is a non-retryable fatal error
+        if (e instanceof OptimizationProviderExhaustedError) {
+          optimizeError = e.message;
+          break;
+        }
         optimizeError = e?.message || "Unknown error";
         log("Resume Optimizer", `Attempt ${optimizeAttempt} failed: ${optimizeError}`);
         if (optimizeAttempt < maxOptimizeAttempts) {

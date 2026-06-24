@@ -18,7 +18,6 @@ export const ALLOWED_PROVIDER_HOSTS = new Set([
   "api.mistral.ai",
   "api.cohere.com",
   "api.together.xyz",
-  "api.z.ai",
   "api.aimlapi.com",
   "api.azure.com",
   "api-inference.huggingface.co",

@@ -74,7 +74,6 @@ export async function GET(_req: NextRequest): Promise<NextResponse<EnhancedHealt
   }
 
   const hasDbUrl = !!process.env.DATABASE_URL;
-  const hasZaiKey = !!process.env.ZAI_API_KEY;
   const serverSideProviders = configuredProviders.filter(
     (p) => !["puter"].includes(p)
   ).length;
@@ -112,15 +111,12 @@ export async function GET(_req: NextRequest): Promise<NextResponse<EnhancedHealt
   };
 
   const aiCheck: SubsystemHealth = {
-    status: configuredProviders.length > 0 || hasZaiKey ? "ok" : "degraded",
+    status: configuredProviders.length > 0 ? "ok" : "degraded",
     detail: configuredProviders.length > 0
-      ? `AI routing through ${configuredProviders.length} providers with failover chain. Z.ai fallback ${hasZaiKey ? "active" : "not configured"}.`
-      : hasZaiKey
-        ? "Z.ai fallback active. No other server-side providers configured."
-        : "No AI providers configured. Falls back to browser-auth (Puter).",
+      ? `AI routing through ${configuredProviders.length} providers with failover chain.`
+      : "No AI providers configured. Falls back to browser-auth (Puter).",
     metrics: {
       providers: configuredProviders.length,
-      zaiFallback: hasZaiKey ? 1 : 0,
     },
   };
 

@@ -90,7 +90,6 @@ export async function GET(_req: NextRequest): Promise<NextResponse<QAResponse>> 
   // 3. DATABASE CONFIGURATION
   // ========================================
   const hasDbUrl = !!process.env.DATABASE_URL;
-  const hasZaiKey = !!process.env.ZAI_API_KEY;
   results.push({
     name: "database_configuration",
     category: "persistence",
@@ -100,19 +99,17 @@ export async function GET(_req: NextRequest): Promise<NextResponse<QAResponse>> 
   });
 
   // ========================================
-  // 4. AI FALLBACK
+  // 4. AI PROVIDERS CONFIGURED
   // ========================================
   results.push({
-    name: "ai_fallback_available",
+    name: "ai_providers_configured",
     category: "provider",
     severity: "high",
-    passed: hasZaiKey || totalConfigured > 0,
-    message: hasZaiKey
-      ? "Z.ai server-side fallback active"
-      : totalConfigured > 0
-        ? "AI providers configured (no Z.ai fallback)"
-        : "NO AI providers or fallback — system cannot optimize resumes",
-    suggestion: !hasZaiKey && totalConfigured === 0 ? "Set ZAI_API_KEY or configure at least one provider." : undefined,
+    passed: totalConfigured > 0,
+    message: totalConfigured > 0
+      ? `${totalConfigured} AI provider(s) configured. Browser-auth (Puter) or API keys active.`
+      : "NO AI providers configured — system cannot optimize resumes",
+    suggestion: totalConfigured === 0 ? "Configure at least one API provider or ensure Puter is active." : undefined,
   });
 
   // ========================================
@@ -351,9 +348,7 @@ export async function GET(_req: NextRequest): Promise<NextResponse<QAResponse>> 
   if (serverSideProviders.length < 2) {
     suggestions.push("Add 2+ server-side providers for reliable failover during outages.");
   }
-  if (!hasZaiKey) {
-    suggestions.push("Set ZAI_API_KEY for server-side AI fallback when all providers fail.");
-  }
+
 
   return NextResponse.json({
     status,

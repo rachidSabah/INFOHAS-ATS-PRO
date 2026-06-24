@@ -320,7 +320,10 @@ async function reportAgentStatusToD1(
       }),
     });
   } catch (e) {
-    // Silent fail — don't pollute the console with D1 errors
+    // Non-fatal: D1 task tracking is best-effort. Log in dev only to avoid console spam.
+    if (process.env.NODE_ENV !== "production") {
+      console.debug("[supervisor] D1 agent status report failed (non-fatal):", agentId, status, e instanceof Error ? e.message : e);
+    }
   }
 }
 

@@ -121,7 +121,9 @@ export class PuterProvider implements OAuthAIProvider {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ id }),
       });
-    } catch (e) {}
+    } catch (e) {
+      console.debug("[PuterProvider] Non-fatal: switch API notification failed:", e instanceof Error ? e.message : e);
+    }
   }
 
   async removeAccount(id: string): Promise<void> {
@@ -139,7 +141,9 @@ export class PuterProvider implements OAuthAIProvider {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ id }),
       });
-    } catch (e) {}
+    } catch (e) {
+      console.debug("[PuterProvider] Non-fatal: remove API notification failed:", e instanceof Error ? e.message : e);
+    }
   }
 
   async rotateToNextHealthyAccount(): Promise<boolean> {
@@ -163,7 +167,9 @@ export class PuterProvider implements OAuthAIProvider {
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ id: account.id }),
           });
-        } catch (e) {}
+        } catch (e) {
+          console.debug("[PuterProvider] Non-fatal: rotate API notification failed:", e instanceof Error ? e.message : e);
+        }
         
         return true;
       }
@@ -174,15 +180,26 @@ export class PuterProvider implements OAuthAIProvider {
   async syncActiveAccountToSession(): Promise<void> {
     const active = this.accounts.find(a => a.active);
     if (active) {
-      // Inject token into window.puter if supported, otherwise just update session
+      // Inject token into window.puter if supported.
+      // Guard with a ready-check to avoid triggering Puter's internal socket
+      // reconnect while it's already connecting — this causes the
+      // "WebSocket closed before connection established" race.
       try {
-        if (typeof window !== "undefined" && window.puter?.setAuthToken) {
-           window.puter.setAuthToken(active.accessToken);
-        } else if (typeof window !== "undefined" && window.puter) {
-           // Fallback to internal token property if setAuthToken doesn't exist
-           window.puter.authToken = active.accessToken;
+        if (typeof window !== "undefined" && window.puter) {
+          // Only call setAuthToken / assign authToken if Puter is fully loaded.
+          // Puter sets window.puter.ready when initialisation is complete.
+          const puterReady = (window.puter as any).ready !== false;
+          if (puterReady) {
+            if (typeof window.puter.setAuthToken === "function") {
+              window.puter.setAuthToken(active.accessToken);
+            } else {
+              window.puter.authToken = active.accessToken;
+            }
+          }
         }
-      } catch (e) {}
+      } catch (e) {
+        console.debug("[PuterProvider] Non-fatal: setAuthToken failed (Puter not ready or API changed):", e instanceof Error ? e.message : e);
+      }
 
       this.session.authenticated = true;
       this.session.email = active.email;
@@ -258,7 +275,9 @@ export class PuterProvider implements OAuthAIProvider {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ email: newAccount.email }),
         });
-      } catch (e) {}
+      } catch (e) {
+        console.debug("[PuterProvider] Non-fatal: login API notification failed:", e instanceof Error ? e.message : e);
+      }
 
       return this.session;
     } catch (e: any) {
@@ -376,7 +395,9 @@ export class PuterProvider implements OAuthAIProvider {
 
     // Proactively refresh if expiring soon
     if (isSessionExpiringSoon(this.session)) {
-      this.refresh().catch(() => {});
+      this.refresh().catch((err) => {
+        console.warn("[PuterProvider] Proactive session refresh failed in background:", err instanceof Error ? err.message : err);
+      });
     }
 
     console.log("[PROVIDER AUTH] session restored");
@@ -438,7 +459,14 @@ export class PuterProvider implements OAuthAIProvider {
       }
 
       try {
-        const resp: any = await window.puter.ai.chat(messages, chatOpts);
+        // Wrap puter.ai.chat in a 30s timeout to prevent it hanging forever
+        // when the WebSocket connection stalls or the server is overloaded.
+        const PUTER_CALL_TIMEOUT_MS = 30_000;
+        const chatPromise: Promise<any> = window.puter.ai.chat(messages, chatOpts);
+        const timeoutPromise: Promise<never> = new Promise((_, reject) =>
+          setTimeout(() => reject(new Error(`Puter.ai.chat timed out after ${PUTER_CALL_TIMEOUT_MS / 1000}s`)), PUTER_CALL_TIMEOUT_MS)
+        );
+        const resp: any = await Promise.race([chatPromise, timeoutPromise]);
 
         // Parse the response
         let text = "";

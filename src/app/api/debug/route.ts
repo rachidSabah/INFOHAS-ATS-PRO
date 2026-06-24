@@ -16,7 +16,6 @@ interface DebugResponse {
   environment: {
     nodeEnv: string | undefined;
     hasDatabase: boolean;
-    hasZaiKey: boolean;
     providerCount: number;
     configuredProviders: string[];
   };
@@ -91,7 +90,6 @@ export async function GET(_req: NextRequest): Promise<NextResponse<DebugResponse
     environment: {
       nodeEnv: process.env.NODE_ENV,
       hasDatabase: !!process.env.DATABASE_URL,
-      hasZaiKey: !!process.env.ZAI_API_KEY,
       providerCount: configuredCount,
       configuredProviders,
     },
@@ -112,7 +110,6 @@ export async function GET(_req: NextRequest): Promise<NextResponse<DebugResponse
         "All catch blocks include error handling or logging",
       ],
       fallbackPatterns: [
-        "Z.ai fallback provider configured for server-side fallback",
         "Puter.js browser-auth fallback for client-side",
         "Provider failover chain: default → fallbacks → remaining active providers",
       ],
@@ -120,7 +117,7 @@ export async function GET(_req: NextRequest): Promise<NextResponse<DebugResponse
     },
     providerDiagnostics: {
       serverSide: serverSideProviders,
-      clientSide: ["Puter (browser-auth)", "Z.ai (server fallback via /api/ai/chat)"],
+      clientSide: ["Puter (browser-auth OAuth via puter.auth.signIn)"],
       failoverChain: "default provider → fallback providers → other active providers (sorted by priority, excluding 'down')",
     },
     cacheDiagnostics: {

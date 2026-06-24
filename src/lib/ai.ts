@@ -3,12 +3,15 @@
 //   0. User-configured default provider (from AI Providers settings) — FIRST priority.
 //      Honors the user's chosen model, API key, base URL, and auth type.
 //   1. Puter.js (free, user authenticates with Google/GitHub/etc via Puter). Loaded from layout.
-//   2. Server-side /api/ai/chat (Z.ai REST fallback) — used when Puter is unavailable.
+//   2. Server-side provider fallback (OpenCode, DeepSeek, Groq, etc.) — used when Puter is unavailable.
 //   3. Local rule-based fallback (deterministic, always works as offline mode).
 //
 // All AI calls are wrapped in failover with try/catch + provider rotation.
 
 "use client";
+
+import { withTimeout, OptimizationProviderExhaustedError, AI_CALL_TIMEOUT_MS } from "./pipeline-watchdog";
+export { OptimizationProviderExhaustedError } from "./pipeline-watchdog";
 
 import { useApp } from "./store";
 import { startAICall, truncatePromptToTokenLimit, checkTokenLimit, MAX_INPUT_TOKENS } from "./ai-diagnostics";
@@ -86,8 +89,6 @@ function assert(condition: boolean, message?: string) {
     throw new Error(message || "Assertion failed");
   }
 }
-
-console.log("[PROVIDER]\nZ.ai removed from registry.");
 
 // ============================================================================
 // Puter.js helpers — user-initiated auth + status checks
@@ -795,8 +796,7 @@ function withTimeout<T>(promise: Promise<T>, ms: number, label = "operation"): P
 // If we keep retrying Puter on every subsequent callAI(), we burn through
 // the same error path repeatedly — producing a "Failed to fetch" loop.
 // Instead, once Puter fails with a quota error, we skip Puter entirely
-// for the next 5 minutes. The user can still fall through to the server
-// fallback (Z.ai) and local generator.
+// for the next 5 minutes. The user can still fall through to local generator.
 
 const PUTER_COOLDOWN_KEY = "resumeai-puter-cooldown-until";
 const PUTER_COOLDOWN_MS = 5 * 60 * 1000; // 5 minutes
@@ -1275,18 +1275,22 @@ export async function callAI(opts: AICallOptions): Promise<AICallResult> {
     const { getPuterProvider } = await import("./providers/puter-provider");
     const puterProvider = getPuterProvider();
     try {
-      const resp = await puterProvider.generate({
-        systemPrompt: finalOpts.systemPrompt,
-        userPrompt: finalOpts.userPrompt,
-        maxTokens: finalOpts.maxTokens,
-        temperature: finalOpts.temperature,
-        model: provider.modelName,
-      });
+      const resp = await withTimeout(
+        puterProvider.generate({
+          systemPrompt: finalOpts.systemPrompt,
+          userPrompt: finalOpts.userPrompt,
+          maxTokens: finalOpts.maxTokens,
+          temperature: finalOpts.temperature,
+          model: provider.modelName,
+        }),
+        AI_CALL_TIMEOUT_MS,
+        "Puter.generate"
+      );
 
       const text = resp.text;
       assert(text !== "", "Provider response is empty");
-      if (text === "" || text == null || text.length === 0) {
-        throw new ProviderReturnedEmptyResponse("The AI provider returned an empty response.\nPlease retry or switch providers.");
+      if (!text || text.length === 0) {
+        throw new ProviderReturnedEmptyResponse();
       }
 
       return {
@@ -1296,21 +1300,23 @@ export async function callAI(opts: AICallOptions): Promise<AICallResult> {
         tokensEstimate: estTokens(finalOpts.userPrompt + (finalOpts.systemPrompt ?? "")),
       };
     } catch (e: any) {
-      // If Puter fails, we fall back to secondary providers in the pool!
+      // Puter failed — try secondary providers in the pool
       console.warn(`[AI] Puter failed: ${e?.message || e}. Trying secondary providers...`);
-      // Find secondary providers
       const state = useApp.getState();
-      const providers = state.providers || [];
-      const secondary = providers.filter((p: any) => p.isActive && p.type !== "puter");
-      if (secondary.length > 0) {
-        const fallbackProvider = secondary[0]; // try first secondary
+      const allProviders = state.providers || [];
+      const secondary = allProviders.filter((p: any) => p.isActive && p.type !== "puter");
+      const providerErrors: string[] = [`Puter: ${e?.message || e}`];
+
+      for (const fallbackProvider of secondary) {
         console.log(`[ROUTER]\nProvider selected: ${fallbackProvider.name}`);
         try {
-          const text = await callUserProvider(fallbackProvider, finalOpts);
+          const text = await withTimeout(
+            callUserProvider(fallbackProvider, finalOpts),
+            AI_CALL_TIMEOUT_MS,
+            `${fallbackProvider.name}.generate`
+          );
           assert(text !== "", "Provider response is empty");
-          if (text === "" || text == null || text.length === 0) {
-            throw new ProviderReturnedEmptyResponse("The AI provider returned an empty response.\nPlease retry or switch providers.");
-          }
+          if (!text || text.length === 0) throw new ProviderReturnedEmptyResponse();
           return {
             text,
             provider: fallbackProvider.name,
@@ -1318,22 +1324,20 @@ export async function callAI(opts: AICallOptions): Promise<AICallResult> {
             tokensEstimate: estTokens(finalOpts.userPrompt + (finalOpts.systemPrompt ?? "")),
           };
         } catch (secErr: any) {
-          // If secondary also fails, fallback to Offline Engine
-          console.warn(`[AI] Secondary provider ${fallbackProvider.name} failed: ${secErr?.message || secErr}. Trying local fallback...`);
+          providerErrors.push(`${fallbackProvider.name}: ${secErr?.message || secErr}`);
+          console.warn(`[AI] Secondary provider ${fallbackProvider.name} failed: ${secErr?.message || secErr}`);
         }
       }
-      
-      // Fallback to local
+
+      // All providers exhausted
       if (opts.isOptimizerCall || taskCategory === "document") {
-        throw new ProviderUnavailableError(
-          "No AI provider available. (No offline fallback allowed for Industry ATS Mode)"
+        throw new OptimizationProviderExhaustedError(
+          `All AI providers failed for this request.\n${providerErrors.map((e, i) => `  ${i + 1}. ${e}`).join("\n")}`
         );
       }
       const text = localGenerate(finalOpts);
       assert(text !== "", "Provider response is empty");
-      if (text === "" || text == null || text.length === 0) {
-        throw new ProviderReturnedEmptyResponse("The AI provider returned an empty response.\nPlease retry or switch providers.");
-      }
+      if (!text || text.length === 0) throw new ProviderReturnedEmptyResponse();
       return {
         text,
         provider: "Local Engine (offline mode)",
@@ -1344,13 +1348,16 @@ export async function callAI(opts: AICallOptions): Promise<AICallResult> {
     }
   }
 
-  // Secondary/API Provider
+  // Secondary/API Provider — wrap in timeout
+  const providerErrors: string[] = [];
   try {
-    const text = await callUserProvider(provider, finalOpts);
+    const text = await withTimeout(
+      callUserProvider(provider, finalOpts),
+      AI_CALL_TIMEOUT_MS,
+      `${provider.name}.generate`
+    );
     assert(text !== "", "Provider response is empty");
-    if (text === "" || text == null || text.length === 0) {
-      throw new ProviderReturnedEmptyResponse("The AI provider returned an empty response.\nPlease retry or switch providers.");
-    }
+    if (!text || text.length === 0) throw new ProviderReturnedEmptyResponse();
     return {
       text,
       provider: provider.name,
@@ -1358,15 +1365,16 @@ export async function callAI(opts: AICallOptions): Promise<AICallResult> {
       tokensEstimate: estTokens(finalOpts.userPrompt + (finalOpts.systemPrompt ?? "")),
     };
   } catch (e: any) {
-    if (e?.message?.includes("429") || (e?.statusCode === 429)) {
-      console.log("[PROVIDER]\nNvidia returned 429.");
+    if (e?.message?.includes("429") || e?.statusCode === 429) {
+      console.log("[PROVIDER]\nPrimary provider returned 429.");
     }
+    providerErrors.push(`${provider.name}: ${e?.message || e}`);
     console.warn(`[AI] Primary provider ${provider.name} failed: ${e?.message || e}. Trying fallbacks...`);
-    
-    // Check if Puter is active & authenticated
+
+    // Check if Puter is active & authenticated as fallback
     const state = useApp.getState();
-    const providers = state.providers || [];
-    const puter = providers.find((p: any) => p.type === "puter" && p.isActive);
+    const allProviders = state.providers || [];
+    const puter = allProviders.find((p: any) => p.type === "puter" && p.isActive);
     let puterAuthenticated = false;
     if (puter) {
       try {
@@ -1379,25 +1387,24 @@ export async function callAI(opts: AICallOptions): Promise<AICallResult> {
     }
 
     if (puter && puterAuthenticated) {
-      console.log("[ROUTER]\nProvider selected: Puter");
-      if (opts.isOptimizerCall || taskCategory === "document") {
-        console.log("[ROUTER]\nIndustry ATS Mode using Puter.");
-      }
+      console.log("[ROUTER]\nProvider selected: Puter (fallback)");
       try {
         const { getPuterProvider } = await import("./providers/puter-provider");
         const puterProvider = getPuterProvider();
-        const resp = await puterProvider.generate({
-          systemPrompt: finalOpts.systemPrompt,
-          userPrompt: finalOpts.userPrompt,
-          maxTokens: finalOpts.maxTokens,
-          temperature: finalOpts.temperature,
-          model: puter.modelName,
-        });
+        const resp = await withTimeout(
+          puterProvider.generate({
+            systemPrompt: finalOpts.systemPrompt,
+            userPrompt: finalOpts.userPrompt,
+            maxTokens: finalOpts.maxTokens,
+            temperature: finalOpts.temperature,
+            model: puter.modelName,
+          }),
+          AI_CALL_TIMEOUT_MS,
+          "Puter.generate (fallback)"
+        );
         const text = resp.text;
         assert(text !== "", "Provider response is empty");
-        if (text === "" || text == null || text.length === 0) {
-          throw new ProviderReturnedEmptyResponse("The AI provider returned an empty response.\nPlease retry or switch providers.");
-        }
+        if (!text || text.length === 0) throw new ProviderReturnedEmptyResponse();
         return {
           text,
           provider: "Puter.js",
@@ -1405,20 +1412,25 @@ export async function callAI(opts: AICallOptions): Promise<AICallResult> {
           tokensEstimate: estTokens(finalOpts.userPrompt + (finalOpts.systemPrompt ?? "")),
         };
       } catch (puterErr: any) {
+        providerErrors.push(`Puter (fallback): ${puterErr?.message || puterErr}`);
         console.warn(`[AI] Puter fallback failed: ${puterErr?.message || puterErr}`);
       }
     }
 
-    // Try other secondary providers
-    const otherSecondary = providers.filter((p: any) => p.isActive && p.type !== "puter" && p.id !== provider.id);
+    // Try all other active secondary providers
+    const otherSecondary = allProviders.filter(
+      (p: any) => p.isActive && p.type !== "puter" && p.id !== provider.id
+    );
     for (const altProvider of otherSecondary) {
       console.log(`[ROUTER]\nProvider selected: ${altProvider.name}`);
       try {
-        const text = await callUserProvider(altProvider, finalOpts);
+        const text = await withTimeout(
+          callUserProvider(altProvider, finalOpts),
+          AI_CALL_TIMEOUT_MS,
+          `${altProvider.name}.generate`
+        );
         assert(text !== "", "Provider response is empty");
-        if (text === "" || text == null || text.length === 0) {
-          throw new ProviderReturnedEmptyResponse("The AI provider returned an empty response.\nPlease retry or switch providers.");
-        }
+        if (!text || text.length === 0) throw new ProviderReturnedEmptyResponse();
         return {
           text,
           provider: altProvider.name,
@@ -1426,21 +1438,22 @@ export async function callAI(opts: AICallOptions): Promise<AICallResult> {
           tokensEstimate: estTokens(finalOpts.userPrompt + (finalOpts.systemPrompt ?? "")),
         };
       } catch (altErr: any) {
+        providerErrors.push(`${altProvider.name}: ${altErr?.message || altErr}`);
         console.warn(`[AI] Alternate provider ${altProvider.name} failed: ${altErr?.message || altErr}`);
       }
     }
 
-    // Finally fallback to local
+    // All providers exhausted — hard fail for optimizer calls
     if (opts.isOptimizerCall || taskCategory === "document") {
-      throw new ProviderUnavailableError(
-        "No AI provider available. (No offline fallback allowed for Industry ATS Mode)"
+      throw new OptimizationProviderExhaustedError(
+        `All AI providers failed for this optimization request.\n${providerErrors.map((e, i) => `  ${i + 1}. ${e}`).join("\n")}`
       );
     }
+
+    // Non-optimizer calls can use local engine as last resort
     const text = localGenerate(finalOpts);
     assert(text !== "", "Provider response is empty");
-    if (text === "" || text == null || text.length === 0) {
-      throw new ProviderReturnedEmptyResponse("The AI provider returned an empty response.\nPlease retry or switch providers.");
-    }
+    if (!text || text.length === 0) throw new ProviderReturnedEmptyResponse();
     return {
       text,
       provider: "Local Engine (offline mode)",
@@ -2027,7 +2040,6 @@ export function useAIProviders() {
 
 export function usePreferredProvider() {
   return useApp((s) =>
-    s.providers.find((p) => p.isActive && p.type !== "z-ai-fallback") ??
     s.providers.find((p) => p.isActive) ??
     null
   );
