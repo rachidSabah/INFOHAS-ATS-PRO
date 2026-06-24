@@ -1,4 +1,4 @@
-# DB migration 0002: Enhanced AI Provider Management
+-- DB migration 0002: Enhanced AI Provider Management
 -- Adds new columns to ai_providers and creates ai_provider_logs table.
 -- Run with: wrangler d1 migrations apply resumeai-pro-db --remote
 

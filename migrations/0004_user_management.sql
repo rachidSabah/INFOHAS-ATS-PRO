@@ -1,4 +1,4 @@
-# DB migration 0004: Enhanced user management with approval workflow
+-- DB migration 0004: Enhanced user management with approval workflow
 -- Run with: wrangler d1 execute resumeai-pro-db --file=migrations/0004_user_management.sql --remote
 
 -- Update users table with new columns

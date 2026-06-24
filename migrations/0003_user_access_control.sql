@@ -1,4 +1,4 @@
-# DB migration 0003: Add allowed_for_regular_users column to ai_providers
+-- DB migration 0003: Add allowed_for_regular_users column to ai_providers
 -- Run with: wrangler d1 execute resumeai-pro-db --file=migrations/0003_user_access_control.sql --remote
 
 -- Add column: controls whether non-super-admin users can use this provider

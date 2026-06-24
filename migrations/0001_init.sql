@@ -1,4 +1,4 @@
-# DB migration: initial schema for ResumeAI Pro (Cloudflare D1 + Drizzle ORM)
+-- DB migration: initial schema for ResumeAI Pro (Cloudflare D1 + Drizzle ORM)
 -- Run with: wrangler d1 migrations apply resumeai-pro-db --remote
 
 -- Users
