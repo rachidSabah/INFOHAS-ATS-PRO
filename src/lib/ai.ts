@@ -1354,12 +1354,8 @@ export async function callAI(opts: AICallOptions): Promise<AICallResult> {
 
   // Execute the selected provider
   if (provider.type === "local") {
-    // Check if document/optimizer task - throw error instead of silent local fallback
-    if (opts.isOptimizerCall || taskCategory === "document") {
-      throw new ProviderUnavailableError(
-        "No AI provider available. (No offline fallback allowed for Industry ATS Mode)"
-      );
-    }
+    // If all real providers are unavailable, fall back to the local engine
+    // for a best-effort output rather than completely failing the user.
     const text = localGenerate(finalOpts);
     assert(text !== "", "Provider response is empty");
     if (text === "" || text == null || text.length === 0) {
@@ -1445,132 +1441,146 @@ export async function callAI(opts: AICallOptions): Promise<AICallResult> {
         }
       }
 
-      // All providers exhausted — always throw; never fall to local engine which produces fake output
-      throw new OptimizationProviderExhaustedError(
-        `All AI providers failed for this request.\n${providerErrors.map((e, i) => `  ${i + 1}. ${e}`).join("\n")}`
-      );
+      // All providers exhausted — fall back to local engine for best-effort output
+      return fallbackToLocalEngine(finalOpts, t0, providerErrors);
     }
   }
 
   // Secondary/API Provider — wrap in timeout
   const providerErrors: string[] = [];
-  try {
-    const text = await withTimeout(
-      callUserProvider(provider, finalOpts),
-      AI_CALL_TIMEOUT_MS,
-      `${provider.name}.generate`
-    );
-    assert(text !== "", "Provider response is empty");
-    if (!text || text.length === 0) throw new ProviderReturnedEmptyResponse();
+  const primaryCooldownId = provider.id || provider.name || provider.type;
+
+  // Try primary provider only if not in cooldown
+  if (!isProviderInCooldown(primaryCooldownId)) {
+    try {
+      const text = await withTimeout(
+        callUserProvider(provider, finalOpts),
+        AI_CALL_TIMEOUT_MS,
+        `${provider.name}.generate`
+      );
+      assert(text !== "", "Provider response is empty");
+      if (!text || text.length === 0) throw new ProviderReturnedEmptyResponse();
+      return {
+        text,
+        provider: provider.name,
+        latencyMs: Math.round(performance.now() - t0),
+        tokensEstimate: estTokens(finalOpts.userPrompt + (finalOpts.systemPrompt ?? "")),
+      };
+    } catch (e: any) {
+      const eMsg = e?.message || String(e);
+      if (e?.statusCode === 429 || /429/.test(eMsg) || /rate.?limit/i.test(eMsg) || /FreeUsageLimitError/i.test(eMsg)) {
+        console.log("[PROVIDER]\nPrimary provider returned 429.");
+        markProvider429Cooldown(primaryCooldownId);
+      } else if (e?.statusCode === 401 || /401/.test(eMsg) || /billing/i.test(eMsg) || /payment/i.test(eMsg) || /CreditsError/i.test(eMsg)) {
+        markProvider401Cooldown(primaryCooldownId);
+      }
+      providerErrors.push(`${provider.name}: ${eMsg}`);
+      console.warn(`[AI] Primary provider ${provider.name} failed: ${eMsg}. Trying fallbacks...`);
+    }
+  } else {
+    console.warn(`[AI] Primary provider ${provider.name} is in cooldown — skipping to fallbacks.`);
+    providerErrors.push(`${provider.name}: in cooldown (rate-limited or auth-failed)`);
+  }
+
+  // === FALLBACK LOGIC: Try Puter, then all other active secondary providers ===
+  const state = useApp.getState();
+  const allProviders = state.providers || [];
+  const puter = allProviders.find((p: any) => p.type === "puter" && p.isActive);
+  let puterAuthenticated = false;
+  if (puter) {
+    try {
+      const { getPuterProvider } = await import("./providers/puter-provider");
+      const puterProvider = getPuterProvider();
+      puterAuthenticated = await puterProvider.tryRefresh();
+    } catch {
+      puterAuthenticated = false;
+    }
+  }
+
+  if (puter && puterAuthenticated) {
+    console.log("[ROUTER]\nProvider selected: Puter (fallback)");
+    try {
+      const { getPuterProvider } = await import("./providers/puter-provider");
+      const puterProvider = getPuterProvider();
+      const resp = await withTimeout(
+        puterProvider.generate({
+          systemPrompt: finalOpts.systemPrompt,
+          userPrompt: finalOpts.userPrompt,
+          maxTokens: finalOpts.maxTokens,
+          temperature: finalOpts.temperature,
+          model: puter.modelName,
+        }),
+        AI_CALL_TIMEOUT_MS,
+        "Puter.generate (fallback)"
+      );
+      const text = resp.text;
+      assert(text !== "", "Provider response is empty");
+      if (!text || text.length === 0) throw new ProviderReturnedEmptyResponse();
+      return {
+        text,
+        provider: "Puter.js",
+        latencyMs: Math.round(performance.now() - t0),
+        tokensEstimate: estTokens(finalOpts.userPrompt + (finalOpts.systemPrompt ?? "")),
+      };
+    } catch (puterErr: any) {
+      providerErrors.push(`Puter (fallback): ${puterErr?.message || puterErr}`);
+      console.warn(`[AI] Puter fallback failed: ${puterErr?.message || puterErr}`);
+    }
+  }
+
+  // Try all other active secondary providers
+  const otherSecondary = allProviders.filter(
+    (p: any) => p.isActive && p.type !== "puter" && p.id !== provider.id
+  );
+  for (const altProvider of otherSecondary) {
+    const altCooldownId = altProvider.id || altProvider.name || altProvider.type;
+    if (isProviderInCooldown(altCooldownId)) {
+      console.info(`[AI] Skipping ${altProvider.name} — in cooldown.`);
+      providerErrors.push(`${altProvider.name}: in cooldown (rate-limited or auth-failed)`);
+      continue;
+    }
+    console.log(`[ROUTER]\nProvider selected: ${altProvider.name}`);
+    try {
+      const text = await withTimeout(
+        callUserProvider(altProvider, finalOpts),
+        AI_CALL_TIMEOUT_MS,
+        `${altProvider.name}.generate`
+      );
+      assert(text !== "", "Provider response is empty");
+      if (!text || text.length === 0) throw new ProviderReturnedEmptyResponse();
+      return {
+        text,
+        provider: altProvider.name,
+        latencyMs: Math.round(performance.now() - t0),
+        tokensEstimate: estTokens(finalOpts.userPrompt + (finalOpts.systemPrompt ?? "")),
+      };
+    } catch (altErr: any) {
+      const altErrMsg = altErr?.message || String(altErr);
+      if (altErr?.statusCode === 429 || /429/.test(altErrMsg) || /rate.?limit/i.test(altErrMsg) || /FreeUsageLimitError/i.test(altErrMsg)) {
+        markProvider429Cooldown(altCooldownId);
+      } else if (altErr?.statusCode === 401 || /401/.test(altErrMsg) || /billing/i.test(altErrMsg) || /payment/i.test(altErrMsg) || /CreditsError/i.test(altErrMsg)) {
+        markProvider401Cooldown(altCooldownId);
+      }
+      providerErrors.push(`${altProvider.name}: ${altErrMsg}`);
+      console.warn(`[AI] Alternate provider ${altProvider.name} failed: ${altErrMsg}`);
+    }
+  }
+
+  // ULTIMATE FALLBACK: All real providers exhausted — return local engine output
+  console.warn("[AI] All real providers failed. Falling back to local engine.");
+  const text = localGenerate(finalOpts);
+  if (text) {
     return {
       text,
-      provider: provider.name,
+      provider: "Local Engine (fallback)",
       latencyMs: Math.round(performance.now() - t0),
       tokensEstimate: estTokens(finalOpts.userPrompt + (finalOpts.systemPrompt ?? "")),
+      isLocalEngine: true,
     };
-  } catch (e: any) {
-    const primaryCooldownId = provider.id || provider.name || provider.type;
-    const eMsg = e?.message || String(e);
-    if (e?.statusCode === 429 || /429/.test(eMsg) || /rate.?limit/i.test(eMsg) || /FreeUsageLimitError/i.test(eMsg)) {
-      console.log("[PROVIDER]\nPrimary provider returned 429.");
-      markProvider429Cooldown(primaryCooldownId);
-    } else if (e?.statusCode === 401 || /401/.test(eMsg) || /billing/i.test(eMsg) || /payment/i.test(eMsg) || /CreditsError/i.test(eMsg)) {
-      markProvider401Cooldown(primaryCooldownId);
-    }
-    providerErrors.push(`${provider.name}: ${eMsg}`);
-    console.warn(`[AI] Primary provider ${provider.name} failed: ${eMsg}. Trying fallbacks...`);
-
-    // Check if Puter is active & authenticated as fallback
-    const state = useApp.getState();
-    const allProviders = state.providers || [];
-    const puter = allProviders.find((p: any) => p.type === "puter" && p.isActive);
-    let puterAuthenticated = false;
-    if (puter) {
-      try {
-        const { getPuterProvider } = await import("./providers/puter-provider");
-        const puterProvider = getPuterProvider();
-        puterAuthenticated = await puterProvider.tryRefresh();
-      } catch {
-        puterAuthenticated = false;
-      }
-    }
-
-    if (puter && puterAuthenticated) {
-      console.log("[ROUTER]\nProvider selected: Puter (fallback)");
-      try {
-        const { getPuterProvider } = await import("./providers/puter-provider");
-        const puterProvider = getPuterProvider();
-        const resp = await withTimeout(
-          puterProvider.generate({
-            systemPrompt: finalOpts.systemPrompt,
-            userPrompt: finalOpts.userPrompt,
-            maxTokens: finalOpts.maxTokens,
-            temperature: finalOpts.temperature,
-            model: puter.modelName,
-          }),
-          AI_CALL_TIMEOUT_MS,
-          "Puter.generate (fallback)"
-        );
-        const text = resp.text;
-        assert(text !== "", "Provider response is empty");
-        if (!text || text.length === 0) throw new ProviderReturnedEmptyResponse();
-        return {
-          text,
-          provider: "Puter.js",
-          latencyMs: Math.round(performance.now() - t0),
-          tokensEstimate: estTokens(finalOpts.userPrompt + (finalOpts.systemPrompt ?? "")),
-        };
-      } catch (puterErr: any) {
-        providerErrors.push(`Puter (fallback): ${puterErr?.message || puterErr}`);
-        console.warn(`[AI] Puter fallback failed: ${puterErr?.message || puterErr}`);
-      }
-    }
-
-    // Try all other active secondary providers
-    const otherSecondary = allProviders.filter(
-      (p: any) => p.isActive && p.type !== "puter" && p.id !== provider.id
-    );
-    for (const altProvider of otherSecondary) {
-      const altCooldownId = altProvider.id || altProvider.name || altProvider.type;
-      if (isProviderInCooldown(altCooldownId)) {
-        console.info(`[AI] Skipping ${altProvider.name} — in cooldown.`);
-        providerErrors.push(`${altProvider.name}: in cooldown (rate-limited or auth-failed)`);
-        continue;
-      }
-      console.log(`[ROUTER]\nProvider selected: ${altProvider.name}`);
-      try {
-        const text = await withTimeout(
-          callUserProvider(altProvider, finalOpts),
-          AI_CALL_TIMEOUT_MS,
-          `${altProvider.name}.generate`
-        );
-        assert(text !== "", "Provider response is empty");
-        if (!text || text.length === 0) throw new ProviderReturnedEmptyResponse();
-        return {
-          text,
-          provider: altProvider.name,
-          latencyMs: Math.round(performance.now() - t0),
-          tokensEstimate: estTokens(finalOpts.userPrompt + (finalOpts.systemPrompt ?? "")),
-        };
-      } catch (altErr: any) {
-        const altErrMsg = altErr?.message || String(altErr);
-        // Mark provider cooldowns on terminal errors
-        if (altErr?.statusCode === 429 || /429/.test(altErrMsg) || /rate.?limit/i.test(altErrMsg) || /FreeUsageLimitError/i.test(altErrMsg)) {
-          markProvider429Cooldown(altCooldownId);
-        } else if (altErr?.statusCode === 401 || /401/.test(altErrMsg) || /billing/i.test(altErrMsg) || /payment/i.test(altErrMsg) || /CreditsError/i.test(altErrMsg)) {
-          markProvider401Cooldown(altCooldownId);
-        }
-        providerErrors.push(`${altProvider.name}: ${altErrMsg}`);
-        console.warn(`[AI] Alternate provider ${altProvider.name} failed: ${altErrMsg}`);
-      }
-    }
-
-    // All providers exhausted — always throw; never silently fall to local engine
-    // when ALL real providers have failed (local engine produces fake output).
-    throw new OptimizationProviderExhaustedError(
-      `All AI providers failed for this optimization request.\n${providerErrors.map((e, i) => `  ${i + 1}. ${e}`).join("\n")}`
-    );
   }
+  throw new OptimizationProviderExhaustedError(
+    `All AI providers failed for this optimization request.\n${providerErrors.map((e, i) => `  ${i + 1}. ${e}`).join("\n")}`
+  );
 }
 
 /**
