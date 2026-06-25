@@ -297,9 +297,135 @@ export function repairJSON(text: string): { json: any | null; repaired: boolean;
   try {
     return { json: JSON.parse(cleaned), repaired: true, repairs };
   } catch {
-    // Still failed
+    // Still failed — try repairMalformedJSON
+    const malformed = repairMalformedJSON(cleaned);
+    if (malformed.json) {
+      return { json: malformed.json, repaired: true, repairs: [...repairs, ...malformed.repairs] };
+    }
     return { json: null, repaired: false, repairs };
   }
+}
+
+/**
+ * Strip markdown from text — removes code fences, bold/italic markers,
+ * headers, and other markdown syntax that breaks JSON parsing.
+ */
+export function stripMarkdown(text: string): string {
+  if (!text) return text;
+  let result = text;
+  // Remove code fences
+  result = result.replace(/```[\w]*\n?/g, "").replace(/```/g, "");
+  // Remove bold/italic markers
+  result = result.replace(/\*\*\*(.*?)\*\*\*/g, "$1").replace(/\*\*(.*?)\*\*/g, "$1").replace(/\*(.*?)\*/g, "$1");
+  // Remove headers
+  result = result.replace(/^#+\s+/gm, "");
+  // Remove links [text](url) → text
+  result = result.replace(/\[([^\]]*)\]\([^)]*\)/g, "$1");
+  // Remove horizontal rules
+  result = result.replace(/^---+$/gm, "");
+  // Remove blockquotes
+  result = result.replace(/^>\s+/gm, "");
+  return result.trim();
+}
+
+/**
+ * Repair malformed/truncated JSON that standard repairJSON couldn't fix.
+ * Handles: truncated JSON, broken strings, missing brackets, invalid arrays.
+ */
+export function repairMalformedJSON(text: string): { json: any | null; repairs: string[] } {
+  const repairs: string[] = [];
+  let cleaned = text.trim();
+
+  // Strategy 1: Close unclosed brackets
+  const openBraces = (cleaned.match(/\{/g) || []).length;
+  const closeBraces = (cleaned.match(/\}/g) || []).length;
+  if (openBraces > closeBraces) {
+    const missing = openBraces - closeBraces;
+    cleaned += "}".repeat(missing);
+    repairs.push(`Added ${missing} missing closing brace(s)`);
+  }
+
+  const openBrackets = (cleaned.match(/\[/g) || []).length;
+  const closeBrackets = (cleaned.match(/\]/g) || []).length;
+  if (openBrackets > closeBrackets) {
+    const missing = openBrackets - closeBrackets;
+    cleaned += "]".repeat(missing);
+    repairs.push(`Added ${missing} missing closing bracket(s)`);
+  }
+
+  try {
+    return { json: JSON.parse(cleaned), repairs };
+  } catch { /* continue */ }
+
+  // Strategy 2: Close unclosed strings
+  const doubleQuoteCount = (cleaned.match(/"/g) || []).length;
+  if (doubleQuoteCount % 2 !== 0) {
+    cleaned += '"';
+    repairs.push("Added missing closing quote");
+  }
+
+  try {
+    return { json: JSON.parse(cleaned), repairs };
+  } catch { /* continue */ }
+
+  // Strategy 3: Remove the last incomplete property (common in truncated output)
+  // e.g., {"name":"John","age":30,"skills":["SQL","Python"," → remove last incomplete
+  const lastComma = cleaned.lastIndexOf(",");
+  if (lastComma > cleaned.lastIndexOf("}") && lastComma > cleaned.lastIndexOf("]")) {
+    cleaned = cleaned.slice(0, lastComma);
+    // Reclose brackets
+    const ob = (cleaned.match(/\{/g) || []).length;
+    const cb = (cleaned.match(/\}/g) || []).length;
+    if (ob > cb) cleaned += "}".repeat(ob - cb);
+    const obr = (cleaned.match(/\[/g) || []).length;
+    const cbr = (cleaned.match(/\]/g) || []).length;
+    if (obr > cbr) cleaned += "]".repeat(obr - cbr);
+    repairs.push("Removed last incomplete property (truncated output)");
+  }
+
+  try {
+    return { json: JSON.parse(cleaned), repairs };
+  } catch {
+    return { json: null, repairs };
+  }
+}
+
+/**
+ * Validate that a JSON object has the required fields and types.
+ * Returns a list of validation errors (empty = valid).
+ */
+export function validateJSON(
+  data: any,
+  schema: { required?: string[]; types?: Record<string, string> },
+): string[] {
+  const errors: string[] = [];
+
+  if (!data || typeof data !== "object") {
+    return ["Data is not an object"];
+  }
+
+  // Check required fields
+  if (schema.required) {
+    for (const field of schema.required) {
+      if (data[field] === undefined || data[field] === null) {
+        errors.push(`Missing required field: ${field}`);
+      }
+    }
+  }
+
+  // Check types
+  if (schema.types) {
+    for (const [field, expectedType] of Object.entries(schema.types)) {
+      if (data[field] !== undefined && data[field] !== null) {
+        const actualType = Array.isArray(data[field]) ? "array" : typeof data[field];
+        if (actualType !== expectedType) {
+          errors.push(`Field "${field}" should be ${expectedType}, got ${actualType}`);
+        }
+      }
+    }
+  }
+
+  return errors;
 }
 
 /**
