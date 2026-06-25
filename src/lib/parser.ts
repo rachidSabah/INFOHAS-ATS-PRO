@@ -699,7 +699,7 @@ function parseExperiences(lines: string[]): ResumeData["experience"] {
         company: "",
         location: "",
         startDate: "",
-        endDate: "Present",
+        endDate: "",
         bullets: [],
       };
     }
@@ -710,13 +710,20 @@ function parseExperiences(lines: string[]): ResumeData["experience"] {
 }
 
 function parseDateRange(s: string): { start: string; end: string } {
+  // Try splitting on common date separators: -, –, —, "to"
   const parts = s.split(/\s*(?:[\-–—]|\bto\b)\s*/i).filter(Boolean);
   if (parts.length === 2) {
     let start = parts[0].trim();
     let end = parts[1].trim();
     return { start, end };
   }
-  return { start: s, end: "Present" };
+  // If only one part and it looks like a single year, use it as startDate
+  // with empty endDate (NOT "Present" — that was the bug)
+  if (parts.length === 1) {
+    return { start: parts[0].trim(), end: "" };
+  }
+  // Can't parse — return empty (NOT "Present")
+  return { start: s, end: "" };
 }
 
 function parseEducation(lines: string[]): ResumeData["education"] {
