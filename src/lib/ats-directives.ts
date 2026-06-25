@@ -744,11 +744,24 @@ Return ONLY the JSON object described in the directive. No prose, no markdown fe
   // employers when generating large JSON; this preamble reinforces the
   // "never fabricate" rule BEFORE the directive content.
   const antiHallucinationPreamble = `CRITICAL RULES (override everything else):
-1. NEVER invent employers, job titles, schools, degrees, or certifications that are not in the SOURCE RESUME.
-2. NEVER invent percentages, metrics, or numbers (e.g. "15% improvement", "98% satisfaction"). Only reuse numbers that appear verbatim in the SOURCE RESUME.
-3. NEVER change the candidate's name, email, phone, or locations.
-4. You may REPHRASE existing content and ADD keywords from the job description, but you may NOT FABRICATE facts.
-5. If the SOURCE RESUME has no metrics, write impactful bullets WITHOUT numbers (e.g. "Streamlined check-in procedures reducing wait times" — no percentage).
+
+=== ZERO-HALLUCINATION POLICY ===
+1. NEVER invent employers, job titles, schools, degrees, certifications, locations, or languages not in the SOURCE RESUME.
+2. NEVER invent percentages, metrics, or numbers. Only reuse numbers that appear VERBATIM in the SOURCE RESUME.
+3. NEVER change the candidate's name, email, phone, or contact info.
+4. You may REPHRASE existing content and WEAVE IN keywords from the JD, but NEVER fabricate facts.
+
+=== NATURAL KEYWORD INTEGRATION (ANTI-STUFFING) ===
+5. NEVER append raw keyword lists to sentences. Do NOT write: "Experience in hospitality, F&B, guest service, customer care, multilingual."
+6. Instead, WEAVE keywords naturally into context: "Delivered hospitality excellence through personalized guest service and multilingual F&B operations."
+7. Each keyword should appear ONCE, embedded in a relevant sentence — not dumped in a list.
+
+=== ACTION-ORIENTED BULLETS & GRAMMAR ===
+8. Start EVERY experience bullet with a strong action verb: Spearheaded, Orchestrated, Streamlined, Facilitated, Coordinated, Delivered, Executed, Managed.
+9. Keep sentences under 20 words. Be concise and impactful.
+10. NEVER use double periods (..) — always single period at end.
+11. NEVER repeat filler phrases like "demonstrating strong attention to detail" or "committed to excellence."
+12. Each bullet must be a unique, specific achievement or responsibility.
 
 `;
 

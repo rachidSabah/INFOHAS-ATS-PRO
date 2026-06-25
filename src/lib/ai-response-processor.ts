@@ -359,6 +359,14 @@ export function processAIResponse<T = any>(
     repairActions.push(...stripped.repairs);
   }
 
+  // Step 4.5: Grammar cleanup — fix double periods, remove filler phrases
+  normalizedText = cleanupGrammar(normalizedText);
+
+  // Also clean up grammar in parsed data (resume fields)
+  if (data && typeof data === "object") {
+    data = cleanupResumeGrammar(data) as T;
+  }
+
   // Step 5: Validate safety for document rendering
   const remainingLeaks = detectLeaks(normalizedText);
   const safeForDocument = remainingLeaks.length === 0 && type !== "error";
@@ -527,4 +535,90 @@ export function isProfessionalResume(resume: ResumeData): {
     issues,
   };
 }
+
+// ============================================================================
+// Grammar Cleanup — fixes common AI output issues
+// ============================================================================
+
+const FILLER_PHRASES = [
+  /demonstrating strong attention to detail/gi,
+  /committed to excellence in all assigned responsibilities/gi,
+  /committed to delivering exceptional results/gi,
+  /demonstrating reliability and professionalism/gi,
+  /consistently meeting operational standards/gi,
+  /contributing to team objectives/gi,
+];
+
+/**
+ * Fix common grammar issues in AI-generated text:
+ * - Double periods (.. → .)
+ * - Filler phrases that repeat across bullets
+ * - Extra spaces before periods/commas
+ */
+export function cleanupGrammar(text: string): string {
+  if (!text) return text;
+  let result = text;
+
+  // Fix double periods (.. → .)
+  result = result.replace(/\.{2,}/g, ".");
+
+  // Fix space before period/comma ( ." → ".")
+  result = result.replace(/\s+\./g, ".");
+  result = result.replace(/\s+,/g, ",");
+
+  // Remove filler phrases
+  for (const phrase of FILLER_PHRASES) {
+    result = result.replace(phrase, "");
+  }
+
+  // Clean up double spaces left by removals
+  result = result.replace(/\s{2,}/g, " ");
+
+  // Fix sentences that end with comma instead of period
+  result = result.replace(/,\s*$/gm, ".");
+
+  return result.trim();
+}
+
+/**
+ * Clean up grammar in a parsed resume object.
+ * Fixes double periods and filler phrases in all text fields.
+ */
+export function cleanupResumeGrammar<T>(data: T): T {
+  if (!data || typeof data !== "object") return data;
+  const cleaned = JSON.parse(JSON.stringify(data)) as any;
+
+  // Clean summary
+  if (cleaned.summary) {
+    cleaned.summary = cleanupGrammar(cleaned.summary);
+  }
+
+  // Clean headline
+  if (cleaned.headline) {
+    cleaned.headline = cleanupGrammar(cleaned.headline);
+  }
+
+  // Clean experience bullets
+  if (Array.isArray(cleaned.experience)) {
+    for (const exp of cleaned.experience) {
+      if (Array.isArray(exp.bullets)) {
+        exp.bullets = exp.bullets.map((b: string) => cleanupGrammar(b)).filter((b: string) => b.length > 0);
+      }
+      if (exp.title) exp.title = cleanupGrammar(exp.title);
+    }
+  }
+
+  // Clean education highlights
+  if (Array.isArray(cleaned.education)) {
+    for (const edu of cleaned.education) {
+      if (Array.isArray(edu.highlights)) {
+        edu.highlights = edu.highlights.map((h: string) => cleanupGrammar(h));
+      }
+      if (edu.degree) edu.degree = cleanupGrammar(edu.degree);
+    }
+  }
+
+  return cleaned as T;
+}
+
 
