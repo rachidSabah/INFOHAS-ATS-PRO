@@ -8,6 +8,243 @@ import { uid } from "./store";
  * Parse an uploaded file into a ResumeData object.
  * Supports: .txt, .pdf (via pdfjs-dist), .docx (via mammoth)
  */
+export function calculateParserConfidence(resume: ResumeData): number {
+  let score = 0;
+  if (resume.summary && resume.summary.trim().length > 20) score += 25;
+  if (resume.experience && resume.experience.length > 0) score += 25;
+  if (resume.education && resume.education.length > 0) score += 20;
+  if (resume.languages && resume.languages.length > 0) score += 15;
+  if (resume.skills && resume.skills.length > 0) score += 10;
+  if (resume.contact && (resume.contact.email || resume.contact.phone)) score += 5;
+  return score;
+}
+
+export function validateParsedResume(resume: ResumeData): boolean {
+  return (
+    resume.summary !== undefined &&
+    resume.summary !== null &&
+    resume.summary.trim().length > 0 &&
+    resume.experience.length > 0 &&
+    resume.education.length > 0 &&
+    resume.languages.length > 0
+  );
+}
+
+export function RepairParser(text: string, fileName: string): ResumeData {
+  console.log("RepairParser: Validation or confidence failed. Trying secondary parser...");
+  let parsed = secondaryParser(text, fileName);
+  let confidence = calculateParserConfidence(parsed);
+  let isValid = validateParsedResume(parsed);
+
+  if (!isValid || confidence < 90) {
+    console.log(`Secondary parser insufficient (confidence: ${confidence}, valid: ${isValid}). Trying heuristic parser...`);
+    parsed = heuristicParser(text, fileName);
+    confidence = calculateParserConfidence(parsed);
+    isValid = validateParsedResume(parsed);
+  }
+
+  if (!isValid) {
+    console.error("Heuristic parser failed to recover core sections. Throwing ParseError.");
+    throw new Error("ParseError: Could not extract all required resume sections (Summary, Experience, Education, Languages) even after heuristic repair.");
+  }
+
+  return parsed;
+}
+
+export function secondaryParser(text: string, fileName: string): ResumeData {
+  const normalizedText = text.replace(/\r/g, "");
+  
+  // Section regexes
+  const expRegex = /(?:PROFESSIONAL EXPERIENCE|WORK EXPERIENCE|EXPERIENCE|EMPLOYMENT HISTORY|HISTORY)([\s\S]*?)(?=(?:EDUCATION|LANGUAGES|SKILLS|CORE COMPETENCIES|CERTIFICATIONS|PROJECTS|REFERENCES|SUMMARY|PROFESSIONAL SUMMARY|$))/i;
+  const eduRegex = /(?:EDUCATION|ACADEMIC BACKGROUND|ACADEMIC)([\s\S]*?)(?=(?:PROFESSIONAL EXPERIENCE|WORK EXPERIENCE|EXPERIENCE|LANGUAGES|SKILLS|CORE COMPETENCIES|CERTIFICATIONS|PROJECTS|REFERENCES|SUMMARY|PROFESSIONAL SUMMARY|$))/i;
+  const langRegex = /(?:LANGUAGES|LANGUAGE)([\s\S]*?)(?=(?:PROFESSIONAL EXPERIENCE|WORK EXPERIENCE|EXPERIENCE|EDUCATION|SKILLS|CORE COMPETENCIES|CERTIFICATIONS|PROJECTS|REFERENCES|SUMMARY|PROFESSIONAL SUMMARY|$))/i;
+  const skillsRegex = /(?:SKILLS|TECHNICAL SKILLS|CORE SKILLS|CORE COMPETENCIES|CORE COMPETENCIES & SKILLS|COMPETENCIES)([\s\S]*?)(?=(?:PROFESSIONAL EXPERIENCE|WORK EXPERIENCE|EXPERIENCE|EDUCATION|LANGUAGES|CERTIFICATIONS|PROJECTS|REFERENCES|SUMMARY|PROFESSIONAL SUMMARY|$))/i;
+  const certsRegex = /(?:CERTIFICATIONS|CERTIFICATES|LICENSES)([\s\S]*?)(?=(?:PROFESSIONAL EXPERIENCE|WORK EXPERIENCE|EXPERIENCE|EDUCATION|LANGUAGES|SKILLS|CORE COMPETENCIES|PROJECTS|REFERENCES|SUMMARY|PROFESSIONAL SUMMARY|$))/i;
+  const projRegex = /(?:PROJECTS|PERSONAL PROJECTS|SIDE PROJECTS)([\s\S]*?)(?=(?:PROFESSIONAL EXPERIENCE|WORK EXPERIENCE|EXPERIENCE|EDUCATION|LANGUAGES|SKILLS|CORE COMPETENCIES|CERTIFICATIONS|REFERENCES|SUMMARY|PROFESSIONAL SUMMARY|$))/i;
+  const summaryRegex = /(?:SUMMARY|PROFESSIONAL SUMMARY|PROFILE|OBJECTIVE)([\s\S]*?)(?=(?:PROFESSIONAL EXPERIENCE|WORK EXPERIENCE|EXPERIENCE|EDUCATION|LANGUAGES|SKILLS|CORE COMPETENCIES|CERTIFICATIONS|PROJECTS|REFERENCES|$))/i;
+
+  const expMatch = normalizedText.match(expRegex);
+  const eduMatch = normalizedText.match(eduRegex);
+  const langMatch = normalizedText.match(langRegex);
+  const skillsMatch = normalizedText.match(skillsRegex);
+  const certsMatch = normalizedText.match(certsRegex);
+  const projMatch = normalizedText.match(projRegex);
+  const summaryMatch = normalizedText.match(summaryRegex);
+
+  const expLines = expMatch ? expMatch[1].split("\n").map(l => l.trim()).filter(Boolean) : [];
+  const eduLines = eduMatch ? eduMatch[1].split("\n").map(l => l.trim()).filter(Boolean) : [];
+  const langLines = langMatch ? langMatch[1].split("\n").map(l => l.trim()).filter(Boolean) : [];
+  const skillsLines = skillsMatch ? skillsMatch[1].split("\n").map(l => l.trim()).filter(Boolean) : [];
+  const certsLines = certsMatch ? certsMatch[1].split("\n").map(l => l.trim()).filter(Boolean) : [];
+  const projLines = projMatch ? projMatch[1].split("\n").map(l => l.trim()).filter(Boolean) : [];
+  const summary = summaryMatch ? summaryMatch[1].trim() : undefined;
+
+  const experience = parseExperiences(expLines);
+  const education = parseEducation(eduLines);
+  const skills = skillsLines
+    .flatMap((l) => l.split(/[,;•|]/))
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0 && s.length < 40)
+    .map((s) => ({ id: uid("s"), name: s }));
+  const projects = parseProjects(projLines);
+  const certifications = certsLines.map((c) => ({ id: uid("c"), name: c }));
+  const languages = langLines
+    .flatMap((l) => l.split(/[,;]/))
+    .map((s) => s.trim())
+    .filter(Boolean)
+    .map((s) => {
+      const match = s.match(/^([A-Za-z]+)\s*[\(:]\s*(Native|Fluent|Proficient|Conversational|Intermediate|Basic|Advanced|Professional)\s*\)?$/i);
+      if (match) {
+        const proficiency = match[2].toLowerCase();
+        const normalizedProf = (["basic", "conversational", "fluent", "native"].includes(proficiency) ? proficiency : "fluent") as "basic" | "conversational" | "fluent" | "native";
+        return { id: uid("l"), name: match[1], proficiency: normalizedProf };
+      }
+      return { id: uid("l"), name: s, proficiency: "fluent" as const };
+    });
+
+  // Extract contact
+  const firstLines = normalizedText.split("\n").slice(0, 15).join("\n");
+  const emailMatch = firstLines.match(EMAIL_RE);
+  const phoneMatch = firstLines.match(PHONE_RE);
+  const urlMatches = Array.from(firstLines.matchAll(new RegExp(URL_RE.source, "gi"))).map((m) => m[0]);
+  const linkedin = urlMatches.find((u) => /linkedin/i.test(u));
+  const github = urlMatches.find((u) => /github/i.test(u));
+  const website = urlMatches.find((u) => !/linkedin|github/i.test(u));
+  const locationLine = normalizedText.split("\n").slice(0, 15).find((l) => /\b([A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+){0,2},\s?[A-Z]{2})\b/.test(l));
+  const location = locationLine?.match(/\b([A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+){0,2},\s?[A-Z]{2})\b/)?.[1];
+
+  let name = "Untitled";
+  const nameLines = normalizedText.split("\n").slice(0, 5);
+  for (const l of nameLines) {
+    const words = l.trim().split(/\s+/);
+    if (words.length >= 2 && words.length <= 5 && !/\d/.test(l) && l.length < 60) {
+      name = l.replace(/[^a-zA-Z\s.\-']/g, "").trim() || name;
+      break;
+    }
+  }
+
+  const now = new Date().toISOString();
+  return {
+    id: uid("r"),
+    name,
+    contact: { email: emailMatch?.[1], phone: phoneMatch?.[1]?.trim(), location, website, linkedin, github },
+    summary,
+    experience,
+    education,
+    skills,
+    projects,
+    certifications,
+    languages,
+    template: "ats-professional",
+    accentColor: "#1154A3",
+    createdAt: now,
+    updatedAt: now,
+    source: "upload",
+    fileName,
+  };
+}
+
+export function heuristicParser(text: string, fileName: string): ResumeData {
+  const lines = text.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+  let currentSection = "header";
+  
+  const sectionLines: { [key: string]: string[] } = {
+    header: [],
+    summary: [],
+    experience: [],
+    education: [],
+    languages: [],
+    skills: [],
+    certifications: [],
+    projects: [],
+  };
+
+  for (const line of lines) {
+    const lower = line.toLowerCase();
+    
+    if (/(?:summary|profile|objective)/i.test(lower) && lower.length < 30) {
+      currentSection = "summary";
+      continue;
+    } else if (/(?:experience|work|employment|history)/i.test(lower) && lower.length < 30) {
+      currentSection = "experience";
+      continue;
+    } else if (/(?:education|academic)/i.test(lower) && lower.length < 30) {
+      currentSection = "education";
+      continue;
+    } else if (/(?:languages|language)/i.test(lower) && lower.length < 30) {
+      currentSection = "languages";
+      continue;
+    } else if (/(?:skills|competencies)/i.test(lower) && lower.length < 30) {
+      currentSection = "skills";
+      continue;
+    } else if (/(?:certifications|certificates)/i.test(lower) && lower.length < 30) {
+      currentSection = "certifications";
+      continue;
+    } else if (/(?:projects)/i.test(lower) && lower.length < 30) {
+      currentSection = "projects";
+      continue;
+    }
+
+    sectionLines[currentSection].push(line);
+  }
+
+  const summary = sectionLines.summary.join(" ").trim() || undefined;
+  const experience = parseExperiences(sectionLines.experience);
+  const education = parseEducation(sectionLines.education);
+  const skills = sectionLines.skills
+    .flatMap((l) => l.split(/[,;•|]/))
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0 && s.length < 40)
+    .map((s) => ({ id: uid("s"), name: s }));
+  const projects = parseProjects(sectionLines.projects);
+  const certifications = sectionLines.certifications.map((c) => ({ id: uid("c"), name: c }));
+  const languages = sectionLines.languages
+    .flatMap((l) => l.split(/[,;]/))
+    .map((s) => s.trim())
+    .filter(Boolean)
+    .map((s) => ({ id: uid("l"), name: s, proficiency: "fluent" as const }));
+
+  // Contact info
+  const headerText = sectionLines.header.join("\n");
+  const emailMatch = headerText.match(EMAIL_RE);
+  const phoneMatch = headerText.match(PHONE_RE);
+  const urlMatches = Array.from(headerText.matchAll(new RegExp(URL_RE.source, "gi"))).map((m) => m[0]);
+  const linkedin = urlMatches.find((u) => /linkedin/i.test(u));
+  const github = urlMatches.find((u) => /github/i.test(u));
+  const website = urlMatches.find((u) => !/linkedin|github/i.test(u));
+  const locationLine = sectionLines.header.find((l) => /\b([A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+){0,2},\s?[A-Z]{2})\b/.test(l));
+  const location = locationLine?.match(/\b([A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+){0,2},\s?[A-Z]{2})\b/)?.[1];
+
+  let name = "Untitled";
+  for (const l of sectionLines.header.slice(0, 5)) {
+    const words = l.split(/\s+/);
+    if (words.length >= 2 && words.length <= 5 && !/\d/.test(l) && l.length < 60) {
+      name = l.replace(/[^a-zA-Z\s.\-']/g, "").trim() || name;
+      break;
+    }
+  }
+
+  const now = new Date().toISOString();
+  return {
+    id: uid("r"),
+    name,
+    contact: { email: emailMatch?.[1], phone: phoneMatch?.[1]?.trim(), location, website, linkedin, github },
+    summary,
+    experience,
+    education,
+    skills,
+    projects,
+    certifications,
+    languages,
+    template: "ats-professional",
+    accentColor: "#1154A3",
+    createdAt: now,
+    updatedAt: now,
+    source: "upload",
+    fileName,
+  };
+}
+
 export async function parseResumeFile(file: File): Promise<ResumeData> {
   const name = file.name.toLowerCase();
   let rawText = "";
@@ -19,7 +256,6 @@ export async function parseResumeFile(file: File): Promise<ResumeData> {
   } else if (name.endsWith(".docx")) {
     rawText = await parseDocx(file);
   } else if (name.endsWith(".doc")) {
-    // Legacy .doc — best-effort
     rawText = await file.text().catch(() => "");
     if (!rawText.trim()) {
       throw new Error(
@@ -34,7 +270,16 @@ export async function parseResumeFile(file: File): Promise<ResumeData> {
     throw new Error("The file appears to be empty or could not be parsed.");
   }
 
-  return extractResumeFromText(rawText, file.name);
+  const primaryResult = extractResumeFromText(rawText, file.name);
+  const primaryConfidence = calculateParserConfidence(primaryResult);
+  const isValid = validateParsedResume(primaryResult);
+
+  if (!isValid || primaryConfidence < 90) {
+    console.warn(`Primary parser incomplete (valid: ${isValid}, confidence: ${primaryConfidence}). Running RepairParser...`);
+    return RepairParser(rawText, file.name);
+  }
+
+  return primaryResult;
 }
 
 async function parsePdf(file: File): Promise<string> {

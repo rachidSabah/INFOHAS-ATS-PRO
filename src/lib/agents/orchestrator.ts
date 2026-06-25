@@ -48,6 +48,7 @@ import {
   OptimizationWatchdog,
   OptimizationTimeoutError,
   OptimizationProviderExhaustedError,
+  DirectiveInjectionError,
   withTimeout,
   PIPELINE_TIMEOUT_MS,
   OPTIMIZER_CALL_TIMEOUT_MS,
@@ -504,6 +505,8 @@ export interface PipelineResult {
   charCount: number;
   /** Whether the optimization met the ~2900 char target */
   metCharTarget: boolean;
+  /** Whether the custom directive was successfully applied */
+  customDirectiveApplied?: boolean;
 }
 
 export interface ReflectionResult {
@@ -779,13 +782,21 @@ async function _runOptimizationPipelineInner(input: PipelineInput, watchdog: Opt
     step.startedAt = new Date().toISOString();
     emitProgress(3, aviationMode ? `Optimizing for ${aviationMode.airlineProfile}…` : "Optimizing resume with full intelligence context…");
 
-    // === AUTO-RECOVERY: retry once on failure ===
     let optimizeAttempt = 0;
-    const maxOptimizeAttempts = 2;
+    const maxOptimizeAttempts = 4; // 1 initial + 3 retries
+    let success = false;
     let optimizeResult: { resume: ResumeData; provider: string; charCount: number; keywordsAdded: number } | null = null;
     let optimizeError: string | null = null;
 
-    while (optimizeAttempt < maxOptimizeAttempts && !optimizeResult) {
+    // Load the directive config (for font size, margins, line height)
+    let directiveConfig: OptimizerDirectiveConfig | null = null;
+    try {
+      directiveConfig = (useApp.getState() as any)?.optimizerDirective ?? null;
+    } catch (directiveErr2) {
+      console.warn("[Orchestrator] Failed to read optimizerDirective:", directiveErr2 instanceof Error ? directiveErr2.message : directiveErr2);
+    }
+
+    while (optimizeAttempt < maxOptimizeAttempts) {
       optimizeAttempt++;
       const optHandle = watchdog.startStep(`Resume Optimizer (attempt ${optimizeAttempt})`);
       try {
@@ -812,89 +823,84 @@ async function _runOptimizationPipelineInner(input: PipelineInput, watchdog: Opt
         optHandle.complete();
       } catch (e: any) {
         optHandle.fail(e);
-        // Provider exhaustion is a non-retryable fatal error
         if (e instanceof OptimizationProviderExhaustedError) {
           optimizeError = e.message;
           console.warn(`[Pipeline] Resume Optimizer: provider exhausted (non-retryable). ${e.message}`);
           break;
         }
         optimizeError = e?.message || "Unknown error";
-        // Surface the failure in the browser console so it's diagnosable
-        // without opening DevTools state inspectors. The UI log() call only
-        // updates step.log — it does NOT console.log.
         console.warn(`[Pipeline] Resume Optimizer attempt ${optimizeAttempt}/${maxOptimizeAttempts} failed: ${optimizeError}`);
         log("Resume Optimizer", `Attempt ${optimizeAttempt} failed: ${optimizeError}`);
         if (optimizeAttempt < maxOptimizeAttempts) {
           log("Resume Optimizer", "Retrying optimization…");
           emitProgress(3, `Optimization failed (attempt ${optimizeAttempt}). Retrying…`);
         }
+        continue;
       }
-    }
 
-    if (!optimizeResult) {
-      throw new Error(`Optimization failed after ${maxOptimizeAttempts} attempts: ${optimizeError}`);
-    }
+      if (!optimizeResult) {
+        continue;
+      }
 
-    result.optimizedResume = optimizeResult.resume;
-    result.provider = optimizeResult.provider;
-    result.charCount = optimizeResult.charCount;
-    const optLog = `✓ Generated ${optimizeResult.charCount} chars (target ~2900) via ${optimizeResult.provider}. Embedded ${optimizeResult.keywordsAdded} keywords. Attempts: ${optimizeAttempt}.`;
-    log("Resume Optimizer", optLog);
-    emitProgress(3, optLog);
+      result.optimizedResume = optimizeResult.resume;
+      result.provider = optimizeResult.provider;
+      result.charCount = optimizeResult.charCount;
 
-    result.metCharTarget = result.charCount >= 2500 && result.charCount <= 3100;
+      // ========================================================================
+      // [V3 MULTI-AGENT PIPELINE] Post-optimization agents (ContentExpansionAgent)
+      // ========================================================================
+      try {
+        const { runV3PostOptimizationPipeline } = await import("../v3-agents");
+        log("Resume Optimizer", `Running V3 post-optimization agents: Keyword Embedding → Fact Verification → Layout Optimization...`);
+        emitProgress(3, `V3 agents: embedding keywords, verifying facts, optimizing layout...`);
 
-    // ========================================================================
-    // [V3 MULTI-AGENT PIPELINE] Post-optimization agents
-    //
-    // After the Resume Writer produces the initial optimized resume, three
-    // specialized agents run in sequence to finalize it:
-    //
-    //   6. Keyword Embedding Agent — embeds missing JD keywords naturally
-    //   7. Fact Verification Agent — removes hallucinated metrics
-    //   8. Layout Optimization Agent — expands content to fill A4 page
-    //
-    // These agents run up to 3 attempts: repair → rerun → preserve.
-    // The user ALWAYS gets a result.
-    // ========================================================================
-    try {
-      const { runV3PostOptimizationPipeline } = await import("../v3-agents");
-      log("Resume Optimizer", `Running V3 post-optimization agents: Keyword Embedding → Fact Verification → Layout Optimization...`);
-      emitProgress(3, `V3 agents: embedding keywords, verifying facts, optimizing layout...`);
+        const v3Result = runV3PostOptimizationPipeline(result.optimizedResume!, resume, jd, 3);
+        result.optimizedResume = v3Result.resume;
+        result.charCount = v3Result.finalCharCount;
+        result.metCharTarget = v3Result.finalCharCount >= 2800 && v3Result.finalCharCount <= 3800;
 
-      const v3Result = runV3PostOptimizationPipeline(result.optimizedResume!, resume, jd, 3);
+        for (const report of v3Result.agentReports) {
+          for (const change of report.changes) {
+            console.info(`[V3 ${report.agentName}] ${change}`);
+          }
+        }
 
-      // Use the V3-processed resume
-      result.optimizedResume = v3Result.resume;
-      result.charCount = v3Result.finalCharCount;
-      result.metCharTarget = v3Result.finalCharCount >= 2500 && v3Result.finalCharCount <= 3100;
+        log("Resume Optimizer",
+          `✓ V3 pipeline complete: ${v3Result.totalChanges} total changes, ` +
+          `${v3Result.hallucinationsRemoved} hallucinations removed, ` +
+          `${v3Result.keywordsEmbedded} keywords embedded, ` +
+          `${v3Result.finalCharCount} chars, ` +
+          `quality ${v3Result.qualityReport.overallScore}/100`
+        );
+        emitProgress(3, `✓ V3 agents complete. Quality: ${v3Result.qualityReport.overallScore}/100, ${v3Result.finalCharCount} chars`);
+      } catch (v3Err: any) {
+        console.warn("[V3 Pipeline] Failed (non-fatal):", v3Err?.message);
+      }
 
-      // Log agent reports
-      for (const report of v3Result.agentReports) {
-        for (const change of report.changes) {
-          console.info(`[V3 ${report.agentName}] ${change}`);
+      // === PAGE VALIDATION (usedHeight / pageHeight < 0.80) ===
+      const pageFillVal = validatePageFill(result.optimizedResume!, directiveConfig);
+      const pageFill = pageFillVal.pageUsage / 100;
+
+      console.log(`[Pipeline Page Validator] Attempt ${optimizeAttempt}: pageFill = ${pageFill.toFixed(2)} (${pageFillVal.pageUsage}%), charCount = ${result.charCount}`);
+
+      if (result.charCount >= 2800 && pageFill >= 0.80) {
+        success = true;
+        const optLog = `✓ Generated ${result.charCount} chars (page fill ${pageFillVal.pageUsage}%) via ${result.provider}. Embedded ${optimizeResult.keywordsAdded} keywords. Attempts: ${optimizeAttempt}.`;
+        log("Resume Optimizer", optLog);
+        emitProgress(3, optLog);
+        break;
+      } else {
+        console.warn(`[Pipeline Page Validator] Attempt ${optimizeAttempt} rejected: pageFill ${pageFill.toFixed(2)} < 0.80 or charCount ${result.charCount} < 2800.`);
+        optimizeResult = null; // force rerun
+        if (optimizeAttempt < maxOptimizeAttempts) {
+          log("Resume Optimizer", `Attempt ${optimizeAttempt} rejected due to low page fill (${pageFillVal.pageUsage}%). Retrying optimizer...`);
+          emitProgress(3, `Page fill low (${pageFillVal.pageUsage}%). Retrying optimization (attempt ${optimizeAttempt + 1})…`);
         }
       }
+    }
 
-      log("Resume Optimizer",
-        `✓ V3 pipeline complete: ${v3Result.totalChanges} total changes, ` +
-        `${v3Result.hallucinationsRemoved} hallucinations removed, ` +
-        `${v3Result.keywordsEmbedded} keywords embedded, ` +
-        `${v3Result.finalCharCount} chars, ` +
-        `quality ${v3Result.qualityReport.overallScore}/100`
-      );
-      emitProgress(3, `✓ V3 agents complete. Quality: ${v3Result.qualityReport.overallScore}/100, ${v3Result.finalCharCount} chars`);
-
-      // Log final quality status
-      if (v3Result.qualityReport.overallScore < 75) {
-        log("Resume Optimizer", `⚠ Quality score ${v3Result.qualityReport.overallScore}/100 — optimization completed with issues. Review recommended.`);
-        emitProgress(3, `⚠ Optimization completed (quality ${v3Result.qualityReport.overallScore}/100). Review recommended.`);
-      } else {
-        log("Resume Optimizer", `✓ Quality score: ${v3Result.qualityReport.overallScore}/100`);
-      }
-    } catch (v3Err: any) {
-      // V3 pipeline errors are non-fatal — log and continue with the result
-      console.warn("[V3 Pipeline] Failed (non-fatal):", v3Err?.message);
+    if (!success || !result.optimizedResume) {
+      throw new Error(`Optimization failed to meet target character/page fill gates after ${maxOptimizeAttempts} attempts: ${optimizeError || "Quality gates not met"}`);
     }
 
     step.completedAt = new Date().toISOString();
@@ -1405,30 +1411,43 @@ CONTENT REQUIREMENTS:
 
 `;
 
+  let customDirective: string | undefined;
+  try {
+    const state: any = useApp.getState();
+    customDirective = state?.optimizerDirective?.customDirectiveOverride?.trim() || undefined;
+  } catch {}
+
+  let systemPromptText = antiHallucinationPreamble + split.system;
+  if (customDirective && !systemPromptText.includes(customDirective)) {
+    systemPromptText += `\n\n[CUSTOM DIRECTIVE OVERRIDE]\n${customDirective}`;
+  }
+
+  const userPromptText = (split.user ? split.user + "\n\n---\n\n" : "") + `SOURCE RESUME (be truthful to this — never invent employers, dates, or metrics):\n${JSON.stringify({
+    name: resume.name,
+    headline: resume.headline,
+    contact: resume.contact,
+    dateOfBirth: resume.dateOfBirth,
+    summary: resume.summary,
+    experience: resume.experience.map((e) => ({ title: e.title, company: e.company, location: e.location, startDate: e.startDate, endDate: e.endDate, bullets: e.bullets })),
+    education: resume.education.map((ed) => ({ degree: ed.degree, field: ed.field, institution: ed.institution, location: ed.location, startDate: ed.startDate, endDate: ed.endDate, highlights: ed.highlights })),
+    skills: resume.skills.map((s) => ({ name: s.name, category: s.category })),
+    languages: resume.languages,
+    certifications: resume.certifications,
+  })}\n\nTARGET JOB DESCRIPTION:\n${jd.rawText ?? JSON.stringify({ title: jd.title, company: jd.company, responsibilities: jd.responsibilities, requiredSkills: jd.requiredSkills, keywords: jd.keywords })}\n\n${intelligenceContext}\n\nReturn ONLY the JSON object described in the directive. No prose, no markdown fences.`;
+
+  // Validation: assert prompt includes customDirective
+  const fullPromptText = systemPromptText + "\n\n" + userPromptText;
+  if (customDirective && !fullPromptText.includes(customDirective)) {
+    throw new DirectiveInjectionError("DirectiveInjectionError: Custom directive override not present in the optimization prompt.");
+  }
+
   const result = await callAI({
-    systemPrompt: antiHallucinationPreamble + split.system,
+    systemPrompt: systemPromptText,
     isOptimizerCall: true,
-    userPrompt: (split.user ? split.user + "\n\n---\n\n" : "") + `SOURCE RESUME (be truthful to this — never invent employers, dates, or metrics):\n${JSON.stringify({
-      name: resume.name,
-      headline: resume.headline,
-      contact: resume.contact,
-      dateOfBirth: resume.dateOfBirth,
-      summary: resume.summary,
-      experience: resume.experience.map((e) => ({ title: e.title, company: e.company, location: e.location, startDate: e.startDate, endDate: e.endDate, bullets: e.bullets })),
-      education: resume.education.map((ed) => ({ degree: ed.degree, field: ed.field, institution: ed.institution, location: ed.location, startDate: ed.startDate, endDate: ed.endDate, highlights: ed.highlights })),
-      skills: resume.skills.map((s) => ({ name: s.name, category: s.category })),
-      languages: resume.languages,
-        certifications: resume.certifications,
-      })}\n\nTARGET JOB DESCRIPTION:\n${jd.rawText ?? JSON.stringify({ title: jd.title, company: jd.company, responsibilities: jd.responsibilities, requiredSkills: jd.requiredSkills, keywords: jd.keywords })}\n\n${intelligenceContext}\n\nReturn ONLY the JSON object described in the directive. No prose, no markdown fences.`,
-      maxTokens: 8000,
-      // Low temperature (0.15) minimizes hallucination for factual resume data.
-      // Llama models at 0.3-0.4 routinely invent employers and metrics; 0.15
-      // keeps output deterministic enough to preserve factual consistency.
-      temperature: 0.15,
+    userPrompt: userPromptText,
+    maxTokens: 8000,
+    temperature: 0.15,
     taskCategory: "document",
-    // Resume Optimizer ships a ~22k-char directive + 8k output tokens.
-    // The default 60s timeout was killing legitimate in-flight requests
-    // on free-tier providers (OpenCode free, Nvidia build-free, etc.).
     timeoutMs: OPTIMIZER_CALL_TIMEOUT_MS,
   });
 
@@ -1461,7 +1480,12 @@ CONTENT REQUIREMENTS:
     // === RETRY with a simpler prompt but STILL includes the directive ===
     if (responseLength < 200) {
       const retrySplit = splitOptimizationDirective(directive);
-      const retrySystem = retrySplit.system + "\n\nThe previous attempt produced an invalid or empty response. Return ONLY a valid JSON object matching the ResumeData schema. No prose, no markdown fences.\n";
+      let retrySystem = retrySplit.system + "\n\nThe previous attempt produced an invalid or empty response. Return ONLY a valid JSON object matching the ResumeData schema. No prose, no markdown fences.\n";
+      
+      if (customDirective && !retrySystem.includes(customDirective)) {
+        retrySystem += `\n\n[CUSTOM DIRECTIVE OVERRIDE]\n${customDirective}`;
+      }
+
       console.group("[Optimizer Prompt — Retry]");
       console.log("Directive chars:", directive.length);
       console.log("Prompt chars:", retrySystem.length);
@@ -1469,16 +1493,28 @@ CONTENT REQUIREMENTS:
       console.log("One-page included:", retrySystem.includes("ONE PAGE"));
       console.log("Target chars included:", retrySystem.includes("2,700"));
       console.groupEnd();
+
       // hard assertion — only in production
       if (process.env.NODE_ENV !== "test") {
         if (!retrySystem.includes("2,700") || !retrySystem.includes("ONE PAGE")) {
-          throw new Error("Optimizer directive missing from retry prompt. Aborting.");
+          // If we have a custom directive override, we do not require the standard instructions to be in it
+          if (!customDirective) {
+            throw new Error("Optimizer directive missing from retry prompt. Aborting.");
+          }
         }
+      }
+
+      const retryUserPrompt = (retrySplit.user ? retrySplit.user + "\n\n---\n\n" : "") + `SOURCE RESUME:\n${JSON.stringify({ name: resume.name, headline: resume.headline, contact: resume.contact, summary: resume.summary, experience: resume.experience, education: resume.education, skills: resume.skills, languages: resume.languages, certifications: resume.certifications })}\n\nJOB DESCRIPTION:\n${jd.rawText?.slice(0, 1500) ?? jd.keywords.join(", ")}\n\nOptimize this resume for the job. Return ONLY a JSON object with: name, headline, email, phone, location, summary, skills [{category, items[]}], experience [{title, company, location, startDate, endDate, bullets[]}], education [{degree, institution, field, startDate, endDate, modules}], languages [{name, proficiency}]. No prose, no markdown.`;
+
+      // Validation check
+      const retryFullPrompt = retrySystem + "\n\n" + retryUserPrompt;
+      if (customDirective && !retryFullPrompt.includes(customDirective)) {
+        throw new DirectiveInjectionError("DirectiveInjectionError: Custom directive override not present in the optimization prompt.");
       }
       const retryResult = await callAI({
         systemPrompt: retrySystem,
         isOptimizerCall: true,
-        userPrompt: (retrySplit.user ? retrySplit.user + "\n\n---\n\n" : "") + `SOURCE RESUME:\n${JSON.stringify({ name: resume.name, headline: resume.headline, contact: resume.contact, summary: resume.summary, experience: resume.experience, education: resume.education, skills: resume.skills, languages: resume.languages, certifications: resume.certifications })}\n\nJOB DESCRIPTION:\n${jd.rawText?.slice(0, 1500) ?? jd.keywords.join(", ")}\n\nOptimize this resume for the job. Return ONLY a JSON object with: name, headline, email, phone, location, summary, skills [{category, items[]}], experience [{title, company, location, startDate, endDate, bullets[]}], education [{degree, institution, field, startDate, endDate, modules}], languages [{name, proficiency}]. No prose, no markdown.`,
+        userPrompt: retryUserPrompt,
         maxTokens: 8000,
         temperature: 0.4,
         taskCategory: "document",

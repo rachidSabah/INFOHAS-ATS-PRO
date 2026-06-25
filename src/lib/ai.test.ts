@@ -12,7 +12,7 @@
 //   - All AI JSON parsing goes through extractJSON()
 
 import { describe, it, expect } from "vitest";
-import { extractJSON, getPuterStatus } from "./ai";
+import { extractJSON, getPuterStatus, hasValidApiKey } from "./ai";
 
 describe("extractJSON", () => {
   it("is a function exported from ai.ts", () => {
@@ -149,5 +149,29 @@ describe("getPuterStatus", () => {
     const status1 = getPuterStatus();
     const status2 = getPuterStatus();
     expect(status1).toEqual(status2);
+  });
+});
+
+describe("hasValidApiKey", () => {
+  it("should return true for puter or local providers", () => {
+    expect(hasValidApiKey({ type: "puter" })).toBe(true);
+    expect(hasValidApiKey({ type: "local" })).toBe(true);
+  });
+
+  it("should return true for custom providers with authType none", () => {
+    expect(hasValidApiKey({ type: "custom", authType: "none" })).toBe(true);
+  });
+
+  it("should return false for providers with empty, null, undefined, or placeholder API keys", () => {
+    expect(hasValidApiKey({ type: "opencode" })).toBe(false);
+    expect(hasValidApiKey({ type: "opencode", apiKey: null })).toBe(false);
+    expect(hasValidApiKey({ type: "opencode", apiKey: "" })).toBe(false);
+    expect(hasValidApiKey({ type: "opencode", apiKey: "   " })).toBe(false);
+    expect(hasValidApiKey({ type: "opencode", apiKey: "undefined" })).toBe(false);
+    expect(hasValidApiKey({ type: "opencode", apiKey: "null" })).toBe(false);
+  });
+
+  it("should return true for providers with a valid API key string", () => {
+    expect(hasValidApiKey({ type: "opencode", apiKey: "oc_key" })).toBe(true);
   });
 });

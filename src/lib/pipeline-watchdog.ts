@@ -87,6 +87,13 @@ export class OptimizationDeadlockError extends Error {
   }
 }
 
+export class DirectiveInjectionError extends Error {
+  constructor(message = "DirectiveInjectionError: Custom directive override not present in the optimization prompt.") {
+    super(message);
+    this.name = "DirectiveInjectionError";
+  }
+}
+
 // ============================================================================
 // withTimeout — wraps any Promise in a hard timeout
 // ============================================================================

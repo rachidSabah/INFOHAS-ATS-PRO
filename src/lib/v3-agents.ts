@@ -148,7 +148,7 @@ export function runFactVerificationAgent(
  * Calculate the VISIBLE text character count (not JSON structure).
  * This is what actually appears on the rendered resume.
  */
-function getVisibleCharCount(resume: ResumeData): number {
+export function getVisibleCharCount(resume: ResumeData): number {
   const parts: string[] = [];
   parts.push(resume.name || "");
   parts.push(resume.headline || "");
@@ -180,7 +180,7 @@ function getVisibleCharCount(resume: ResumeData): number {
  * Aggressively expand content to reach the 2700+ character target.
  * Only elaborates existing content — NEVER invents metrics.
  */
-function aggressiveExpand(resume: ResumeData, original: ResumeData, jdKeywords?: string[]): ResumeData {
+export function aggressiveExpand(resume: ResumeData, original: ResumeData, jdKeywords?: string[]): ResumeData {
   const result = JSON.parse(JSON.stringify(resume)) as ResumeData;
 
   // 1. Expand summary to 500+ chars if short
@@ -298,6 +298,19 @@ function aggressiveExpand(resume: ResumeData, original: ResumeData, jdKeywords?:
     result.education = original.education || [];
   }
 
+  // 7. Ensure achievements are present and expand if short
+  if (!result.achievements || result.achievements.length === 0) {
+    result.achievements = original.achievements || [];
+  }
+  if (result.achievements && result.achievements.length > 0) {
+    result.achievements = result.achievements.map((ach) => {
+      if (ach && ach.length < 80) {
+        return ach.replace(/\.$/, "") + ", demonstrating professional growth and dedication to achieving outstanding outcomes.";
+      }
+      return ach;
+    });
+  }
+
   return result;
 }
 
@@ -305,10 +318,10 @@ function aggressiveExpand(resume: ResumeData, original: ResumeData, jdKeywords?:
  * Layout Optimization Agent
  *
  * Ensures the resume fills a complete A4 page (85-95% occupancy).
- * Uses aggressive expansion to reach 2700+ visible characters.
+ * Uses aggressive expansion to reach 2800+ visible characters.
  * NEVER invents metrics — only elaborates existing content.
  *
- * Target: 2600-3200 characters, 85-95% page occupancy
+ * Target: 2800-3800 characters, 80-98% page occupancy
  */
 export function runLayoutOptimizationAgent(
   optimized: ResumeData,
@@ -333,7 +346,7 @@ export function runLayoutOptimizationAgent(
     changes.push(`Basic bullet expansion (+${afterBasicChars - beforeBasicChars} chars)`);
   }
 
-  // Step 3: AGGRESSIVE expansion to reach 2700+ visible chars
+  // Step 3: AGGRESSIVE expansion to reach 2800+ visible chars
   const beforeAggressiveChars = getVisibleCharCount(result);
   result = aggressiveExpand(result, original, jdKeywords);
   const afterAggressiveChars = getVisibleCharCount(result);
@@ -341,9 +354,9 @@ export function runLayoutOptimizationAgent(
     changes.push(`Aggressive content expansion (+${afterAggressiveChars - beforeAggressiveChars} chars)`);
   }
 
-  // Step 4: If STILL under 2700, do one more pass
+  // Step 4: If STILL under 2800, do one more pass
   let finalVisibleChars = getVisibleCharCount(result);
-  if (finalVisibleChars < 2700) {
+  if (finalVisibleChars < 2800) {
     result = aggressiveExpand(result, original, jdKeywords);
     finalVisibleChars = getVisibleCharCount(result);
     changes.push(`Second expansion pass to reach ${finalVisibleChars} chars`);

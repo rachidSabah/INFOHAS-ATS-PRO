@@ -45,8 +45,7 @@ export function mergeProviderWithSeed(d1Provider: AIProvider, seedProvider?: AIP
   const merged = { ...d1Provider };
 
   // Restore API key from seed if D1 has empty/missing key
-  // BUT never overwrite an admin-configured key
-  if (!merged.apiKey || merged.apiKey.trim() === "") {
+  if (!merged.apiKey || merged.apiKey.trim() === "" || merged.apiKey === "undefined" || merged.apiKey === "null") {
     merged.apiKey = seedProvider.apiKey || "";
   }
 
@@ -75,10 +74,10 @@ export function mergeProviderWithSeed(d1Provider: AIProvider, seedProvider?: AIP
   }
 
   // Restore timeout/maxTokens from seed if D1 has 0 or invalid values
-  if (!merged.timeout || merged.timeout < 1000) {
+  if (!merged.timeout || typeof merged.timeout !== "number" || isNaN(merged.timeout) || merged.timeout < 1000) {
     merged.timeout = seedProvider.timeout;
   }
-  if (!merged.maxTokens || merged.maxTokens < 100) {
+  if (!merged.maxTokens || typeof merged.maxTokens !== "number" || isNaN(merged.maxTokens) || merged.maxTokens < 100) {
     merged.maxTokens = seedProvider.maxTokens;
   }
 
@@ -87,17 +86,43 @@ export function mergeProviderWithSeed(d1Provider: AIProvider, seedProvider?: AIP
 
 /**
  * Find the seed provider that matches a D1 provider.
- * Matches by ID first, then by name (case-insensitive).
+ * Matches by ID first, then by name (case-insensitive & flexible substring match).
  */
 export function findSeedProvider(d1Provider: AIProvider, seedProviders: AIProvider[] = SEED_PROVIDERS): AIProvider | undefined {
   // Try ID match first
   let seed = seedProviders.find((p) => p.id === d1Provider.id);
   if (seed) return seed;
 
-  // Try name match (case-insensitive)
-  const d1Name = (d1Provider.name || "").toLowerCase();
-  seed = seedProviders.find((p) => p.name.toLowerCase() === d1Name);
-  return seed;
+  // Try exact name match (case-insensitive, trimmed)
+  const d1Name = (d1Provider.name || "").trim().toLowerCase();
+  seed = seedProviders.find((p) => (p.name || "").trim().toLowerCase() === d1Name);
+  if (seed) return seed;
+
+  // Try flexible name match (starts with, ends with, contains, or word matching)
+  seed = seedProviders.find((p) => {
+    const sName = (p.name || "").trim().toLowerCase();
+    return sName.includes(d1Name) || d1Name.includes(sName);
+  });
+  if (seed) return seed;
+
+  // Hardcoded mappings for common provider names to their seed equivalents
+  if (d1Name.includes("nvidia")) {
+    return seedProviders.find((p) => p.id === "p_nvidia");
+  }
+  if (d1Name.includes("opencode")) {
+    return seedProviders.find((p) => p.id === "p_opencode");
+  }
+  if (d1Name.includes("google") || d1Name.includes("gemini")) {
+    return seedProviders.find((p) => p.id === "p_google_gemini");
+  }
+  if (d1Name.includes("openrouter")) {
+    return seedProviders.find((p) => p.id === "p_openrouter");
+  }
+  if (d1Name.includes("mistral")) {
+    return seedProviders.find((p) => p.id === "p_mistral");
+  }
+
+  return undefined;
 }
 
 /**

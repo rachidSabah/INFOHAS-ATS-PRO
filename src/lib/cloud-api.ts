@@ -333,21 +333,19 @@ export async function syncAllFromCloud(store: any): Promise<void> {
         } catch (err) { console.warn("[cloudApi] ATS reports backup restore failed:", err instanceof Error ? err.message : err); }
       }
     }
-    if (providers.length) {
-      // [PROVIDER SYNC] Synchronize D1 providers with seed defaults.
-      // This merges API keys (from env vars), fixes invalid model names,
-      // restores missing timeouts/maxTokens, and backfills missing providers.
-      const { syncProviderConfigs } = await import("./provider-sync");
-      const { providers: syncedProviders, result: syncResult } = syncProviderConfigs(providers as any);
-      if (syncResult.driftDetected) {
-        console.warn(
-          `[PROVIDER SYNC] Database drift detected. ` +
-          `${syncResult.repaired} repaired, ${syncResult.backfilled} backfilled. ` +
-          `Details: ${syncResult.driftDetails.join("; ")}`
-        );
-      }
-      store.setState({ providers: syncedProviders });
+    // [PROVIDER SYNC] Synchronize D1 providers with seed defaults.
+    // This merges API keys (from env vars), fixes invalid model names,
+    // restores missing timeouts/maxTokens, and backfills missing providers.
+    const { syncProviderConfigs } = await import("./provider-sync");
+    const { providers: syncedProviders, result: syncResult } = syncProviderConfigs(providers as any);
+    if (syncResult.driftDetected) {
+      console.warn(
+        `[PROVIDER SYNC] Database drift detected. ` +
+        `${syncResult.repaired} repaired, ${syncResult.backfilled} backfilled. ` +
+        `Details: ${syncResult.driftDetails.join("; ")}`
+      );
     }
+    store.setState({ providers: syncedProviders });
     if (prompts.length) store.setState({ prompts });
     if (logs.length) store.setState({ logs });
 

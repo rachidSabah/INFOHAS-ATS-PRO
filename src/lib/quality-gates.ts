@@ -430,20 +430,20 @@ export function estimatePageUtilization(resume: ResumeData): PageUtilizationResu
     certifications: resume.certifications,
   }).length;
 
-  const targetMin = 2700;
-  const targetMax = 3200;
+  const targetMin = 2800;
+  const targetMax = 3800;
   const utilizationPercent = Math.round((charCount / targetMax) * 100);
-  const appearsHalfEmpty = charCount < 2000;
+  const appearsHalfEmpty = charCount < 2800;
 
   const issues: string[] = [];
-  if (charCount < 2500) {
-    issues.push(`Content too short: ${charCount} chars (minimum 2500)`);
+  if (charCount < 2800) {
+    issues.push(`Content too short: ${charCount} chars (minimum 2800)`);
   }
   if (appearsHalfEmpty) {
-    issues.push(`Resume appears half-empty: ${charCount} chars (under 2000)`);
+    issues.push(`Resume appears half-empty: ${charCount} chars (under 2800)`);
   }
-  if (charCount > 3500) {
-    issues.push(`Content may overflow: ${charCount} chars (over 3500)`);
+  if (charCount > 3800) {
+    issues.push(`Content may overflow: ${charCount} chars (over 3800)`);
   }
 
   return {
@@ -837,6 +837,34 @@ export function repairContent(
         expanded = true;
       }
     }
+  }
+
+  // Strategy 8: Restore dropped projects
+  if (original.projects && original.projects.length > 0) {
+    const repairedProjects = repaired.projects || [];
+    const optimizedProjNames = new Set(repairedProjects.map((p) => (p.name || "").toLowerCase()));
+    for (const origProj of original.projects) {
+      if (origProj && origProj.name && !optimizedProjNames.has(origProj.name.toLowerCase())) {
+        repairedProjects.push(origProj);
+        repairsMade.push(`Restored dropped project: ${origProj.name}`);
+        expanded = true;
+      }
+    }
+    repaired.projects = repairedProjects;
+  }
+
+  // Strategy 9: Restore dropped achievements
+  if (original.achievements && original.achievements.length > 0) {
+    const repairedAchievements = repaired.achievements || [];
+    const optimizedAchNames = new Set(repairedAchievements.map((a) => (a || "").toLowerCase()));
+    for (const origAch of original.achievements) {
+      if (origAch && !optimizedAchNames.has(origAch.toLowerCase())) {
+        repairedAchievements.push(origAch);
+        repairsMade.push(`Restored dropped achievement: ${origAch}`);
+        expanded = true;
+      }
+    }
+    repaired.achievements = repairedAchievements;
   }
 
   return {

@@ -107,11 +107,11 @@ export function computePageFillTarget(directive?: OptimizerDirectiveConfig | nul
   // - Bullet points (indented, not full-width)
   // - Spacing between sections
   // - Two-column header (name + photo)
-  // Use 0.54 as the effective ratio (calibrated against the InfoHAS Pro layout)
-  const effectiveCapacity = Math.floor(rawCapacity * 0.54);
+  // Use 0.58 as the effective ratio (calibrated against the InfoHAS Pro layout)
+  const effectiveCapacity = Math.floor(rawCapacity * 0.58);
 
-  // 90-98% fill target
-  const minChars = Math.floor(effectiveCapacity * 0.90);
+  // 80% minimum page fill, 90-98% target sweet spot
+  const minChars = Math.floor(effectiveCapacity * 0.80);
   const targetChars = Math.floor(effectiveCapacity * 0.94);
   const maxChars = Math.floor(effectiveCapacity * 0.98);
 

@@ -49,6 +49,18 @@ export class ProviderReturnedEmptyResponse extends Error {
   }
 }
 
+export function hasValidApiKey(p: any): boolean {
+  if (!p) return false;
+  if (p.type === "puter" || p.type === "local") return true;
+  if (p.type === "custom" && p.authType === "none") return true;
+  const key = p.apiKey;
+  if (key === undefined || key === null) return false;
+  if (typeof key !== "string") return false;
+  const trimmed = key.trim();
+  if (trimmed === "" || trimmed === "undefined" || trimmed === "null") return false;
+  return true;
+}
+
 export async function selectProvider(): Promise<any> {
   const state: any = useApp.getState();
   const providers: any[] = state?.providers || [];
@@ -71,14 +83,11 @@ export async function selectProvider(): Promise<any> {
     return puter;
   }
 
-  // 2. Secondary providers — only include those with an API key configured
-  // (providers without keys will fail with 401 and waste pipeline time)
   const secondary = providers.filter((p: any) =>
     p.isActive &&
     p.type !== "puter" &&
     p.type !== "local" &&
-    // Must have an API key (unless it's a no-auth provider like Puter)
-    (p.apiKey || p.type === "custom" && p.authType === "none")
+    hasValidApiKey(p)
   );
   if (secondary.length > 0) {
     const defaultId = settings.defaultProviderId;
@@ -448,26 +457,17 @@ ONE-PAGE CONSTRAINT: The output MUST fit on exactly one A4 page. Apply the CONTE
  *   const result = await callAI({ systemPrompt: directive, ... });
  */
 export function getOptimizerDirective(): string {
+  let customDirective: string | undefined;
+  let generatedDirective: string | undefined;
+  let defaults = OPTIMIZER_DIRECTIVE;
+
   try {
     const state: any = useApp.getState();
     const c: OptimizerDirectiveConfig | undefined = state?.optimizerDirective;
 
-    // If no config in store, use the hardcoded default
-    if (!c) {
-      console.info("[getOptimizerDirective] No config in store, using hardcoded default");
-      return OPTIMIZER_DIRECTIVE;
-    }
-
-    // If custom override is set, use it completely
-    if (c.customDirectiveOverride?.trim()) {
-      console.info("[getOptimizerDirective] Using custom override from super admin settings");
-      return c.customDirectiveOverride.trim();
-    }
-
-    console.info("[getOptimizerDirective] Using generated directive from structured config (no override set)");
-
-    // Otherwise, generate from the structured config
-    return `You are the ResumeAI Pro Optimizer. You MUST preserve the EXACT layout framework described below. Only modify CONTENT — never modify LAYOUT, section order, content density, photo position, or the compact recruiter-friendly structure.
+    if (c) {
+      customDirective = c.customDirectiveOverride?.trim() || undefined;
+      generatedDirective = `You are the ResumeAI Pro Optimizer. You MUST preserve the EXACT layout framework described below. Only modify CONTENT — never modify LAYOUT, section order, content density, photo position, or the compact recruiter-friendly structure.
 
 ═══════════════════════════════════════════════════════════════
 PAGE FORMAT & CONTENT DENSITY
@@ -558,8 +558,8 @@ Return ONLY valid JSON with this exact shape:
       "company": "Company",
       "location": "City, Country",
       "startDate": "Mon YYYY",
-      "endDate": "Mon YYYY",  // CRITICAL: NEVER output "Present" unless original says "Present"
-      "bullets": ["Achievement bullet 1...", "Achievement bullet 2..."]  // PRESERVE ALL original bullets
+      "endDate": "Mon YYYY",
+      "bullets": ["Achievement bullet 1...", "Achievement bullet 2..."]
     }
   ],
   "education": [
@@ -736,10 +736,19 @@ EXPERIENCE bullets must be achievement statements:
 If you include ANY analysis, reasoning, recommendations, or meta-commentary
 in the resume fields, the output will be REJECTED and the user will see
 nothing. Return ONLY clean, professional resume content.`;
-  } catch {
-    // If anything goes wrong reading the store, use the hardcoded default
-    return OPTIMIZER_DIRECTIVE;
+    }
+  } catch (err) {
+    console.warn("[getOptimizerDirective] Error resolving config:", err);
   }
+
+  const directive = customDirective ?? generatedDirective ?? defaults;
+
+  console.log(
+    'Optimizer Directive Applied',
+    directive
+  );
+
+  return directive;
 }
 
 // Import the type for the directive config (imported here to avoid circular deps
@@ -792,15 +801,7 @@ const estTokens = (s: string) => Math.ceil(s.length / 4);
  * with a timeout error. Used to prevent AI provider calls from hanging forever
  * (e.g. Puter sign-in popup that the user dismisses, or a slow provider endpoint).
  */
-function withTimeout<T>(promise: Promise<T>, ms: number, label = "operation"): Promise<T> {
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  const timeout = new Promise<never>((_, reject) => {
-    timer = setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms);
-  });
-  return Promise.race([promise, timeout]).finally(() => {
-    if (timer) clearTimeout(timer);
-  }) as Promise<T>;
-}
+
 
 // ============================================================================
 // Puter Cooldown — prevents retry storms after "No usage left" / quota errors
@@ -1481,7 +1482,7 @@ export async function callAI(opts: AICallOptions): Promise<AICallResult> {
       console.warn(`[AI] Puter failed: ${e?.message || e}. Trying secondary providers...`);
       const state = useApp.getState();
       const allProviders = state.providers || [];
-      const secondary = allProviders.filter((p: any) => p.isActive && p.type !== "puter" && p.type !== "local" && (p.apiKey || (p.type === "custom" && p.authType === "none")));
+      const secondary = allProviders.filter((p: any) => p.isActive && p.type !== "puter" && p.type !== "local" && hasValidApiKey(p));
       const providerErrors: string[] = [`Puter: ${e?.message || e}`];
 
       for (const fallbackProvider of secondary) {
@@ -1630,7 +1631,7 @@ export async function callAI(opts: AICallOptions): Promise<AICallResult> {
 
   // Try all other active secondary providers
   const otherSecondary = allProviders.filter(
-    (p: any) => p.isActive && p.type !== "puter" && p.type !== "local" && p.id !== provider.id && (p.apiKey || (p.type === "custom" && p.authType === "none"))
+    (p: any) => p.isActive && p.type !== "puter" && p.type !== "local" && p.id !== provider.id && hasValidApiKey(p)
   );
   for (const altProvider of otherSecondary) {
     const altCooldownId = altProvider.id || altProvider.name || altProvider.type;
