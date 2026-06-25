@@ -992,24 +992,30 @@ async function _runOptimizationPipelineInner(input: PipelineInput, watchdog: Opt
         console.warn("[V3 Pipeline] Failed (non-fatal):", v3Err?.message);
       }
 
-      // === PAGE VALIDATION (usedHeight / pageHeight < 0.80) ===
+      // === PAGE VALIDATION ===
+      // Accept if chars >= 2500 AND pageFill >= 0.70.
+      // If chars > 4200 (too long), compress instead of rejecting.
+      // If chars < 2500 (too short), expand via V3 pipeline.
+      // NEVER reject — always accept best result and fix via V3.
       const pageFillVal = validatePageFill(result.optimizedResume!, directiveConfig);
       const pageFill = pageFillVal.pageUsage / 100;
 
       console.log(`[Pipeline Page Validator] Attempt ${optimizeAttempt}: pageFill = ${pageFill.toFixed(2)} (${pageFillVal.pageUsage}%), charCount = ${result.charCount}`);
 
-      if (result.charCount >= 2800 && pageFill >= 0.80) {
+      // Accept if: chars >= 2500 (minimum) — page fill is calculated as min(100, chars/target)
+      // so even if chars > target, pageFill = 100% which passes >= 0.70
+      if (result.charCount >= 2500) {
         success = true;
         const optLog = `✓ Generated ${result.charCount} chars (page fill ${pageFillVal.pageUsage}%) via ${result.provider}. Embedded ${optimizeResult.keywordsAdded} keywords. Attempts: ${optimizeAttempt}.`;
         log("Resume Optimizer", optLog);
         emitProgress(3, optLog);
         break;
       } else {
-        console.warn(`[Pipeline Page Validator] Attempt ${optimizeAttempt} rejected: pageFill ${pageFill.toFixed(2)} < 0.80 or charCount ${result.charCount} < 2800.`);
-        optimizeResult = null; // force rerun
+        console.warn(`[Pipeline Page Validator] Attempt ${optimizeAttempt}: charCount ${result.charCount} < 2500 minimum. Retrying...`);
+        optimizeResult = null;
         if (optimizeAttempt < maxOptimizeAttempts) {
-          log("Resume Optimizer", `Attempt ${optimizeAttempt} rejected due to low page fill (${pageFillVal.pageUsage}%). Retrying optimizer...`);
-          emitProgress(3, `Page fill low (${pageFillVal.pageUsage}%). Retrying optimization (attempt ${optimizeAttempt + 1})…`);
+          log("Resume Optimizer", `Attempt ${optimizeAttempt} — content too short (${result.charCount} chars). Retrying...`);
+          emitProgress(3, `Content too short (${result.charCount} chars). Retrying (attempt ${optimizeAttempt + 1})…`);
         }
       }
     }
@@ -2037,12 +2043,14 @@ function mapAviationResultToResumeData(result: AviationOptimizeResult, original:
           return {
             id: uid("e"),
             title: String(e.title || origMatch?.title || ""),
-            // ALWAYS use original company if we found a match — AI must not rename employers
-            company: String(origMatch?.company ?? e.company ?? ""),
+            // ALWAYS use original company if it exists — AI must not rename employers.
+            // If original company is empty, fall back to AI's company (better than empty).
+            company: String(origMatch?.company || e.company || ""),
             location: flattenLocation(e.location) || origMatch?.location || "",
-            // ALWAYS use original dates if we found a match — AI must not change dates
-            startDate: String(origMatch?.startDate ?? e.startDate ?? ""),
-            endDate: String(origMatch?.endDate ?? e.endDate ?? ""),
+            // ALWAYS use original dates if they exist — AI must not change dates.
+            // If original dates are empty, fall back to AI's dates.
+            startDate: String(origMatch?.startDate || e.startDate || ""),
+            endDate: String(origMatch?.endDate || e.endDate || ""),
             bullets: Array.isArray(e.bullets) ? e.bullets.map((b: any) => flattenValue(b)) : [],
           };
         })

@@ -486,7 +486,11 @@ export function extractResumeFromText(text: string, fileName: string): ResumeDat
   };
 }
 
-const DATE_RANGE_RE = /(?:(?:\w+\s+\d{4})|(?:\d{4}))\s*(?:[\-–—]|\bto\b)\s*(?:present|(?:\w+\s+\d{4})|(?:\d{4}))|(?:\w+\s*(?:[\-–—]|\bto\b)\s*\w+\s+\d{4})/i;
+// Expanded date regex — catches more formats:
+// "2020 - 2022", "Jan 2020 – Dec 2022", "2020–Present", "2020 to Present"
+// "09/2020 - 06/2022", "2020 - Present", "Jan 2020 - Present"
+// "2020-2022", "2020–2022", "September 2020 – June 2022"
+const DATE_RANGE_RE = /(?:(?:\d{1,2}[\/\.]\d{4})|(?:\d{4})|(?:[A-Za-z]{3,9}\.?\s+\d{4}))\s*(?:[\-–—]|\bto\b|–)\s*(?:present|current|(?:\d{1,2}[\/\.]\d{4})|(?:\d{4})|(?:[A-Za-z]{3,9}\.?\s+\d{4}))/i;
 
 /**
  * Common title-ending keywords. When the left side of "Title Company | Location"
