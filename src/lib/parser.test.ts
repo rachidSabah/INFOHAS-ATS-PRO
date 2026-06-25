@@ -144,3 +144,78 @@ describe("Parser — QA false positive prevention", () => {
     expect(originalCompanies.has("university of california, berkeley")).toBe(true);
   });
 });
+
+const AYA_CHABAKI_RESUME_TEXT = `AYA CHABAKI 
+Retail Sales & Service Professional 
+Rabat, Morocco | +212 6 96 84 27 83 | ayachabaki4@gmail.com
+Date of Birth: 01/04/2005 
+
+PROFESSIONAL SUMMARY 
+Highly collaborative and customer-focused Retail Sales professional with experience in the beauty industry and airport operations. Eager to leverage training in Aviation and Hospitality to join the Qatar Duty Free team.
+
+CORE COMPETENCIES & SKILLS
+• Sales Techniques: Experience in upselling products/services.
+• Airport Security: Knowledge of airport safety protocols.
+
+PROFESSIONAL EXPERIENCE
+Customer Service Agent Rabat International Airport | Rabat, Morocco Jun 2025 – Nov 2025
+• Assisted diverse international passengers with inquiries.
+• Adhered to strict airport security and safety protocols.
+
+Beauty Consultant / Sales Assistant Ibtissam Beauty | Rabat, Morocco Jan 2024 – May 2025
+• Provided personalized beauty consultations to clients.
+• Managed appointment schedules and processed payments.
+
+EDUCATION 
+Hospitality and Aviation Accredited Diploma INFOHAS | Rabat, Morocco | 2023 – 2025 
+• Modules: Customer Services, Hospitality, English.
+High School Degree Morocco | 2022 – 2023
+
+LANGUAGES
+• English: Fluent (Oral/Written)
+• French: Fluent (Oral/Written)
+• Arabic: Fluent (Oral/Written)`;
+
+describe("Parser — AYA_CHABAKI regression", () => {
+  const parsed = extractResumeFromText(AYA_CHABAKI_RESUME_TEXT, "AYA_CHABAKI_resume.pdf");
+
+  it("extracts the contact location as 'Rabat, Morocco'", () => {
+    expect(parsed.contact.location).toBe("Rabat, Morocco");
+  });
+
+  it("extracts experience entries with correctly-split title/company/location", () => {
+    expect(parsed.experience.length).toBe(2);
+
+    // Entry 1
+    expect(parsed.experience[0].title).toBe("Customer Service Agent");
+    expect(parsed.experience[0].company).toBe("Rabat International Airport");
+    expect(parsed.experience[0].location).toBe("Rabat, Morocco");
+    expect(parsed.experience[0].startDate).toBe("Jun 2025");
+    expect(parsed.experience[0].endDate).toBe("Nov 2025");
+
+    // Entry 2
+    expect(parsed.experience[1].title).toBe("Beauty Consultant / Sales Assistant");
+    expect(parsed.experience[1].company).toBe("Ibtissam Beauty");
+    expect(parsed.experience[1].location).toBe("Rabat, Morocco");
+    expect(parsed.experience[1].startDate).toBe("Jan 2024");
+    expect(parsed.experience[1].endDate).toBe("May 2025");
+  });
+
+  it("extracts education entries with correct degree/institution/location", () => {
+    expect(parsed.education.length).toBe(2);
+
+    // Entry 1
+    expect(parsed.education[0].degree).toBe("Hospitality and Aviation Accredited Diploma");
+    expect(parsed.education[0].institution).toBe("INFOHAS");
+    expect(parsed.education[0].location).toBe("Rabat, Morocco");
+    expect(parsed.education[0].startDate).toBe("2023");
+    expect(parsed.education[0].endDate).toBe("2025");
+
+    // Entry 2
+    expect(parsed.education[1].degree).toBe("High School Degree");
+    expect(parsed.education[1].institution).toBe("Morocco");
+    expect(parsed.education[1].startDate).toBe("2022");
+    expect(parsed.education[1].endDate).toBe("2023");
+  });
+});
+

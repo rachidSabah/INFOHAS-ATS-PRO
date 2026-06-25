@@ -801,15 +801,50 @@ async function _runOptimizationPipelineInner(input: PipelineInput, watchdog: Opt
       const optHandle = watchdog.startStep(`Resume Optimizer (attempt ${optimizeAttempt})`);
       try {
         if (aviationMode) {
-          log("Resume Optimizer", `Aviation ATS mode → ${aviationMode.airlineProfile}. Calling aviationOptimize() with unified directive…`);
+          log("Resume Optimizer", `Industry ATS mode → ${aviationMode.airlineProfile}. Calling aviationOptimize() with unified directive…`);
           const aviationResult = await aviationOptimize(resume, jd.rawText ?? "", aviationMode.airlineProfile, aviationMode.settings);
           result.optimizedResume = mapAviationResultToResumeData(aviationResult, resume);
           result.provider = "aviation-ats";
           result.charCount = aviationResult.charCount;
-          const optLog = `✓ Generated ${aviationResult.charCount} chars (target ~2900). ATS score: ${aviationResult.score}/100. ${aviationResult.matched_keywords.length} keywords matched.`;
+          // Compute the REAL ATS score via analyzeATS (not the AI's self-reported score which can be 0)
+          const realAtsScore = analyzeATS(result.optimizedResume!, jd).scores.ats;
+          const optLog = `✓ Generated ${aviationResult.charCount} chars (target ~2900). ATS score: ${realAtsScore}/100. ${aviationResult.matched_keywords.length} keywords matched.`;
           log("Resume Optimizer", optLog);
           emitProgress(3, optLog);
-          optimizeResult = { resume: result.optimizedResume!, provider: "aviation-ats", charCount: result.charCount, keywordsAdded: aviationResult.matched_keywords.length };
+          // === INDUSTRY ATS QUALITY GATES — preserve sections ===
+          // These mirror the quality gates in optimizeResumeStandard so that
+          // the aviation/industry path is equally protected from section loss.
+          const avi = result.optimizedResume!;
+
+          if (!avi.experience || avi.experience.length === 0) {
+            console.warn("[Industry ATS Quality Gate] Experience missing — restoring original.");
+            avi.experience = resume.experience;
+          } else if (avi.experience.length < resume.experience.length) {
+            console.warn(`[Industry ATS Quality Gate] Experience entries dropped (${avi.experience.length} < ${resume.experience.length}) — restoring original.`);
+            avi.experience = resume.experience;
+          }
+          if (resume.education.length > 0 && (!avi.education || avi.education.length === 0)) {
+            console.warn("[Industry ATS Quality Gate] Education missing — restoring original.");
+            avi.education = resume.education;
+          }
+          if (!avi.skills || avi.skills.length === 0) {
+            console.warn("[Industry ATS Quality Gate] Skills missing — restoring original.");
+            avi.skills = resume.skills;
+          }
+          if (resume.languages.length > 0 && (!avi.languages || avi.languages.length === 0)) {
+            console.warn("[Industry ATS Quality Gate] Languages missing — restoring original.");
+            avi.languages = resume.languages;
+          }
+          if (resume.certifications?.length > 0 && (!avi.certifications || avi.certifications.length === 0)) {
+            console.warn("[Industry ATS Quality Gate] Certifications missing — restoring original.");
+            avi.certifications = resume.certifications;
+          }
+          if (!avi.summary || avi.summary.trim().length < 30) {
+            console.warn("[Industry ATS Quality Gate] Summary too short — restoring original.");
+            avi.summary = resume.summary;
+          }
+          // Update optimizeResult with the quality-gated resume
+          optimizeResult = { resume: avi, provider: "aviation-ats", charCount: result.charCount, keywordsAdded: aviationResult.matched_keywords.length };
         } else {
           log("Resume Optimizer", `Standard optimization mode (attempt ${optimizeAttempt}/${maxOptimizeAttempts}).`);
           const optimizeAttemptResult = await optimizeResumeStandard(
@@ -820,6 +855,7 @@ async function _runOptimizationPipelineInner(input: PipelineInput, watchdog: Opt
           );
           optimizeResult = optimizeAttemptResult;
         }
+
         optHandle.complete();
       } catch (e: any) {
         optHandle.fail(e);

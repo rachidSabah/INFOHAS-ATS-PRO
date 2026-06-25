@@ -110,8 +110,11 @@ export function secondaryParser(text: string, fileName: string): ResumeData {
   const linkedin = urlMatches.find((u) => /linkedin/i.test(u));
   const github = urlMatches.find((u) => /github/i.test(u));
   const website = urlMatches.find((u) => !/linkedin|github/i.test(u));
-  const locationLine = normalizedText.split("\n").slice(0, 15).find((l) => /\b([A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+){0,2},\s?[A-Z]{2})\b/.test(l));
-  const location = locationLine?.match(/\b([A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+){0,2},\s?[A-Z]{2})\b/)?.[1];
+  // Try to find a location pattern near the top
+  // Allow 1-3 capitalized words before the comma (e.g. "San Francisco, CA", "New York City, NY").
+  // Also allow capitalized country/state names after the comma (e.g. "Rabat, Morocco", "London, United Kingdom").
+  const locationLine = normalizedText.split("\n").slice(0, 15).find((l) => /\b([A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+){0,2},\s?[A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+)?)\b/.test(l));
+  const location = locationLine?.match(/\b([A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+){0,2},\s?[A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+)?)\b/)?.[1];
 
   let name = "Untitled";
   const nameLines = normalizedText.split("\n").slice(0, 5);
@@ -212,8 +215,8 @@ export function heuristicParser(text: string, fileName: string): ResumeData {
   const linkedin = urlMatches.find((u) => /linkedin/i.test(u));
   const github = urlMatches.find((u) => /github/i.test(u));
   const website = urlMatches.find((u) => !/linkedin|github/i.test(u));
-  const locationLine = sectionLines.header.find((l) => /\b([A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+){0,2},\s?[A-Z]{2})\b/.test(l));
-  const location = locationLine?.match(/\b([A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+){0,2},\s?[A-Z]{2})\b/)?.[1];
+  const locationLine = sectionLines.header.find((l) => /\b([A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+){0,2},\s?[A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+)?)\b/.test(l));
+  const location = locationLine?.match(/\b([A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+){0,2},\s?[A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+)?)\b/)?.[1];
 
   let name = "Untitled";
   for (const l of sectionLines.header.slice(0, 5)) {
@@ -372,11 +375,10 @@ export function extractResumeFromText(text: string, fileName: string): ResumeDat
   const website = urlMatches.find((u) => !/linkedin|github/i.test(u));
 
   // Try to find a location pattern near the top
-  // Allow 1-3 capitalized words before the comma (e.g. "San Francisco, CA",
-  // "New York City, NY", "Kuala Lumpur, MY"). The previous regex only matched
-  // a single capitalized word, so "San Francisco, CA" was extracted as "Francisco, CA".
-  const locationLine = lines.slice(0, 12).find((l) => /\b([A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+){0,2},\s?[A-Z]{2})\b/.test(l));
-  const location = locationLine?.match(/\b([A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+){0,2},\s?[A-Z]{2})\b/)?.[1];
+  // Allow 1-3 capitalized words before the comma (e.g. "San Francisco, CA", "New York City, NY").
+  // Also allow capitalized country/state names after the comma (e.g. "Rabat, Morocco", "London, United Kingdom").
+  const locationLine = lines.slice(0, 12).find((l) => /\b([A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+){0,2},\s?[A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+)?)\b/.test(l));
+  const location = locationLine?.match(/\b([A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+){0,2},\s?[A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+)?)\b/)?.[1];
 
   // Sections — match common headers
   const sectionIndex = (labels: string[]) =>
@@ -536,11 +538,13 @@ function splitTitleAndCompany(combined: string): { title: string; company: strin
   const trimmed = combined.trim();
   if (!trimmed) return null;
 
-  // Try each keyword — find the FIRST one that appears as a whole word.
+  let bestSplit: { title: string; company: string; index: number } | null = null;
+
+  // Try each keyword — find the one furthest to the right that appears as a whole word.
   // We use word boundaries to avoid matching "Manager" inside "Management".
   for (const kw of TITLE_END_KEYWORDS) {
     // Build a regex that matches the keyword as a whole word, case-insensitive.
-    // Allow a trailing period (e.g. "Mgr." — though we don't have that in the list).
+    // Allow a trailing period (e.g. "Mgr.").
     const re = new RegExp(`\\b${kw.replace(/\./g, "\\.")}\\b`, "i");
     const match = trimmed.match(re);
     if (!match) continue;
@@ -551,19 +555,18 @@ function splitTitleAndCompany(combined: string): { title: string; company: strin
     const company = trimmed.slice(endPos).trim();
 
     // Sanity: company should be non-empty AND not just punctuation.
-    // If there's nothing after the keyword, this isn't a valid split.
     if (!company || !/[A-Za-z0-9]/.test(company)) continue;
 
-    // Sanity: title should be at least 2 words (avoid matching single-word titles
-    // like "Manager" alone — those usually mean the entire line is just the title).
-    // EXCEPTION: if the title is exactly the keyword (e.g. "Manager"), allow it.
+    // Sanity: title should be at least 2 words (avoid matching single-word titles).
     const titleWords = title.split(/\s+/);
     if (titleWords.length < 2 && title.toLowerCase() !== kw.toLowerCase()) continue;
 
-    return { title, company };
+    if (bestSplit === null || match.index > bestSplit.index) {
+      bestSplit = { title, company, index: match.index };
+    }
   }
 
-  return null;
+  return bestSplit ? { title: bestSplit.title, company: bestSplit.company } : null;
 }
 
 function parseExperiences(lines: string[]): ResumeData["experience"] {
@@ -722,7 +725,7 @@ function parseEducation(lines: string[]): ResumeData["education"] {
   // Split into entries by blank lines OR by lines that look like a degree/institution header.
   // A "header" line is one that contains a degree keyword (B.S., M.S., PhD, Bachelor, Master, etc.)
   // or a year range (2014-2018, 2014 - 2018, 2014–2018).
-  const degreePattern = /\b(b\.?\s?s\.?|b\.?\s?a\.?|b\.?\s?eng\.?|b\.?\s?tech|m\.?\s?s\.?|m\.?\s?a\.?|mba|ph\.?d|bachelor|master|doctorate|diploma|certificate|associate)\b/i;
+  const degreePattern = /\b(b\.?\s?s\.?|b\.?\s?a\.?|b\.?\s?eng\.?|b\.?\s?tech|m\.?\s?s\.?|m\.?\s?a\.?|mba|ph\.?d|bachelor|master|doctorate|diploma|certificate|associate|degree|high\s+school)\b/i;
   const yearRangePattern = /\b(19|20)\d{2}\s*[–\-]\s*(19|20)\d{2}\b|\b(19|20)\d{2}\s*[–\-]\s*present\b/i;
 
   const entries: string[][] = [];
@@ -781,13 +784,13 @@ function parseEducation(lines: string[]): ResumeData["education"] {
     let degree = "";
     let institution = "";
     let field = "";
+    let location = "";
     const highlights: string[] = [];
 
     // === Institution keyword detection ===
     // Common patterns: "University of X", "X University", "X College", "X Institute",
     // "X School of Y". When the degree line contains one of these, the institution
-    // name is likely embedded in the same line (e.g. "B.S. in Computer Science
-    // University of California, Berkeley | 2014 – 2018").
+    // name is likely embedded in the same line.
     const INST_KEYWORDS = /\b(University|College|Institute|School|Academy|Polytechnic|Conservatory)\b/i;
 
     for (let i = 0; i < entryLines.length; i++) {
@@ -797,9 +800,7 @@ function parseEducation(lines: string[]): ResumeData["education"] {
       if (!cleanedLine) continue;
 
       if (!degree && degreePattern.test(cleanedLine)) {
-        // Extract degree + field (e.g. "B.S. in Computer Science")
-        // First, strip the trailing " | YEAR – YEAR" or " | YEAR" suffix that
-        // wasn't removed by parseExperiences (this is parseEducation).
+        // First, strip the trailing " | YEAR – YEAR" or " | YEAR" suffix
         const lineWithoutDate = cleanedLine
           .replace(/\s*\|\s*\d{4}\s*[–\-]\s*\d{4}\s*$/, "")
           .replace(/\s*\|\s*\d{4}\s*[–\-]\s*present\s*$/i, "")
@@ -807,43 +808,58 @@ function parseEducation(lines: string[]): ResumeData["education"] {
           .replace(/\s*\|\s*$/, "")
           .trim();
 
-        degree = lineWithoutDate;
-        const fieldMatch = lineWithoutDate.match(/\bin\s+(.+)$/i);
-        if (fieldMatch) {
-          field = fieldMatch[1].trim();
-          degree = lineWithoutDate.replace(/\s+in\s+.+$/i, "").trim();
+        // Check if there is a pipe separating degree/institution from location
+        let leftSide = lineWithoutDate;
+        if (lineWithoutDate.includes("|")) {
+          const pipeParts = lineWithoutDate.split("|").map((p) => p.trim());
+          leftSide = pipeParts[0];
+          location = pipeParts[1] || "";
         }
 
-        // === Try to extract institution from the same line ===
-        // Pattern: "B.S. in Computer Science University of California, Berkeley | 2014 – 2018"
-        // After date removal: "B.S. in Computer Science University of California, Berkeley"
-        //
-        // Strategy: look for an institution keyword (University, College, etc.) in
-        // the lineWithoutDate. If found, everything from that keyword onwards is
-        // the institution name. The "field" gets shortened to exclude the institution.
-        const instMatch = lineWithoutDate.match(INST_KEYWORDS);
-        if (instMatch && instMatch.index !== undefined) {
-          const instStart = instMatch.index;
-          institution = lineWithoutDate.slice(instStart).trim();
-          // Remove the institution from the field
-          if (field) {
-            const fieldInstIdx = field.toLowerCase().indexOf(instMatch[0].toLowerCase());
-            if (fieldInstIdx >= 0) {
-              field = field.slice(0, fieldInstIdx).trim();
+        // Try to separate degree + field from institution in leftSide.
+        // We find the rightmost degree keyword match.
+        const degMatches = Array.from(leftSide.matchAll(new RegExp(degreePattern.source, "gi")));
+        let bestDegMatch: any = null;
+        for (const m of degMatches) {
+          if (m.index !== undefined) {
+            if (bestDegMatch === null || m.index > bestDegMatch.index) {
+              bestDegMatch = m;
             }
           }
-        } else if (field) {
-          // No institution keyword — try to split field by comma. The part after
-          // the last comma might be the institution (e.g. "Computer Science, Berkeley"
-          // → field="Computer Science", institution="Berkeley"). But this is fragile,
-          // so we only do it if there are 2+ comma parts AND the last part looks like
-          // a proper noun (starts with uppercase).
-          const fieldCommaParts = field.split(/,/);
-          if (fieldCommaParts.length >= 2) {
-            const lastPart = fieldCommaParts[fieldCommaParts.length - 1].trim();
-            if (lastPart && /^[A-Z]/.test(lastPart) && lastPart.length >= 2) {
-              institution = lastPart;
-              field = fieldCommaParts.slice(0, -1).join(",").trim();
+        }
+
+        if (bestDegMatch) {
+          let kwEnd = bestDegMatch.index + bestDegMatch[0].length;
+          // Consume trailing dot (e.g. "B.S.") so it is included in degree
+          if (leftSide[kwEnd] === ".") {
+            kwEnd++;
+          }
+          degree = leftSide.slice(0, kwEnd).trim();
+
+          const afterKw = leftSide.slice(kwEnd);
+          // Look for an optional "in/of/with [Field]" suffix followed by an institution keyword, comma, pipe, or end of line
+          const fieldMatch = afterKw.match(/^\s+(?:of|in|with)\s+([A-Za-z\s&]+?)(?=\s+(?:University|College|Institute|School|Academy|Polytechnic|Conservatory|,|\|)|$)/i);
+          if (fieldMatch) {
+            field = fieldMatch[1].trim();
+            institution = afterKw.slice(fieldMatch[0].length).trim();
+          } else {
+            institution = afterKw.trim();
+          }
+        } else {
+          degree = leftSide;
+        }
+
+        // Fallback: If no institution was extracted via keyword boundary, try INST_KEYWORDS
+        if (!institution) {
+          const instMatch = lineWithoutDate.match(INST_KEYWORDS);
+          if (instMatch && instMatch.index !== undefined) {
+            const instStart = instMatch.index;
+            institution = lineWithoutDate.slice(instStart).trim();
+            if (field) {
+              const fieldInstIdx = field.toLowerCase().indexOf(instMatch[0].toLowerCase());
+              if (fieldInstIdx >= 0) {
+                field = field.slice(0, fieldInstIdx).trim();
+              }
             }
           }
         }
@@ -880,6 +896,7 @@ function parseEducation(lines: string[]): ResumeData["education"] {
       institution,
       degree,
       field: field || undefined,
+      location: location || undefined,
       startDate,
       endDate,
       highlights: highlights.slice(0, 4),

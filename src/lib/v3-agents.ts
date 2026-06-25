@@ -67,19 +67,28 @@ export function runKeywordEmbeddingAgent(
   }
 
   // Strategy 1: Add missing keywords to skills section
+  // Determine the best category to use — prefer the most common existing category
+  // so keywords blend into the existing skills section rather than creating a
+  // separate "Targeted Keywords" section that looks out of place on the resume.
   const existingSkillNames = new Set((result.skills || []).map((s) => s.name.toLowerCase()));
+  const categoryCounts: Record<string, number> = {};
+  for (const sk of result.skills || []) {
+    if (sk.category) categoryCounts[sk.category] = (categoryCounts[sk.category] || 0) + 1;
+  }
+  const dominantCategory = Object.entries(categoryCounts).sort((a, b) => b[1] - a[1])[0]?.[0] || "Core Competencies";
+
   const keywordsToAddToSkills = missingKeywords
     .filter((k) => !existingSkillNames.has(k.toLowerCase()))
-    .slice(0, 8)
+    .slice(0, 5)
     .map((name) => ({
       id: `s_kw_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
       name,
-      category: "Targeted Keywords",
+      category: dominantCategory,
     }));
 
   if (keywordsToAddToSkills.length > 0 && result.skills) {
     result.skills = [...result.skills, ...keywordsToAddToSkills];
-    changes.push(`Added ${keywordsToAddToSkills.length} keywords to skills: ${keywordsToAddToSkills.map((s) => s.name).join(", ")}`);
+    changes.push(`Added ${keywordsToAddToSkills.length} keywords to skills (category: ${dominantCategory}): ${keywordsToAddToSkills.map((s) => s.name).join(", ")}`);
   }
 
   // Strategy 2: Weave keywords into summary if not already there

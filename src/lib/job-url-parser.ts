@@ -512,7 +512,7 @@ function extractByRegex(text: string): {
   const result: any = {};
 
   // Location: "Location: City, State" or "Location: City, Country"
-  const locMatch = text.match(/(?:location|location:)\s*([A-Z][a-zA-Z\s,]+(?:,\s*[A-Z]{2})?)/i);
+  const locMatch = text.match(/(?:location|location:)\s*([A-Z][a-zA-Z\s,\-]+(?:,\s*[A-Z]{2})?)/i);
   if (locMatch) result.location = locMatch[1].trim();
 
   // Salary: "$80,000 - $100,000" or "$80k-$100k" or "Salary: $80,000"

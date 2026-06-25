@@ -930,31 +930,74 @@ async function runCoverLetterAgent(resume: ResumeData, jd: JobDescription, compa
       return;
     }
 
+    const candidateSummary = `${resume.name}${resume.headline ? `, ${resume.headline}` : ""}`;
+    const experienceSummary = resume.experience.slice(0, 3).map((e) => `${e.title} at ${e.company}`).join("; ");
+    const skillsSummary = resume.skills.slice(0, 10).map((s) => s.name).join(", ");
+    const jobTitle = jd.title ?? "the role";
+    const jobSummary = jd.rawText?.slice(0, 800) ?? jd.keywords.join(", ");
+
     const result = await withRetry(() => callAI({
-      systemPrompt: "You are an expert cover letter writer. Write a personalized, recruiter-grade cover letter (~400 words) that aligns the candidate's experience with the company's values and the job's requirements. Plain text only.",
-      userPrompt: `CANDIDATE: ${resume.name}, ${resume.headline ?? ""}
-EXPERIENCE: ${resume.experience.map((e) => `${e.title} at ${e.company}`).join(", ")}
-SKILLS: ${resume.skills.map((s) => s.name).join(", ")}
+      systemPrompt: `You are a professional cover letter writer. Write a compelling, personalized cover letter of at least 400 words (minimum 2,500 characters). Structure: opening paragraph (hook + role interest), body (2-3 paragraphs matching experience to job requirements), closing (call to action). Plain text only — no headers, no markdown.`,
+      userPrompt: `Write a full cover letter for the following:
 
-JOB: ${jd.title ?? "Role"} at ${company || "the company"}
-JD SUMMARY: ${jd.rawText?.slice(0, 1000) ?? jd.keywords.join(", ")}
+CANDIDATE: ${candidateSummary}
+EXPERIENCE: ${experienceSummary}
+KEY SKILLS: ${skillsSummary}
 
-Write the cover letter now. Address it to the hiring team. Be specific to ${company || "the company"} — reference the company's values and the job's requirements.`,
-      maxTokens: 1000,
+TARGET ROLE: ${jobTitle} at ${company || "the company"}
+JOB REQUIREMENTS: ${jobSummary}
+
+Instructions:
+- Address to: "Dear Hiring Team" or "Dear ${company || "the company"} Recruitment Team"
+- Open by expressing genuine interest in ${jobTitle} at ${company || "the company"}
+- In the body, connect the candidate's experience to 2-3 specific job requirements
+- Use professional, confident language — avoid generic phrases
+- Close with a clear call to action requesting an interview
+- Write at least 400 words
+
+Write the complete cover letter now:`,
+      maxTokens: 1200,
       taskCategory: "document",
     }), 1, "cover-letter");
 
     // === OUTPUT VALIDATION ===
     // Cover letter must be at least 500 characters. If the AI returned a
-    // short/empty response, mark the agent as FAILED (not Completed).
+    // short/empty response, retry once with an even simpler prompt before giving up.
     if (!result.text || result.text.trim().length < 500) {
-      updateContext({ coverLetter: null });
-      updateAgent(agentId, {
-        status: "failed",
-        completedAt: new Date().toISOString(),
-        error: `Cover letter too short (${result.text?.length ?? 0} chars, minimum 500).`,
-        log: `✗ Cover letter validation failed: only ${result.text?.length ?? 0} chars.`,
-      });
+      updateAgent(agentId, { log: `⚠ First attempt too short (${result.text?.trim().length ?? 0} chars). Retrying with simplified prompt…` });
+
+      // Retry with a more structured prompt to coax more output
+      const retryResult = await withRetry(() => callAI({
+        systemPrompt: "Write a professional job application cover letter. Minimum 400 words. Plain text, no markdown.",
+        userPrompt: `Write a complete cover letter for ${resume.name} applying to ${jobTitle} at ${company || "the company"}.
+
+Background: ${candidateSummary}. Experience includes: ${experienceSummary}.
+
+The cover letter should:
+1. Open with enthusiasm for the ${jobTitle} position
+2. Explain why the candidate is a strong fit (reference ${experienceSummary})
+3. Show knowledge of ${company || "the company"} and alignment with their needs
+4. Close with a professional request for an interview
+
+Write the complete letter now (minimum 400 words):`,
+        maxTokens: 1500,
+        taskCategory: "document",
+      }), 1, "cover-letter-retry");
+
+      if (!retryResult.text || retryResult.text.trim().length < 500) {
+        updateContext({ coverLetter: null });
+        updateAgent(agentId, {
+          status: "failed",
+          completedAt: new Date().toISOString(),
+          error: `Cover letter too short after retry (${retryResult.text?.trim().length ?? 0} chars, minimum 500).`,
+          log: `✗ Cover letter validation failed after retry: only ${retryResult.text?.trim().length ?? 0} chars.`,
+        });
+        return;
+      }
+
+      updateContext({ coverLetter: retryResult.text });
+      setCached(cacheK, retryResult.text);
+      updateAgent(agentId, { status: "completed", completedAt: new Date().toISOString(), log: `Cover letter generated on retry (${retryResult.text.length} chars) via ${retryResult.provider}.` });
       return;
     }
 
@@ -965,6 +1008,7 @@ Write the cover letter now. Address it to the hiring team. Be specific to ${comp
     updateAgent(agentId, { status: "failed", error: e?.message ?? "Cover letter failed", log: `⚠ ${e?.message}` });
   }
 }
+
 
 async function runInterviewAgent(
   resume: ResumeData,
