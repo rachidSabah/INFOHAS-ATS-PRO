@@ -54,6 +54,15 @@ import {
   OPTIMIZER_CALL_TIMEOUT_MS,
   PIPELINE_STEP_CALL_TIMEOUT_MS,
 } from "../pipeline-watchdog";
+// === PRODUCTION HARDENING IMPORTS (v2025.01.15) ===
+import {
+  extractLockedEntities,
+  restoreLockedEntities,
+  deduplicateResume,
+  verifyEntityIntegrity,
+  sanitizeSkills,
+} from "../entity-lock";
+import { processAIResponseHardened } from "../orchestrator-hardening";
 
 // ============================================================================
 // AI response normalization helpers
@@ -1048,12 +1057,9 @@ async function _runOptimizationPipelineInner(input: PipelineInput, watchdog: Opt
     log("Quality Assurance", qaLog);
     emitProgress(4, qaLog);
 
-    // ADVISORY ONLY: QA factual consistency issues are logged as warnings
-    // but NEVER block the optimization. The user always gets the optimized
-    // resume and can decide whether to use it or retry. This fixes the
-    // recurring "optimization failed" loop where free-tier models (Llama,
-    // OpenCode free) produce minor metric hallucinations that triggered
-    // the fatal gate.
+    // === HARDENED QA GATES (v2025.01.15) ===
+    // Fabricated employers, education, and certifications are HARD FAILURES.
+    // Only minor metric hallucinations are allowed through with warnings.
     if (result.qa.factualConsistency && !result.qa.factualConsistency.passed) {
       const fc = result.qa.factualConsistency;
       const seriousCount =
@@ -1062,20 +1068,33 @@ async function _runOptimizationPipelineInner(input: PipelineInput, watchdog: Opt
         fc.fabricatedCertifications.length;
       const minorCount = fc.issueCount - seriousCount;
 
-      console.warn(
-        `[Pipeline] QA factual consistency ADVISORY: ${fc.issueCount} total issues ` +
-        `(${seriousCount} serious: ${fc.fabricatedEmployers.length} employers, ` +
-        `${fc.fabricatedEducation.length} education, ${fc.fabricatedCertifications.length} certs; ` +
-        `${minorCount} minor: metrics/locations/languages/contact). ` +
-        `Proceeding with optimization — user can review.`
-      );
-
       if (seriousCount >= 1) {
-        log("Quality Assurance", `⚠ WARNING: ${seriousCount} serious fabrication(s) + ${minorCount} minor issue(s). Review the optimized resume carefully before using.`);
-        emitProgress(4, `⚠ ${fc.issueCount} factual issues detected. Optimization completed — please review.`);
-      } else {
-        log("Quality Assurance", `⚠ WARNING: ${minorCount} minor factual issue(s) (metrics/locations). Optimization completed — common with free-tier models.`);
+        // HARD FAILURE: Fabricated employers, education, or certifications
+        console.error(
+          `[Pipeline] QA HARD FAILURE: ${seriousCount} serious fabrication(s). ` +
+          `Employers: [${fc.fabricatedEmployers.join(", ")}], ` +
+          `Education: [${fc.fabricatedEducation.join(", ")}], ` +
+          `Certs: [${fc.fabricatedCertifications.join(", ")}]. ` +
+          `Restoring original resume.`,
+        );
+        log("Quality Assurance", `✗ HARD FAILURE: ${seriousCount} serious fabrication(s) detected. ` +
+          `Fabricated: ${[...fc.fabricatedEmployers, ...fc.fabricatedEducation, ...fc.fabricatedCertifications].join(", ")}. ` +
+          `Restoring original resume.`);
+        emitProgress(4, `✗ Serious fabrication detected. Restoring original resume.`);
+
+        // FAIL PIPELINE: Restore original resume
+        result.optimizedResume = resume;
+        result.status = "failed";
+        result.error = `Factual integrity violation: ${[...fc.fabricatedEmployers, ...fc.fabricatedEducation].join(", ")}`;
+        result.provider = "none";
+        return result;
       }
+
+      // Minor issues (metrics, locations) — log warning but allow through
+      console.warn(
+        `[Pipeline] QA factual consistency WARNING: ${minorCount} minor issues (metrics/locations).`,
+      );
+      log("Quality Assurance", `⚠ ${minorCount} minor factual issue(s) (metrics/locations).`);
     }
 
     // === ATS Analysis (After) ===
@@ -1239,21 +1258,47 @@ async function _runOptimizationPipelineInner(input: PipelineInput, watchdog: Opt
       qualityErrors.push(`Bullet count reduced in ${missingBullets.length} experience entr(ies): ${missingBullets.map((x) => `#${x.entry + 1} ${x.original}→${x.optimized}`).join(", ")}`);
     }
 
-    if (qualityErrors.length > 0) {
-      // ADVISORY ONLY: Quality gate issues are logged as warnings but NEVER
-      // block the optimization. The user always gets the optimized resume.
-      console.warn(
-        `[Pipeline] Quality gates ADVISORY: ${qualityErrors.length} issues. ` +
-        `provider=${result.provider}, charCount=${result.charCount ?? 0}, ` +
-        `experience entries=${result.optimizedResume?.experience?.length ?? 0}, ` +
-        `education entries=${result.optimizedResume?.education?.length ?? 0}, ` +
-        `skills count=${result.optimizedResume?.skills?.length ?? 0}. ` +
-        `Proceeding — user can review.`
+    // === HARDENED QUALITY GATES (v2025.01.15) ===
+    // Quality gates are now HARD FAILURES, not advisory warnings.
+    // Critical issues fail the pipeline. The user gets the ORIGINAL resume,
+    // not a corrupted optimization.
+    const criticalIssues = qualityErrors.filter((e) =>
+      e.includes("Experience section is empty") ||
+      e.includes("Education section is empty") ||
+      e.includes("company name(s) changed") ||
+      e.includes('incorrectly set to "Present"') ||
+      e.includes("Duplicated education") ||
+      e.includes("placeholder company"),
+    );
+    const minorIssues = qualityErrors.filter((e) => !criticalIssues.includes(e));
+
+    if (criticalIssues.length > 0) {
+      // HARD FAILURE: Critical quality issues fail the pipeline
+      console.error(
+        `[Pipeline] Quality gates HARD FAILURE: ${criticalIssues.length} critical issues. ` +
+        `Failing pipeline and restoring original resume. Issues: ${criticalIssues.join("; ")}`,
       );
-      log("Quality Assurance", `⚠ ${qualityErrors.length} quality issue(s) detected: ${qualityErrors.join("; ")}. Optimization completed — please review.`);
-      emitProgress(4, `⚠ ${qualityErrors.length} quality issues detected. Optimization completed — review recommended.`);
-    } else {
-      // Include the actual QA check count to avoid UI/backend mismatch
+      log("Quality Assurance", `✗ HARD FAILURE: ${criticalIssues.length} critical issue(s): ${criticalIssues.join("; ")}. Restoring original resume.`);
+      emitProgress(4, `✗ Critical quality issues detected. Restoring original resume.`);
+
+      // Restore original resume and fail the pipeline
+      result.optimizedResume = resume;
+      result.status = "failed";
+      result.error = `Quality gates failed: ${criticalIssues.join("; ")}`;
+      result.provider = "none";
+      result.charCount = 0;
+      return result;
+    }
+
+    if (minorIssues.length > 0) {
+      // Minor issues are logged as warnings but don't fail
+      console.warn(
+        `[Pipeline] Quality gates WARNING: ${minorIssues.length} minor issues: ${minorIssues.join("; ")}`,
+      );
+      log("Quality Assurance", `⚠ ${minorIssues.length} minor issue(s): ${minorIssues.join("; ")}.`);
+    }
+
+    if (qualityErrors.length === 0) {
       const qaPassed = result.qa?.checks?.filter((c) => c.passed).length ?? "?";
       const qaTotal = result.qa?.checks?.length ?? "?";
       log("Quality Assurance", `✓ Pipeline quality gates passed. QA checks: ${qaPassed}/${qaTotal}.`);
@@ -1565,7 +1610,8 @@ CONTENT REQUIREMENTS:
     timeoutMs: OPTIMIZER_CALL_TIMEOUT_MS,
   });
 
-  // Process the AI response through the full leak-prevention pipeline
+  // Process the AI response through the HARDENED leak-prevention pipeline
+  // === PRODUCTION HARDENING (v2025.01.15): Entity lock + mandatory pipeline ===
   console.info(`[Optimizer] Provider: ${result.provider}, Response length: ${result.text?.length ?? 0} chars, Tokens est: ${result.tokensEstimate}`);
 
   // Reject local fallback — no AI provider actually executed
@@ -1575,6 +1621,58 @@ CONTENT REQUIREMENTS:
       "Configure an API provider in Settings or sign in to Puter."
     );
   }
+
+  // === HARDENED PIPELINE: Run entity-locked mandatory processing ===
+  const hardenedResult = await processAIResponseHardened({
+    rawText: result.text,
+    provider: result.provider,
+    originalResume: resume,
+    jobDescription: jd,
+    jobIntelligence: ji,
+    companyIntelligence: company,
+    skillGap,
+    attemptNumber: 1, // Will be incremented by caller on retry
+    maxAttempts: 4,
+  });
+
+  if (hardenedResult.passed && hardenedResult.resume) {
+    // Hardened pipeline succeeded — skip legacy processing
+    let normalizedResume = hardenedResult.resume;
+
+    // === DYNAMIC PAGE BALANCING ===
+    try {
+      let directiveConfig: OptimizerDirectiveConfig | null = null;
+      try {
+        directiveConfig = (useApp.getState() as any)?.optimizerDirective ?? null;
+      } catch (directiveErr2) { console.warn("[Orchestrator] Failed to read optimizerDirective:", directiveErr2 instanceof Error ? directiveErr2.message : directiveErr2); }
+
+      const pageFill = validatePageFill(normalizedResume, directiveConfig);
+      if (pageFill.action === "expand") {
+        const jdKeywords = jd.keywords ?? [];
+        const resumeText = JSON.stringify(normalizedResume).toLowerCase();
+        const missingKeywords = jdKeywords.filter((k) => !resumeText.includes(k.toLowerCase()));
+        normalizedResume = expandResume(normalizedResume, {
+          originalResume: resume, jd, targetChars: pageFill.targetChars,
+          currentChars: pageFill.charCount, missingKeywords,
+        });
+      } else if (pageFill.action === "compress") {
+        normalizedResume = compressResume(normalizedResume, {
+          targetChars: pageFill.targetChars, maxChars: Math.floor(pageFill.targetChars * 1.04), currentChars: pageFill.charCount,
+        });
+      }
+    } catch (e) { console.warn("[Page Balancer] Failed (non-fatal):", e); }
+
+    const finalCharCount = computeResumeCharCount(normalizedResume);
+    return {
+      resume: normalizedResume,
+      provider: result.provider,
+      charCount: finalCharCount,
+      keywordsAdded: 0,
+    };
+  }
+
+  // === FALLBACK: Legacy processing if hardened pipeline failed ===
+  console.warn(`[Optimizer] Hardened pipeline failed (${hardenedResult.failedStep}): ${hardenedResult.errors.join("; ")}. Falling back to legacy processing.`);
   const processed = processAIResponse<any>(result.text, result.provider, { expectJson: true });
   let data: any;
   if (processed.data) {
