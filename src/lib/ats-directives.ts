@@ -700,9 +700,14 @@ INSTRUCTIONS:
 2. Embed the airline's priority keywords naturally throughout summary, skills, and bullets.
 3. CRITICAL: NEVER invent percentages, metrics, or numbers. Only use real data from the original resume. No fake "20% improvement" or "98% satisfaction".
 4. Most recent role: 2-3 bullets max. Older roles: 1-2 bullets max.
-5. Group skills into 2-3 categories with 3-5 items each.
+5. Group skills into 2-3 categories with 3-5 items each. Do NOT include company names or airport names as skills.
 6. Match the tone preference (${profile.tone || "Balanced"}) of the target airline.
-7. NEVER invent employers, dates, or metrics — only rephrase real content.
+7. EMPLOYER NAMES: Use the EXACT employer name from the SOURCE RESUME. NEVER rename, generalize, or replace employer names. If the source says "Sephora Doha", output "Sephora Doha" — NOT "Beauty Retailer".
+8. DATES: Use the EXACT dates from the SOURCE RESUME. NEVER change, remove, or invent dates.
+9. EDUCATION: Use the EXACT institution name and degree from the SOURCE RESUME. NEVER rename institutions.
+10. SUMMARY: Include ALL relevant information from the original summary, including language fluency. NEVER drop languages or certifications from the summary.
+11. NEVER use double periods (..) — always single period at end of sentence.
+12. NEVER invent employers, dates, or metrics — only rephrase real content.
 
 Return ONLY the JSON object described in the directive. No prose, no markdown fences.`;
 
@@ -942,10 +947,25 @@ Return ONLY the JSON object described in the directive. No prose, no markdown fe
     console.warn("[aviationOptimize] Summary is too short or missing — AI may have returned an analysis instead of a resume.");
   }
 
+  // CRITICAL FIX: Apply grammar cleanup to the parsed resume data.
+  // The standard path uses processAIResponse() which calls cleanupResumeGrammar(),
+  // but the aviation path parsed JSON directly — so double periods, filler phrases,
+  // and other grammar issues were never fixed.
+  try {
+    const { cleanupResumeGrammar } = await import("./ai-response-processor");
+    data.resume = cleanupResumeGrammar(data.resume) as typeof data.resume;
+    if (data.resume.summary) {
+      // Fix double periods specifically in summary (most common location)
+      data.resume.summary = data.resume.summary
+        .replace(/\.{2,}/g, ".")
+        .replace(/\s+\./g, ".")
+        .replace(/\s{2,}/g, " ")
+        .trim();
+    }
+  } catch { /* non-fatal — grammar cleanup is best-effort */ }
+
   // Compute character count — use the SAME method as standard optimization
   // (summary + experience + skills + education + languages only) for consistency.
-  // Anomaly #8 fix: was JSON.stringify(data.resume).length which included
-  // metadata fields and inflated the count.
   const charCount = JSON.stringify({
     summary: data.resume.summary,
     experience: data.resume.experience,
