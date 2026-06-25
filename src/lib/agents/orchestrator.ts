@@ -710,8 +710,9 @@ async function _runOptimizationPipelineInner(input: PipelineInput, watchdog: Opt
     log("Company + Skill Gap (parallel)", "Generating company intelligence + skill gap analysis in parallel…");
     emitProgress(1, "Analyzing company + skill gaps in parallel…");
 
-    // Run Company Intelligence first (Skill Gap benefits from Company result).
-    // If Company Intel fails, Skill Gap still proceeds (degraded but functional).
+    // Run Company Intelligence first (Skill Gap depends on Company result).
+    // NOTE: These are sequential by design — analyzeSkillGap takes companyIntelligence
+    // as a parameter. True parallelization would require decoupling the dependency.
     try {
       result.companyIntelligence = await analyzeCompanyIntelligence(jd, result.jobIntelligence);
       const ciLog = result.companyIntelligence
@@ -804,6 +805,10 @@ async function _runOptimizationPipelineInner(input: PipelineInput, watchdog: Opt
           log("Resume Optimizer", `Industry ATS mode → ${aviationMode.airlineProfile}. Calling aviationOptimize() with unified directive…`);
           const aviationResult = await aviationOptimize(resume, jd.rawText ?? "", aviationMode.airlineProfile, aviationMode.settings);
           result.optimizedResume = mapAviationResultToResumeData(aviationResult, resume);
+          // CRITICAL FIX (Anomaly #1): Apply enforceLockedFields to aviation path.
+          // Without this, the AI can modify locked fields (name, email, phone,
+          // employer names, dates) without correction — leading to fabricated resumes.
+          result.optimizedResume = enforceLockedFields(result.optimizedResume!, resume);
           result.provider = "aviation-ats";
           result.charCount = aviationResult.charCount;
           // Compute the REAL ATS score via analyzeATS (not the AI's self-reported score which can be 0)
@@ -892,6 +897,11 @@ async function _runOptimizationPipelineInner(input: PipelineInput, watchdog: Opt
 
         const v3Result = runV3PostOptimizationPipeline(result.optimizedResume!, resume, jd, 3);
         result.optimizedResume = v3Result.resume;
+        // CRITICAL FIX (Anomaly #2): Re-apply enforceLockedFields after V3 pipeline.
+        // V3 agents (Keyword Embedding, Fact Verification, Layout Optimization) may
+        // inadvertently modify locked fields (dates, company names). This ensures
+        // all locked fields are restored to their original values.
+        result.optimizedResume = enforceLockedFields(result.optimizedResume!, resume);
         result.charCount = v3Result.finalCharCount;
         result.metCharTarget = v3Result.finalCharCount >= 2800 && v3Result.finalCharCount <= 3800;
 
@@ -1553,7 +1563,7 @@ CONTENT REQUIREMENTS:
         }
       }
 
-      const retryUserPrompt = (retrySplit.user ? retrySplit.user + "\n\n---\n\n" : "") + `SOURCE RESUME:\n${JSON.stringify({ name: resume.name, headline: resume.headline, contact: resume.contact, summary: resume.summary, experience: resume.experience, education: resume.education, skills: resume.skills, languages: resume.languages, certifications: resume.certifications })}\n\nJOB DESCRIPTION:\n${jd.rawText?.slice(0, 1500) ?? jd.keywords.join(", ")}\n\nOptimize this resume for the job. Return ONLY a JSON object with: name, headline, email, phone, location, summary, skills [{category, items[]}], experience [{title, company, location, startDate, endDate, bullets[]}], education [{degree, institution, field, startDate, endDate, modules}], languages [{name, proficiency}]. No prose, no markdown.`;
+      const retryUserPrompt = (retrySplit.user ? retrySplit.user + "\n\n---\n\n" : "") + `SOURCE RESUME:\n${JSON.stringify({ name: resume.name, headline: resume.headline, contact: resume.contact, summary: resume.summary, experience: resume.experience, education: resume.education, skills: resume.skills, languages: resume.languages, certifications: resume.certifications })}\n\nJOB DESCRIPTION:\n${jd.rawText ?? jd.keywords.join(", ")}\n\nOptimize this resume for the job. Return ONLY a JSON object with: name, headline, email, phone, location, summary, skills [{category, items[]}], experience [{title, company, location, startDate, endDate, bullets[]}], education [{degree, institution, field, startDate, endDate, modules}], languages [{name, proficiency}]. No prose, no markdown.`;
 
       // Validation check
       const retryFullPrompt = retrySystem + "\n\n" + retryUserPrompt;

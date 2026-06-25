@@ -942,8 +942,17 @@ Return ONLY the JSON object described in the directive. No prose, no markdown fe
     console.warn("[aviationOptimize] Summary is too short or missing — AI may have returned an analysis instead of a resume.");
   }
 
-  // Compute character count of the serialized resume content (for the UI badge)
-  const charCount = JSON.stringify(data.resume).length;
+  // Compute character count — use the SAME method as standard optimization
+  // (summary + experience + skills + education + languages only) for consistency.
+  // Anomaly #8 fix: was JSON.stringify(data.resume).length which included
+  // metadata fields and inflated the count.
+  const charCount = JSON.stringify({
+    summary: data.resume.summary,
+    experience: data.resume.experience,
+    skills: data.resume.skills,
+    education: data.resume.education,
+    languages: data.resume.languages,
+  }).length;
   data.charCount = charCount;
 
   // Normalize score breakdown
