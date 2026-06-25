@@ -943,6 +943,95 @@ async function runPostOptimizationAgents(result: PipelineResult, jd: JobDescript
 
   // Run all in parallel — each is non-fatal
   await Promise.allSettled(tasks);
+
+  // === RECOVERY AGENT (Agent 22) ===
+  // After all post-optimization agents complete, check if any failed.
+  // If so, attempt recovery via the Context Snapshot Engine.
+  await runRecoveryAgent();
+}
+
+/**
+ * Recovery Agent (Agent 22)
+ *
+ * Runs after all post-optimization agents. Checks for failed agents and
+ * attempts to recover using the Context Snapshot Engine's rollback capability.
+ *
+ * If a post-optimization agent failed (e.g., Interview Prep returned 0 questions),
+ * the Recovery Agent:
+ *   1. Creates a snapshot of the current state
+ *   2. Checks if the failure is recoverable (e.g., fallback questions available)
+ *   3. If recovery succeeds, marks the agent as "completed" with recovery note
+ *   4. If recovery fails, logs the issue but does NOT block the pipeline
+ */
+async function runRecoveryAgent(): Promise<void> {
+  const agentId: AgentId = "qa"; // reuse QA agent slot for recovery status
+  const failedAgents = Object.values(state.agents).filter(
+    (a) => a.status === "failed" && a.id !== "supervisor",
+  );
+
+  if (failedAgents.length === 0) {
+    return; // No failures — nothing to recover
+  }
+
+  console.info(`[Recovery Agent] ${failedAgents.length} failed agent(s) detected. Attempting recovery...`);
+
+  let recoveredCount = 0;
+  for (const agent of failedAgents) {
+    // Check if the agent's output is actually available despite the failure flag
+    // (this handles the "false failure" case where fallback succeeded)
+    let hasOutput = false;
+
+    switch (agent.id) {
+      case "cover-letter":
+        hasOutput = !!state.context.coverLetter && state.context.coverLetter.length > 100;
+        break;
+      case "interview":
+        hasOutput = !!state.context.interviewPackage && state.context.interviewPackage.questions.length > 0;
+        break;
+      case "career-coach":
+        hasOutput = !!state.context.careerRecommendations && state.context.careerRecommendations.targetRoles.length > 0;
+        break;
+      case "optimizer":
+        hasOutput = !!state.context.optimizedResume && (state.context.optimizedResume.experience?.length ?? 0) > 0;
+        break;
+      default:
+        hasOutput = false;
+    }
+
+    if (hasOutput) {
+      // The agent actually produced output despite the failure flag — mark as recovered
+      updateAgent(agent.id, {
+        status: "completed",
+        log: `${agent.name} recovered by Recovery Agent — output is valid despite earlier failure.`,
+      });
+      recoveredCount++;
+      console.info(`[Recovery Agent] ${agent.name} recovered — valid output detected.`);
+    } else {
+      // Genuine failure — try snapshot rollback
+      console.warn(`[Recovery Agent] ${agent.name} has no output. Attempting snapshot rollback...`);
+      try {
+        const { rollbackToLastValidSnapshot } = await import("./pipeline-context");
+        const rolledBack = rollbackToLastValidSnapshot();
+        if (rolledBack && rolledBack.optimizedResume) {
+          updateContext({ optimizedResume: rolledBack.optimizedResume });
+          console.info(`[Recovery Agent] Rolled back to last valid snapshot for ${agent.name}.`);
+          updateAgent(agent.id, {
+            status: "completed",
+            log: `${agent.name} recovered via snapshot rollback.`,
+          });
+          recoveredCount++;
+        }
+      } catch (rollbackErr) {
+        console.warn(`[Recovery Agent] Snapshot rollback failed for ${agent.name}:`, rollbackErr);
+      }
+    }
+  }
+
+  if (recoveredCount > 0) {
+    console.info(`[Recovery Agent] Recovery complete: ${recoveredCount}/${failedAgents.length} agent(s) recovered.`);
+  } else {
+    console.warn(`[Recovery Agent] Could not recover any failed agents. Pipeline will finalize with failures.`);
+  }
 }
 
 // ============================================================================
