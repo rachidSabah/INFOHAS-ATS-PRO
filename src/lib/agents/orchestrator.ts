@@ -152,6 +152,8 @@ function enforceLockedFields(optimized: ResumeData, original: ResumeData): Resum
         .map((e, i) => {
           // Match by substring — AI may have cleaned up company name
           const eCompanyLower = e.company?.toLowerCase().trim() ?? "";
+          const eTitleLower = e.title?.toLowerCase().trim() ?? "";
+          // Try company match first, then title match, then index — NEVER use [0] fallback
           const orig = original.experience.find(
             (o) => {
               const oCompanyLower = o.company?.toLowerCase().trim() ?? "";
@@ -159,30 +161,52 @@ function enforceLockedFields(optimized: ResumeData, original: ResumeData): Resum
                 oCompanyLower.includes(eCompanyLower) ||
                 eCompanyLower.includes(oCompanyLower);
             }
-          ) ?? original.experience[i] ?? original.experience[0];
-          // Restore ALL original bullets for this entry — AI must not drop them
+          ) ?? original.experience.find(
+            (o) => {
+              const oTitleLower = o.title?.toLowerCase().trim() ?? "";
+              return oTitleLower === eTitleLower ||
+                oTitleLower.includes(eTitleLower) ||
+                eTitleLower.includes(oTitleLower);
+            }
+          ) ?? original.experience[i]; // Index fallback only — never [0]
+          // Only restore bullets if AI dropped them — keep AI's optimized bullets if they're longer
           const restoredBullets = orig && orig.bullets.length > e.bullets.length
             ? orig.bullets
             : e.bullets;
           return {
             ...e,
+            // Keep AI's title if present, fall back to original
             title: cleanTitle(e.title || orig?.title || ""),
+            // ALWAYS use original company name (locked field)
             company: cleanCompany(orig?.company ?? e.company),
+            // Restore original location, dates (locked fields) — only if we found a match
             location: orig?.location ?? e.location,
-            startDate: orig?.startDate ?? e.startDate,
-            endDate: orig?.endDate ?? e.endDate,
+            startDate: orig?.startDate ?? e.startDate ?? "",
+            endDate: orig?.endDate ?? e.endDate ?? "",
             bullets: restoredBullets,
           };
         });
     }
-    // If AI dropped entries OR all were hallucinated, restore original
+    // If AI dropped entries OR all were hallucinated, restore MISSING entries
+    // from original — but PRESERVE AI-optimized entries that are valid.
+    // CRITICAL FIX: Previously this replaced ALL experience with original,
+    // losing the AI's optimized bullets. Now we MERGE: keep AI entries that
+    // matched, and add back any original entries that were dropped.
     if (locked.experience.length < original.experience.length) {
-      console.warn(`[enforceLockedFields] Restoring original experience (AI had ${optimized.experience.length}, after filter ${locked.experience.length}, original ${original.experience.length})`);
-      locked.experience = original.experience.map((e) => ({
-        ...e,
-        title: cleanTitle(e.title),
-        company: cleanCompany(e.company),
-      }));
+      console.warn(`[enforceLockedFields] Restoring missing experience entries (AI had ${optimized.experience.length}, after filter ${locked.experience.length}, original ${original.experience.length})`);
+      const existingCompanies = new Set(locked.experience.map((e) => (e.company || "").toLowerCase().trim()));
+      for (const origExp of original.experience) {
+        const origCompanyLower = (origExp.company || "").toLowerCase().trim();
+        if (origCompanyLower && !existingCompanies.has(origCompanyLower)) {
+          // This entry was dropped by the AI — restore it with original data
+          locked.experience.push({
+            ...origExp,
+            title: cleanTitle(origExp.title),
+            company: cleanCompany(origExp.company),
+          });
+          console.info(`[enforceLockedFields] Restored dropped experience: ${origExp.title} at ${origExp.company}`);
+        }
+      }
     }
   }
 
@@ -225,9 +249,18 @@ function enforceLockedFields(optimized: ResumeData, original: ResumeData): Resum
           };
         });
     }
+    // CRITICAL FIX: Same merge approach as experience — restore MISSING
+    // education entries without replacing AI-optimized ones.
     if (locked.education.length < original.education.length) {
-      console.warn(`[enforceLockedFields] Restoring original education (AI had ${optimized.education.length}, after filter ${locked.education.length}, original ${original.education.length})`);
-      locked.education = original.education;
+      console.warn(`[enforceLockedFields] Restoring missing education entries (AI had ${optimized.education.length}, after filter ${locked.education.length}, original ${original.education.length})`);
+      const existingInsts = new Set(locked.education.map((e) => (e.institution || "").toLowerCase().trim()));
+      for (const origEdu of original.education) {
+        const origInstLower = (origEdu.institution || "").toLowerCase().trim();
+        if (origInstLower && !existingInsts.has(origInstLower)) {
+          locked.education.push(origEdu);
+          console.info(`[enforceLockedFields] Restored dropped education: ${origEdu.degree} at ${origEdu.institution}`);
+        }
+      }
     }
   }
 
