@@ -1983,27 +1983,60 @@ function mapAviationResultToResumeData(result: AviationOptimizeResult, original:
     dateOfBirth: result.resume.dateOfBirth || original.dateOfBirth,
     summary: String(result.resume.summary || ""),
     experience: (result.resume.experience ?? []).length > 0
-      ? result.resume.experience.map((e: any, i: number) => ({
-          id: uid("e"),
-          title: String(e.title || ""),
-          company: String(e.company || ""),
-          location: flattenLocation(e.location) || "",
-          startDate: String(e.startDate || ""),
-          endDate: String(e.endDate || original.experience?.[i]?.endDate || ""),
-          bullets: Array.isArray(e.bullets) ? e.bullets.map((b: any) => flattenValue(b)) : [],
-        }))
+      ? result.resume.experience.map((e: any, i: number) => {
+          // CRITICAL FIX: Match AI entry to original by company name or title.
+          // If matched, ALWAYS use original company/dates/location (locked fields).
+          // If not matched, keep AI's data (it may be a rephrased entry).
+          const aiCompanyLower = (e.company || "").toLowerCase().trim();
+          const aiTitleLower = (e.title || "").toLowerCase().trim();
+          const origMatch = original.experience.find((o) => {
+            const oCompanyLower = (o.company || "").toLowerCase().trim();
+            const oTitleLower = (o.title || "").toLowerCase().trim();
+            return (oCompanyLower && (oCompanyLower === aiCompanyLower ||
+              oCompanyLower.includes(aiCompanyLower) || aiCompanyLower.includes(oCompanyLower))) ||
+              (oTitleLower && (oTitleLower === aiTitleLower ||
+              oTitleLower.includes(aiTitleLower) || aiTitleLower.includes(oTitleLower)));
+          }) ?? original.experience[i];
+
+          return {
+            id: uid("e"),
+            title: String(e.title || origMatch?.title || ""),
+            // ALWAYS use original company if we found a match — AI must not rename employers
+            company: String(origMatch?.company ?? e.company ?? ""),
+            location: flattenLocation(e.location) || origMatch?.location || "",
+            // ALWAYS use original dates if we found a match — AI must not change dates
+            startDate: String(origMatch?.startDate ?? e.startDate ?? ""),
+            endDate: String(origMatch?.endDate ?? e.endDate ?? ""),
+            bullets: Array.isArray(e.bullets) ? e.bullets.map((b: any) => flattenValue(b)) : [],
+          };
+        })
       : original.experience,
     education: (result.resume.education ?? []).length > 0
-      ? result.resume.education.map((ed: any) => ({
-          id: uid("ed"),
-          degree: String(ed.degree || ""),
-          institution: String(ed.institution || ""),
-          field: String(ed.field || ""),
-          location: flattenLocation(ed.location) || "",
-          startDate: String(ed.startDate || ""),
-          endDate: String(ed.endDate || ""),
-          highlights: ed.modules ? [`Modules: ${flattenValue(ed.modules)}`] : ed.highlights || [],
-        }))
+      ? result.resume.education.map((ed: any, i: number) => {
+          // CRITICAL FIX: Match AI education to original by institution or degree.
+          // Always use original institution/dates if matched.
+          const aiInstLower = (ed.institution || "").toLowerCase().trim();
+          const aiDegreeLower = (ed.degree || "").toLowerCase().trim();
+          const origEduMatch = original.education.find((o) => {
+            const oInstLower = (o.institution || "").toLowerCase().trim();
+            const oDegreeLower = (o.degree || "").toLowerCase().trim();
+            return (oInstLower && (oInstLower === aiInstLower ||
+              oInstLower.includes(aiInstLower) || aiInstLower.includes(oInstLower))) ||
+              (oDegreeLower && (oDegreeLower === aiDegreeLower ||
+              oDegreeLower.includes(aiDegreeLower) || aiDegreeLower.includes(oDegreeLower)));
+          }) ?? original.education[i];
+
+          return {
+            id: uid("ed"),
+            degree: String(ed.degree || origEduMatch?.degree || ""),
+            institution: String(origEduMatch?.institution ?? ed.institution ?? ""),
+            field: String(ed.field || origEduMatch?.field || ""),
+            location: flattenLocation(ed.location) || origEduMatch?.location || "",
+            startDate: String(origEduMatch?.startDate ?? ed.startDate ?? ""),
+            endDate: String(origEduMatch?.endDate ?? ed.endDate ?? ""),
+            highlights: ed.modules ? [`Modules: ${flattenValue(ed.modules)}`] : ed.highlights || origEduMatch?.highlights || [],
+          };
+        })
       : original.education,
     skills: aiSkills.length > 0 ? aiSkills : original.skills,
     projects: original.projects,
