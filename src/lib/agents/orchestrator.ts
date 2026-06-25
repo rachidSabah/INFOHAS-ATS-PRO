@@ -839,9 +839,25 @@ async function _runOptimizationPipelineInner(input: PipelineInput, watchdog: Opt
           const aviationResult = await aviationOptimize(resume, jd.rawText ?? "", aviationMode.airlineProfile, aviationMode.settings);
           result.optimizedResume = mapAviationResultToResumeData(aviationResult, resume);
           // CRITICAL FIX (Anomaly #1): Apply enforceLockedFields to aviation path.
-          // Without this, the AI can modify locked fields (name, email, phone,
-          // employer names, dates) without correction — leading to fabricated resumes.
           result.optimizedResume = enforceLockedFields(result.optimizedResume!, resume);
+          // UNIFIED PIPELINE: Apply the same pipeline ALL providers must use:
+          // restoreLockedEntities → deduplicateResume → factualConsistencyCheck
+          try {
+            const { runUnifiedPipeline } = await import("../unified-pipeline");
+            const pipelineResult = runUnifiedPipeline(
+              JSON.stringify(result.optimizedResume),
+              resume,
+            );
+            result.optimizedResume = pipelineResult.resume;
+            if (pipelineResult.entitiesRestored.length > 0) {
+              console.info(`[Unified Pipeline] Aviation: restored ${pipelineResult.entitiesRestored.length} entities`);
+            }
+            if (pipelineResult.duplicatesRemoved > 0) {
+              console.info(`[Unified Pipeline] Aviation: removed ${pipelineResult.duplicatesRemoved} duplicates`);
+            }
+          } catch (pipeErr: any) {
+            console.warn("[Unified Pipeline] Aviation path failed (non-fatal):", pipeErr?.message);
+          }
           result.provider = "aviation-ats";
           result.charCount = aviationResult.charCount;
           // Compute the REAL ATS score via analyzeATS (not the AI's self-reported score which can be 0)
@@ -892,6 +908,26 @@ async function _runOptimizationPipelineInner(input: PipelineInput, watchdog: Opt
             result.skillGap,
           );
           optimizeResult = optimizeAttemptResult;
+        }
+
+        // UNIFIED PIPELINE: Apply to standard path too — deduplicate + entity restore
+        if (optimizeResult?.resume) {
+          try {
+            const { runUnifiedPipeline } = await import("../unified-pipeline");
+            const pipeResult = runUnifiedPipeline(
+              JSON.stringify(optimizeResult.resume),
+              resume,
+            );
+            optimizeResult.resume = pipeResult.resume;
+            if (pipeResult.entitiesRestored.length > 0) {
+              console.info(`[Unified Pipeline] Standard: restored ${pipeResult.entitiesRestored.length} entities`);
+            }
+            if (pipeResult.duplicatesRemoved > 0) {
+              console.info(`[Unified Pipeline] Standard: removed ${pipeResult.duplicatesRemoved} duplicates`);
+            }
+          } catch (pipeErr: any) {
+            console.warn("[Unified Pipeline] Standard path failed (non-fatal):", pipeErr?.message);
+          }
         }
 
         optHandle.complete();
