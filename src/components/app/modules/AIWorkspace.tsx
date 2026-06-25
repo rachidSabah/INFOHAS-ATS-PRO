@@ -1452,7 +1452,137 @@ function DebugTab() {
           </CardContent>
         </Card>
       </div>
+
+      {/* === Interactive Debug Chat === */}
+      <DebugChatSection />
     </div>
+  );
+}
+
+// ============================================================================
+// Interactive Debug Chat Section
+// ============================================================================
+
+function DebugChatSection() {
+  const providers = useApp((s) => s.providers);
+  const [messages, setMessages] = useState<{ id: string; role: "user" | "assistant" | "system"; content: string; timestamp: string; actions?: any[]; provider?: string }[]>([]);
+  const [input, setInput] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [selectedProviderId, setSelectedProviderId] = useState("");
+
+  const activeProviders = providers.filter((p) => p.isActive);
+
+  const sendMessage = async () => {
+    if (!input.trim() || loading) return;
+    const userMsg = { id: `msg_${Date.now()}`, role: "user" as const, content: input.trim(), timestamp: new Date().toISOString() };
+    setMessages((prev) => [...prev, userMsg]);
+    setInput("");
+    setLoading(true);
+
+    try {
+      const { sendDebugMessage, executeAction } = await import("@/lib/debug-chat");
+      const response = await sendDebugMessage(userMsg.content, selectedProviderId || undefined);
+      setMessages((prev) => [...prev, response]);
+    } catch (e: any) {
+      setMessages((prev) => [...prev, {
+        id: `msg_err_${Date.now()}`,
+        role: "assistant" as const,
+        content: `Failed: ${e?.message ?? "Unknown error"}`,
+        timestamp: new Date().toISOString(),
+      }]);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleAction = async (action: any) => {
+    try {
+      const { executeAction } = await import("@/lib/debug-chat");
+      const result = await executeAction(action);
+      toast[result.success ? "success" : "error"](result.message);
+    } catch (e: any) {
+      toast.error(`Action failed: ${e?.message}`);
+    }
+  };
+
+  return (
+    <Card className="bg-card border border-border shadow-md">
+      <CardHeader className="pb-3">
+        <CardTitle className="text-sm flex items-center gap-2">
+          <Icon name="MessageSquare" className="w-4 h-4 text-brand" /> Interactive Debug Chat
+          <select
+            value={selectedProviderId}
+            onChange={(e) => setSelectedProviderId(e.target.value)}
+            className="ml-auto h-7 px-2 rounded-md border border-input bg-background text-xs"
+          >
+            <option value="">Auto-select provider</option>
+            {activeProviders.map((p) => (
+              <option key={p.id} value={p.id}>{p.name}</option>
+            ))}
+          </select>
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="pt-0 space-y-3">
+        {/* Messages */}
+        <div className="max-h-96 overflow-y-auto space-y-2 p-2 rounded-lg bg-muted/30 border border-border">
+          {messages.length === 0 ? (
+            <p className="text-xs text-muted-foreground text-center py-4">
+              Type a debug command below (e.g., &quot;Fix the rendering loop&quot; or &quot;Check provider health&quot;).
+              The chat uses your configured AI providers and includes live system health context.
+            </p>
+          ) : (
+            messages.map((msg) => (
+              <div key={msg.id} className={`text-xs ${msg.role === "user" ? "text-right" : ""}`}>
+                <div className={`inline-block max-w-[85%] p-2 rounded-lg ${
+                  msg.role === "user"
+                    ? "bg-primary text-primary-foreground"
+                    : "bg-card border border-border"
+                }`}>
+                  <p className="whitespace-pre-wrap">{msg.content}</p>
+                  {msg.actions && msg.actions.length > 0 && (
+                    <div className="flex flex-wrap gap-1 mt-2">
+                      {msg.actions.map((action: any) => (
+                        <button
+                          key={action.id}
+                          onClick={() => handleAction(action)}
+                          className="px-2 py-1 text-[10px] font-medium rounded-md bg-primary/10 text-primary hover:bg-primary/20 border border-primary/20"
+                        >
+                          {action.label}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                  {msg.provider && (
+                    <p className="text-[9px] text-muted-foreground mt-1">via {msg.provider}</p>
+                  )}
+                </div>
+              </div>
+            ))
+          )}
+          {loading && (
+            <div className="text-center py-2">
+              <Icon name="Loader2" className="w-4 h-4 animate-spin inline text-muted-foreground" />
+              <span className="text-xs text-muted-foreground ml-2">Analyzing...</span>
+            </div>
+          )}
+        </div>
+
+        {/* Input */}
+        <div className="flex gap-2">
+          <Input
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendMessage(); } }}
+            placeholder="Type a debug command..."
+            disabled={loading}
+            className="flex-1 text-xs h-8"
+          />
+          <Button onClick={sendMessage} disabled={loading || !input.trim()} size="sm" className="gap-1">
+            <Icon name="Send" className="w-3 h-3" /> Send
+          </Button>
+        </div>
+      </CardContent>
+    </Card>
   );
 }
 
