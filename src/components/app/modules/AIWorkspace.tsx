@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -1454,8 +1454,103 @@ function DebugTab() {
       </div>
 
       {/* === Interactive Debug Chat === */}
+      <HealthDashboardSection />
       <DebugChatSection />
     </div>
+  );
+}
+
+// ============================================================================
+// Health Dashboard Section
+// ============================================================================
+
+function HealthDashboardSection() {
+  const [metrics, setMetrics] = useState<any>(null);
+  const [loading, setLoading] = useState(false);
+
+  const refresh = async () => {
+    setLoading(true);
+    try {
+      const { getMetricsSnapshot } = await import("@/lib/metrics-service");
+      setMetrics(getMetricsSnapshot());
+    } catch { /* non-fatal */ }
+    setLoading(false);
+  };
+
+  useEffect(() => {
+    refresh();
+    const interval = setInterval(refresh, 30000); // refresh every 30s
+    return () => clearInterval(interval);
+  }, []);
+
+  if (!metrics) {
+    return (
+      <Card className="bg-card border border-border shadow-md">
+        <CardContent className="p-4 text-center">
+          <Icon name="Loader2" className="w-4 h-4 animate-spin inline text-muted-foreground" />
+        </CardContent>
+      </Card>
+    );
+  }
+
+  const healthItems = [
+    { label: "Providers", healthy: metrics.health.providersHealthy, detail: `${metrics.providers.trippedCount} tripped` },
+    { label: "Database", healthy: metrics.health.databaseHealthy, detail: metrics.health.databaseHealthy ? "Connected" : "Unreachable" },
+    { label: "Pipelines", healthy: metrics.health.pipelinesHealthy, detail: `${metrics.pipeline.totalFailures} failures` },
+    { label: "Memory", healthy: metrics.health.memoryHealthy, detail: `${metrics.health.memoryUsedMB}MB` },
+  ];
+
+  return (
+    <Card className="bg-card border border-border shadow-md">
+      <CardHeader className="pb-3">
+        <CardTitle className="text-sm flex items-center gap-2">
+          <Icon name="Activity" className="w-4 h-4 text-brand" /> System Health Dashboard
+          <Button onClick={refresh} variant="ghost" size="sm" className="ml-auto h-6 px-2 text-xs gap-1">
+            <Icon name="RefreshCw" className={`w-3 h-3 ${loading ? "animate-spin" : ""}`} /> Refresh
+          </Button>
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="pt-0 space-y-3">
+        {/* Health status grid */}
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+          {healthItems.map((item) => (
+            <div key={item.label} className={`p-2 rounded-lg border ${item.healthy ? "border-emerald-500/30 bg-emerald-500/5" : "border-red-500/30 bg-red-500/5"}`}>
+              <div className="flex items-center gap-1.5">
+                <Icon name={item.healthy ? "CheckCircle2" : "AlertCircle"} className={`w-3 h-3 ${item.healthy ? "text-emerald-600" : "text-red-600"}`} />
+                <span className="text-xs font-medium">{item.label}</span>
+              </div>
+              <p className="text-[10px] text-muted-foreground mt-0.5">{item.detail}</p>
+            </div>
+          ))}
+        </div>
+
+        {/* Pipeline metrics */}
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs">
+          <div className="p-2 rounded-lg bg-muted/30">
+            <p className="text-muted-foreground">Optimizations</p>
+            <p className="font-semibold">{metrics.pipeline.totalOptimizations}</p>
+          </div>
+          <div className="p-2 rounded-lg bg-muted/30">
+            <p className="text-muted-foreground">Avg ATS Score</p>
+            <p className="font-semibold">{metrics.pipeline.avgAtsScore || "—"}</p>
+          </div>
+          <div className="p-2 rounded-lg bg-muted/30">
+            <p className="text-muted-foreground">Repair Success</p>
+            <p className="font-semibold">{metrics.repairs.repairSuccessRate}%</p>
+          </div>
+          <div className="p-2 rounded-lg bg-muted/30">
+            <p className="text-muted-foreground">Incidents</p>
+            <p className="font-semibold">{metrics.incidents.total} ({metrics.incidents.critical} critical)</p>
+          </div>
+        </div>
+
+        {/* Overall status */}
+        <div className={`flex items-center gap-2 p-2 rounded-lg ${metrics.health.overall ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400" : "bg-red-500/10 text-red-700 dark:text-red-400"}`}>
+          <Icon name={metrics.health.overall ? "ShieldCheck" : "ShieldAlert"} className="w-4 h-4" />
+          <span className="text-xs font-medium">{metrics.health.overall ? "All systems operational" : "System issues detected"}</span>
+        </div>
+      </CardContent>
+    </Card>
   );
 }
 
