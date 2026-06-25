@@ -603,6 +603,17 @@ export const SEED_OPTIMIZER_DIRECTIVE: OptimizerDirectiveConfig = {
   enforceOnePage: true,
   minFontSizePt: 10,
 
+  // === SECTION CHARACTER LIMITS (fine-tunable) ===
+  sectionLimits: {
+    header: { min: 80, max: 150 },          // name + contact line
+    summary: { min: 400, max: 600 },         // professional summary (3-5 sentences)
+    skills: { min: 300, max: 500 },           // core competencies (4 groups)
+    experience: { min: 1200, max: 1800 },     // all experience combined
+    education: { min: 150, max: 300 },        // all education
+    languages: { min: 50, max: 100 },         // languages
+    total: { min: 2500, max: 3500 },          // total resume
+  },
+
   // === CUSTOM DIRECTIVE (ADVANCED) ===
   customDirectiveOverride: "", // empty = use generated directive
 };

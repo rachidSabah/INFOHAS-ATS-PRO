@@ -535,6 +535,20 @@ export interface OptimizerDirectiveConfig {
   enforceOnePage: boolean;   // assert(pdf.pages === 1)
   minFontSizePt: number;     // never go below this font size when compressing
 
+  // === SECTION CHARACTER LIMITS (fine-tunable) ===
+  // Per-section min/max character targets for balanced page utilization.
+  // The AI prompt includes these limits. QA validates against them.
+  // The user can override these in the Optimizer Directive tab.
+  sectionLimits: {
+    header: { min: number; max: number };         // name + contact line
+    summary: { min: number; max: number };         // professional summary
+    skills: { min: number; max: number };           // core competencies
+    experience: { min: number; max: number };       // all experience entries combined
+    education: { min: number; max: number };        // all education entries
+    languages: { min: number; max: number };        // languages section
+    total: { min: number; max: number };            // total resume chars
+  };
+
   // === CUSTOM DIRECTIVE (ADVANCED) ===
   // If non-empty, this COMPLETELY REPLACES the generated directive text.
   // Use for advanced fine-tuning that the structured fields above can't express.

@@ -538,6 +538,20 @@ NEVER create page two. assert(pdf.pages === 1).`
   : "Multi-page output allowed if content exceeds one page."}
 
 ═══════════════════════════════════════════════════════════════
+SECTION CHARACTER LIMITS (MANDATORY — stay within these ranges)
+═══════════════════════════════════════════════════════════════
+${c.sectionLimits ? `- HEADER (name + contact): ${c.sectionLimits.header.min}-${c.sectionLimits.header.max} characters
+- PROFESSIONAL SUMMARY: ${c.sectionLimits.summary.min}-${c.sectionLimits.summary.max} characters (${c.summaryMinWords}-${c.summaryMaxWords} words)
+- CORE COMPETENCIES & SKILLS: ${c.sectionLimits.skills.min}-${c.sectionLimits.skills.max} characters (${c.skillsMaxGroups} groups max)
+- PROFESSIONAL EXPERIENCE: ${c.sectionLimits.experience.min}-${c.sectionLimits.experience.max} characters (${c.experienceBulletsPerEntry} bullets per entry)
+- EDUCATION: ${c.sectionLimits.education.min}-${c.sectionLimits.education.max} characters
+- LANGUAGES: ${c.sectionLimits.languages.min}-${c.sectionLimits.languages.max} characters
+- TOTAL RESUME: ${c.sectionLimits.total.min}-${c.sectionLimits.total.max} characters
+- If any section is below minimum: EXPAND with more detail from the original resume.
+- If any section is above maximum: COMPRESS by tightening wording (never remove facts).
+- Balance the page: no section should dominate. Experience should be the largest section.` : ''}
+
+═══════════════════════════════════════════════════════════════
 OUTPUT FORMAT
 ═══════════════════════════════════════════════════════════════
 Return ONLY valid JSON with this exact shape:
