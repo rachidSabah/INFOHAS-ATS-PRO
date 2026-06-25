@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { useApp } from "@/lib/store";
 import { LandingPage } from "@/components/landing/LandingPage";
 import { AppShell } from "@/components/app/AppShell";
@@ -36,13 +36,11 @@ export default function Home() {
   }, [needsRehydrate, rehydrateSession]);
 
   // === V3.0.3: Restore pipeline snapshot on app load ===
-  // After rehydration, restore the Supervisor's pipeline state from
-  // localStorage so the user's in-progress optimization survives refresh,
-  // logout/login, and browser crash. Any agent that was "running" when the
-  // snapshot was taken is marked "pending" (since we can't resume an
-  // in-flight AI call) — the user can re-trigger it.
+  // STRICT MODE PROTECTION: useRef guard prevents double-restore in React 19 Strict Mode
+  const hasRestoredSnapshot = useRef(false);
   useEffect(() => {
-    if (isAuthed) {
+    if (isAuthed && !hasRestoredSnapshot.current) {
+      hasRestoredSnapshot.current = true;
       import("@/lib/agents/supervisor").then(({ restoreFromSnapshot }) => {
         const restored = restoreFromSnapshot();
         if (restored) {
@@ -60,19 +58,18 @@ export default function Home() {
   }, [theme]);
 
   // Sync all data from D1 on app mount
+  // STRICT MODE PROTECTION: useRef guard prevents double-sync in React 19 Strict Mode
+  const hasSynced = useRef(false);
   useEffect(() => {
-    if (isAuthed && !synced && user) {
-      setUserId(user.id); // Restore user ID for API calls (important after refresh)
-      // Use .finally() so `synced` is set even if syncAllFromCloud rejects.
-      // Otherwise a sync failure would leave `synced=false` forever, blocking
-      // future sync attempts and leaving the user with stale seed data.
+    if (isAuthed && !synced && user && !hasSynced.current) {
+      hasSynced.current = true;
+      setUserId(user.id);
       syncAllFromCloud(useApp)
         .then(() => useApp.setState({ synced: true }))
         .catch((e) => {
           console.warn("[syncAllFromCloud] failed (non-fatal):", e);
           useApp.setState({ synced: true });
         });
-      // Also migrate old localStorage data if present — guard against rejection
       migrateLocalStorageToCloud(useApp).catch((e) => console.warn("[migrateLocalStorageToCloud] failed (non-fatal):", e));
     }
   }, [isAuthed, synced, user]);
