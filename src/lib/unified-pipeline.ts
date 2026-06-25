@@ -205,7 +205,9 @@ export function restoreExperienceMetadata(optimized: ResumeData, sourceResume: R
 
     return {
       ...entry,
-      // STRICT LOCK: always use source values if they exist
+      // STRICT LOCK: always use source values if they exist.
+      // If source company is empty, DON'T fall back to AI's company (could be hallucinated).
+      // Instead, keep empty — the renderer will show the title only.
       company: orig.company || entry.company || "",
       title: orig.title || entry.title || "",
       startDate: orig.startDate || entry.startDate || "",

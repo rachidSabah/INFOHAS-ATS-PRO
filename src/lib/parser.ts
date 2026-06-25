@@ -507,18 +507,30 @@ const TITLE_END_KEYWORDS = [
   // Senior-level / leadership
   "Manager", "Director", "Lead", "Head", "Chief", "Officer", "President",
   "VP", "SVP", "EVP", "CFO", "CEO", "CTO", "COO", "CIO", "CMO",
+  "Supervisor", "Superintendent", "Controller", "Inspector",
   // Individual contributors
   "Engineer", "Developer", "Designer", "Architect", "Analyst", "Consultant",
   "Specialist", "Associate", "Assistant", "Coordinator", "Administrator",
   "Representative", "Agent", "Intern", "Trainee", "Apprentice",
+  "Clerk", "Cashier", "Teller", "Operator", "Dispatcher", "Receptionist",
+  "Secretary", "Stenographer", "Bookkeeper", "Examiner",
+  // Sales / Retail
+  "Salesperson", "Salesman", "Saleswoman", "Merchandiser", "Cashier",
+  "Stocker", "Attendant", "Greeter",
+  // Hospitality / Customer Service
+  "Host", "Hostess", "Waiter", "Waitress", "Bartender", "Barista",
+  "Concierge", "Porter", "Bellhop", "Housekeeper", "Steward", "Stewardess",
   // Industry-specific
-  "Pilot", "Captain", "Lieutenant", "Sergeant", "Officer", "Marshal",
+  "Pilot", "Captain", "Lieutenant", "Sergeant", "Marshal",
   "Nurse", "Therapist", "Technician", "Mechanic", "Electrician",
   "Teacher", "Professor", "Lecturer", "Instructor", "Tutor",
   "Accountant", "Auditor", "Banker", "Trader", "Broker",
   "Lawyer", "Attorney", "Paralegal", "Judge",
   "Writer", "Editor", "Reporter", "Journalist",
-  "Chef", "Cook", "Baker", "Host", "Hostess", "Waiter", "Waitress",
+  "Chef", "Cook", "Baker",
+  // Aviation / Airport
+  "Crew", "Cabin Crew", "Flight Attendant", "Ground Staff", "Ramp Agent",
+  "Ticket Agent", "Gate Agent", "Baggage Handler", "Check-in Agent",
 ];
 
 /**
