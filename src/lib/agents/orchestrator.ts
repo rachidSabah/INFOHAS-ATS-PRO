@@ -838,25 +838,15 @@ async function _runOptimizationPipelineInner(input: PipelineInput, watchdog: Opt
           log("Resume Optimizer", `Industry ATS mode → ${aviationMode.airlineProfile}. Calling aviationOptimize() with unified directive…`);
           const aviationResult = await aviationOptimize(resume, jd.rawText ?? "", aviationMode.airlineProfile, aviationMode.settings);
           result.optimizedResume = mapAviationResultToResumeData(aviationResult, resume);
-          // CRITICAL FIX (Anomaly #1): Apply enforceLockedFields to aviation path.
-          result.optimizedResume = enforceLockedFields(result.optimizedResume!, resume);
-          // UNIFIED PIPELINE: Apply the same pipeline ALL providers must use:
-          // restoreLockedEntities → deduplicateResume → factualConsistencyCheck
+          // MANDATORY: Call finalizeResume() — the single shared function ALL providers must use.
+          // This runs: cleanupGrammar → restoreLockedEntities → deduplicate → validateImmutableEntities
           try {
-            const { runUnifiedPipeline } = await import("../unified-pipeline");
-            const pipelineResult = runUnifiedPipeline(
-              JSON.stringify(result.optimizedResume),
-              resume,
-            );
-            result.optimizedResume = pipelineResult.resume;
-            if (pipelineResult.entitiesRestored.length > 0) {
-              console.info(`[Unified Pipeline] Aviation: restored ${pipelineResult.entitiesRestored.length} entities`);
-            }
-            if (pipelineResult.duplicatesRemoved > 0) {
-              console.info(`[Unified Pipeline] Aviation: removed ${pipelineResult.duplicatesRemoved} duplicates`);
-            }
-          } catch (pipeErr: any) {
-            console.warn("[Unified Pipeline] Aviation path failed (non-fatal):", pipeErr?.message);
+            const { finalizeResume } = await import("../unified-pipeline");
+            result.optimizedResume = finalizeResume(result.optimizedResume!, resume);
+          } catch (finErr: any) {
+            console.warn("[finalizeResume] Aviation path failed (non-fatal):", finErr?.message);
+            // Fallback: enforceLockedFields
+            result.optimizedResume = enforceLockedFields(result.optimizedResume!, resume);
           }
           result.provider = "aviation-ats";
           result.charCount = aviationResult.charCount;
@@ -910,23 +900,13 @@ async function _runOptimizationPipelineInner(input: PipelineInput, watchdog: Opt
           optimizeResult = optimizeAttemptResult;
         }
 
-        // UNIFIED PIPELINE: Apply to standard path too — deduplicate + entity restore
+        // MANDATORY: Call finalizeResume() — the single shared function ALL providers must use.
         if (optimizeResult?.resume) {
           try {
-            const { runUnifiedPipeline } = await import("../unified-pipeline");
-            const pipeResult = runUnifiedPipeline(
-              JSON.stringify(optimizeResult.resume),
-              resume,
-            );
-            optimizeResult.resume = pipeResult.resume;
-            if (pipeResult.entitiesRestored.length > 0) {
-              console.info(`[Unified Pipeline] Standard: restored ${pipeResult.entitiesRestored.length} entities`);
-            }
-            if (pipeResult.duplicatesRemoved > 0) {
-              console.info(`[Unified Pipeline] Standard: removed ${pipeResult.duplicatesRemoved} duplicates`);
-            }
-          } catch (pipeErr: any) {
-            console.warn("[Unified Pipeline] Standard path failed (non-fatal):", pipeErr?.message);
+            const { finalizeResume } = await import("../unified-pipeline");
+            optimizeResult.resume = finalizeResume(optimizeResult.resume, resume);
+          } catch (finErr: any) {
+            console.warn("[finalizeResume] Standard path failed (non-fatal):", finErr?.message);
           }
         }
 

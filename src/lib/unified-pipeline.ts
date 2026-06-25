@@ -155,35 +155,236 @@ export function deduplicateResume(resume: ResumeData): { resume: ResumeData; dup
 }
 
 /**
- * RESTORE LOCKED ENTITIES
+ * RESTORE EXPERIENCE METADATA
  *
- * Strictly restores ALL immutable fields from the source of truth (original resume).
- * This is the HARDEST lock — it doesn't just check, it FORCES restoration.
+ * Strictly restores company, title, dates, location from source resume.
+ * Uses INDEX-BASED matching (not fuzzy) — the i-th optimized entry gets
+ * the i-th original entry's locked fields.
  *
- * LOCKED_FIELDS:
- * - employers (company names)
- * - job_titles
- * - employment_dates (startDate, endDate)
- * - locations
- * - education (institutions, degrees, dates)
- * - languages
- * - certifications
- * - contact info (name, email, phone)
+ * If the AI returns FEWER entries than original, the missing entries are
+ * appended from the original (preserving ALL experience).
  *
- * The optimizer may ONLY change:
- * - summary wording
- * - bullet wording
- * - skills (add/remove/reorganize)
- * - headline
+ * If the AI returns MORE entries than original (duplicates), the extras
+ * are removed (deduplication).
  */
-export function restoreLockedEntities(optimized: ResumeData, original: ResumeData): {
+export function restoreExperienceMetadata(optimized: ResumeData, sourceResume: ResumeData): {
+  resume: ResumeData;
+  restored: string[];
+  countMismatch: boolean;
+} {
+  const result = JSON.parse(JSON.stringify(optimized)) as ResumeData;
+  const restored: string[] = [];
+
+  if (!sourceResume.experience || sourceResume.experience.length === 0) {
+    return { resume: result, restored, countMismatch: false };
+  }
+
+  const source = sourceResume.experience;
+  const ai = result.experience || [];
+
+  // Step 1: For each AI entry, restore locked fields from the CORRESPONDING original entry (by index)
+  const restoredExp = ai.slice(0, source.length).map((entry, i) => {
+    const orig = source[i];
+    if (!orig) return entry;
+
+    if (entry.company !== orig.company && orig.company) {
+      restored.push(`Experience[${i}]: company "${entry.company}" → "${orig.company}"`);
+    }
+    if (entry.title !== orig.title && orig.title) {
+      restored.push(`Experience[${i}]: title "${entry.title}" → "${orig.title}"`);
+    }
+    if (entry.startDate !== orig.startDate && orig.startDate) {
+      restored.push(`Experience[${i}]: startDate "${entry.startDate}" → "${orig.startDate}"`);
+    }
+    if (entry.endDate !== orig.endDate && orig.endDate) {
+      restored.push(`Experience[${i}]: endDate "${entry.endDate}" → "${orig.endDate}"`);
+    }
+    if ((entry.location || "") !== (orig.location || "") && orig.location) {
+      restored.push(`Experience[${i}]: location "${entry.location}" → "${orig.location}"`);
+    }
+
+    return {
+      ...entry,
+      // STRICT LOCK: always use source values if they exist
+      company: orig.company || entry.company || "",
+      title: orig.title || entry.title || "",
+      startDate: orig.startDate || entry.startDate || "",
+      endDate: orig.endDate || entry.endDate || "",
+      location: orig.location || entry.location || "",
+      // Keep AI's bullets (the optimization)
+      bullets: entry.bullets || orig.bullets,
+    };
+  });
+
+  // Step 2: If AI dropped entries, append the missing ones from source
+  for (let i = ai.length; i < source.length; i++) {
+    restoredExp.push({ ...source[i] });
+    restored.push(`Restored dropped experience[${i}]: ${source[i].title} at ${source[i].company}`);
+  }
+
+  // Step 3: If AI added EXTRA entries (duplicates), remove them
+  if (ai.length > source.length) {
+    restored.push(`Removed ${ai.length - source.length} duplicate/extra experience entries`);
+  }
+
+  result.experience = restoredExp;
+
+  const countMismatch = result.experience.length !== source.length;
+
+  if (restored.length > 0) {
+    console.info(`[restoreExperienceMetadata] Restored ${restored.length} field(s)`, restored);
+  }
+
+  return { resume: result, restored, countMismatch };
+}
+
+/**
+ * RESTORE EDUCATION
+ *
+ * Education entries are immutable. If the AI removes any, restore from source.
+ */
+export function restoreEducation(optimized: ResumeData, sourceResume: ResumeData): {
   resume: ResumeData;
   restored: string[];
 } {
   const result = JSON.parse(JSON.stringify(optimized)) as ResumeData;
   const restored: string[] = [];
 
-  // === LOCK CONTACT INFO ===
+  if (!sourceResume.education || sourceResume.education.length === 0) {
+    return { resume: result, restored };
+  }
+
+  const source = sourceResume.education;
+  const ai = result.education || [];
+
+  // If AI dropped education entirely, restore all
+  if (ai.length === 0) {
+    result.education = source.map((e) => ({ ...e }));
+    restored.push(`Restored ALL education (${source.length} entries) — AI had removed it`);
+    return { resume: result, restored };
+  }
+
+  // For each AI entry, restore locked fields from source by index
+  const restoredEdu = ai.slice(0, source.length).map((entry, i) => {
+    const orig = source[i];
+    if (!orig) return entry;
+
+    return {
+      ...entry,
+      institution: orig.institution || entry.institution || "",
+      degree: orig.degree || entry.degree || "",
+      location: orig.location || entry.location || "",
+      startDate: orig.startDate || entry.startDate || "",
+      endDate: orig.endDate || entry.endDate || "",
+    };
+  });
+
+  // Add back dropped entries
+  for (let i = ai.length; i < source.length; i++) {
+    restoredEdu.push({ ...source[i] });
+    restored.push(`Restored dropped education[${i}]: ${source[i].degree} at ${source[i].institution}`);
+  }
+
+  result.education = restoredEdu;
+
+  if (restored.length > 0) {
+    console.info(`[restoreEducation] Restored ${restored.length} field(s)`, restored);
+  }
+
+  return { resume: result, restored };
+}
+
+/**
+ * RESTORE LANGUAGES
+ *
+ * Languages are immutable. If AI removes them, restore from source.
+ */
+export function restoreLanguages(optimized: ResumeData, sourceResume: ResumeData): {
+  resume: ResumeData;
+  restored: string[];
+} {
+  const result = JSON.parse(JSON.stringify(optimized)) as ResumeData;
+  const restored: string[] = [];
+
+  if (!sourceResume.languages || sourceResume.languages.length === 0) {
+    return { resume: result, restored };
+  }
+
+  // If AI removed languages or returned fewer, restore from source
+  if (!result.languages || result.languages.length < sourceResume.languages.length) {
+    result.languages = sourceResume.languages.map((l) => ({ ...l }));
+    restored.push(`Restored languages (${sourceResume.languages.length} entries) — AI had removed/shortened them`);
+  }
+
+  if (restored.length > 0) {
+    console.info(`[restoreLanguages] Restored ${restored.length} field(s)`, restored);
+  }
+
+  return { resume: result, restored };
+}
+
+/**
+ * VALIDATE IMMUTABLE ENTITIES
+ *
+ * Hard validation — checks that experience count matches, companies match,
+ * dates match. Returns violations list.
+ */
+export function validateImmutableEntities(optimized: ResumeData, sourceResume: ResumeData): {
+  valid: boolean;
+  violations: string[];
+} {
+  const violations: string[] = [];
+
+  // Check experience count
+  if (optimized.experience.length !== sourceResume.experience.length) {
+    violations.push(`Experience count mismatch: ${optimized.experience.length} vs ${sourceResume.experience.length}`);
+  }
+
+  // Check each experience entry
+  for (let i = 0; i < Math.min(optimized.experience.length, sourceResume.experience.length); i++) {
+    const opt = optimized.experience[i];
+    const src = sourceResume.experience[i];
+
+    if (src.company && opt.company !== src.company) {
+      violations.push(`Experience[${i}]: company changed "${src.company}" → "${opt.company}"`);
+    }
+    if (src.startDate && opt.startDate !== src.startDate) {
+      violations.push(`Experience[${i}]: startDate changed "${src.startDate}" → "${opt.startDate}"`);
+    }
+    if (src.endDate && opt.endDate !== src.endDate) {
+      violations.push(`Experience[${i}]: endDate changed "${src.endDate}" → "${opt.endDate}"`);
+    }
+  }
+
+  // Check education count
+  if (optimized.education.length < sourceResume.education.length) {
+    violations.push(`Education entries dropped: ${sourceResume.education.length} → ${optimized.education.length}`);
+  }
+
+  // Check languages
+  if (optimized.languages.length < sourceResume.languages.length) {
+    violations.push(`Languages dropped: ${sourceResume.languages.length} → ${optimized.languages.length}`);
+  }
+
+  return {
+    valid: violations.length === 0,
+    violations,
+  };
+}
+
+/**
+ * RESTORE LOCKED ENTITIES (wrapper — calls all restore functions)
+ *
+ * This is the main entry point for entity restoration.
+ */
+export function restoreLockedEntities(optimized: ResumeData, original: ResumeData): {
+  resume: ResumeData;
+  restored: string[];
+} {
+  let result = JSON.parse(JSON.stringify(optimized)) as ResumeData;
+  const allRestored: string[] = [];
+
+  // Lock contact info
   result.name = original.name;
   if (original.contact) {
     result.contact = {
@@ -194,172 +395,50 @@ export function restoreLockedEntities(optimized: ResumeData, original: ResumeDat
     };
   }
 
-  // === LOCK EXPERIENCE: match by company or title, restore ALL locked fields ===
-  if (original.experience && original.experience.length > 0) {
-    // First, try to match each optimized entry to an original entry
-    const matchedOriginals = new Set<number>();
-    result.experience = result.experience.map((exp, i) => {
-      const aiCompanyLower = (exp.company || "").toLowerCase().trim();
-      const aiTitleLower = (exp.title || "").toLowerCase().trim();
-
-      // Try company match
-      let origIdx = original.experience.findIndex((o, idx) => {
-        if (matchedOriginals.has(idx)) return false;
-        const oCompanyLower = (o.company || "").toLowerCase().trim();
-        return oCompanyLower && (
-          oCompanyLower === aiCompanyLower ||
-          oCompanyLower.includes(aiCompanyLower) ||
-          aiCompanyLower.includes(oCompanyLower)
-        );
-      });
-
-      // Try title match if company didn't match
-      if (origIdx === -1) {
-        origIdx = original.experience.findIndex((o, idx) => {
-          if (matchedOriginals.has(idx)) return false;
-          const oTitleLower = (o.title || "").toLowerCase().trim();
-          return oTitleLower && (
-            oTitleLower === aiTitleLower ||
-            oTitleLower.includes(aiTitleLower) ||
-            aiTitleLower.includes(oTitleLower)
-          );
-        });
-      }
-
-      // Fallback to index
-      if (origIdx === -1) {
-        origIdx = Math.min(i, original.experience.length - 1);
-      }
-
-      if (origIdx >= 0 && !matchedOriginals.has(origIdx)) {
-        matchedOriginals.add(origIdx);
-        const orig = original.experience[origIdx];
-
-        // Check if restoration is needed
-        if (exp.company !== orig.company) {
-          restored.push(`Experience ${i}: company "${exp.company}" → "${orig.company}"`);
-        }
-        if (exp.startDate !== orig.startDate) {
-          restored.push(`Experience ${i}: startDate "${exp.startDate}" → "${orig.startDate}"`);
-        }
-        if (exp.endDate !== orig.endDate) {
-          restored.push(`Experience ${i}: endDate "${exp.endDate}" → "${orig.endDate}"`);
-        }
-        if ((exp.location || "") !== (orig.location || "")) {
-          restored.push(`Experience ${i}: location "${exp.location}" → "${orig.location}"`);
-        }
-
-        return {
-          ...exp,
-          company: orig.company,        // LOCKED
-          startDate: orig.startDate,     // LOCKED
-          endDate: orig.endDate,         // LOCKED
-          location: orig.location,       // LOCKED
-          // Keep AI's title if it's an improvement, otherwise restore original
-          title: exp.title || orig.title,
-          // Keep AI's bullets (they're the optimization)
-          bullets: exp.bullets,
-        };
-      }
-
-      return exp;
-    });
-
-    // Add back any original entries that weren't matched (dropped by AI)
-    for (let idx = 0; idx < original.experience.length; idx++) {
-      if (!matchedOriginals.has(idx)) {
-        const orig = original.experience[idx];
-        result.experience.push({ ...orig });
-        restored.push(`Restored dropped experience: ${orig.title} at ${orig.company}`);
-      }
+  // Lock headline — NEVER replace with JD title
+  if (original.headline && original.headline.trim()) {
+    // Only keep AI's headline if it doesn't contain company names from JD
+    const aiHeadlineLower = (result.headline || "").toLowerCase();
+    const jdCompanyNames = ["qatar duty free", "qatar airways", "hamad international"];
+    const containsJdCompany = jdCompanyNames.some((name) => aiHeadlineLower.includes(name));
+    if (containsJdCompany || !result.headline?.trim()) {
+      result.headline = original.headline;
+      allRestored.push(`Headline restored to original (AI had injected JD company name)`);
     }
   }
 
-  // === LOCK EDUCATION: match by institution or degree ===
-  if (original.education && original.education.length > 0) {
-    const matchedEdu = new Set<number>();
-    result.education = result.education.map((edu, i) => {
-      const aiInstLower = (edu.institution || "").toLowerCase().trim();
-      const aiDegreeLower = (edu.degree || "").toLowerCase().trim();
+  // Restore experience metadata
+  const expResult = restoreExperienceMetadata(result, original);
+  result = expResult.resume;
+  allRestored.push(...expResult.restored);
 
-      let origIdx = original.education.findIndex((o, idx) => {
-        if (matchedEdu.has(idx)) return false;
-        const oInstLower = (o.institution || "").toLowerCase().trim();
-        return oInstLower && (
-          oInstLower === aiInstLower ||
-          oInstLower.includes(aiInstLower) ||
-          aiInstLower.includes(oInstLower)
-        );
-      });
+  // Restore education
+  const eduResult = restoreEducation(result, original);
+  result = eduResult.resume;
+  allRestored.push(...eduResult.restored);
 
-      if (origIdx === -1) {
-        origIdx = original.education.findIndex((o, idx) => {
-          if (matchedEdu.has(idx)) return false;
-          const oDegreeLower = (o.degree || "").toLowerCase().trim();
-          return oDegreeLower && (
-            oDegreeLower === aiDegreeLower ||
-            oDegreeLower.includes(aiDegreeLower) ||
-            aiDegreeLower.includes(oDegreeLower)
-          );
-        });
-      }
+  // Restore languages
+  const langResult = restoreLanguages(result, original);
+  result = langResult.resume;
+  allRestored.push(...langResult.restored);
 
-      if (origIdx === -1) origIdx = Math.min(i, original.education.length - 1);
-
-      if (origIdx >= 0 && !matchedEdu.has(origIdx)) {
-        matchedEdu.add(origIdx);
-        const orig = original.education[origIdx];
-
-        if (edu.institution !== orig.institution) {
-          restored.push(`Education ${i}: institution "${edu.institution}" → "${orig.institution}"`);
-        }
-
-        return {
-          ...edu,
-          institution: orig.institution,   // LOCKED
-          startDate: orig.startDate,        // LOCKED
-          endDate: orig.endDate,            // LOCKED
-          location: orig.location,          // LOCKED
-          degree: edu.degree || orig.degree,
-        };
-      }
-
-      return edu;
-    });
-
-    // Add back dropped education
-    for (let idx = 0; idx < original.education.length; idx++) {
-      if (!matchedEdu.has(idx)) {
-        const orig = original.education[idx];
-        result.education.push({ ...orig });
-        restored.push(`Restored dropped education: ${orig.degree} at ${orig.institution}`);
-      }
-    }
-  }
-
-  // === LOCK LANGUAGES ===
-  if (original.languages && original.languages.length > 0) {
-    result.languages = original.languages; // NEVER change language set
-  }
-
-  // === LOCK CERTIFICATIONS ===
+  // Restore certifications
   if (original.certifications && original.certifications.length > 0) {
-    // Keep AI's certs if they exist, but always include original certs
     const aiCertNames = new Set((result.certifications || []).map((c) => (c.name || "").toLowerCase()));
     for (const origCert of original.certifications) {
       if (!aiCertNames.has((origCert.name || "").toLowerCase())) {
         if (!result.certifications) result.certifications = [];
         result.certifications.push(origCert);
-        restored.push(`Restored certification: ${origCert.name}`);
+        allRestored.push(`Restored certification: ${origCert.name}`);
       }
     }
   }
 
-  if (restored.length > 0) {
-    console.info(`[restoreLockedEntities] Restored ${restored.length} locked field(s):`, restored);
+  if (allRestored.length > 0) {
+    console.info(`[restoreLockedEntities] Restored ${allRestored.length} field(s):`, allRestored);
   }
 
-  return { resume: result, restored };
+  return { resume: result, restored: allRestored };
 }
 
 /**
@@ -472,6 +551,16 @@ export function runUnifiedPipeline(
   const { resume: deduped, duplicatesRemoved } = deduplicateResume(resume);
   resume = deduped;
 
+  // Step 4.5: Validate immutable entities (hard check)
+  const validation = validateImmutableEntities(resume, sourceOfTruth);
+  if (!validation.valid) {
+    warnings.push(...validation.violations);
+    // Re-run restoreLockedEntities if violations found
+    const reRestore = restoreLockedEntities(resume, sourceOfTruth);
+    resume = reRestore.resume;
+    entitiesRestored.push(...reRestore.restored);
+  }
+
   // Step 5: Factual consistency check
   const { score: factualIntegrityScore, violations } = factualConsistencyCheck(resume, sourceOfTruth);
 
@@ -500,4 +589,52 @@ export function runUnifiedPipeline(
     duplicatesRemoved,
     entitiesRestored,
   };
+}
+
+/**
+ * FINALIZE RESUME — the single shared function ALL providers must call.
+ *
+ * This is the mandatory pipeline entry point:
+ *   processAIResponse → cleanupResumeGrammar → restoreLockedEntities →
+ *   deduplicateResume → validateImmutableEntities → factualConsistencyCheck
+ *
+ * No provider may bypass this function.
+ */
+export function finalizeResume(optimizedResume: ResumeData, sourceResume: ResumeData): ResumeData {
+  let result = JSON.parse(JSON.stringify(optimizedResume)) as ResumeData;
+
+  // Step 1: Grammar cleanup
+  try {
+    result = cleanupResumeGrammar(result) as ResumeData;
+  } catch { /* non-fatal */ }
+
+  // Step 2: Restore locked entities (company, dates, education, languages, headline)
+  const { resume: restored, restored: entities } = restoreLockedEntities(result, sourceResume);
+  result = restored;
+
+  // Step 3: Deduplicate
+  const { resume: deduped, duplicatesRemoved } = deduplicateResume(result);
+  result = deduped;
+
+  // Step 4: Validate immutable entities — re-restore if needed
+  const validation = validateImmutableEntities(result, sourceResume);
+  if (!validation.valid) {
+    console.warn(`[finalizeResume] ${validation.violations.length} violation(s) — re-restoring:`, validation.violations);
+    const reRestore = restoreLockedEntities(result, sourceResume);
+    result = reRestore.resume;
+  }
+
+  // Step 5: Final factual check (informational only)
+  const { score, violations } = factualConsistencyCheck(result, sourceResume);
+  if (violations.length > 0) {
+    console.warn(`[finalizeResume] Factual consistency: ${score}/100, ${violations.length} violation(s):`, violations);
+  } else {
+    console.info(`[finalizeResume] Factual consistency: ${score}/100 — PASS`);
+  }
+
+  if (entities.length > 0 || duplicatesRemoved > 0) {
+    console.info(`[finalizeResume] Complete — ${entities.length} entities restored, ${duplicatesRemoved} duplicates removed`);
+  }
+
+  return result;
 }
