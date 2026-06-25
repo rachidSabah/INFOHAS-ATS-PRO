@@ -445,3 +445,146 @@ export function findPlaceholders(text: string | null | undefined): string[] {
   }
   return found;
 }
+
+// ============================================================================
+// Fact Manifest — immutable reference for the optimizer
+//
+// The fact_manifest is created from the original resume BEFORE optimization.
+// The optimizer may ONLY use values from the manifest.
+// Any value in the optimized resume not in the manifest = hallucination.
+// ============================================================================
+
+export interface FactManifest {
+  createdAt: string;
+  employers: Set<string>;
+  education: Set<string>;
+  certifications: Set<string>;
+  dates: Set<string>;
+  metrics: Set<string>;
+  locations: Set<string>;
+  languages: Set<string>;
+  jobTitles: Set<string>;
+  contact: { name: string; email: string; phone: string; location: string };
+}
+
+/**
+ * Create an immutable fact manifest from the original resume.
+ * This is the "source of truth" for what facts the optimizer may use.
+ */
+export function createFactManifest(resume: ResumeData): FactManifest {
+  const facts = extractLockedFacts(resume);
+  // Build a set of all date strings from experience + education
+  const allDates: string[] = [];
+  for (const d of facts.dates.experience) {
+    allDates.push(d.startDate, d.endDate);
+  }
+  for (const d of facts.dates.education) {
+    allDates.push(d.startDate, d.endDate);
+  }
+  // Build a set of all locations from experience + contact
+  const allLocations: string[] = [facts.location];
+  for (const exp of resume.experience || []) {
+    if (exp.location) allLocations.push(exp.location);
+  }
+  return {
+    createdAt: new Date().toISOString(),
+    employers: new Set(facts.companies.map((c) => c.toLowerCase())),
+    education: new Set(facts.educationInstitutions.map((e) => e.toLowerCase())),
+    certifications: new Set(facts.certifications.map((c) => c.toLowerCase())),
+    dates: new Set(allDates.filter(Boolean).map((d) => d.toLowerCase())),
+    metrics: new Set(facts.metrics.map((m) => m.toLowerCase())),
+    locations: new Set(allLocations.filter(Boolean).map((l) => l.toLowerCase())),
+    languages: new Set(facts.languages.map((l) => l.toLowerCase())),
+    jobTitles: new Set(facts.jobTitles.map((t) => t.toLowerCase())),
+    contact: {
+      name: facts.name,
+      email: facts.email,
+      phone: facts.phone,
+      location: facts.location,
+    },
+  };
+}
+
+/**
+ * Compute the factual integrity score (0-100) from a FactDiff.
+ * 100 = no deviations. Each deviation lowers the score.
+ * Score < 95 = force regeneration.
+ */
+export function computeFactualIntegrityScore(diff: FactDiff): number {
+  // If the diff already has a score, use it
+  if (typeof diff.factualIntegrityScore === "number") {
+    return diff.factualIntegrityScore;
+  }
+
+  let violations = 0;
+
+  // Count critical new facts (hallucinations)
+  const criticalNewFacts = diff.newFacts.filter((f) => f.severity === "critical");
+  const warningNewFacts = diff.newFacts.filter((f) => f.severity === "warning");
+
+  // Each critical new fact = 15 point penalty
+  violations += criticalNewFacts.length * 15;
+
+  // Each warning new fact = 5 point penalty
+  violations += warningNewFacts.length * 5;
+
+  // Each critical changed field = 10 point penalty
+  const criticalChanged = diff.changed.filter((c) => c.severity === "critical");
+  violations += criticalChanged.length * 10;
+
+  // Each critical missing fact = 10 point penalty (data loss)
+  const criticalMissing = diff.missing.filter((m) => m.severity === "critical");
+  violations += criticalMissing.length * 10;
+
+  return Math.max(0, 100 - violations);
+}
+
+/**
+ * Validate an optimized resume against a fact manifest.
+ * Returns a list of violations (empty = fully compliant).
+ */
+export function validateAgainstManifest(
+  optimized: ResumeData,
+  manifest: FactManifest,
+): string[] {
+  const violations: string[] = [];
+
+  // Check employers
+  for (const exp of optimized.experience || []) {
+    const company = (exp.company || "").toLowerCase();
+    if (company && !manifest.employers.has(company)) {
+      violations.push(`Hallucinated employer: "${exp.company}"`);
+    }
+  }
+
+  // Check education
+  for (const edu of optimized.education || []) {
+    const inst = (edu.institution || "").toLowerCase();
+    if (inst && !manifest.education.has(inst)) {
+      violations.push(`Hallucinated education: "${edu.institution}"`);
+    }
+  }
+
+  // Check certifications
+  for (const cert of optimized.certifications || []) {
+    const name = (cert.name || "").toLowerCase();
+    if (name && !manifest.certifications.has(name)) {
+      violations.push(`Hallucinated certification: "${cert.name}"`);
+    }
+  }
+
+  // Check languages
+  for (const lang of optimized.languages || []) {
+    const name = (lang.name || "").toLowerCase();
+    if (name && !manifest.languages.has(name)) {
+      violations.push(`Hallucinated language: "${lang.name}"`);
+    }
+  }
+
+  // Check contact info hasn't changed
+  if (optimized.name && optimized.name !== manifest.contact.name) {
+    violations.push(`Name changed: "${manifest.contact.name}" → "${optimized.name}"`);
+  }
+
+  return violations;
+}
