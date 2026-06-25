@@ -1,4 +1,4 @@
-// ResumeAI Pro — AI Response Processing Layer
+// ResumeAI Pro — AI Response Processing Layer (Hardened v2025.01.15)
 // This layer sits BETWEEN the AI provider response and the resume builder.
 // It detects response type, validates, normalizes, and prevents ANY error
 // from leaking into the generated document.
@@ -151,6 +151,73 @@ const LEAK_PATTERNS: RegExp[] = [
   /i (added|removed|included|embedded|modified|changed)/i,
   /the (above )?changes (will|should|improve)/i,
 ];
+
+/**
+ * FORBIDDEN SKILL PATTERNS — company names, locations, and other non-skills
+ * that should NEVER appear in the skills section of a resume.
+ */
+const FORBIDDEN_SKILL_PATTERNS: RegExp[] = [
+  // Company names (major employers that commonly leak into skills)
+  /\bqatar duty free\b/i,
+  /\bqatar airways\b/i,
+  /\bhamad international\b/i,
+  /\bqdfc\b/i,
+  /\bretail company\b/i,
+  /\bbeauty retailer\b/i,
+  /\bduty free\b/i,
+  // Locations (cities, countries, airports)
+  /\bdoha\b/i,
+  /\bqatar\b/i,
+  /\bdubai\b/i,
+  /\babu dhabi\b/i,
+  /\buae\b/i,
+  /\briyadh\b/i,
+  /\bsaudi arabia\b/i,
+  /\bkuwait\b/i,
+  /\bbahrain\b/i,
+  /\boman\b/i,
+  /\bmuscat\b/i,
+  // Generic non-skills
+  /\bunknown\b/i,
+  /\bn\/a\b/i,
+  /\bplaceholder\b/i,
+  /\bsample skill\b/i,
+  /\bexample skill\b/i,
+  /\bskill gap\b/i,
+  /\bmissing skill\b/i,
+  // Years (not skills)
+  /^(19|20)\d{2}$/,
+  /^\d{4}-\d{4}$/,
+];
+
+/**
+ * Check if a skill name is forbidden (company name, location, etc.)
+ */
+export function isForbiddenSkill(skillName: string): boolean {
+  if (!skillName || skillName.trim().length === 0) return true;
+  const trimmed = skillName.trim();
+  return FORBIDDEN_SKILL_PATTERNS.some((p) => p.test(trimmed));
+}
+
+/**
+ * Filter forbidden skills from a skills list.
+ * Returns the filtered list + list of removed skills for logging.
+ */
+export function filterForbiddenSkills(skills: { name: string; category?: string }[]): {
+  filtered: { name: string; category?: string }[];
+  removed: string[];
+} {
+  const filtered: { name: string; category?: string }[] = [];
+  const removed: string[] = [];
+  for (const skill of skills) {
+    if (isForbiddenSkill(skill.name)) {
+      removed.push(skill.name);
+    } else {
+      filtered.push(skill);
+    }
+  }
+  return { filtered, removed };
+}
 
 /**
  * Detect the type of AI response.
