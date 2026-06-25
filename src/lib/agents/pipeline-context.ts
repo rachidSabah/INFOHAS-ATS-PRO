@@ -194,3 +194,104 @@ export function createEmptyContext(): GlobalPipelineContext {
 export function serializeContext(ctx: GlobalPipelineContext): any {
   return JSON.parse(JSON.stringify(ctx));
 }
+
+// ============================================================================
+// CONTEXT SNAPSHOT ENGINE
+//
+// Before every agent: createSnapshot()
+// After every agent: createSnapshot()
+// On failure: rollbackToLastValidSnapshot()
+//
+// Snapshots are immutable deep clones of the GlobalPipelineContext.
+// They allow the pipeline to roll back to a known-good state when an
+// agent produces invalid output.
+// ============================================================================
+
+export interface ContextSnapshot {
+  id: string;
+  timestamp: string;
+  agentName: string;
+  context: GlobalPipelineContext;
+  label: string; // e.g., "before-optimizer", "after-qa"
+}
+
+const snapshots: ContextSnapshot[] = [];
+const MAX_SNAPSHOTS = 50; // prevent memory leaks
+
+/**
+ * Create an immutable snapshot of the current context.
+ * Called before and after every agent runs.
+ */
+export function createSnapshot(
+  context: GlobalPipelineContext,
+  agentName: string,
+  label: string,
+): ContextSnapshot {
+  const snapshot: ContextSnapshot = {
+    id: `snap_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+    timestamp: new Date().toISOString(),
+    agentName,
+    label,
+    context: JSON.parse(JSON.stringify(context)), // deep clone — immutable
+  };
+
+  snapshots.push(snapshot);
+
+  // Prune old snapshots to prevent memory leaks
+  if (snapshots.length > MAX_SNAPSHOTS) {
+    snapshots.shift();
+  }
+
+  console.info(`[Snapshot Engine] Created snapshot: ${label} (${agentName}) — ${snapshots.length} total`);
+  return snapshot;
+}
+
+/**
+ * Roll back to the last valid snapshot.
+ * Called when an agent produces invalid output or fails.
+ *
+ * @returns The context from the last valid snapshot, or null if none exist.
+ */
+export function rollbackToLastValidSnapshot(): GlobalPipelineContext | null {
+  if (snapshots.length === 0) {
+    console.warn("[Snapshot Engine] No snapshots to roll back to");
+    return null;
+  }
+
+  // Find the last snapshot that has valid output (optimizedResume with experience)
+  for (let i = snapshots.length - 1; i >= 0; i--) {
+    const snap = snapshots[i];
+    if (snap.context.optimizedResume && (snap.context.optimizedResume.experience?.length ?? 0) > 0) {
+      console.info(`[Snapshot Engine] Rolling back to: ${snap.label} (${snap.agentName}) at ${snap.timestamp}`);
+      // Return a deep clone so the caller can't mutate the snapshot
+      return JSON.parse(JSON.stringify(snap.context));
+    }
+  }
+
+  // No snapshot with valid output — return the earliest snapshot
+  const earliest = snapshots[0];
+  console.warn(`[Snapshot Engine] No valid snapshot found — rolling back to earliest: ${earliest.label}`);
+  return JSON.parse(JSON.stringify(earliest.context));
+}
+
+/**
+ * Get the most recent snapshot (without rolling back).
+ */
+export function getLastSnapshot(): ContextSnapshot | null {
+  return snapshots.length > 0 ? snapshots[snapshots.length - 1] : null;
+}
+
+/**
+ * Get all snapshots (for debugging / UI display).
+ */
+export function getAllSnapshots(): ContextSnapshot[] {
+  return [...snapshots];
+}
+
+/**
+ * Clear all snapshots — called when a new optimization run starts.
+ */
+export function clearSnapshots(): void {
+  snapshots.length = 0;
+  console.info("[Snapshot Engine] All snapshots cleared");
+}

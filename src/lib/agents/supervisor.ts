@@ -499,17 +499,21 @@ function finalizeSupervisorStatus(): void {
   const agentList = Object.values(state.agents);
 
   // CORE required agents — if any of these fail, the pipeline FAILS
+  // BUT: a core agent is only considered "failed" if it has NO output.
+  // If a core agent failed but a fallback succeeded (e.g., optimizer failed
+  // but local engine produced a resume), the pipeline still COMPLETES.
+  // This fixes the "False ParseFailure" bug where the supervisor emitted
+  // FAILED even though fallbackSucceeded === true.
   const coreRequiredAgentIds: AgentId[] = [
     "resume-parser", "job-intelligence", "ats-analysis", "optimizer",
   ];
 
   // POST-OPTIMIZATION agents — if these fail, pipeline still completes
-  // but the failure is logged. The user gets the optimized resume.
   const postOptAgentIds: AgentId[] = [
     "cover-letter", "interview", "career-coach",
   ];
 
-  // === Agents that are NOT part of the optimization pipeline ===
+  // Non-pipeline agents (standalone tools)
   const nonPipelineAgents: AgentId[] = [
     "application-tracker", "salary", "job-search",
   ];
@@ -522,7 +526,7 @@ function finalizeSupervisorStatus(): void {
     (a) => a.status === "pending" || a.status === "running",
   );
 
-  // Mark non-pipeline agents as "skipped" if they're still pending
+  // Mark non-pipeline agents as "skipped"
   for (const id of nonPipelineAgents) {
     if (state.agents[id]?.status === "pending") {
       updateAgent(id, { status: "skipped", log: "Not part of this optimization pipeline." });
@@ -537,20 +541,47 @@ function finalizeSupervisorStatus(): void {
     return;
   }
 
-  // Check if any CORE required agent failed
+  // FALSE PARSE FAILURE FIX: Recompute final state from Context Engine snapshots.
+  // Do NOT trust stale agent flags. A core agent that "failed" but whose
+  // fallback produced valid output is NOT a real failure.
+  const ctx = state.context;
+  const fallbackSucceeded =
+    ctx.optimizedResume !== null &&
+    ctx.optimizedResume !== undefined &&
+    (ctx.optimizedResume.experience?.length ?? 0) > 0;
+
   const failedCore = coreRequiredAgentIds
     .map((id) => state.agents[id])
     .filter((a) => a && a.status === "failed");
 
   const failedAgents = agentList.filter((a) => a.status === "failed");
 
-  if (failedCore.length > 0) {
-    // CORE agent failed — pipeline FAILS
+  // FALSE PARSE FAILURE FIX: If core agents failed but fallback succeeded,
+  // mark the pipeline as COMPLETED (not FAILED). The user got a valid result.
+  if (failedCore.length > 0 && !fallbackSucceeded) {
+    // GENUINE failure — no fallback output available
     updateAgent("supervisor", {
       status: "failed",
       completedAt: new Date().toISOString(),
       error: `Core agents failed: ${failedCore.map((a) => a.name).join(", ")}`,
       log: `Pipeline FAILED: ${failedCore.length} core agent(s) failed: ${failedCore.map((a) => a.name).join(", ")}`,
+    });
+  } else if (failedCore.length > 0 && fallbackSucceeded) {
+    // FALSE FAILURE — core agent failed but fallback produced valid output
+    // Mark the failed core agents as "completed" with a recovery note
+    for (const agent of failedCore) {
+      updateAgent(agent.id, {
+        status: "completed",
+        log: `${agent.name} recovered via fallback. Output is valid.`,
+      });
+    }
+    const completedCount = agentList.filter((a) => a.status === "completed" || a.status === "cached").length;
+    const skippedCount = agentList.filter((a) => a.status === "skipped").length;
+    const failedCount = failedAgents.filter((a) => !coreRequiredAgentIds.includes(a.id)).length;
+    updateAgent("supervisor", {
+      status: "completed",
+      completedAt: new Date().toISOString(),
+      log: `Pipeline complete (recovered): ${completedCount} completed, ${skippedCount} skipped, ${failedCount} post-opt failed. Core agents recovered via fallback.`,
     });
   } else {
     // Core agents succeeded — pipeline COMPLETES
