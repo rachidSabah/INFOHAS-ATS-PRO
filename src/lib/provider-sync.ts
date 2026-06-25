@@ -238,3 +238,110 @@ export function syncProviderConfigs(d1Providers: AIProvider[]): {
 
   return { providers: mergedProviders, result };
 }
+
+// ============================================================================
+// Provider State Validation & Hash (for drift detection)
+// ============================================================================
+
+/**
+ * Calculate a hash of the providers array to detect changes.
+ * Only syncs when the hash changes — prevents infinite loops.
+ */
+export function calculateProviderHash(providers: AIProvider[]): string {
+  const parts = providers
+    .map((p) => `${p.id}|${p.modelName || ""}|${(p.apiKey || "").slice(0, 8)}|${p.isActive ? 1 : 0}`)
+    .sort()
+    .join("||");
+  let hash = 0;
+  for (let i = 0; i < parts.length; i++) {
+    const char = parts.charCodeAt(i);
+    hash = ((hash << 5) - hash) + char;
+    hash = hash & hash;
+  }
+  return String(hash);
+}
+
+/**
+ * Validate that provider state is consistent (no drift, no empty keys on active providers).
+ * Returns a list of issues found (empty = healthy).
+ */
+export function validateProviderState(providers: AIProvider[]): string[] {
+  const issues: string[] = [];
+
+  for (const p of providers) {
+    if (!p.isActive) continue; // skip inactive providers
+
+    // Check for empty API key on active provider
+    if (!p.apiKey || p.apiKey.trim() === "") {
+      // Only flag if the provider type requires a key (not Puter)
+      if (p.type !== "puter") {
+        issues.push(`${p.name}: active but API key is empty`);
+      }
+    }
+
+    // Check for empty model name
+    if (!p.modelName || p.modelName.trim() === "") {
+      issues.push(`${p.name}: model name is empty`);
+    }
+
+    // Check for empty base URL
+    if (!p.baseUrl || p.baseUrl.trim() === "") {
+      if (p.type !== "puter") {
+        issues.push(`${p.name}: base URL is empty`);
+      }
+    }
+
+    // Check for invalid timeout
+    if (!p.timeout || p.timeout < 5000) {
+      issues.push(`${p.name}: timeout is ${p.timeout || 0}ms (minimum 5000)`);
+    }
+  }
+
+  return issues;
+}
+
+/**
+ * Reconcile provider state — returns the corrected providers + list of fixes applied.
+ * Idempotent: running twice produces the same result.
+ */
+export function reconcileProviderState(providers: AIProvider[]): {
+  providers: AIProvider[];
+  fixes: string[];
+} {
+  const fixes: string[] = [];
+  const result = providers.map((p) => {
+    const patched = { ...p };
+
+    // Fix empty model name using seed
+    if (!patched.modelName || patched.modelName.trim() === "") {
+      const seed = findSeedProvider(patched);
+      if (seed?.modelName) {
+        patched.modelName = seed.modelName;
+        fixes.push(`${p.name}: restored model name to "${seed.modelName}"`);
+      }
+    }
+
+    // Fix empty base URL using seed
+    if (!patched.baseUrl || patched.baseUrl.trim() === "") {
+      const seed = findSeedProvider(patched);
+      if (seed?.baseUrl) {
+        patched.baseUrl = seed.baseUrl;
+        patched.apiUrl = seed.apiUrl || seed.baseUrl;
+        fixes.push(`${p.name}: restored base URL to "${seed.baseUrl}"`);
+      }
+    }
+
+    // Fix low timeout
+    if (!patched.timeout || patched.timeout < 5000) {
+      const seed = findSeedProvider(patched);
+      if (seed?.timeout) {
+        patched.timeout = seed.timeout;
+        fixes.push(`${p.name}: restored timeout to ${seed.timeout}ms`);
+      }
+    }
+
+    return patched;
+  });
+
+  return { providers: result, fixes };
+}
