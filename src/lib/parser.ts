@@ -54,14 +54,16 @@ export function RepairParser(text: string, fileName: string): ResumeData {
 export function secondaryParser(text: string, fileName: string): ResumeData {
   const normalizedText = text.replace(/\r/g, "");
   
-  // Section regexes
-  const expRegex = /(?:PROFESSIONAL EXPERIENCE|WORK EXPERIENCE|EXPERIENCE|EMPLOYMENT HISTORY|HISTORY)([\s\S]*?)(?=(?:EDUCATION|LANGUAGES|SKILLS|CORE COMPETENCIES|CERTIFICATIONS|PROJECTS|REFERENCES|SUMMARY|PROFESSIONAL SUMMARY|$))/i;
-  const eduRegex = /(?:EDUCATION|ACADEMIC BACKGROUND|ACADEMIC)([\s\S]*?)(?=(?:PROFESSIONAL EXPERIENCE|WORK EXPERIENCE|EXPERIENCE|LANGUAGES|SKILLS|CORE COMPETENCIES|CERTIFICATIONS|PROJECTS|REFERENCES|SUMMARY|PROFESSIONAL SUMMARY|$))/i;
-  const langRegex = /(?:LANGUAGES|LANGUAGE)([\s\S]*?)(?=(?:PROFESSIONAL EXPERIENCE|WORK EXPERIENCE|EXPERIENCE|EDUCATION|SKILLS|CORE COMPETENCIES|CERTIFICATIONS|PROJECTS|REFERENCES|SUMMARY|PROFESSIONAL SUMMARY|$))/i;
-  const skillsRegex = /(?:SKILLS|TECHNICAL SKILLS|CORE SKILLS|CORE COMPETENCIES|CORE COMPETENCIES & SKILLS|COMPETENCIES)([\s\S]*?)(?=(?:PROFESSIONAL EXPERIENCE|WORK EXPERIENCE|EXPERIENCE|EDUCATION|LANGUAGES|CERTIFICATIONS|PROJECTS|REFERENCES|SUMMARY|PROFESSIONAL SUMMARY|$))/i;
-  const certsRegex = /(?:CERTIFICATIONS|CERTIFICATES|LICENSES)([\s\S]*?)(?=(?:PROFESSIONAL EXPERIENCE|WORK EXPERIENCE|EXPERIENCE|EDUCATION|LANGUAGES|SKILLS|CORE COMPETENCIES|PROJECTS|REFERENCES|SUMMARY|PROFESSIONAL SUMMARY|$))/i;
-  const projRegex = /(?:PROJECTS|PERSONAL PROJECTS|SIDE PROJECTS)([\s\S]*?)(?=(?:PROFESSIONAL EXPERIENCE|WORK EXPERIENCE|EXPERIENCE|EDUCATION|LANGUAGES|SKILLS|CORE COMPETENCIES|CERTIFICATIONS|REFERENCES|SUMMARY|PROFESSIONAL SUMMARY|$))/i;
-  const summaryRegex = /(?:SUMMARY|PROFESSIONAL SUMMARY|PROFILE|OBJECTIVE)([\s\S]*?)(?=(?:PROFESSIONAL EXPERIENCE|WORK EXPERIENCE|EXPERIENCE|EDUCATION|LANGUAGES|SKILLS|CORE COMPETENCIES|CERTIFICATIONS|PROJECTS|REFERENCES|$))/i;
+  // Section regexes using line-start markers and word boundaries to avoid false matching
+  const headerLookahead = `(?=(?:(?:^|\\n)\\s*(?:PROFESSIONAL EXPERIENCE|WORK EXPERIENCE|\\bEXPERIENCE\\b|EDUCATION|LANGUAGES|LANGUAGE|SKILLS|CORE COMPETENCIES|COMPETENCIES|CERTIFICATIONS|PROJECTS|REFERENCES|SUMMARY|PROFESSIONAL SUMMARY|CAREER OBJECTIVE|CAREER PROFILE|PROFESSIONAL PROFILE|ABOUT ME|PERSONAL INFORMATIONS|PERSONAL INFORMATION|PERSONAL INFO|PERSONAL DETAILS|INTERESTS|HOBBIES|NATIONALITY)\\b\\s*:?\\s*(?:\\n|$)))`;
+
+  const expRegex = new RegExp('(?:^|\\n)\\s*(?:PROFESSIONAL EXPERIENCE|WORK EXPERIENCE|\\bEXPERIENCE\\b|\\bEXPERIENCES\\b|EMPLOYMENT HISTORY|HISTORY)\\b\\s*:?\\s*\\n([\\s\\S]*?)' + headerLookahead, 'i');
+  const eduRegex = new RegExp('(?:^|\\n)\\s*(?:EDUCATION|ACADEMIC BACKGROUND|ACADEMIC)\\b\\s*:?\\s*\\n([\\s\\S]*?)' + headerLookahead, 'i');
+  const langRegex = new RegExp('(?:^|\\n)\\s*(?:LANGUAGES|LANGUAGE)\\b\\s*:?\\s*\\n([\\s\\S]*?)' + headerLookahead, 'i');
+  const skillsRegex = new RegExp('(?:^|\\n)\\s*(?:SKILLS|TECHNICAL SKILLS|CORE SKILLS|CORE COMPETENCIES|CORE COMPETENCIES & SKILLS|COMPETENCIES)\\b\\s*:?\\s*\\n([\\s\\S]*?)' + headerLookahead, 'i');
+  const certsRegex = new RegExp('(?:^|\\n)\\s*(?:CERTIFICATIONS|CERTIFICATES|LICENSES)\\b\\s*:?\\s*\\n([\\s\\S]*?)' + headerLookahead, 'i');
+  const projRegex = new RegExp('(?:^|\\n)\\s*(?:PROJECTS|PERSONAL PROJECTS|SIDE PROJECTS)\\b\\s*:?\\s*\\n([\\s\\S]*?)' + headerLookahead, 'i');
+  const summaryRegex = new RegExp('(?:^|\\n)\\s*(?:SUMMARY|PROFESSIONAL SUMMARY|PROFILE|OBJECTIVE|CAREER OBJECTIVE|CAREER PROFILE|PROFESSIONAL PROFILE|ABOUT ME)\\b\\s*:?\\s*\\n([\\s\\S]*?)' + headerLookahead, 'i');
 
   const expMatch = normalizedText.match(expRegex);
   const eduMatch = normalizedText.match(eduRegex);
@@ -88,19 +90,22 @@ export function secondaryParser(text: string, fileName: string): ResumeData {
     .map((s) => ({ id: uid("s"), name: s }));
   const projects = parseProjects(projLines);
   const certifications = certsLines.map((c) => ({ id: uid("c"), name: c }));
-  const languages = langLines
-    .flatMap((l) => l.split(/[,;]/))
-    .map((s) => s.trim())
-    .filter(Boolean)
-    .map((s) => {
-      const match = s.match(/^([A-Za-z]+)\s*[\(:]\s*(Native|Fluent|Proficient|Conversational|Intermediate|Basic|Advanced|Professional)\s*\)?$/i);
-      if (match) {
-        const proficiency = match[2].toLowerCase();
-        const normalizedProf = (["basic", "conversational", "fluent", "native"].includes(proficiency) ? proficiency : "fluent") as "basic" | "conversational" | "fluent" | "native";
-        return { id: uid("l"), name: match[1], proficiency: normalizedProf };
+  const languages: ResumeData["languages"] = [];
+  const seenLangs = new Set<string>();
+  for (const line of langLines) {
+    const parts = line.split(/[,;]/);
+    for (const part of parts) {
+      const detected = detectLanguage(part);
+      if (detected && !seenLangs.has(detected.name.toLowerCase())) {
+        seenLangs.add(detected.name.toLowerCase());
+        languages.push({
+          id: uid("l"),
+          name: detected.name,
+          proficiency: detected.proficiency,
+        });
       }
-      return { id: uid("l"), name: s, proficiency: "fluent" as const };
-    });
+    }
+  }
 
   // Extract contact
   const firstLines = normalizedText.split("\n").slice(0, 15).join("\n");
@@ -116,15 +121,7 @@ export function secondaryParser(text: string, fileName: string): ResumeData {
   const locationLine = normalizedText.split("\n").slice(0, 15).find((l) => /\b([A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+){0,2},\s?[A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+)?)\b/.test(l));
   const location = locationLine?.match(/\b([A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+){0,2},\s?[A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+)?)\b/)?.[1];
 
-  let name = "Untitled";
-  const nameLines = normalizedText.split("\n").slice(0, 5);
-  for (const l of nameLines) {
-    const words = l.trim().split(/\s+/);
-    if (words.length >= 2 && words.length <= 5 && !/\d/.test(l) && l.length < 60) {
-      name = l.replace(/[^a-zA-Z\s.\-']/g, "").trim() || name;
-      break;
-    }
-  }
+  const name = extractNameFromLines(normalizedText.split("\n"));
 
   const now = new Date().toISOString();
   return {
@@ -163,27 +160,25 @@ export function heuristicParser(text: string, fileName: string): ResumeData {
   };
 
   for (const line of lines) {
-    const lower = line.toLowerCase();
-    
-    if (/(?:summary|profile|objective)/i.test(lower) && lower.length < 30) {
+    if (/^\s*(?:summary|profile|objective|career\s+objective|career\s+profile|professional\s+profile|about\s+me)s?\s*:?$/i.test(line)) {
       currentSection = "summary";
       continue;
-    } else if (/(?:experience|work|employment|history)/i.test(lower) && lower.length < 30) {
+    } else if (/^\s*(?:professional\s+)?experience[s]?|work\s+experience|employment\s+history|history\s*:?$/i.test(line)) {
       currentSection = "experience";
       continue;
-    } else if (/(?:education|academic)/i.test(lower) && lower.length < 30) {
+    } else if (/^\s*(?:education|academic(?:\s+background)?)\s*:?$/i.test(line)) {
       currentSection = "education";
       continue;
-    } else if (/(?:languages|language)/i.test(lower) && lower.length < 30) {
+    } else if (/^\s*(?:languages|language)\s*:?$/i.test(line)) {
       currentSection = "languages";
       continue;
-    } else if (/(?:skills|competencies)/i.test(lower) && lower.length < 30) {
+    } else if (/^\s*(?:skills|core\s+competencies|competencies|technical\s+skills)\s*:?$/i.test(line)) {
       currentSection = "skills";
       continue;
-    } else if (/(?:certifications|certificates)/i.test(lower) && lower.length < 30) {
+    } else if (/^\s*(?:certifications|certificates)\s*:?$/i.test(line)) {
       currentSection = "certifications";
       continue;
-    } else if (/(?:projects)/i.test(lower) && lower.length < 30) {
+    } else if (/^\s*(?:projects)\s*:?$/i.test(line)) {
       currentSection = "projects";
       continue;
     }
@@ -201,11 +196,22 @@ export function heuristicParser(text: string, fileName: string): ResumeData {
     .map((s) => ({ id: uid("s"), name: s }));
   const projects = parseProjects(sectionLines.projects);
   const certifications = sectionLines.certifications.map((c) => ({ id: uid("c"), name: c }));
-  const languages = sectionLines.languages
-    .flatMap((l) => l.split(/[,;]/))
-    .map((s) => s.trim())
-    .filter(Boolean)
-    .map((s) => ({ id: uid("l"), name: s, proficiency: "fluent" as const }));
+  const languages: ResumeData["languages"] = [];
+  const seenLangs = new Set<string>();
+  for (const line of sectionLines.languages) {
+    const parts = line.split(/[,;]/);
+    for (const part of parts) {
+      const detected = detectLanguage(part);
+      if (detected && !seenLangs.has(detected.name.toLowerCase())) {
+        seenLangs.add(detected.name.toLowerCase());
+        languages.push({
+          id: uid("l"),
+          name: detected.name,
+          proficiency: detected.proficiency,
+        });
+      }
+    }
+  }
 
   // Contact info
   const headerText = sectionLines.header.join("\n");
@@ -218,14 +224,7 @@ export function heuristicParser(text: string, fileName: string): ResumeData {
   const locationLine = sectionLines.header.find((l) => /\b([A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+){0,2},\s?[A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+)?)\b/.test(l));
   const location = locationLine?.match(/\b([A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+){0,2},\s?[A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+)?)\b/)?.[1];
 
-  let name = "Untitled";
-  for (const l of sectionLines.header.slice(0, 5)) {
-    const words = l.split(/\s+/);
-    if (words.length >= 2 && words.length <= 5 && !/\d/.test(l) && l.length < 60) {
-      name = l.replace(/[^a-zA-Z\s.\-']/g, "").trim() || name;
-      break;
-    }
-  }
+  const name = extractNameFromLines(sectionLines.header);
 
   const now = new Date().toISOString();
   return {
@@ -366,6 +365,87 @@ const EMAIL_RE = /([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/;
 const PHONE_RE = /(\+?[\d\s().-]{10,})/;
 const URL_RE = /(https?:\/\/[^\s]+|linkedin\.com\/[^\s]+|github\.com\/[^\s]+)/i;
 
+const KNOWN_LANGUAGES = new Set([
+  "english", "french", "arabic", "spanish", "german", "italic", "italian", "chinese", "japanese",
+  "russian", "portuguese", "hindi", "bengali", "punjabi", "marathi", "telugu", "tamil",
+  "urdu", "turkish", "korean", "vietnamese", "javanese", "thai", "persian",
+  "polish", "romanian", "dutch", "greek", "hungarian", "swedish", "czech", "hebrew",
+  "indonesian", "malay", "norwegian", "danish", "finnish", "slovak", "ukrainian", "catalan",
+  "swahili", "filipino", "tagalog", "luxembourgish", "kabyle", "berber", "amazigh",
+  "latin", "sanskrit", "esperanto", "cantonese", "mandarin", "darija", "gaelic", "irish",
+  "welsh", "basque", "galician", "croatian", "serbian", "slovenian", "bulgarian", "estonian",
+  "latvian", "lithuanian", "icelandic", "albanian", "macedonian", "georgian", "armenian",
+  "azerbaijani", "kazakh", "uzbek", "mongolian", "nepali", "sinhala", "khmer", "lao",
+  "myanmar", "burmese", "amharic", "somali", "yoruba", "igbo", "zulu", "xhosa", "afrikaans"
+]);
+
+export function detectLanguage(s: string): { name: string; proficiency: "basic" | "conversational" | "fluent" | "native" } | null {
+  const clean = s.trim();
+  if (!clean) return null;
+
+  const words = clean.toLowerCase().split(/[^a-z]+/);
+  const foundLang = words.find(w => KNOWN_LANGUAGES.has(w));
+  if (!foundLang) {
+    return null;
+  }
+
+  let proficiency: "basic" | "conversational" | "fluent" | "native" = "fluent";
+  const lower = clean.toLowerCase();
+  if (lower.includes("native") || lower.includes("bilingual")) {
+    proficiency = "native";
+  } else if (lower.includes("conversational") || lower.includes("intermediate") || lower.includes("good")) {
+    proficiency = "conversational";
+  } else if (lower.includes("basic") || lower.includes("elementary") || lower.includes("beginner")) {
+    proficiency = "basic";
+  }
+
+  const formattedName = foundLang.charAt(0).toUpperCase() + foundLang.slice(1);
+  return { name: formattedName, proficiency };
+}
+
+export function extractNameFromLines(lines: string[]): string {
+  const nameExclusions = /^(?:phone|tel|mobile|fax|email|e-mail|address|linkedin|github|website|portfolio|resume|cv|curriculum\s+vitae|summary|profile|objective|career\s+objective|nationality|marital\s+status|date\s+of\s+birth|health|height|weight|gender|sex|languages|skills|experience|education|hobbies|interests|references|fluent|native|english|french|arabic|moroccan|casablanca|rabat)$/i;
+
+  const emailPattern = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/;
+  const urlPattern = /https?:\/\/[^\s]+|linkedin\.com\/[^\s]+|github\.com\/[^\s]+|www\.[^\s]+/i;
+
+  for (const l of lines.slice(0, 25)) {
+    const trimmed = l.trim();
+    if (!trimmed) continue;
+
+    if (/\d/.test(trimmed)) continue;
+    if (emailPattern.test(trimmed) || urlPattern.test(trimmed)) continue;
+
+    const words = trimmed.split(/\s+/).map(w => w.replace(/[^a-zA-Z]/g, "")).filter(Boolean);
+    if (words.length < 2 || words.length > 5) continue;
+
+    const hasLabel = words.some(w => nameExclusions.test(w));
+    if (hasLabel) continue;
+
+    const isCapitalized = words.every(w => /^[A-Z]/.test(w));
+    if (isCapitalized) {
+      return trimmed.replace(/[^a-zA-Z\s.\-']/g, "").trim();
+    }
+  }
+
+  for (const l of lines.slice(0, 25)) {
+    const trimmed = l.trim();
+    if (!trimmed) continue;
+    if (/\d/.test(trimmed)) continue;
+    if (emailPattern.test(trimmed) || urlPattern.test(trimmed)) continue;
+
+    const words = trimmed.split(/\s+/).map(w => w.replace(/[^a-zA-Z]/g, "")).filter(Boolean);
+    if (words.length < 2 || words.length > 5) continue;
+
+    const hasLabel = words.some(w => nameExclusions.test(w));
+    if (hasLabel) continue;
+
+    return trimmed.replace(/[^a-zA-Z\s.\-']/g, "").trim();
+  }
+
+  return "Untitled";
+}
+
 /**
  * Heuristic resume text → ResumeData extractor.
  * Not perfect, but good enough for initial parsing and to seed the builder.
@@ -374,15 +454,7 @@ export function extractResumeFromText(text: string, fileName: string): ResumeDat
   const lines = text.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
   const joined = lines.join("\n");
 
-  // Name = first non-empty line if it has 2-4 words and no digits
-  let name = "Untitled";
-  for (const l of lines.slice(0, 5)) {
-    const words = l.split(/\s+/);
-    if (words.length >= 2 && words.length <= 5 && !/\d/.test(l) && l.length < 60) {
-      name = l.replace(/[^a-zA-Z\s.\-']/g, "").trim() || name;
-      break;
-    }
-  }
+  const name = extractNameFromLines(lines);
 
   const emailMatch = joined.match(EMAIL_RE);
   const phoneMatch = joined.match(PHONE_RE);
@@ -403,16 +475,17 @@ export function extractResumeFromText(text: string, fileName: string): ResumeDat
 
   const expStart = sectionIndex(["experience", "work experience", "professional experience", "employment"]);
   const eduStart = sectionIndex(["education", "academic background"]);
-  const skillsStart = sectionIndex(["skills", "technical skills", "core skills", "core competencies"]);
+  const skillsStart = sectionIndex(["skills", "technical skills", "core skills", "core competencies", "competencies"]);
   const projStart = sectionIndex(["projects", "side projects", "personal projects"]);
   const certStart = sectionIndex(["certifications", "certificates", "licenses"]);
   const langStart = sectionIndex(["languages"]);
   const achStart = sectionIndex(["achievements", "key achievements", "awards", "honors", "awards & honors"]);
-  const summaryStart = sectionIndex(["summary", "professional summary", "profile", "objective"]);
+  const summaryStart = sectionIndex(["summary", "professional summary", "profile", "objective", "career objective", "career profile", "professional profile", "about me"]);
+  const personalStart = sectionIndex(["personal informations", "personal information", "personal info", "personal details", "nationality"]);
 
   const nextSectionStart = (start: number) => {
     if (start < 0) return lines.length;
-    const candidates = [expStart, eduStart, skillsStart, projStart, certStart, langStart, achStart, summaryStart]
+    const candidates = [expStart, eduStart, skillsStart, projStart, certStart, langStart, achStart, summaryStart, personalStart]
       .filter((i) => i > start);
     return candidates.length ? Math.min(...candidates) : lines.length;
   };
@@ -450,20 +523,22 @@ export function extractResumeFromText(text: string, fileName: string): ResumeDat
 
   // Languages — try to detect proficiency from common patterns like "English (Fluent)" or "French: Native"
   const langLines = sliceSection(langStart);
-  const languages = langLines
-    .flatMap((l) => l.split(/[,;]/))
-    .map((s) => s.trim())
-    .filter(Boolean)
-    .map((s) => {
-      // Try to extract proficiency from patterns like "English (Fluent)" or "French: Native"
-      const match = s.match(/^([A-Za-z]+)\s*[\(:]\s*(Native|Fluent|Proficient|Conversational|Intermediate|Basic|Advanced|Professional)\s*\)?$/i);
-      if (match) {
-        const proficiency = match[2].toLowerCase();
-        const normalizedProf = (["basic", "conversational", "fluent", "native"].includes(proficiency) ? proficiency : "fluent") as "basic" | "conversational" | "fluent" | "native";
-        return { id: uid("l"), name: match[1], proficiency: normalizedProf };
+  const languages: ResumeData["languages"] = [];
+  const seenLangs = new Set<string>();
+  for (const line of langLines) {
+    const parts = line.split(/[,;]/);
+    for (const part of parts) {
+      const detected = detectLanguage(part);
+      if (detected && !seenLangs.has(detected.name.toLowerCase())) {
+        seenLangs.add(detected.name.toLowerCase());
+        languages.push({
+          id: uid("l"),
+          name: detected.name,
+          proficiency: detected.proficiency,
+        });
       }
-      return { id: uid("l"), name: s, proficiency: "fluent" as const };
-    });
+    }
+  }
 
   // Achievements (new — extracted as an array of { title, description })
   const achLines = sliceSection(achStart);
@@ -686,8 +761,9 @@ function parseExperiences(lines: string[]): ResumeData["experience"] {
           const split = splitTitleAndCompany(cleanLine);
           if (split) {
             title = split.title;
-            // `split.company` may contain "Company Location" — try to extract location (last comma part)
-            const compParts = split.company.split(/,/);
+            const cleanComp = split.company.replace(/^[:\s,—–\-|·•▪◦]+/, "").trim();
+            // `cleanComp` may contain "Company Location" — try to extract location (last comma part)
+            const compParts = cleanComp.split(/,/);
             if (compParts.length >= 2) {
               company = compParts.slice(0, -1).join(",").trim();
               location = compParts.slice(-1)[0].trim();
@@ -696,7 +772,7 @@ function parseExperiences(lines: string[]): ResumeData["experience"] {
                 location = compParts.slice(-2).join(",").trim();
               }
             } else {
-              company = split.company;
+              company = cleanComp;
               location = "";
             }
           } else {
@@ -712,6 +788,11 @@ function parseExperiences(lines: string[]): ResumeData["experience"] {
           }
         }
       }
+
+      title = title.replace(/^[:\s,—–\-|·•▪◦\.]+/, '').replace(/[:\s,—–\-|·•▪◦\.]+$/, '').trim();
+      company = company.replace(/^(?:at|in|for|with)\s+/i, "").trim();
+      company = company.replace(/^[:\s,—–\-|·•▪◦\.]+/, '').replace(/[:\s,—–\-|·•▪◦\.]+$/, '').trim();
+      location = location.replace(/^[:\s,—–\-|·•▪◦\.]+/, '').replace(/[:\s,—–\-|·•▪◦\.]+$/, '').trim();
 
       current = {
         id: uid("e"),

@@ -965,3 +965,86 @@ Arabic: Native
     await expect(parseResumeText("Too short")).rejects.toThrow("too short");
   });
 });
+
+// ============================================================================
+// 20. BOUDKIK ADAM SCRAMBLED RESUME REGRESSION TEST
+// ============================================================================
+
+describe("Boudkik Adam Two-Column Layout Parser Regression Test", () => {
+  it("extracts the correct candidate name, languages, and professional experience", async () => {
+    const rawResumeText = `
+BOUDKIK ADAM
+Phone +212 661 617075
+e-mail ADAM.BOUDKIK03@GMAIL.COM
+Address INFOHAS 15 RUE DEMNATE RABAT- MOROCCO
+
+CAREER OBJECTIVE
+As a recent graduate, I am enthusiastic to begin my journey in the hospitality and aviation sector. My objective is to utilize my scholarly knowledge and zeal for service to provide unmatched client experiences. I am excited to learn from seasoned professionals and consistently enhance my abilities. I aspire to be an integral member of a team, promoting success through my dedication, flexibility, and strong work ethic.
+
+PERSONAL INFORMATIONS
+NATIONALITY : Moroccan
+HEALTH : FIT
+HEIGHT CM: 180
+WEIGHT KG: 65
+MARITAL STATUS: Single
+DATE OF BIRTH: 04/08/2003
+
+LANGUAGES:
+ENGLISH (ORAL/WRITTEN) :
+FLUENT
+FRENCH (ORAL/WRITTEN) :
+FLUENT
+ARABIC (ORAL/WRITTEN) :
+FLUENT
+
+PROFESSIONAL EXPERIENCE
+Dec 2023-Mars 2024 Customer Service Agent, International Airport of Casablanca.
+Apr 2024-Jan 2025 Support agent at International Negoce recruitment center Rabat.
+Aug 2022-Dec 2023 Call center agent in Access Rabat.
+
+EDUCATION
+2023-2025 INFOHAS Hospitality and Aviation Accredited Diploma (Customer services, hospitality, English, Aviation and cabin crew training modules, Food & Beverage services, CRM, Communication.
+2021-2022 High school degree
+
+COMPETENCIES
+Empathy: I'm a compassionate person, grasping and connecting with others' requirements and journeys, continually attaining victory via compassionate collaboration.
+Time management: Moreover, I am systematic, timely, excel in task ordering, and skilled at managing my responsibilities to meet deadlines.
+Customer services oriented: A perceptive auditor, empathetic, centered on resolutions, and committed to providing exceptional customer interactions.
+    `;
+
+    const parsed = await parseResumeText(rawResumeText);
+
+    // 1. Candidate Name verification
+    expect(parsed.name).toBe("BOUDKIK ADAM");
+
+    // 2. Contact details verification
+    expect(parsed.contact.email).toBe("ADAM.BOUDKIK03@GMAIL.COM");
+    expect(parsed.contact.phone).toBe("+212 661 617075");
+
+    // 3. Languages whitelist filtering verification
+    const langNames = parsed.languages.map((l) => l.name);
+    expect(langNames).toContain("English");
+    expect(langNames).toContain("French");
+    expect(langNames).toContain("Arabic");
+    expect(langNames.length).toBe(3); // NO contact labels, dates, or other garbage!
+
+    // 4. Experience validation
+    expect(parsed.experience.length).toBe(3);
+    
+    expect(parsed.experience[0].title).toBe("Customer Service Agent");
+    expect(parsed.experience[0].company).toBe("International Airport of Casablanca");
+    expect(parsed.experience[0].startDate).toBe("Dec 2023");
+    expect(parsed.experience[0].endDate).toBe("Mars 2024");
+
+    expect(parsed.experience[1].title).toBe("Support agent");
+    expect(parsed.experience[1].company).toBe("International Negoce recruitment center Rabat");
+    expect(parsed.experience[1].startDate).toBe("Apr 2024");
+    expect(parsed.experience[1].endDate).toBe("Jan 2025");
+
+    expect(parsed.experience[2].title).toBe("Call center agent");
+    expect(parsed.experience[2].company).toBe("Access Rabat");
+    expect(parsed.experience[2].startDate).toBe("Aug 2022");
+    expect(parsed.experience[2].endDate).toBe("Dec 2023");
+  });
+});
+
