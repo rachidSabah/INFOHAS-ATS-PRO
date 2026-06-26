@@ -779,30 +779,54 @@ function SettingsTab() {
 
   // === Model Detection ===
   const detectModels = async () => {
-    const providerId = draft.providerId || activeProviders[0]?.id;
-    if (!providerId) {
-      toast.error("No provider selected. Select a provider first.");
-      return;
-    }
-    const provider = providers.find((p) => p.id === providerId);
-    if (!provider) {
-      toast.error("Provider not found.");
+    if (activeProviders.length === 0) {
+      toast.error("No active providers configured.");
       return;
     }
 
     setDetecting(true);
     try {
-      const result = await fetchProviderModels(provider);
-      setDetectedModels(result.models);
-      setDetectionSource(result.source);
-      if (result.source === "api") {
-        toast.success(`Detected ${result.models.length} models from ${provider.name}'s API.`);
-      } else {
-        toast.info(`Using ${result.models.length} configured models from ${provider.name} (API unreachable: ${result.error || "unknown error"}).`);
+      const results = await Promise.allSettled(
+        activeProviders.map(async (provider) => {
+          const result = await fetchProviderModels(provider);
+          return { provider, result };
+        })
+      );
+
+      const allDetectedModels: DetectedModel[] = [];
+      let successCount = 0;
+      let apiSourceCount = 0;
+
+      for (const r of results) {
+        if (r.status === "fulfilled") {
+          const { provider, result } = r.value;
+          if (result.models.length > 0) {
+            // Update the provider's enabledModels and health status in store/D1
+            useApp.getState().updateProvider(provider.id, {
+              enabledModels: result.models.map((m) => m.id),
+              status: result.source === "api" ? "healthy" : "degraded",
+            });
+            successCount++;
+            if (result.source === "api") {
+              apiSourceCount++;
+            }
+            // If this is the currently selected provider, populate local state for preview lists
+            if (provider.id === (draft.providerId || activeProviders[0]?.id)) {
+              setDetectedModels(result.models);
+              setDetectionSource(result.source);
+            }
+            allDetectedModels.push(...result.models);
+          }
+        }
       }
-      // Auto-select the first detected model if no model is set
-      if (result.models.length > 0 && !draft.modelName) {
-        patch({ modelName: result.models[0].id });
+
+      toast.success(
+        `Discovered models across ${successCount}/${activeProviders.length} active providers (${apiSourceCount} via live APIs).`
+      );
+
+      // Auto-select primary model name if missing
+      if (allDetectedModels.length > 0 && !draft.modelName) {
+        patch({ modelName: allDetectedModels[0].id });
       }
     } catch (e: any) {
       toast.error(`Model detection failed: ${e?.message || e}`);
@@ -1078,6 +1102,73 @@ function SettingsTab() {
               <p className="text-xs text-muted-foreground">Generate health/security/performance reports automatically</p>
             </div>
             <Switch checked={draft.autoReportEnabled} onCheckedChange={(v) => patch({ autoReportEnabled: v })} />
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Active Providers Status */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-lg flex items-center gap-2">
+            <Icon name="Layers" className="w-4 h-4 text-brand" /> Active Providers Status
+          </CardTitle>
+          <CardDescription>
+            Live status, model counts, and health of all configured AI providers.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm border-collapse text-left">
+              <thead>
+                <tr className="border-b border-border text-muted-foreground text-xs uppercase font-medium">
+                  <th className="py-2 px-3">Provider</th>
+                  <th className="py-2 px-3">Type</th>
+                  <th className="py-2 px-3">Status</th>
+                  <th className="py-2 px-3">Detected Models</th>
+                  <th className="py-2 px-3">Default Model</th>
+                  <th className="py-2 px-3">Health</th>
+                  <th className="py-2 px-3">Fallback Position</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-border">
+                {activeProviders.map((p) => {
+                  const fallbackChain = useApp.getState().fallbackChain;
+                  const chainEntries = fallbackChain?.entries || [];
+                  const positionIdx = chainEntries.findIndex((e) => e.providerId === p.id && e.enabled);
+                  const fallbackPos = positionIdx >= 0 ? `#${positionIdx + 1}` : "Not in chain";
+                  const detectedCount = p.enabledModels?.length || 0;
+
+                  return (
+                    <tr key={p.id} className="hover:bg-secondary/10">
+                      <td className="py-2.5 px-3 font-medium">{p.name}</td>
+                      <td className="py-2.5 px-3 font-mono text-xs">{p.type}</td>
+                      <td className="py-2.5 px-3">
+                        <Badge variant={p.isActive ? "success" : "secondary"}>
+                          {p.isActive ? "Active" : "Inactive"}
+                        </Badge>
+                      </td>
+                      <td className="py-2.5 px-3 font-medium">
+                        {detectedCount} models
+                      </td>
+                      <td className="py-2.5 px-3 font-mono text-xs max-w-[150px] truncate" title={p.modelName}>
+                        {p.modelName || "(none)"}
+                      </td>
+                      <td className="py-2.5 px-3">
+                        <span className="flex items-center gap-1">
+                          <span className={`w-2 h-2 rounded-full ${p.status === "healthy" ? "bg-emerald-500" : p.status === "degraded" ? "bg-amber-500" : "bg-rose-500"}`} />
+                          <span className="capitalize">{p.status || "untested"}</span>
+                        </span>
+                      </td>
+                      <td className="py-2.5 px-3">
+                        <Badge variant={positionIdx >= 0 ? "outline" : "secondary"}>
+                          {fallbackPos}
+                        </Badge>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
           </div>
         </CardContent>
       </Card>

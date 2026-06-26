@@ -45,7 +45,7 @@ export async function fetchProviderModels(provider: AIProvider): Promise<ModelDe
   }
 
   // Determine the base URL
-  const baseUrl = (provider.baseUrl || provider.apiUrl || "").replace(/\/+$/, "");
+  const baseUrl = (provider.baseUrl || provider.apiUrl || "").trim();
   if (!baseUrl) {
     return {
       models: getFallbackModels(provider),
@@ -54,52 +54,84 @@ export async function fetchProviderModels(provider: AIProvider): Promise<ModelDe
     };
   }
 
-  // Try the OpenAI-compatible /models endpoint
+  const isLocal = baseUrl.includes("localhost") || baseUrl.includes("127.0.0.1") || baseUrl.includes("0.0.0.0") || baseUrl.includes("::1");
+
   try {
-    const headers: Record<string, string> = {
-      "Content-Type": "application/json",
-    };
-    if (provider.apiKey) {
-      headers["Authorization"] = `Bearer ${provider.apiKey}`;
+    let rawModels: any[] = [];
+
+    if (isLocal) {
+      const headers: Record<string, string> = {
+        "Content-Type": "application/json",
+      };
+      if (provider.apiKey) {
+        headers["Authorization"] = `Bearer ${provider.apiKey}`;
+      }
+      if (provider.headersJson) {
+        try {
+          const custom = JSON.parse(provider.headersJson);
+          Object.assign(headers, custom);
+        } catch { /* ignore parse errors */ }
+      }
+
+      const modelsUrl = baseUrl.endsWith("/models") ? baseUrl : `${baseUrl.replace(/\/$/, "")}/models`;
+      const response = await fetch(modelsUrl, {
+        method: "GET",
+        headers,
+        signal: AbortSignal.timeout(10000), // 10s timeout
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
+
+      const data = await response.json();
+      rawModels = data.data || data.models || data;
+    } else {
+      // Use proxy to avoid CORS issues
+      const response = await fetch("/api/providers/models", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          baseUrl,
+          apiKey: provider.apiKey,
+          authType: provider.authType || "bearer",
+          headersJson: provider.headersJson,
+        }),
+        signal: AbortSignal.timeout(10000),
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
+
+      const data = await response.json();
+      if (data && Array.isArray(data.models)) {
+        rawModels = data.models.map((id: string) => ({ id, name: id }));
+      } else {
+        rawModels = data.data || data.models || data;
+      }
     }
-    // Add custom headers if configured
-    if (provider.headersJson) {
-      try {
-        const custom = JSON.parse(provider.headersJson);
-        Object.assign(headers, custom);
-      } catch { /* ignore parse errors */ }
-    }
 
-    const modelsUrl = `${baseUrl}/models`;
-    const response = await fetch(modelsUrl, {
-      method: "GET",
-      headers,
-      signal: AbortSignal.timeout(10000), // 10s timeout
-    });
-
-    if (!response.ok) {
-      throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-    }
-
-    const data = await response.json();
-
-    // Parse the response — OpenAI-compatible APIs return { data: [{ id: "..." }, ...] }
-    const rawModels = data.data || data.models || data;
     if (!Array.isArray(rawModels)) {
       throw new Error("Unexpected response format — expected array or { data: [...] }");
     }
 
     const models: DetectedModel[] = rawModels
-      .map((m: any): DetectedModel => ({
-        id: m.id || m.name || m.model,
-        name: m.name || m.id,
-        contextLength: m.context_length || m.maxContextLength || m.context_window,
-        maxTokens: m.max_tokens || m.maxTokens,
-        supportsReasoning: m.supports_reasoning ?? m.reasoning,
-        supportsStreaming: m.supports_streaming ?? m.streaming ?? true,
-        supportsVision: m.supports_vision ?? m.vision,
-        supportsToolCalling: m.supports_tool_calling ?? m.tool_calling ?? m.function_calling,
-      }))
+      .map((m: any): DetectedModel => {
+        if (typeof m === "string") {
+          return { id: m, name: m, supportsStreaming: true };
+        }
+        return {
+          id: m.id || m.name || m.model,
+          name: m.name || m.id,
+          contextLength: m.context_length || m.maxContextLength || m.context_window,
+          maxTokens: m.max_tokens || m.maxTokens,
+          supportsReasoning: m.supports_reasoning ?? m.reasoning,
+          supportsStreaming: m.supports_streaming ?? m.streaming ?? true,
+          supportsVision: m.supports_vision ?? m.vision,
+          supportsToolCalling: m.supports_tool_calling ?? m.tool_calling ?? m.function_calling,
+        };
+      })
       .filter((m: DetectedModel) => m.id);
 
     if (models.length === 0) {
