@@ -315,17 +315,22 @@ export async function runBulletOnlyOptimizer(
   jd: JobDescription,
   intelligenceContext: string,
   agentDirectives?: AgentDirectives,
+  excludeProviderIds?: string[],
 ): Promise<BulletOnlyOptimizerResult> {
   const { systemPrompt, userPrompt } = buildOptimizerInput(sourceResume, jd, intelligenceContext, agentDirectives);
 
+  const temp = agentDirectives?.supervisor?.temperature ?? 0.15;
   const result = await callAI({
     systemPrompt,
     isOptimizerCall: true,
     userPrompt,
     maxTokens: 6000, // smaller than before — output is much smaller now
-    temperature: 0.15,
+    temperature: temp,
     taskCategory: "document",
     timeoutMs: OPTIMIZER_CALL_TIMEOUT_MS,
+    excludeProviderIds,
+    enableRetries: agentDirectives?.supervisor?.enableRetries,
+    enableProviderSwitch: agentDirectives?.supervisor?.enableProviderSwitch,
   });
 
   // Reject local fallback
@@ -399,6 +404,12 @@ function buildAgentDirectiveSection(d: AgentDirectives): string {
   lines.push("SUPERVISOR DIRECTIVE:");
   lines.push(`- Strict Mode: ${d.supervisor.strictMode ? "ENABLED — hard-fail on any critical issue" : "disabled (graceful degradation)"}`);
   lines.push(`- Immutable Entity Enforcement: ${d.supervisor.enforceImmutableEntities ? "ENABLED" : "disabled"}`);
+  if (d.supervisor.temperature !== undefined) {
+    lines.push(`- Temperature: ${d.supervisor.temperature}`);
+  }
+  if (d.supervisor.strictness !== undefined) {
+    lines.push(`- Strictness: ${d.supervisor.strictness}/100`);
+  }
 
   lines.push("");
   lines.push("═══════════════════════════════════════════════════════════════");

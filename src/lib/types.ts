@@ -636,6 +636,10 @@ export interface SupervisorDirective {
   enableDebugLogs: boolean;
   /** If true, show before/after diff viewer in the UI */
   enableDiffViewer: boolean;
+  /** Optional supervisor LLM generation temperature override */
+  temperature?: number;
+  /** Optional supervisor optimization strictness level (0-100) */
+  strictness?: number;
 }
 
 /**

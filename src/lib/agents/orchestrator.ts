@@ -63,6 +63,7 @@ import {
   sanitizeSkills,
 } from "../entity-lock";
 import { processAIResponseHardened } from "../orchestrator-hardening";
+import { computeExperienceFingerprint } from "../experience-fingerprint";
 
 // ============================================================================
 // AI response normalization helpers
@@ -138,65 +139,55 @@ function enforceLockedFields(optimized: ResumeData, original: ResumeData): Resum
     return PLACEHOLDER_PATTERNS.some((p) => p.test(text));
   };
 
-  // === Lock experience: STRICT INDEX-BASED matching ===
-  // The previous fuzzy matching (substring contains) was matching wrong entries
-  // and letting hallucinated companies survive. Now we use strict index-based
-  // matching: the i-th AI entry gets the i-th original entry's locked fields.
-  // finalizeResume() already handles this, but enforceLockedFields runs AFTER
-  // V3 pipeline, so we re-apply the strict lock here.
+  // === Lock experience: ID AND FINGERPRINT matching ===
+  // We match each optimized entry back to the original entry using its ID or fingerprint.
+  // This ensures that we restore company names, locations, and dates accurately and do not drop entries.
   if (original.experience.length > 0) {
-    if (optimized.experience.length >= original.experience.length) {
-      // AI returned at least as many entries — filter + lock them
-      locked.experience = optimized.experience
-        .filter((e) => {
-          if (isPlaceholder(e.company)) return false;
-          // NOTE: We no longer filter by fuzzy company match — that was removing
-          // valid entries when the AI slightly modified the company name.
-          // The strict index-based restore below will fix the company name.
-          return true;
-        })
-        .slice(0, original.experience.length) // Only keep up to original count
-        .map((e, i) => {
-          // STRICT INDEX-BASED: always use original.experience[i]
-          const orig = original.experience[i];
-          if (!orig) return e;
-          // Only restore bullets if AI dropped them — keep AI's optimized bullets if they're longer
-          const restoredBullets = orig.bullets.length > e.bullets.length
-            ? orig.bullets
-            : e.bullets;
-          return {
-            ...e,
-            // title: prefer source, fall back to AI
-            title: cleanTitle(orig.title || e.title || ""),
-            // STRICT: company ALWAYS from source. If source.company is empty, use "".
-            company: cleanCompany(orig.company || ""),
-            // STRICT: dates ALWAYS from source. If source dates are empty, use "".
-            location: orig.location || e.location || "",
-            startDate: orig.startDate || "",
-            endDate: orig.endDate || "",
-            bullets: restoredBullets,
-          };
-        });
-    }
-    // If AI dropped entries OR all were hallucinated, restore MISSING entries
-    // from original — but PRESERVE AI-optimized entries that are valid.
-    // CRITICAL FIX: Previously this replaced ALL experience with original,
-    // losing the AI's optimized bullets. Now we MERGE: keep AI entries that
-    // matched, and add back any original entries that were dropped.
-    if (locked.experience.length < original.experience.length) {
-      console.warn(`[enforceLockedFields] Restoring missing experience entries (AI had ${optimized.experience.length}, after filter ${locked.experience.length}, original ${original.experience.length})`);
-      const existingCompanies = new Set(locked.experience.map((e) => (e.company || "").toLowerCase().trim()));
-      for (const origExp of original.experience) {
-        const origCompanyLower = (origExp.company || "").toLowerCase().trim();
-        if (origCompanyLower && !existingCompanies.has(origCompanyLower)) {
-          // This entry was dropped by the AI — restore it with original data
-          locked.experience.push({
-            ...origExp,
-            title: cleanTitle(origExp.title),
-            company: cleanCompany(origExp.company),
-          });
-          console.info(`[enforceLockedFields] Restored dropped experience: ${origExp.title} at ${origExp.company}`);
+    locked.experience = optimized.experience
+      .filter((e) => {
+        if (isPlaceholder(e.company)) return false;
+        return true;
+      })
+      .map((e) => {
+        let orig = original.experience.find((x) => x.id === e.id);
+        if (!orig) {
+          const eFp = computeExperienceFingerprint(e);
+          orig = original.experience.find((x) => computeExperienceFingerprint(x) === eFp);
         }
+
+        if (!orig) {
+          console.warn(`[enforceLockedFields] Removing hallucinated experience: "${e.company}"`);
+          return null;
+        }
+
+        // Only restore bullets if AI dropped them — keep AI's optimized bullets if they're longer
+        const restoredBullets = orig.bullets.length > e.bullets.length
+          ? orig.bullets
+          : e.bullets;
+
+        return {
+          ...e,
+          id: orig.id,
+          title: cleanTitle(orig.title || e.title || ""),
+          company: cleanCompany(orig.company || ""),
+          location: orig.location || e.location || "",
+          startDate: orig.startDate || "",
+          endDate: orig.endDate || "",
+          bullets: restoredBullets,
+        };
+      })
+      .filter((x): x is NonNullable<typeof x> => x !== null);
+
+    // Restore missing experiences if dropped by AI
+    for (const origExp of original.experience) {
+      const hasMatch = locked.experience.some((e) => e.id === origExp.id);
+      if (!hasMatch) {
+        locked.experience.push({
+          ...origExp,
+          title: cleanTitle(origExp.title),
+          company: cleanCompany(origExp.company),
+        });
+        console.info(`[enforceLockedFields] Restored dropped experience: ${origExp.title} at ${origExp.company}`);
       }
     }
   }
@@ -2298,10 +2289,14 @@ CONTENT REQUIREMENTS:
     originalCharCount,
     preservedExperience: normalizedResume.experience.length,
     originalExperience: resume.experience.length,
-    preservedDates: normalizedResume.experience.every((e, i) =>
-      e.startDate === (resume.experience[i]?.startDate ?? "") &&
-      e.endDate === (resume.experience[i]?.endDate ?? "")
-    ),
+    preservedDates: normalizedResume.experience.every((e) => {
+      let orig = resume.experience.find((x) => x.id === e.id);
+      if (!orig) {
+        const eFp = computeExperienceFingerprint(e);
+        orig = resume.experience.find((x) => computeExperienceFingerprint(x) === eFp);
+      }
+      return orig ? (e.startDate === orig.startDate && e.endDate === orig.endDate) : false;
+    }),
     hasSummary: !!normalizedResume.summary,
     hasSkills: normalizedResume.skills.length > 0,
     hasEducation: normalizedResume.education.length > 0,

@@ -27,13 +27,14 @@
 //   - hallucinated employers (LLM cannot add employers)
 //   - education corruption (education comes from source, not LLM)
 //   - language corruption (languages come from source, not LLM)
+//   - language corruption (language corruption (languages come from source, not LLM)
 // ============================================================================
 
 "use client";
 
 import type { ResumeData, ResumeExperience, ResumeSkill, ResumeLanguage } from "./types";
 import { cleanupGrammar, cleanupResumeGrammar, filterForbiddenSkills, isForbiddenSkill } from "./ai-response-processor";
-import { findMatchingSourceExperience, validateExperienceFingerprints } from "./experience-fingerprint";
+import { findMatchingSourceExperience, validateExperienceFingerprints, computeExperienceFingerprint } from "./experience-fingerprint";
 
 /**
  * The optimizer output contract.
@@ -133,23 +134,18 @@ export function assembleResume(
       };
     }
 
-    // If no ID match, try fingerprint/title-company matching
+    // If no ID match, try fingerprint matching
     // (this handles the case where the LLM changed the ID but kept the entry)
+    const srcFp = computeExperienceFingerprint(srcExp);
     const fuzzyMatch = optimizerExperiences.find((opt) => {
-      // Try to match by title + company
-      const optTitleLower = (opt as any).title?.toLowerCase?.()?.trim() ?? "";
-      const optCompanyLower = (opt as any).company?.toLowerCase?.()?.trim() ?? "";
-      const srcTitleLower = srcExp.title?.toLowerCase()?.trim() ?? "";
-      const srcCompanyLower = srcExp.company?.toLowerCase()?.trim() ?? "";
-      return (srcTitleLower && optTitleLower === srcTitleLower) ||
-             (srcCompanyLower && optCompanyLower === srcCompanyLower);
+      return computeExperienceFingerprint(opt as any) === srcFp;
     });
 
     if (fuzzyMatch) {
-      matchedByTitleCompany++;
+      matchedByFingerprint++;
       warnings.push(
-        `Experience[${index}] (id="${srcExp.id}") matched optimizer entry by title/company, not by ID. ` +
-        `The LLM may have changed the ID. Using optimizer's bullets.`,
+        `Experience[${index}] (id="${srcExp.id}") matched optimizer entry by fingerprint, not by ID. ` +
+        `Using optimizer's bullets.`,
       );
       const cleanedBullets = fuzzyMatch.bullets
         .map((b) => cleanupGrammar(b))
@@ -165,18 +161,19 @@ export function assembleResume(
     matchedByIndex++;
     warnings.push(
       `Experience[${index}] (id="${srcExp.id}", title="${srcExp.title}") had no matching optimizer entry. ` +
-      `Keeping source bullets. The LLM may have dropped this entry.`,
+      `Keeping source bullets.`,
     );
     return { ...srcExp };
   });
 
   // Check for optimizer entries that didn't match any source entry (hallucinated)
   for (const opt of optimizerExperiences) {
-    const hasMatch = sourceResume.experience.some((src) => src.id === opt.id);
+    const hasMatch = sourceResume.experience.some((src) => src.id === opt.id) ||
+      sourceResume.experience.some((src) => computeExperienceFingerprint(src) === computeExperienceFingerprint(opt as any));
     if (!hasMatch) {
       unmatched++;
       warnings.push(
-        `Optimizer returned experience with id="${opt.id}" but no source entry has that ID. ` +
+        `Optimizer returned experience with id="${opt.id}" but no source entry has that ID or fingerprint. ` +
         `This entry will be IGNORED (prevents hallucinated experience).`,
       );
     }

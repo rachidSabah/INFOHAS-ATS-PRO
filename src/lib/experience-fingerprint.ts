@@ -37,6 +37,112 @@ import type { ResumeExperience, ResumeData } from "./types";
  * Returns a hex string (first 16 chars of SHA-256, enough for collision resistance
  * across a resume with <100 entries).
  */
+function sha256(ascii: string): string {
+  function rightRotate(value: number, amount: number) {
+    return (value >>> amount) | (value << (32 - amount));
+  }
+
+  const lengthProperty = 'length';
+  let i;
+
+  const words: number[] = [];
+  const asciiLength = ascii[lengthProperty];
+
+  const hash = [
+    0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19
+  ];
+
+  const k = [
+    0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
+    0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,
+    0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
+    0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7, 0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967,
+    0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85,
+    0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070,
+    0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
+    0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2
+  ];
+
+  const wordsLength = ((asciiLength + 8) >> 6) + 1;
+  const wordsCount = wordsLength * 16;
+  for (i = 0; i < wordsCount; i++) words[i] = 0;
+  for (i = 0; i < asciiLength; i++) {
+    words[i >> 2] |= ascii.charCodeAt(i) << (24 - (i & 3) * 8);
+  }
+  words[asciiLength >> 2] |= 0x80 << (24 - (asciiLength & 3) * 8);
+  words[wordsCount - 1] = asciiLength * 8;
+
+  for (let blockIndex = 0; blockIndex < wordsLength; blockIndex++) {
+    const w: number[] = [];
+    for (i = 0; i < 16; i++) w[i] = words[blockIndex * 16 + i];
+    for (i = 16; i < 64; i++) {
+      const s0 = rightRotate(w[i - 15], 7) ^ rightRotate(w[i - 15], 18) ^ (w[i - 15] >>> 3);
+      const s1 = rightRotate(w[i - 2], 17) ^ rightRotate(w[i - 2], 19) ^ (w[i - 2] >>> 10);
+      w[i] = (w[i - 16] + s0 + w[i - 7] + s1) | 0;
+    }
+
+    let a = hash[0];
+    let b = hash[1];
+    let c = hash[2];
+    let d = hash[3];
+    let e = hash[4];
+    let f = hash[5];
+    let g = hash[6];
+    let h = hash[7];
+
+    for (i = 0; i < 64; i++) {
+      const S1 = rightRotate(e, 6) ^ rightRotate(e, 11) ^ rightRotate(e, 25);
+      const ch = (e & f) ^ (~e & g);
+      const temp1 = (h + S1 + ch + k[i] + w[i]) | 0;
+      const S0 = rightRotate(a, 2) ^ rightRotate(a, 13) ^ rightRotate(a, 22);
+      const maj = (a & b) ^ (a & c) ^ (b & c);
+      const temp2 = (S0 + maj) | 0;
+
+      h = g;
+      g = f;
+      f = e;
+      e = (d + temp1) | 0;
+      d = c;
+      c = b;
+      b = a;
+      a = (temp1 + temp2) | 0;
+    }
+
+    hash[0] = (hash[0] + a) | 0;
+    hash[1] = (hash[1] + b) | 0;
+    hash[2] = (hash[2] + c) | 0;
+    hash[3] = (hash[3] + d) | 0;
+    hash[4] = (hash[4] + e) | 0;
+    hash[5] = (hash[5] + f) | 0;
+    hash[6] = (hash[6] + g) | 0;
+    hash[7] = (hash[7] + h) | 0;
+  }
+
+  let hex = '';
+  for (i = 0; i < 8; i++) {
+    const hStr = (hash[i] >>> 0).toString(16);
+    hex += hStr.padStart(8, '0');
+  }
+  return hex;
+}
+
+/**
+ * Compute a stable fingerprint for an experience entry.
+ *
+ * The fingerprint is based on IMMUTABLE fields only:
+ *   title + company + location + startDate + endDate
+ *
+ * Bullets are excluded because they ARE mutable (the optimizer rewrites them).
+ * IDs are excluded because they're application-owned, not LLM-owned.
+ *
+ * The fingerprint is normalized:
+ *   - lowercase
+ *   - trimmed
+ *   - whitespace collapsed
+ *   - empty fields contribute "" (so an entry with no company still has a stable fingerprint)
+ *
+ * Returns the SHA-256 hash string (64 characters).
+ */
 export function computeExperienceFingerprint(exp: {
   title?: string;
   company?: string;
@@ -50,31 +156,14 @@ export function computeExperienceFingerprint(exp: {
       .trim()
       .replace(/\s+/g, " ");
 
-  const parts = [
-    normalize(exp.title),
-    normalize(exp.company),
-    normalize(exp.location),
-    normalize(exp.startDate),
-    normalize(exp.endDate),
-  ];
-  const key = parts.join("|");
+  const concatenated =
+    normalize(exp.title) +
+    normalize(exp.company) +
+    normalize(exp.location) +
+    normalize(exp.startDate) +
+    normalize(exp.endDate);
 
-  // Simple hash (djb2) — works in browser without crypto.subtle.
-  // For a resume with <100 entries, collision risk is negligible.
-  // We use a 16-char hex string for readability.
-  let hash = 5381;
-  for (let i = 0; i < key.length; i++) {
-    hash = ((hash << 5) + hash + key.charCodeAt(i)) & 0xffffffff;
-  }
-  // Convert to unsigned and pad to 8 hex chars, then double it for 16 chars
-  const part1 = (hash >>> 0).toString(16).padStart(8, "0");
-  // Second hash with different seed for the second half
-  let hash2 = 52711;
-  for (let i = 0; i < key.length; i++) {
-    hash2 = ((hash2 << 5) + hash2 + key.charCodeAt(i)) & 0xffffffff;
-  }
-  const part2 = (hash2 >>> 0).toString(16).padStart(8, "0");
-  return part1 + part2;
+  return sha256(concatenated);
 }
 
 /**
@@ -113,8 +202,6 @@ export function buildExperienceIdMap(resume: ResumeData): Map<string, ResumeExpe
  * Matching priority:
  *   1. ID match (100% reliable — LLM must preserve IDs)
  *   2. Fingerprint match (reliable when LLM preserved immutable fields)
- *   3. Title + Company match (fallback for slight AI rephrasing)
- *   4. Index fallback (LAST RESORT — logs a warning)
  *
  * Returns the matched source entry, or null if no match found.
  */
@@ -144,35 +231,6 @@ export function findMatchingSourceExperience(
     };
   }
 
-  // 3. Title + Company match
-  const optTitleLower = (optimized.title || "").toLowerCase().trim();
-  const optCompanyLower = (optimized.company || "").toLowerCase().trim();
-  if (optTitleLower || optCompanyLower) {
-    const byTitleCompany = sourceResume.experience.find((e) => {
-      const eTitleLower = (e.title || "").toLowerCase().trim();
-      const eCompanyLower = (e.company || "").toLowerCase().trim();
-      return (optTitleLower && eTitleLower === optTitleLower) ||
-             (optCompanyLower && eCompanyLower === optCompanyLower) ||
-             (optCompanyLower && eCompanyLower && (eCompanyLower.includes(optCompanyLower) || optCompanyLower.includes(eCompanyLower)));
-    });
-    if (byTitleCompany) {
-      return {
-        match: byTitleCompany,
-        method: "title-company",
-        warning: `Experience matched by title/company (ID "${optimized.id}" not found in source — LLM may have changed the ID)`,
-      };
-    }
-  }
-
-  // 4. Index fallback (LAST RESORT)
-  if (index !== undefined && index < sourceResume.experience.length) {
-    return {
-      match: sourceResume.experience[index],
-      method: "index",
-      warning: `Experience matched by INDEX fallback (index ${index}) — ID, fingerprint, and title/company all failed. This indicates the LLM significantly modified the entry.`,
-    };
-  }
-
   return { match: null, method: "none" };
 }
 
@@ -195,16 +253,35 @@ export function validateExperienceFingerprints(
 
   for (let i = 0; i < optimized.experience.length; i++) {
     const opt = optimized.experience[i];
-    const byId = opt.id ? sourceIdMap.get(opt.id) : null;
-    const byFp = sourceFpMap.get(computeExperienceFingerprint(opt));
+    if (!opt.id) {
+      violations.push(`Experience[${i}] is missing an ID.`);
+      continue;
+    }
+    const byId = sourceIdMap.get(opt.id);
+    const optFp = computeExperienceFingerprint(opt);
 
-    if (byId || byFp) {
-      matched++;
+    if (byId) {
+      const srcFp = computeExperienceFingerprint(byId);
+      if (srcFp !== optFp) {
+        violations.push(
+          `Experience[${i}] (id="${opt.id}") changed fingerprint (original fingerprint: ${srcFp}, optimized fingerprint: ${optFp}).`,
+        );
+      } else {
+        matched++;
+      }
     } else {
-      unmatched++;
-      violations.push(
-        `Experience[${i}] (id="${opt.id}", title="${opt.title}", company="${opt.company}") has no matching source entry — possibly hallucinated`,
-      );
+      // No match by ID, check if it matches by fingerprint
+      const byFp = sourceFpMap.get(optFp);
+      if (byFp) {
+        violations.push(
+          `Experience[${i}] (title="${opt.title}", company="${opt.company}") matched by fingerprint but has a different ID (expected "${byFp.id}", got "${opt.id}").`,
+        );
+      } else {
+        unmatched++;
+        violations.push(
+          `Experience[${i}] (id="${opt.id}", title="${opt.title}", company="${opt.company}") has no matching source entry — possibly hallucinated`,
+        );
+      }
     }
   }
 

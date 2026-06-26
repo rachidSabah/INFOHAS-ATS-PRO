@@ -37,6 +37,7 @@
 // ============================================================================
 
 import type { ResumeData, JobDescription, OptimizerDirectiveConfig } from "../types";
+import { computeExperienceFingerprint } from "../experience-fingerprint";
 
 // ============================================================================
 // Page-fill estimation
@@ -182,7 +183,11 @@ export function expandResume(
   // For each experience entry, if it has < 4 bullets, add 1-2 bullets
   // inferred from the JD's responsibilities (matched by role).
   expanded.experience = expanded.experience.map((exp, i) => {
-    const origExp = originalResume.experience[i] ?? originalResume.experience[0];
+    let origExp = originalResume.experience.find((x) => x.id === exp.id);
+    if (!origExp) {
+      const expFp = computeExperienceFingerprint(exp);
+      origExp = originalResume.experience.find((x) => computeExperienceFingerprint(x) === expFp);
+    }
     if (!origExp) return exp;
 
     const newBullets = [...exp.bullets];

@@ -22,6 +22,7 @@ import type { ResumeData } from "./types";
 import { cleanupResumeGrammar, stripMarkdown, repairMalformedJSON, filterForbiddenSkills, isForbiddenSkill } from "./ai-response-processor";
 import { extractJSON } from "./ai";
 import { extractLockedFacts, computeFactDiff, computeFactualIntegrityScore } from "./locked-facts";
+import { computeExperienceFingerprint } from "./experience-fingerprint";
 
 export interface UnifiedPipelineResult {
   resume: ResumeData;
@@ -230,57 +231,54 @@ export function restoreExperienceMetadata(optimized: ResumeData, sourceResume: R
   const source = sourceResume.experience;
   const ai = result.experience || [];
 
-  // Step 1: For each AI entry, restore locked fields from the CORRESPONDING original entry (by index)
-  const restoredExp = ai.slice(0, source.length).map((entry, i) => {
-    const orig = source[i];
-    if (!orig) return entry;
+  // Match each AI experience to a source experience using ID first, then fingerprint
+  const restoredExp = ai.map((entry, idx) => {
+    let orig = source.find((x) => x.id === entry.id);
+    if (!orig) {
+      const entryFp = computeExperienceFingerprint(entry);
+      orig = source.find((x) => computeExperienceFingerprint(x) === entryFp);
+    }
+
+    if (!orig) {
+      restored.push(`Experience entry (id="${entry.id}") had no matching source entry and was removed.`);
+      return null;
+    }
 
     if (entry.company !== orig.company && orig.company) {
-      restored.push(`Experience[${i}]: company "${entry.company}" → "${orig.company}"`);
+      restored.push(`Experience[${entry.id}]: company "${entry.company}" → "${orig.company}"`);
     }
     if (entry.title !== orig.title && orig.title) {
-      restored.push(`Experience[${i}]: title "${entry.title}" → "${orig.title}"`);
+      restored.push(`Experience[${entry.id}]: title "${entry.title}" → "${orig.title}"`);
     }
     if (entry.startDate !== orig.startDate && orig.startDate) {
-      restored.push(`Experience[${i}]: startDate "${entry.startDate}" → "${orig.startDate}"`);
+      restored.push(`Experience[${entry.id}]: startDate "${entry.startDate}" → "${orig.startDate}"`);
     }
     if (entry.endDate !== orig.endDate && orig.endDate) {
-      restored.push(`Experience[${i}]: endDate "${entry.endDate}" → "${orig.endDate}"`);
+      restored.push(`Experience[${entry.id}]: endDate "${entry.endDate}" → "${orig.endDate}"`);
     }
     if ((entry.location || "") !== (orig.location || "") && orig.location) {
-      restored.push(`Experience[${i}]: location "${entry.location}" → "${orig.location}"`);
+      restored.push(`Experience[${entry.id}]: location "${entry.location}" → "${orig.location}"`);
     }
 
     return {
       ...entry,
-      // STRICT LOCK: ID is ALWAYS from source (immutable).
-      // The AI must never change, remove, or regenerate IDs.
       id: orig.id,
-      // STRICT LOCK: company is ALWAYS from source. If source.company is empty,
-      // use "" — NEVER fall back to AI's company (could be hallucinated like "Beauty Retailer").
-      // The renderer will show the title only when company is empty.
       company: orig.company || "",
-      // title: prefer source, but allow AI's title as fallback (AI may have improved capitalization)
       title: orig.title || entry.title || "",
-      // dates: ALWAYS from source. If source dates are empty, use "" (never "Present")
       startDate: orig.startDate || "",
       endDate: orig.endDate || "",
-      // location: prefer source, fall back to AI
       location: orig.location || entry.location || "",
-      // Keep AI's bullets (the optimization)
       bullets: entry.bullets || orig.bullets,
     };
-  });
+  }).filter((x): x is NonNullable<typeof x> => x !== null);
 
-  // Step 2: If AI dropped entries, append the missing ones from source
-  for (let i = ai.length; i < source.length; i++) {
-    restoredExp.push({ ...source[i] });
-    restored.push(`Restored dropped experience[${i}]: ${source[i].title} at ${source[i].company}`);
-  }
-
-  // Step 3: If AI added EXTRA entries (duplicates), remove them
-  if (ai.length > source.length) {
-    restored.push(`Removed ${ai.length - source.length} duplicate/extra experience entries`);
+  // If source experiences are missing in AI output, append them
+  for (const origExp of source) {
+    const hasMatch = restoredExp.some((e) => e.id === origExp.id);
+    if (!hasMatch) {
+      restoredExp.push({ ...origExp, location: origExp.location || "" });
+      restored.push(`Restored dropped experience: ${origExp.title} at ${origExp.company}`);
+    }
   }
 
   result.experience = restoredExp;

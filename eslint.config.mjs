@@ -68,6 +68,7 @@ const eslintConfig = [...nextCoreWebVitals, ...nextTypescript, {
     "*.config.ts",
     "*.config.mjs",
     "*.config.js",
+    "*.js",
   ]
 }];
 

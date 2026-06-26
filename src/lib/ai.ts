@@ -76,6 +76,13 @@ export function getFallbackChain(): FallbackChainConfig | null {
   }
 }
 
+export const PROVIDER_ALIASES: Record<string, string[]> = {
+  p_google: ["p_google_gemini"],
+  p_google_gemini: ["p_google"],
+  p_zencode: ["p_opencode", "zencode"],
+  p_opencode: ["p_zencode"],
+};
+
 /**
  * Build an ordered list of fallback providers from the user's configured chain.
  *
@@ -86,7 +93,7 @@ export function getFallbackChain(): FallbackChainConfig | null {
  * Returns an array of { provider, model, overrides } objects.
  * Only enabled entries with valid API keys are included.
  */
-export function getOrderedFallbackProviders(excludeProviderId?: string): Array<{
+export function getOrderedFallbackProviders(excludeProviderIdOrIds?: string | string[]): Array<{
   provider: any;
   model: string;
   overrides: { temperature?: number; maxTokens?: number; timeoutMs?: number; topP?: number };
@@ -95,11 +102,24 @@ export function getOrderedFallbackProviders(excludeProviderId?: string): Array<{
   const allProviders: any[] = state?.providers || [];
   const chain = getFallbackChain();
 
+  const excludeIds = typeof excludeProviderIdOrIds === "string"
+    ? [excludeProviderIdOrIds]
+    : (excludeProviderIdOrIds || []);
+
+  const isProviderExcluded = (p: any) => {
+    if (excludeIds.length === 0) return false;
+    const pid = p.id || p.name || p.type;
+    return (p.id && excludeIds.includes(p.id)) ||
+           (p.name && excludeIds.includes(p.name)) ||
+           (p.type && excludeIds.includes(p.type)) ||
+           (pid && excludeIds.includes(pid));
+  };
+
   // If chain is disabled or empty, fall back to legacy behavior (all active providers)
   if (!chain || !chain.entries || chain.entries.length === 0) {
     console.info("[AI] Fallback chain disabled or empty — using legacy provider order (all active providers)");
     return allProviders
-      .filter((p) => p.isActive && p.type !== "puter" && p.type !== "local" && hasValidApiKey(p) && p.id !== excludeProviderId)
+      .filter((p) => p.isActive && p.type !== "puter" && p.type !== "local" && hasValidApiKey(p) && !isProviderExcluded(p))
       .map((p) => ({ provider: p, model: p.modelName || "", overrides: {} }));
   }
 
@@ -107,27 +127,52 @@ export function getOrderedFallbackProviders(excludeProviderId?: string): Array<{
   const result: Array<{ provider: any; model: string; overrides: any }> = [];
   for (const entry of chain.entries) {
     if (!entry.enabled) continue;
-    if (entry.providerId === excludeProviderId) continue; // don't retry the primary
+    if (isProviderExcluded({ id: entry.providerId })) continue; // don't retry the primary / excluded
 
-    // Try exact ID match first
+    // 1. Exact provider ID match
     let provider = allProviders.find((p) => p.id === entry.providerId);
 
-    // If not found, try matching by type (e.g., "p_nvidia" might be stored as "nvidia-xxx")
+    // 2. Provider type match
     if (!provider) {
       const entryType = entry.providerId.replace(/^p_/, "").replace(/_/g, "-");
       provider = allProviders.find((p) =>
         p.type === entryType ||
-        p.type === entry.providerId.replace(/^p_/, "") ||
-        p.id?.includes(entryType) ||
-        p.name?.toLowerCase().includes(entryType)
+        p.type === entry.providerId.replace(/^p_/, "")
       );
     }
 
-    // If still not found, try matching by model (the chain entry's model might match a provider's enabledModels)
+    // 3. Provider name match
+    if (!provider) {
+      const cleanEntryId = entry.providerId.toLowerCase().replace(/^p_/, "").replace(/_/g, " ").replace(/-/g, " ");
+      provider = allProviders.find((p) => {
+        const pName = (p.name || "").toLowerCase();
+        return pName.includes(cleanEntryId) || cleanEntryId.includes(pName);
+      });
+    }
+
+    // 4. Enabled model matching
     if (!provider) {
       provider = allProviders.find((p) =>
         p.enabledModels?.includes(entry.model) || p.modelName === entry.model
       );
+    }
+
+    // 5. Provider aliases matching
+    if (!provider) {
+      const aliases = PROVIDER_ALIASES[entry.providerId] || [];
+      for (const alias of aliases) {
+        provider = allProviders.find((p) => p.id === alias);
+        if (provider) break;
+
+        const aliasType = alias.replace(/^p_/, "").replace(/_/g, "-");
+        provider = allProviders.find((p) =>
+          p.type === aliasType ||
+          p.type === alias.replace(/^p_/, "") ||
+          p.id?.includes(aliasType) ||
+          (p.name && p.name.toLowerCase().includes(aliasType))
+        );
+        if (provider) break;
+      }
     }
 
     if (!provider) {
@@ -157,11 +202,10 @@ export function getOrderedFallbackProviders(excludeProviderId?: string): Array<{
 
   // CRITICAL: If the fallback chain found NO providers (all IDs mismatched),
   // fall back to ALL active providers so the user still gets results.
-  // This prevents the "Fallback chain: 0 active entries" → all providers fail scenario.
   if (result.length === 0) {
     console.warn("[AI] Fallback chain found 0 active providers — falling back to ALL active providers");
     return allProviders
-      .filter((p) => p.isActive && p.type !== "puter" && p.type !== "local" && hasValidApiKey(p) && p.id !== excludeProviderId)
+      .filter((p) => p.isActive && p.type !== "puter" && p.type !== "local" && hasValidApiKey(p) && !isProviderExcluded(p))
       .map((p) => ({ provider: p, model: p.modelName || "", overrides: {} }));
   }
 
@@ -169,15 +213,24 @@ export function getOrderedFallbackProviders(excludeProviderId?: string): Array<{
   return result;
 }
 
-export async function selectProvider(): Promise<any> {
+export async function selectProvider(excludeIds?: string[]): Promise<any> {
   const state: any = useApp.getState();
   const providers: any[] = state?.providers || [];
   const settings = state?.providerSettings || {};
 
+  const isProviderExcluded = (p: any) => {
+    if (!excludeIds || excludeIds.length === 0) return false;
+    const pid = p.id || p.name || p.type;
+    return (p.id && excludeIds.includes(p.id)) ||
+           (p.name && excludeIds.includes(p.name)) ||
+           (p.type && excludeIds.includes(p.type)) ||
+           (pid && excludeIds.includes(pid));
+  };
+
   // 1. Puter (if authenticated)
   const puter = providers.find((p: any) => p.type === "puter");
   let puterAuthenticated = false;
-  if (puter && puter.isActive) {
+  if (puter && puter.isActive && !isProviderExcluded(puter)) {
     try {
       const { getPuterProvider } = await import("./providers/puter-provider");
       const puterProvider = getPuterProvider();
@@ -187,7 +240,7 @@ export async function selectProvider(): Promise<any> {
     }
   }
 
-  if (puter && puter.isActive && puterAuthenticated) {
+  if (puter && puter.isActive && puterAuthenticated && !isProviderExcluded(puter)) {
     return puter;
   }
 
@@ -195,11 +248,12 @@ export async function selectProvider(): Promise<any> {
     p.isActive &&
     p.type !== "puter" &&
     p.type !== "local" &&
-    hasValidApiKey(p)
+    hasValidApiKey(p) &&
+    !isProviderExcluded(p)
   );
   if (secondary.length > 0) {
     const defaultId = settings.defaultProviderId;
-    const defaultSec = secondary.find((p) => p.id === defaultId);
+    const defaultSec = secondary.find((p) => p.id === defaultId && !isProviderExcluded(p));
     if (defaultSec) return defaultSec;
     return secondary[0];
   }
@@ -904,6 +958,9 @@ export interface AICallOptions {
    * takes 70–110s on slower free-tier providers.
    */
   timeoutMs?: number;
+  excludeProviderIds?: string[];
+  enableRetries?: boolean;
+  enableProviderSwitch?: boolean;
 }
 
 export interface AICallResult {
@@ -1543,8 +1600,14 @@ export async function callAI(opts: AICallOptions): Promise<AICallResult> {
     finalOpts.userPrompt = truncatePromptToTokenLimit(opts.userPrompt, userBudget);
   }
 
+  // Helper to check if a provider is excluded
+  const isExcluded = (pId: string) => {
+    if (!opts.excludeProviderIds || opts.excludeProviderIds.length === 0) return false;
+    return opts.excludeProviderIds.includes(pId);
+  };
+
   // Select provider using selectProvider()
-  const provider = await selectProvider();
+  const provider = await selectProvider(opts.excludeProviderIds);
   assert(provider !== null, "Provider is null");
 
   // Logging selected provider
@@ -1603,13 +1666,13 @@ export async function callAI(opts: AICallOptions): Promise<AICallResult> {
       // Puter failed — try fallback providers using the USER-CONFIGURED fallback chain
       console.warn(`[AI] Puter failed: ${e?.message || e}. Trying fallback chain...`);
       const providerErrors: string[] = [`Puter: ${e?.message || e}`];
-      const fallbackChain = getOrderedFallbackProviders(); // respects user's configured order
+      const fallbackChain = getOrderedFallbackProviders(opts.excludeProviderIds); // respects user's configured order
 
       for (const { provider: fallbackProvider, model: fbModel, overrides: fbOverrides } of fallbackChain) {
         const fbCooldownId = fallbackProvider.id || fallbackProvider.name || fallbackProvider.type;
-        if (isProviderInCooldown(fbCooldownId)) {
-          console.info(`[AI] Skipping ${fallbackProvider.name} — in cooldown.`);
-          providerErrors.push(`${fallbackProvider.name}: in cooldown (rate-limited or auth-failed)`);
+        if (isProviderInCooldown(fbCooldownId) || isExcluded(fbCooldownId)) {
+          console.info(`[AI] Skipping ${fallbackProvider.name} — in cooldown or excluded.`);
+          providerErrors.push(`${fallbackProvider.name}: in cooldown or excluded`);
           continue;
         }
         console.log(`[ROUTER]\nProvider selected: ${fallbackProvider.name} (model: ${fbModel || fallbackProvider.modelName || "default"})`);
@@ -1677,8 +1740,8 @@ export async function callAI(opts: AICallOptions): Promise<AICallResult> {
   const providerErrors: string[] = [];
   const primaryCooldownId = provider.id || provider.name || provider.type;
 
-  // Try primary provider only if not in cooldown
-  if (!isProviderInCooldown(primaryCooldownId)) {
+  // Try primary provider only if not in cooldown and not excluded
+  if (!isProviderInCooldown(primaryCooldownId) && !isExcluded(primaryCooldownId)) {
     try {
       const text = await withTimeout(
         callUserProvider(provider, finalOpts),
@@ -1728,7 +1791,8 @@ export async function callAI(opts: AICallOptions): Promise<AICallResult> {
     }
   }
 
-  if (puter && puterAuthenticated) {
+  const puterId = puter ? (puter.id || puter.name || puter.type) : "puter";
+  if (puter && puterAuthenticated && !isExcluded(puterId)) {
     console.log("[ROUTER]\nProvider selected: Puter (fallback)");
     try {
       const { getPuterProvider } = await import("./providers/puter-provider");
@@ -1759,13 +1823,14 @@ export async function callAI(opts: AICallOptions): Promise<AICallResult> {
     }
   }
 
-  // Try fallback providers using the USER-CONFIGURED fallback chain (excludes the primary that just failed)
-  const otherSecondary = getOrderedFallbackProviders(provider.id);
+  // Try fallback providers using the USER-CONFIGURED fallback chain (excludes the primary that just failed + excluded ones)
+  const excludeChainIds = [provider.id, ...(opts.excludeProviderIds || [])];
+  const otherSecondary = getOrderedFallbackProviders(excludeChainIds);
   for (const { provider: altProvider, model: altModel, overrides: altOverrides } of otherSecondary) {
     const altCooldownId = altProvider.id || altProvider.name || altProvider.type;
-    if (isProviderInCooldown(altCooldownId)) {
-      console.info(`[AI] Skipping ${altProvider.name} — in cooldown.`);
-      providerErrors.push(`${altProvider.name}: in cooldown (rate-limited or auth-failed)`);
+    if (isProviderInCooldown(altCooldownId) || isExcluded(altCooldownId)) {
+      console.info(`[AI] Skipping ${altProvider.name} — in cooldown or excluded.`);
+      providerErrors.push(`${altProvider.name}: in cooldown or excluded`);
       continue;
     }
     console.log(`[ROUTER]\nProvider selected: ${altProvider.name} (model: ${altModel || altProvider.modelName || "default"})`);

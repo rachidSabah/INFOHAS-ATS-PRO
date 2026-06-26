@@ -17,7 +17,7 @@
 //   - Assembler rendering
 // ============================================================================
 
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, afterEach } from "vitest";
 import { finalizeResume, restoreLockedEntities, deduplicateResume } from "../unified-pipeline";
 import { computeExperienceFingerprint, validateExperienceFingerprints } from "../experience-fingerprint";
 import { assembleResume } from "../resume-assembler";
@@ -146,7 +146,7 @@ describe("Experience Fingerprints", () => {
     const fp1 = computeExperienceFingerprint(sourceResume.experience[0]);
     const fp2 = computeExperienceFingerprint(sourceResume.experience[0]);
     expect(fp1).toBe(fp2);
-    expect(fp1.length).toBe(16); // 16 hex chars
+    expect(fp1.length).toBe(64); // 64 hex chars (SHA-256)
   });
 
   it("detects different fingerprints for different entries", () => {
@@ -589,5 +589,149 @@ describe("Deduplication", () => {
     };
     const result = deduplicateResume(optimized);
     expect(result.resume.education.length).toBe(1);
+  });
+});
+
+// ============================================================================
+// 15. PROVIDER ALIAS & EXCLUSION MATCHING
+// ============================================================================
+
+import { getOrderedFallbackProviders, selectProvider } from "../ai";
+import { useApp } from "../store";
+
+describe("Resilient Provider Aliasing and Exclusion", () => {
+  const originalState = useApp.getState();
+
+  afterEach(() => {
+    // Restore state after each test
+    useApp.setState(originalState);
+  });
+
+  it("resolves exact provider ID", () => {
+    useApp.setState({
+      providers: [
+        { id: "p_google_gemini", name: "Google Gemini", type: "google", isActive: true, apiKey: "test-key" }
+      ],
+      providerSettings: { defaultProviderId: "p_google_gemini" },
+      fallbackChain: {
+        enabled: true,
+        entries: [
+          { id: "entry_1", enabled: true, providerId: "p_google_gemini", model: "gemini-1.5-flash" }
+        ]
+      }
+    } as any);
+
+    const chain = getOrderedFallbackProviders();
+    expect(chain.length).toBe(1);
+    expect(chain[0].provider.id).toBe("p_google_gemini");
+  });
+
+  it("resolves provider by alias (e.g. p_google -> p_google_gemini)", () => {
+    useApp.setState({
+      providers: [
+        { id: "p_google_gemini", name: "Google Gemini", type: "google", isActive: true, apiKey: "test-key" }
+      ],
+      providerSettings: {},
+      fallbackChain: {
+        enabled: true,
+        entries: [
+          { id: "entry_1", enabled: true, providerId: "p_google", model: "gemini-1.5-flash" }
+        ]
+      }
+    } as any);
+
+    const chain = getOrderedFallbackProviders();
+    expect(chain.length).toBe(1);
+    expect(chain[0].provider.id).toBe("p_google_gemini");
+  });
+
+  it("resolves provider by type (e.g. p_zencode -> zencode provider)", () => {
+    useApp.setState({
+      providers: [
+        { id: "some_zencode_id", name: "ZenCode AI", type: "zencode", isActive: true, apiKey: "test-key" }
+      ],
+      providerSettings: {},
+      fallbackChain: {
+        enabled: true,
+        entries: [
+          { id: "entry_1", enabled: true, providerId: "p_zencode", model: "zencode-v1" }
+        ]
+      }
+    } as any);
+
+    const chain = getOrderedFallbackProviders();
+    expect(chain.length).toBe(1);
+    expect(chain[0].provider.type).toBe("zencode");
+  });
+
+  it("excludes specific provider IDs from fallback chain", () => {
+    useApp.setState({
+      providers: [
+        { id: "p_google_gemini", name: "Google Gemini", type: "google", isActive: true, apiKey: "test-key" },
+        { id: "p_mistral", name: "Mistral Large", type: "mistral", isActive: true, apiKey: "test-key" }
+      ],
+      providerSettings: {},
+      fallbackChain: {
+        enabled: true,
+        entries: [
+          { id: "entry_1", enabled: true, providerId: "p_google_gemini", model: "gemini-1.5-flash" },
+          { id: "entry_2", enabled: true, providerId: "p_mistral", model: "mistral-large" }
+        ]
+      }
+    } as any);
+
+    const chain = getOrderedFallbackProviders("p_google_gemini");
+    expect(chain.length).toBe(1);
+    expect(chain[0].provider.id).toBe("p_mistral");
+  });
+
+  it("selectProvider respects excluded provider list", async () => {
+    useApp.setState({
+      providers: [
+        { id: "p_google_gemini", name: "Google Gemini", type: "google", isActive: true, apiKey: "test-key" },
+        { id: "p_mistral", name: "Mistral Large", type: "mistral", isActive: true, apiKey: "test-key" }
+      ],
+      providerSettings: { defaultProviderId: "p_google_gemini" }
+    } as any);
+
+    // Without exclusion
+    const p1 = await selectProvider();
+    expect(p1.id).toBe("p_google_gemini");
+
+    // With exclusion of google_gemini, should return mistral
+    const p2 = await selectProvider(["p_google_gemini"]);
+    expect(p2.id).toBe("p_mistral");
+  });
+});
+
+// ============================================================================
+// 16. STRICT ID AND FINGERPRINT VALIDATION
+// ============================================================================
+
+describe("Strict ID and Fingerprint Validation", () => {
+  it("fails validation when experience ID is missing", () => {
+    const optimized: ResumeData = {
+      ...sourceResume,
+      experience: sourceResume.experience.map((e, idx) => ({
+        ...e,
+        id: idx === 0 ? "" : e.id, // missing ID
+      })),
+    };
+    const validation = validateExperienceFingerprints(optimized, sourceResume);
+    expect(validation.valid).toBe(false);
+    expect(validation.violations.some((v) => v.includes("missing an ID"))).toBe(true);
+  });
+
+  it("fails validation when immutable experience field is changed (changed fingerprint)", () => {
+    const optimized: ResumeData = {
+      ...sourceResume,
+      experience: sourceResume.experience.map((e, idx) => ({
+        ...e,
+        company: idx === 0 ? "CHANGED COMPANY" : e.company, // changed company -> changed fingerprint
+      })),
+    };
+    const validation = validateExperienceFingerprints(optimized, sourceResume);
+    expect(validation.valid).toBe(false);
+    expect(validation.violations.some((v) => v.includes("changed fingerprint"))).toBe(true);
   });
 });
