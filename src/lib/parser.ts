@@ -81,7 +81,7 @@ export function secondaryParser(text: string, fileName: string): ResumeData {
   const experience = parseExperiences(expLines);
   const education = parseEducation(eduLines);
   const skills = skillsLines
-    .flatMap((l) => l.split(/[,;•|]/))
+    .flatMap((l) => l.split(new RegExp("[,;•|]")))
     .map((s) => s.trim())
     .filter((s) => s.length > 0 && s.length < 40 && !isForbiddenSkill(s))
     .map((s) => ({ id: uid("s"), name: s }));
@@ -90,7 +90,7 @@ export function secondaryParser(text: string, fileName: string): ResumeData {
   const languages: ResumeData["languages"] = [];
   const seenLangs = new Set<string>();
   for (const line of langLines) {
-    const parts = line.split(/[,;]/);
+    const parts = line.split(new RegExp("[,;]"));
     for (const part of parts) {
       const detected = detectLanguage(part);
       if (detected && !seenLangs.has(detected.name.toLowerCase())) {
@@ -187,7 +187,7 @@ export function heuristicParser(text: string, fileName: string): ResumeData {
   const experience = parseExperiences(sectionLines.experience);
   const education = parseEducation(sectionLines.education);
   const skills = sectionLines.skills
-    .flatMap((l) => l.split(/[,;•|]/))
+    .flatMap((l) => l.split(new RegExp("[,;•|]")))
     .map((s) => s.trim())
     .filter((s) => s.length > 0 && s.length < 40 && !isForbiddenSkill(s))
     .map((s) => ({ id: uid("s"), name: s }));
@@ -196,7 +196,7 @@ export function heuristicParser(text: string, fileName: string): ResumeData {
   const languages: ResumeData["languages"] = [];
   const seenLangs = new Set<string>();
   for (const line of sectionLines.languages) {
-    const parts = line.split(/[,;]/);
+    const parts = line.split(new RegExp("[,;]"));
     for (const part of parts) {
       const detected = detectLanguage(part);
       if (detected && !seenLangs.has(detected.name.toLowerCase())) {
@@ -550,7 +550,7 @@ export function extractResumeFromText(text: string, fileName: string): ResumeDat
   // Skills
   const skillLines = sliceSection(skillsStart);
   const skills = skillLines
-    .flatMap((l) => l.split(/[,;•|]/))
+    .flatMap((l) => l.split(new RegExp("[,;•|]")))
     .map((s) => s.trim())
     .filter((s) => s.length > 0 && s.length < 40 && !isForbiddenSkill(s))
     .map((s) => ({ id: uid("s"), name: s }));
@@ -568,7 +568,7 @@ export function extractResumeFromText(text: string, fileName: string): ResumeDat
   const languages: ResumeData["languages"] = [];
   const seenLangs = new Set<string>();
   for (const line of langLines) {
-    const parts = line.split(/[,;]/);
+    const parts = line.split(new RegExp("[,;]"));
     for (const part of parts) {
       const detected = detectLanguage(part);
       if (detected && !seenLangs.has(detected.name.toLowerCase())) {
@@ -624,7 +624,7 @@ export function extractResumeFromText(text: string, fileName: string): ResumeDat
 // "2020 - 2022", "Jan 2020 – Dec 2022", "2020–Present", "2020 to Present"
 // "09/2020 - 06/2022", "2020 - Present", "Jan 2020 - Present"
 // "2020-2022", "2020–2022", "September 2020 – June 2022"
-const DATE_RANGE_RE = /(?:(?:\d{1,2}[\/\.]\d{4})|(?:\d{4})|(?:[A-Za-z]{3,9}\.?\s+\d{4}))\s*(?:[\-–—]|\bto\b|–)\s*(?:present|current|(?:\d{1,2}[\/\.]\d{4})|(?:\d{4})|(?:[A-Za-z]{3,9}\.?\s+\d{4}))/i;
+const DATE_RANGE_RE = new RegExp("(?:(?:\\d{1,2}[\\/\\.]\\d{4})|(?:\\d{4})|(?:[A-Za-z]{3,9}\\.?\\s+\\d{4}))\\s*(?:[\\-–—]|\\bto\\b|–)\\s*(?:present|current|(?:\\d{1,2}[\\/\\.]\\d{4})|(?:\\d{4})|(?:[A-Za-z]{3,9}\\.?\\s+\\d{4}))", "i");
 
 /**
  * Common title-ending keywords. When the left side of "Title Company | Location"
@@ -758,7 +758,7 @@ function parseExperiences(lines: string[], jobDesc?: string): ResumeData["experi
       const dateRange = parseDateRange(dateStr);
 
       let cleanLine = trimmed.replace(dateStr, '').trim();
-      cleanLine = cleanLine.replace(/^[:\s,—–\-|·•▪◦]+/, '').replace(/[:\s,—–\-|·•▪◦]+$/, '').trim();
+      cleanLine = cleanLine.replace(new RegExp("^[:\\s,—–\\-|·•▪◦]+"), '').replace(new RegExp("[:\\s,—–\\-|·•▪◦]+$"), '').trim();
 
       let title = cleanLine;
       let company = "";
@@ -794,7 +794,7 @@ function parseExperiences(lines: string[], jobDesc?: string): ResumeData["experi
           const split = splitTitleAndCompany(cleanLine);
           if (split) {
             title = split.title;
-            const comp = split.company.replace(/^[:\s,—–\-|·•▪◦]+/, '').trim();
+            const comp = split.company.replace(new RegExp("^[:\\s,—–\\-|·•▪◦]+"), '').trim();
             const compParts = comp.split(",");
             if (compParts.length >= 2) {
               company = compParts.slice(0, -1).join(",").trim();
@@ -813,10 +813,10 @@ function parseExperiences(lines: string[], jobDesc?: string): ResumeData["experi
         }
       }
 
-      title = title.replace(/^[:\s,—–\-|·•▪◦\.]+/, '').replace(/[:\s,—–\-|·•▪◦\.]+$/, '').trim();
+      title = title.replace(new RegExp("^[:\\s,—–\\-|·•▪◦\\\\.]+"), '').replace(new RegExp("[:\\s,—–\\-|·•▪◦\\\\.]+$"), '').trim();
       company = company.replace(/^(?:at|in|for|with)\s+/i, '').trim();
-      company = company.replace(/^[:\s,—–\-|·•▪◦\.]+/, '').replace(/[:\s,—–\-|·•▪◦\.]+$/, '').trim();
-      location = location.replace(/^[:\s,—–\-|·•▪◦\.]+/, '').replace(/[:\s,—–\-|·•▪◦\.]+$/, '').trim();
+      company = company.replace(new RegExp("^[:\\s,—–\\-|·•▪◦\\\\.]+"), '').replace(new RegExp("[:\\s,—–\\-|·•▪◦\\\\.]+$"), '').trim();
+      location = location.replace(new RegExp("^[:\\s,—–\\-|·•▪◦\\\\.]+"), '').replace(new RegExp("[:\\s,—–\\-|·•▪◦\\\\.]+$"), '').trim();
 
       current = {
         id: uid("e"),
@@ -869,7 +869,7 @@ function parseExperiences(lines: string[], jobDesc?: string): ResumeData["experi
       const dateRange = parseDateRange(dateStr);
 
       let cleanLine = trimmed.replace(dateStr, '').trim();
-      cleanLine = cleanLine.replace(/^[:\s,—–\-|·•▪◦]+/, '').replace(/[:\s,—–\-|·•▪◦]+$/, '').trim();
+      cleanLine = cleanLine.replace(new RegExp("^[:\\s,—–\\-|·•▪◦]+"), '').replace(new RegExp("[:\\s,—–\\-|·•▪◦]+$"), '').trim();
 
       let title = cleanLine;
       let company = "";
@@ -937,7 +937,7 @@ function parseExperiences(lines: string[], jobDesc?: string): ResumeData["experi
           const split = splitTitleAndCompany(cleanLine);
           if (split) {
             title = split.title;
-            const cleanComp = split.company.replace(/^[:\s,—–\-|·•▪◦]+/, "").trim();
+            const cleanComp = split.company.replace(new RegExp("^[:\\s,—–\\-|·•▪◦]+"), "").trim();
             // `cleanComp` may contain "Company Location" — try to extract location (last comma part)
             const compParts = cleanComp.split(/,/);
             if (compParts.length >= 2) {
@@ -965,10 +965,10 @@ function parseExperiences(lines: string[], jobDesc?: string): ResumeData["experi
         }
       }
 
-      title = title.replace(/^[:\s,—–\-|·•▪◦\.]+/, '').replace(/[:\s,—–\-|·•▪◦\.]+$/, '').trim();
+      title = title.replace(new RegExp("^[:\\s,—–\\-|·•▪◦\\\\.]+"), '').replace(new RegExp("[:\\s,—–\\-|·•▪◦\\\\.]+$"), '').trim();
       company = company.replace(/^(?:at|in|for|with)\s+/i, "").trim();
-      company = company.replace(/^[:\s,—–\-|·•▪◦\.]+/, '').replace(/[:\s,—–\-|·•▪◦\.]+$/, '').trim();
-      location = location.replace(/^[:\s,—–\-|·•▪◦\.]+/, '').replace(/[:\s,—–\-|·•▪◦\.]+$/, '').trim();
+      company = company.replace(new RegExp("^[:\\s,—–\\-|·•▪◦\\\\.]+"), '').replace(new RegExp("[:\\s,—–\\-|·•▪◦\\\\.]+$"), '').trim();
+      location = location.replace(new RegExp("^[:\\s,—–\\-|·•▪◦\\\\.]+"), '').replace(new RegExp("[:\\s,—–\\-|·•▪◦\\\\.]+$"), '').trim();
 
       current = {
         id: uid("e"),
@@ -980,7 +980,7 @@ function parseExperiences(lines: string[], jobDesc?: string): ResumeData["experi
         bullets: [],
       };
     } else if (current) {
-      const cleaned = trimmed.replace(/^[•*\-·▪◦]\s*/, "").trim();
+      const cleaned = trimmed.replace(new RegExp("^[•*\\-·▪◦]\\s*"), "").trim();
       if (cleaned) {
         const isLocationPattern = /^(?:of|in)\s+[A-Z][a-zA-Z]+/i.test(cleaned) || /\b[A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+)*,\s?[A-Z][a-zA-Z]+/.test(cleaned);
         if (current.bullets.length === 0 && !current.location && isLocationPattern) {
@@ -1027,22 +1027,22 @@ export function cleanEducationLine(l: string): string {
   let clean = l;
   
   // 1. Remove date ranges matching DATE_RANGE_RE (extended to include ongoing)
-  const rangeRe = /(?:(?:\d{1,2}[\/\.]\d{4})|(?:\d{4})|(?:[A-Za-z]{3,9}\.?\s+\d{4}))\s*(?:[\-–—]|\bto\b|–)\s*(?:present|current|ongoing|(?:\d{1,2}[\/\.]\d{4})|(?:\d{4})|(?:[A-Za-z]{3,9}\.?\s+\d{4}))/i;
+  const rangeRe = new RegExp("(?:(?:\\d{1,2}[\\/\\.]\\d{4})|(?:\\d{4})|(?:[A-Za-z]{3,9}\\.?\\s+\\d{4}))\\s*(?:[\\-–—]|\\bto\\b|–)\\s*(?:present|current|ongoing|(?:\\d{1,2}[\\/\\.]\\d{4})|(?:\\d{4})|(?:[A-Za-z]{3,9}\\.?\\s+\\d{4}))", "i");
   clean = clean.replace(rangeRe, "");
   
   // 2. Remove year ranges like "2021-2022" or "2021 - 2022"
-  clean = clean.replace(/\b(19|20)\d{2}\s*[\-–—]\s*(19|20)\d{2}\b/g, "");
+  clean = clean.replace(new RegExp("\\b(19|20)\\d{2}\\s*[\\-–—]\\s*(19|20)\\d{2}\\b", "g"), "");
   
   // 3. Remove single years with trailing dash/separator e.g. "2022 -" or "2022 –"
-  clean = clean.replace(/\b(19|20)\d{2}\s*[\-–—]?/g, "");
+  clean = clean.replace(new RegExp("\\b(19|20)\\d{2}\\s*[\\-–—]?", "g"), "");
   
   // 4. Remove standalone months and words like present, ongoing, current
   clean = clean.replace(/\b(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\b/gi, "");
   clean = clean.replace(/\b(?:present|ongoing|current)\b/gi, "");
   
   // 5. Clean up leading/trailing punctuation and double spaces
-  clean = clean.replace(/^[:\s,—–\-|·•▪◦\(\)]+/, "");
-  clean = clean.replace(/[:\s,—–\-|·•▪◦\(\)]+$/, "");
+  clean = clean.replace(new RegExp("^[:\\s,—–\\-|·•▪◦\\(\\)]+"), "");
+  clean = clean.replace(new RegExp("[:\\s,—–\\-|·•▪◦\\(\\)]+$"), "");
   clean = clean.replace(/\s+/g, " ").trim();
   
   return clean;
@@ -1055,7 +1055,7 @@ function parseEducation(lines: string[]): ResumeData["education"] {
   // A "header" line is one that contains a degree keyword (B.S., M.S., PhD, Bachelor, Master, etc.)
   // or a year range (2014-2018, 2014 - 2018, 2014–2018).
   const degreePattern = /\b(b\.?\s?s\.?|b\.?\s?a\.?|b\.?\s?eng\.?|b\.?\s?tech|m\.?\s?s\.?|m\.?\s?a\.?|mba|ph\.?d|bachelor|master|doctorate|diploma|certificate|associate|degree|high\s+school)\b/i;
-  const yearRangePattern = /\b(19|20)\d{2}\s*[–\-]\s*(19|20)\d{2}\b|\b(19|20)\d{2}\s*[–\-]\s*present\b/i;
+  const yearRangePattern = new RegExp("\\b(19|20)\\d{2}\\s*[–\\-]\\s*(19|20)\\d{2}\\b|\\b(19|20)\\d{2}\\s*[–\\-]\\s*present\\b", "i");
 
   const entries: string[][] = [];
   let current: string[] = [];
@@ -1173,7 +1173,7 @@ function parseEducation(lines: string[]): ResumeData["education"] {
           degree = leftSide.slice(0, kwEnd).trim();
 
           const afterKw = leftSide.slice(kwEnd);
-          const fieldMatch = afterKw.match(/^\s+(?:of|in|with)\s+([A-Za-z\s&]+?)(?=\s+(?:University|College|Institute|School|Academy|Polytechnic|Conservatory)|$)/i);
+          const fieldMatch = afterKw.match(new RegExp("^\\s+(?:of|in|with)\\s+([A-Za-z\\s&]+?)(?=\\s+(?:University|College|Institute|School|Academy|Polytechnic|Conservatory)|$)", "i"));
           if (fieldMatch) {
             field = fieldMatch[1].trim();
             institution = afterKw.slice(fieldMatch[0].length).trim();
@@ -1200,10 +1200,10 @@ function parseEducation(lines: string[]): ResumeData["education"] {
           }
         }
 
-      } else if (!institution && !degreePattern.test(cleanedLine) && !yearRangePattern.test(cleanedLine) && !/^[•\-\*·▪◦]/.test(cleanedLine)) {
+      } else if (!institution && !degreePattern.test(cleanedLine) && !yearRangePattern.test(cleanedLine) && !new RegExp("^[•\\-\\*·▪◦]").test(cleanedLine)) {
         institution = cleanedLine;
       } else if (i > 0 && !yearRangePattern.test(cleanedLine)) {
-        const cleaned = cleanedLine.replace(/^[*·▪◦-]\s*/, "").trim();
+        const cleaned = cleanedLine.replace(new RegExp("^[*·▪◦-]\\s*"), "").trim();
         const highlightText = cleaned;
         if (highlightText && !degreePattern.test(highlightText)) {
           highlights.push(highlightText);
@@ -1213,16 +1213,16 @@ function parseEducation(lines: string[]): ResumeData["education"] {
 
     // Fallback: if no degree found, use first line as institution, second as degree
     if (!degree && !institution) {
-      const firstNonBullet = cleanedEntryLines.find((l) => !/^[•\-\*·▪◦]/.test(l.trim())) || cleanedEntryLines[0] || "Institution";
-      institution = firstNonBullet.replace(/^[•\-\*·▪◦\s|]+/, "").trim() || "Institution";
-      degree = cleanedEntryLines[1]?.replace(/^[•\-\*·▪◦\s|]+/, "").trim() || "Degree";
-      highlights.push(...cleanedEntryLines.slice(2, 4).map((l) => l.replace(/^[•\-\*·▪◦\s|]+/, "").trim()).filter(Boolean));
+      const firstNonBullet = cleanedEntryLines.find((l) => !new RegExp("^[•\\-\\*·▪◦]").test(l.trim())) || cleanedEntryLines[0] || "Institution";
+      institution = firstNonBullet.replace(new RegExp("^[•\\-\\*·▪◦\\s|]+"), "").trim() || "Institution";
+      degree = cleanedEntryLines[1]?.replace(new RegExp("^[•\\-\\*·▪◦\\s|]+"), "").trim() || "Degree";
+      highlights.push(...cleanedEntryLines.slice(2, 4).map((l) => l.replace(new RegExp("^[•\\-\\*·▪◦\\s|]+"), "").trim()).filter(Boolean));
     } else if (!institution) {
       const fallbackInst = cleanedEntryLines.find((l) => {
-        const c = l.replace(/^[•\-\*·▪◦\s|]+/, "").trim();
-        return c && l !== degree && !degreePattern.test(c) && !yearRangePattern.test(c) && !/^[•\-\*·▪◦]/.test(l.trim());
+        const c = l.replace(new RegExp("^[•\\-\\*·▪◦\\s|]+"), "").trim();
+        return c && l !== degree && !degreePattern.test(c) && !yearRangePattern.test(c) && !new RegExp("^[•\\-\\*·▪◦]").test(l.trim());
       });
-      institution = fallbackInst?.replace(/^[•\-\*·▪◦\s|]+/, "").trim() || "Institution";
+      institution = fallbackInst?.replace(new RegExp("^[•\\-\\*·▪◦\\s|]+"), "").trim() || "Institution";
     }
 
     return {
@@ -1252,15 +1252,15 @@ function parseProjects(lines: string[]): ResumeData["projects"] {
   let current: string[] = [];
 
   for (const line of lines) {
-    const isBulletStart = /^[•\-\*]\s+/.test(line);
+    const isBulletStart = new RegExp("^[•\\-\\*]\\s+").test(line);
     const isNumberedStart = /^\d+\.\s+/.test(line);
     const isHeader = (isBulletStart || isNumberedStart) && current.length > 0;
 
     if (isHeader) {
       blocks.push(current);
-      current = [line.replace(/^[•\-\*]\s+/, "").replace(/^\d+\.\s+/, "")];
+      current = [line.replace(new RegExp("^[•\\-\\*]\\s+"), "").replace(/^\d+\.\s+/, "")];
     } else if (isBulletStart || isNumberedStart) {
-      current.push(line.replace(/^[•\-\*]\s+/, "").replace(/^\d+\.\s+/, ""));
+      current.push(line.replace(new RegExp("^[•\\-\\*]\\s+"), "").replace(/^\d+\.\s+/, ""));
     } else {
       current.push(line);
     }
@@ -1290,7 +1290,7 @@ function parseProjects(lines: string[]): ResumeData["projects"] {
     id: uid("p"),
     name: blockLines[0] || "Project",
     description: blockLines.slice(1).join(" ").trim() || undefined,
-    bullets: blockLines.slice(1).filter((l) => l.startsWith("•") || l.startsWith("-")).map((l) => l.replace(/^[•\-]\s*/, "")),
+    bullets: blockLines.slice(1).filter((l) => l.startsWith("•") || l.startsWith("-")).map((l) => l.replace(new RegExp("^[•\\-]\\s*"), "")),
   }));
 }
 
