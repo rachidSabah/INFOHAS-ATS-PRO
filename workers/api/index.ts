@@ -456,16 +456,31 @@ app.post("/api/resumes", async (c) => {
   const body = await parseBody(c.req.raw);
   const id = body.id || uuid("r");
   const now = new Date().toISOString();
-  await c.env.DB.prepare(
-    `INSERT INTO resumes (id, user_id, name, headline, contact_json, summary, experience_json, education_json, skills_json, projects_json, certifications_json, languages_json, achievements_json, template, accent_color, photo_url, date_of_birth, source, file_name, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-  ).bind(
-    id, userId, body.name || "", body.headline || null, JSON.stringify(body.contact || {}), body.summary || null,
-    JSON.stringify(body.experience || []), JSON.stringify(body.education || []), JSON.stringify(body.skills || []),
-    JSON.stringify(body.projects || []), JSON.stringify(body.certifications || []), JSON.stringify(body.languages || []),
-    JSON.stringify(body.achievements || []), body.template || "ats-professional", body.accentColor || "#1154A3",
-    body.photoUrl || null, body.dateOfBirth || null, body.source || "manual", body.fileName || null, now, now
-  ).run();
+  try {
+    // Try INSERT first
+    await c.env.DB.prepare(
+      `INSERT INTO resumes (id, user_id, name, headline, contact_json, summary, experience_json, education_json, skills_json, projects_json, certifications_json, languages_json, achievements_json, template, accent_color, photo_url, date_of_birth, source, file_name, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).bind(
+      id, userId, body.name || "", body.headline || null, JSON.stringify(body.contact || {}), body.summary || null,
+      JSON.stringify(body.experience || []), JSON.stringify(body.education || []), JSON.stringify(body.skills || []),
+      JSON.stringify(body.projects || []), JSON.stringify(body.certifications || []), JSON.stringify(body.languages || []),
+      JSON.stringify(body.achievements || []), body.template || "ats-professional", body.accentColor || "#1154A3",
+      body.photoUrl || null, body.dateOfBirth || null, body.source || "manual", body.fileName || null, now, now
+    ).run();
+  } catch (insertErr: any) {
+    // If INSERT fails (duplicate id), fall back to UPDATE (UPSERT pattern)
+    console.warn("[Workers] Resume INSERT failed, trying UPDATE:", insertErr?.message || insertErr);
+    await c.env.DB.prepare(
+      `UPDATE resumes SET name = ?, headline = ?, contact_json = ?, summary = ?, experience_json = ?, education_json = ?, skills_json = ?, projects_json = ?, certifications_json = ?, languages_json = ?, achievements_json = ?, template = ?, accent_color = ?, photo_url = ?, date_of_birth = ?, source = ?, file_name = ?, updated_at = ? WHERE id = ? AND user_id = ?`
+    ).bind(
+      body.name || "", body.headline || null, JSON.stringify(body.contact || {}), body.summary || null,
+      JSON.stringify(body.experience || []), JSON.stringify(body.education || []), JSON.stringify(body.skills || []),
+      JSON.stringify(body.projects || []), JSON.stringify(body.certifications || []), JSON.stringify(body.languages || []),
+      JSON.stringify(body.achievements || []), body.template || "ats-professional", body.accentColor || "#1154A3",
+      body.photoUrl || null, body.dateOfBirth || null, body.source || "manual", body.fileName || null, now, id, userId
+    ).run();
+  }
   return c.json({ ok: true, resume: { ...body, id } });
 });
 

@@ -1198,7 +1198,43 @@ Bridging Strategy: ${result.skillGap.bridgingStrategy}`);
     }
 
     if (!success || !result.optimizedResume) {
-      throw new Error(`Optimization failed to meet target character/page fill gates after ${maxOptimizeAttempts} attempts: ${optimizeError || "Quality gates not met"}`);
+      // === GRACEFUL DEGRADATION ===
+      // Instead of hard-failing when all AI providers are rate-limited/unavailable,
+      // return the ORIGINAL resume with JD keywords added to skills.
+      // This ensures the user always gets a usable result and can retry later.
+      console.warn(`[Pipeline] All ${maxOptimizeAttempts} optimization attempts failed. Falling back to original resume + JD keywords.`);
+      log("Resume Optimizer", `⚠ All AI providers failed after ${maxOptimizeAttempts} attempts. Returning original resume with JD keywords added. Please retry when AI providers recover.`);
+
+      // Add JD keywords to the original resume's skills
+      const jdKeywords = jd.keywords ?? [];
+      const existingSkillNames = new Set(resume.skills.map((s) => s.name.toLowerCase()));
+      const keywordsToAdd: ResumeSkill[] = jdKeywords
+        .filter((k) => !existingSkillNames.has(k.toLowerCase()))
+        .slice(0, 8)
+        .map((name) => ({ id: uid("s"), name, category: "Targeted Keywords" }));
+
+      result.optimizedResume = {
+        ...resume,
+        skills: [...resume.skills, ...keywordsToAdd],
+        updatedAt: new Date().toISOString(),
+        source: "ai-optimized-degraded" as any,
+      };
+      result.provider = "Local Engine (degraded)";
+      result.charCount = JSON.stringify({
+        summary: result.optimizedResume.summary,
+        experience: result.optimizedResume.experience,
+        skills: result.optimizedResume.skills,
+        education: result.optimizedResume.education,
+        languages: result.optimizedResume.languages,
+      }).length;
+      result.metCharTarget = false;
+
+      // Mark step as COMPLETED (not failed) so the pipeline continues
+      step.completedAt = new Date().toISOString();
+      step.durationMs = Date.now() - new Date(step.startedAt).getTime();
+      step.status = "completed";
+      emitProgress(3, `⚠ AI providers unavailable. Original resume + ${keywordsToAdd.length} keywords. Retry later for full optimization.`);
+      // Skip the throw — continue to QA step
     }
 
     step.completedAt = new Date().toISOString();
