@@ -1076,6 +1076,41 @@ Bridging Strategy: ${result.skillGap.bridgingStrategy}`);
         } catch (v3Err: any) {
           console.warn("[V3 Pipeline] Failed (non-fatal):", v3Err?.message);
         }
+
+        // ====================================================================
+        // CRITICAL FIX: Final cleanup pass AFTER V3 + enforceLockedFields.
+        //
+        // V3 agents (Keyword Embedding, Fact Verification, Layout Optimization)
+        // can RE-INTRODUCE corruption that finalizeResume already cleaned:
+        //   - Duplicate summary sentences (keyword embedding adds them back)
+        //   - JD company names in skills (keyword embedding stuffs them)
+        //   - Double periods, filler phrases
+        //   - "within <Title>" hallucinations
+        //
+        // We run finalizeResume ONE MORE TIME after V3 to re-clean.
+        // This is the definitive fix for the "3x duplicate sentences" and
+        // "Qatar Duty Free in skills" issues observed in production.
+        // ====================================================================
+        try {
+          const { finalizeResume } = await import("../unified-pipeline");
+          const beforeClean = JSON.stringify({
+            summary: result.optimizedResume?.summary?.slice(0, 100),
+            skillsCount: result.optimizedResume?.skills?.length,
+            skillsPreview: result.optimizedResume?.skills?.slice(0, 5).map((s: any) => s.name),
+          });
+          result.optimizedResume = finalizeResume(result.optimizedResume!, resume);
+          const afterClean = JSON.stringify({
+            summary: result.optimizedResume?.summary?.slice(0, 100),
+            skillsCount: result.optimizedResume?.skills?.length,
+            skillsPreview: result.optimizedResume?.skills?.slice(0, 5).map((s: any) => s.name),
+          });
+          if (beforeClean !== afterClean) {
+            console.info("[Post-V3 Cleanup] finalizeResume re-cleaned the resume after V3 pipeline");
+            log("Resume Optimizer", `✓ Post-V3 cleanup: re-filtered skills, re-deduplicated summary, re-fixed grammar`);
+          }
+        } catch (cleanErr: any) {
+          console.warn("[Post-V3 Cleanup] finalizeResume failed (non-fatal):", cleanErr?.message);
+        }
       }
 
       // === PAGE VALIDATION ===
@@ -1113,6 +1148,40 @@ Bridging Strategy: ${result.skillGap.bridgingStrategy}`);
         if (result.charCount < minCharThreshold) {
           console.warn(`[Pipeline Page Validator] Accepting short output on final attempt (${result.charCount} < ${minCharThreshold}) — source may have insufficient content.`);
         }
+
+        // ====================================================================
+        // FINAL SAFETY NET: Run finalizeResume one last time before accepting.
+        //
+        // This catches ANY remaining corruption regardless of which path was
+        // taken (locked pipeline, aviation, standard, V3). This is the
+        // definitive cleanup that ensures the output is always clean:
+        //   - No duplicate summary sentences
+        //   - No JD company names in skills
+        //   - No double periods
+        //   - No "within <Title>" hallucinations
+        //   - No backticks
+        //   - Education/languages restored from source
+        // ====================================================================
+        try {
+          const { finalizeResume } = await import("../unified-pipeline");
+          result.optimizedResume = finalizeResume(result.optimizedResume!, resume);
+          result.charCount = JSON.stringify({
+            summary: result.optimizedResume?.summary,
+            experience: result.optimizedResume?.experience,
+            skills: result.optimizedResume?.skills,
+            education: result.optimizedResume?.education,
+            languages: result.optimizedResume?.languages,
+          }).length;
+        } catch (finErr: any) {
+          console.warn("[Final Safety Net] finalizeResume failed (non-fatal):", finErr?.message);
+        }
+
+        // Warn if the provider is Local Engine (all AI providers failed)
+        if (/local\s*engine/i.test(result.provider || "")) {
+          log("Resume Optimizer", `⚠ Warning: All AI providers failed. Using local engine output. The resume may not be fully optimized. Please retry when AI providers recover.`);
+          emitProgress(3, `⚠ All AI providers failed — using fallback output. Please retry later for full optimization.`);
+        }
+
         success = true;
         const optLog = `✓ Generated ${result.charCount} chars (page fill ${pageFillVal.pageUsage}%) via ${result.provider}. Embedded ${optimizeResult.keywordsAdded} keywords. Attempts: ${optimizeAttempt}.`;
         log("Resume Optimizer", optLog);
