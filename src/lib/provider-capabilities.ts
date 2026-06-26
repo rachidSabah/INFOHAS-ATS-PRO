@@ -80,6 +80,22 @@ export const PROVIDER_CAPABILITIES: Record<string, ProviderCapabilities> = {
     retryable429: true,
     recommendedFallback: false,
   },
+  nvidia: {
+    freeTier: true,
+    thirdPartyLimited: true,
+    maxConcurrentRequests: 1, // rate-limited on concurrent calls
+    retryable429: true,
+    recommendedFallback: true,
+    warningBadge: "⚠ Free model – Nvidia API rate limits may apply.",
+  },
+  zencode: {
+    freeTier: true,
+    thirdPartyLimited: true,
+    maxConcurrentRequests: 1,
+    retryable429: true,
+    recommendedFallback: true,
+    warningBadge: "⚠ Free model – ZenCode API rate limits may apply.",
+  },
   custom: {
     freeTier: false,
     thirdPartyLimited: false,
@@ -104,9 +120,10 @@ export function isOpenCodeZenFree(provider: any): boolean {
   const type = provider.type || "";
   const modelName = (provider.modelName || "").toLowerCase();
   const name = (provider.name || "").toLowerCase();
-  const isZen = type === "opencode" || type === "opencode-zen" || name.includes("zen");
-  const isModelFree = modelName ? modelName.includes("free") : true;
-  return isZen && isModelFree;
+  const isZen = type === "opencode" || type === "opencode-zen" || type === "zencode" || type === "nvidia" || name.includes("zen") || name.includes("nvidia");
+  const isMistralFree = type === "mistral" && (modelName.includes("free") || modelName.includes("small") || modelName.includes("codestral") || modelName.includes("pixtral") || modelName.includes("tiny") || modelName.includes("trial"));
+  const isModelFree = modelName ? (modelName.includes("free") || modelName.includes("instruct") || modelName.includes("llama")) : true;
+  return (isZen && isModelFree) || isMistralFree;
 }
 
 export function isRateLimitError(error: any): boolean {
@@ -120,17 +137,19 @@ export function isRateLimitError(error: any): boolean {
 
 export function getRateLimitErrorMessage(provider: any): string {
   if (isOpenCodeZenFree(provider)) {
-    return `OpenCode Zen free models are temporarily rate-limited for third-party applications. Please wait a few moments or switch to another provider.`;
+    return `OpenCode Zen or Mistral free models are temporarily rate-limited. Please wait a few moments or switch to another provider.`;
   }
   return `This provider is temporarily rate-limited. Please wait a few moments or switch to another provider.`;
 }
 
 export function getRecommendedFallbacks(allProviders: any[], currentProviderId?: string): any[] {
-  const fallbackOrder = ["puter", "gemini", "openrouter", "opencode"];
+  const fallbackOrder = ["puter", "gemini", "mistral", "nvidia", "openrouter", "zencode", "opencode"];
   return fallbackOrder
     .map((type) => {
-      if (type === "opencode") {
-        return allProviders.find((p) => p.type === type && p.isActive && p.id !== currentProviderId && !isOpenCodeZenFree(p));
+      if (type === "opencode" || type === "nvidia" || type === "zencode" || type === "mistral") {
+        const nonFree = allProviders.find((p) => p.type === type && p.isActive && p.id !== currentProviderId && !isOpenCodeZenFree(p));
+        if (nonFree) return nonFree;
+        return allProviders.find((p) => p.type === type && p.isActive && p.id !== currentProviderId);
       }
       return allProviders.find((p) => p.type === type && p.isActive && p.id !== currentProviderId);
     })

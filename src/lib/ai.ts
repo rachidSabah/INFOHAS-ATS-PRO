@@ -118,9 +118,28 @@ export function getOrderedFallbackProviders(excludeProviderIdOrIds?: string | st
   // If chain is disabled or empty, fall back to legacy behavior (all active providers)
   if (!chain || !chain.entries || chain.entries.length === 0) {
     console.info("[AI] Fallback chain disabled or empty — using legacy provider order (all active providers)");
-    return allProviders
-      .filter((p) => p.isActive && p.type !== "puter" && p.type !== "local" && hasValidApiKey(p) && !isProviderExcluded(p))
-      .map((p) => ({ provider: p, model: p.modelName || "", overrides: {} }));
+    const active = allProviders
+      .filter((p) => p.isActive && p.type !== "puter" && p.type !== "local" && hasValidApiKey(p) && !isProviderExcluded(p));
+
+    // Sort by reliability rank: paid/explicit > gemini > mistral > nvidia > openrouter > zencode > opencode > others
+    const reliabilityRank: Record<string, number> = {
+      gemini: 1,
+      mistral: 2,
+      nvidia: 3,
+      openrouter: 4,
+      zencode: 5,
+      opencode: 6,
+    };
+    active.sort((a, b) => {
+      const isFreeA = isOpenCodeZenFree(a);
+      const isFreeB = isOpenCodeZenFree(b);
+      if (isFreeA !== isFreeB) return isFreeA ? 1 : -1;
+      const rankA = reliabilityRank[a.type] ?? 100;
+      const rankB = reliabilityRank[b.type] ?? 100;
+      return rankA - rankB;
+    });
+
+    return active.map((p) => ({ provider: p, model: p.modelName || "", overrides: {} }));
   }
 
   // Use the user's configured chain order
@@ -204,9 +223,27 @@ export function getOrderedFallbackProviders(excludeProviderIdOrIds?: string | st
   // fall back to ALL active providers so the user still gets results.
   if (result.length === 0) {
     console.warn("[AI] Fallback chain found 0 active providers — falling back to ALL active providers");
-    return allProviders
-      .filter((p) => p.isActive && p.type !== "puter" && p.type !== "local" && hasValidApiKey(p) && !isProviderExcluded(p))
-      .map((p) => ({ provider: p, model: p.modelName || "", overrides: {} }));
+    const active = allProviders
+      .filter((p) => p.isActive && p.type !== "puter" && p.type !== "local" && hasValidApiKey(p) && !isProviderExcluded(p));
+
+    const reliabilityRank: Record<string, number> = {
+      gemini: 1,
+      mistral: 2,
+      nvidia: 3,
+      openrouter: 4,
+      zencode: 5,
+      opencode: 6,
+    };
+    active.sort((a, b) => {
+      const isFreeA = isOpenCodeZenFree(a);
+      const isFreeB = isOpenCodeZenFree(b);
+      if (isFreeA !== isFreeB) return isFreeA ? 1 : -1;
+      const rankA = reliabilityRank[a.type] ?? 100;
+      const rankB = reliabilityRank[b.type] ?? 100;
+      return rankA - rankB;
+    });
+
+    return active.map((p) => ({ provider: p, model: p.modelName || "", overrides: {} }));
   }
 
   console.info(`[AI] Fallback chain: ${result.length} active entries (from ${chain.entries.length} total)`);

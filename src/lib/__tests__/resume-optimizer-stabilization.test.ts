@@ -27,6 +27,7 @@ import { matchExperienceEntry } from "../pipeline-orchestration-modules";
 import type { ResumeData } from "../types";
 import { enforceLockedFields } from "../agents/orchestrator";
 import { buildOptimizerInput } from "../bullet-only-optimizer";
+import { isOpenCodeZenFree, getRecommendedFallbacks, getProviderCapabilities } from "../provider-capabilities";
 
 // ============================================================================
 // Test Fixtures
@@ -832,5 +833,88 @@ describe("Enforce Locked Fields Bullet Length & Directive Cleaning", () => {
     expect(input.systemPrompt).toContain("LAYOUT & CONFIGURATION DIRECTIVES");
     expect(input.systemPrompt).not.toContain("OUTPUT FORMAT");
     expect(input.systemPrompt).not.toContain("OUTPUT CONTRACT");
+  });
+});
+
+// ============================================================================
+// 18. FREE PROVIDER STABILIZATION & CAPABILITIES
+// ============================================================================
+
+describe("Free Provider Stabilization & Capabilities", () => {
+  it("resolves capabilities correctly for nvidia and zencode", () => {
+    const nvidiaCaps = getProviderCapabilities("nvidia");
+    expect(nvidiaCaps.freeTier).toBe(true);
+    expect(nvidiaCaps.thirdPartyLimited).toBe(true);
+    expect(nvidiaCaps.maxConcurrentRequests).toBe(1);
+    expect(nvidiaCaps.retryable429).toBe(true);
+
+    const zencodeCaps = getProviderCapabilities("zencode");
+    expect(zencodeCaps.freeTier).toBe(true);
+    expect(zencodeCaps.thirdPartyLimited).toBe(true);
+    expect(zencodeCaps.maxConcurrentRequests).toBe(1);
+  });
+
+  it("isOpenCodeZenFree matches Nvidia NIM, ZenCode and Mistral free-tier providers", () => {
+    const nvidiaProvider = { type: "nvidia", name: "Nvidia NIM", modelName: "meta/llama-3.3-70b-instruct" };
+    expect(isOpenCodeZenFree(nvidiaProvider)).toBe(true);
+
+    const zencodeProvider = { type: "zencode", name: "ZenCode", modelName: "deepseek-v4-flash-free" };
+    expect(isOpenCodeZenFree(zencodeProvider)).toBe(true);
+
+    const opencodeProvider = { type: "opencode", name: "OpenCode", modelName: "deepseek-v4-flash-free" };
+    expect(isOpenCodeZenFree(opencodeProvider)).toBe(true);
+
+    const mistralFreeProvider = { type: "mistral", name: "Mistral Small", modelName: "mistral-small-latest" };
+    expect(isOpenCodeZenFree(mistralFreeProvider)).toBe(true);
+
+    const paidProvider = { type: "openai", name: "OpenAI", modelName: "gpt-4o" };
+    expect(isOpenCodeZenFree(paidProvider)).toBe(false);
+  });
+
+  it("getRecommendedFallbacks prioritizes most reliable free models", () => {
+    const providers = [
+      { id: "p_gemini", type: "gemini", isActive: true },
+      { id: "p_nvidia", type: "nvidia", name: "Nvidia NIM", modelName: "meta/llama-3.3-70b-instruct", isActive: true },
+      { id: "p_opencode", type: "opencode", name: "OpenCode Zen", modelName: "deepseek-v4-flash-free", isActive: true },
+      { id: "p_mistral", type: "mistral", name: "Mistral Small", modelName: "mistral-small-latest", isActive: true },
+    ];
+
+    const fallbacks = getRecommendedFallbacks(providers);
+    const types = fallbacks.map((f) => f.type);
+    
+    // Check that all are present
+    expect(types).toContain("gemini");
+    expect(types).toContain("nvidia");
+    expect(types).toContain("opencode");
+    expect(types).toContain("mistral");
+
+    // Check exact reliability priority ordering
+    const geminiIndex = types.indexOf("gemini");
+    const mistralIndex = types.indexOf("mistral");
+    const nvidiaIndex = types.indexOf("nvidia");
+    const opencodeIndex = types.indexOf("opencode");
+
+    expect(geminiIndex).toBeLessThan(nvidiaIndex);
+    expect(mistralIndex).toBeLessThan(nvidiaIndex);
+    expect(nvidiaIndex).toBeLessThan(opencodeIndex);
+  });
+
+  it("getOrderedFallbackProviders automatically sorts legacy providers by reliability", () => {
+    const originalState = useApp.getState();
+    useApp.setState({
+      providers: [
+        { id: "p_opencode", type: "opencode", isActive: true, modelName: "deepseek-v4-flash-free", apiKey: "key" },
+        { id: "p_gemini", type: "gemini", isActive: true, modelName: "gemini-1.5-flash", apiKey: "key" },
+        { id: "p_mistral", type: "mistral", isActive: true, modelName: "mistral-small-latest", apiKey: "key" },
+      ],
+      fallbackChain: { enabled: false, entries: [] }
+    } as any);
+
+    const ordered = getOrderedFallbackProviders();
+    expect(ordered[0].provider.type).toBe("gemini");
+    expect(ordered[1].provider.type).toBe("mistral");
+    expect(ordered[2].provider.type).toBe("opencode");
+
+    useApp.setState(originalState);
   });
 });
