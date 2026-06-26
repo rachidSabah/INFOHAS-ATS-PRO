@@ -87,7 +87,7 @@ export function Builder() {
   const onExportPDF = async () => {
     setExporting(true);
     await new Promise((r) => setTimeout(r, 100));
-    const result = exportResumePDF(resume, { enforceOnePage: true });
+    const result = await exportResumePDF(resume, { enforceOnePage: true });
     setExporting(false);
     if (result.ok) {
       incUsage("downloads");

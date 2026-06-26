@@ -609,7 +609,8 @@ Return ONLY valid JSON with this exact shape:
       "location": "City, Country" | "",
       "startDate": "YYYY",
       "endDate": "YYYY",
-      "modules": "Module 1, Module 2, ..." | ""
+      "field": "Customer services, hospitality English, ..." | "",
+      "highlights": ["Detail 1", "Detail 2"] | []
     },
     ...  // PRESERVE ALL original education entries
   ],
@@ -857,7 +858,8 @@ Return ONLY valid JSON with this exact shape:
       "location": "City, Country" | "",
       "startDate": "YYYY",
       "endDate": "YYYY",
-      "modules": "Module 1, Module 2, ..." | ""
+      "field": "Customer services, hospitality English, ..." | "",
+      "highlights": ["Detail 1", "Detail 2"] | []
     }
   ],
   "languages": [
@@ -2426,6 +2428,7 @@ function localOptimize(prompt: string): string {
     location: ed.location || "",
     startDate: ed.startDate || "",
     endDate: ed.endDate || "",
+    field: ed.field || "",
     modules: ed.highlights?.join(", ") || "",
   }));
 

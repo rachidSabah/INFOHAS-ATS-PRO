@@ -646,7 +646,7 @@ export function BulkGenerator() {
                     </div>
                     <div className="flex gap-1.5">
                       {job.optimizedResumeId && resumes.find((r) => r.id === job.optimizedResumeId) && (
-                        <Button size="sm" variant="outline" onClick={() => { const r = resumes.find((r) => r.id === job.optimizedResumeId)!; exportResumePDF(r); incUsage("downloads"); toast.success("Resume PDF exported."); }} className="gap-1 text-xs"><Icon name="Download" className="w-3 h-3" /> Resume</Button>
+                        <Button size="sm" variant="outline" onClick={async () => { const r = resumes.find((r) => r.id === job.optimizedResumeId)!; await exportResumePDF(r); incUsage("downloads"); toast.success("Resume PDF exported."); }} className="gap-1 text-xs"><Icon name="Download" className="w-3 h-3" /> Resume</Button>
                       )}
                     </div>
                   </div>

@@ -64,8 +64,160 @@ export function getDefaultResumeLayout(): ResumeLayoutModel {
 }
 
 // Convert pt → mm
-function ptToMm(pt: number): number {
-  return pt * 0.352778;
+function ptToMm(pt: number) { return pt * 0.352778; }
+
+// ============================================================================
+// Build A4-styled HTML string that matches the DOCX visual format.
+// Used by the HTML-based PDF exporter.
+// ============================================================================
+function buildResumeHtml(r: ResumeData, L: ResumeLayoutModel): string {
+  const fmtDate = (d?: string) => {
+    if (!d) return "";
+    if (/present|ongoing/i.test(d)) return "Present";
+    const m = d.match(/^(\d{4})-(\d{2})$/);
+    if (m) return m[1];
+    if (/^\d{4}$/.test(d)) return d;
+    return d;
+  };
+  const esc = (s: string) => s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
+
+  const bodySize = L.bodyFontSizePt;
+  const sectionSize = L.sectionTitleSizePt;
+  const nameSize = L.nameSizePt;
+  const nameColor = L.nameColor;
+  const sectionColor = L.sectionTitleColor;
+  const bodyColor = L.bodyTextColor;
+
+  const lines: string[] = [];
+
+  lines.push(`<!DOCTYPE html><html><head><meta charset="utf-8"><style>
+    @page { size: A4; margin: ${L.marginTopMm}mm ${L.marginRightMm}mm ${L.marginBottomMm}mm ${L.marginLeftMm}mm; }
+    * { box-sizing: border-box; }
+    body {
+      font-family: '${L.fontFamily}', 'Times New Roman', Times, serif;
+      font-size: ${bodySize}pt; color: ${bodyColor}; line-height: ${bodySize * 0.352778 * 1.15}mm;
+      margin: 0; padding: 0; width: 210mm;
+    }
+    h1 {
+      font-size: ${nameSize}pt; font-weight: bold;
+      color: ${nameColor}; text-transform: uppercase;
+      margin: 0 0 1.5mm 0; padding: 0;
+    }
+    .contact { font-size: ${bodySize}pt; color: #444; margin: 0 0 2mm 0; }
+    .section-title {
+      font-size: ${sectionSize}pt; font-weight: bold;
+      color: ${sectionColor}; text-transform: uppercase;
+      margin: 2.5mm 0 0.8mm 0; padding: 0;
+      border-bottom: 0.5px solid ${sectionColor}; padding-bottom: 0.3mm;
+    }
+    .entry-row { clear: both; margin: 0.3mm 0 0 0; width: 100%; }
+    .entry-title { font-weight: bold; font-size: ${bodySize}pt; color: ${bodyColor}; }
+    .entry-company { font-weight: normal; color: ${bodyColor}; }
+    .entry-date { float: right; font-style: italic; color: #555; font-size: ${(bodySize * 0.85).toFixed(1)}pt; }
+    .edu-detail { font-size: ${(bodySize * 0.95).toFixed(1)}pt; color: ${bodyColor}; }
+    p { margin: 0.5mm 0 1mm 0; text-align: justify; }
+    ul { margin: 0.3mm 0 0.8mm 0; padding-left: 4mm; list-style: disc; }
+    li { margin-bottom: 0.2mm; }
+    .clearfix::after { content: ""; clear: both; display: table; }
+  </style></head><body>`);
+
+  // NAME
+  lines.push(`<h1>${esc((r.name || "YOUR NAME").toUpperCase())}</h1>`);
+
+  // Headline
+  if (r.headline) {
+    lines.push(`<div style="color:${sectionColor};font-size:${(bodySize * 1.05).toFixed(1)}pt;margin:0 0 1.5mm 0">${esc(r.headline)}</div>`);
+  }
+
+  // Contact
+  const contactParts = [r.contact.email, r.contact.phone, r.contact.location, r.contact.linkedin, r.contact.github, r.contact.website].filter(Boolean);
+  if (contactParts.length) {
+    lines.push(`<div class="contact">${contactParts.map(c => esc(c)).join("  |  ")}</div>`);
+  }
+
+  // Separator
+  lines.push(`<div style="height:0.5px;background:${sectionColor};margin:1.5mm 0 1mm 0"></div>`);
+
+  // PROFESSIONAL SUMMARY
+  if (r.summary) {
+    lines.push(`<div class="section-title">PROFESSIONAL SUMMARY</div>`);
+    lines.push(`<p>${esc(r.summary)}</p>`);
+  }
+
+  // PROFESSIONAL EXPERIENCE
+  if (r.experience.length) {
+    lines.push(`<div class="section-title">PROFESSIONAL EXPERIENCE</div>`);
+    for (const e of r.experience) {
+      const dateStr = e.startDate || e.endDate ? `${fmtDate(e.startDate)} \u2013 ${fmtDate(e.endDate)}` : "";
+      const titleCompany = `${esc(e.title)}${e.company ? ` <span class="entry-company">\u2014 ${esc(e.company)}</span>` : ""}`;
+      lines.push(`<div class="entry-row clearfix"><span class="entry-title">${titleCompany}</span>${dateStr ? `<span class="entry-date">${esc(dateStr)}</span>` : ""}</div>`);
+      if (e.bullets.length) {
+        lines.push(`<ul>${e.bullets.map(b => `<li>${esc(b)}</li>`).join("")}</ul>`);
+      }
+    }
+  }
+
+  // EDUCATION
+  if (r.education.length) {
+    lines.push(`<div class="section-title">EDUCATION</div>`);
+    for (const ed of r.education) {
+      const dateStr = ed.startDate || ed.endDate ? `${fmtDate(ed.startDate)} \u2013 ${fmtDate(ed.endDate)}` : "";
+      const leftSide = `${esc(ed.degree)} ${esc(ed.institution)}${ed.location ? ` | ${esc(ed.location)}` : ""}`;
+      lines.push(`<div class="entry-row clearfix"><span class="entry-title">${leftSide}</span>${dateStr ? `<span class="entry-date">${esc(dateStr)}</span>` : ""}</div>`);
+      if (ed.field) {
+        lines.push(`<div class="edu-detail" style="margin:0.1mm 0 0.3mm 0">${esc(ed.field)}</div>`);
+      }
+      if (ed.highlights?.length) {
+        lines.push(`<ul>${ed.highlights.map(h => `<li>${esc(h)}</li>`).join("")}</ul>`);
+      }
+    }
+  }
+
+  // SKILLS
+  if (r.skills.length) {
+    lines.push(`<div class="section-title">CORE COMPETENCIES &amp; SKILLS</div>`);
+    const categorized = new Map<string, string[]>();
+    for (const s of r.skills) {
+      const cat = s.category?.trim() || "General";
+      if (!categorized.has(cat)) categorized.set(cat, []);
+      categorized.get(cat)!.push(s.name);
+    }
+    for (const [cat, skills] of categorized) {
+      lines.push(`<div style="margin:0.2mm 0"><strong>${esc(cat)}:</strong> ${skills.map(s => esc(s)).join(", ")}</div>`);
+    }
+  }
+
+  // PROJECTS
+  if (r.projects?.length) {
+    lines.push(`<div class="section-title">PROJECTS</div>`);
+    for (const p of r.projects.slice(0, 2)) {
+      lines.push(`<div class="entry-title">${esc(p.name)}</div>`);
+      if (p.description) lines.push(`<p style="margin:0.1mm 0 0.5mm 0">${esc(p.description)}</p>`);
+    }
+  }
+
+  // CERTIFICATIONS
+  if (r.certifications?.length) {
+    lines.push(`<div class="section-title">CERTIFICATIONS</div>`);
+    lines.push(`<ul>`);
+    for (const c of r.certifications.slice(0, 4)) {
+      const certText = `${esc(c.name)}${c.issuer ? ` \u2014 ${esc(c.issuer)}` : ""}${c.date ? ` (${fmtDate(c.date)})` : ""}`;
+      lines.push(`<li>${certText}</li>`);
+    }
+    lines.push(`</ul>`);
+  }
+
+  // LANGUAGES
+  if (r.languages.length) {
+    lines.push(`<div class="section-title">LANGUAGES</div>`);
+    for (const l of r.languages) {
+      const note = (l as any).note ? ` (${esc((l as any).note)})` : "";
+      lines.push(`<div style="margin:0.1mm 0">${esc(l.name)}: ${esc(l.proficiency)}${note}</div>`);
+    }
+  }
+
+  lines.push(`</body></html>`);
+  return lines.join("\n");
 }
 
 // ---------- PDF: One A4 page enforcement ----------
@@ -81,85 +233,44 @@ interface PDFOptions {
   enforceOnePage?: boolean;
 }
 
-export function exportResumePDF(resume: ResumeData, opts: PDFOptions = {}, layout?: ResumeLayoutModel): { ok: boolean; pages: number; error?: string } {
+export async function exportResumePDF(resume: ResumeData, opts: PDFOptions = {}, layout?: ResumeLayoutModel): Promise<{ ok: boolean; pages: number; error?: string }> {
   const L = layout ?? getDefaultResumeLayout();
   if (resume.template === "infohas-pro" || opts.template === "infohas-pro") {
     return exportInfohasProPDF(resume, opts, L);
   }
 
-  const accent = opts.accentColor || resume.accentColor || "#1154A3";
-  const accentRgb = hexToRgb(accent);
-
-  // Pick font sizes based on content volume — auto-compress
-  const sizes = pickSizesForResume(resume);
+  // Build the HTML using the DOCX-matching HTML builder
+  const html = buildResumeHtml(resume, L);
 
   const doc = new jsPDF({ unit: "mm", format: "a4", orientation: "portrait" });
 
-  // Try to render; if it overflows, retry with progressively tighter sizes
-  let attempt = 0;
-  let result: { ok: boolean; pages: number; error?: string } = { ok: false, pages: 0 };
-  let currentSizes = { ...sizes };
+  try {
+    await doc.html(html, {
+      callback: () => {},
+      html2canvas: { scale: 2, useCORS: false, letterRendering: true, logging: false },
+      autoPaging: 'text',
+      x: 0,
+      y: 0,
+      width: 210 - L.marginLeftMm - L.marginRightMm, // mm
+      windowWidth: Math.round((210 - L.marginLeftMm - L.marginRightMm) / 25.4 * 96), // px at 96dpi
+    });
 
-  while (attempt < 4) {
-    doc.deletePage(1);
-    doc.addPage("a4", "portrait");
-    renderResumeToPdf(doc, resume, currentSizes, accentRgb);
     const pages = doc.getNumberOfPages();
-    if (pages === 1) {
-      result = { ok: true, pages };
-      break;
+    let result: { ok: boolean; pages: number; error?: string } = { ok: true, pages };
+
+    if (opts.enforceOnePage !== false && pages > 2) {
+      result = { ok: false, pages, error: `Resume is ${pages} pages. Please reduce content.` };
+    } else if (opts.enforceOnePage !== false && pages > 1) {
+      result = { ok: true, pages, error: `Resume fits on ${pages} pages. Some content may overflow.` };
     }
-    // Overflow — compress and retry
-    currentSizes = compressSizes(currentSizes);
-    attempt++;
-  }
 
-  if (!result.ok && opts.enforceOnePage !== false) {
-    // Final attempt: compress more aggressively but DON'T strip core sections.
-    // Keep all education, experience, skills, certifications, languages.
-    // Only trim achievements (least important) and limit projects to 1.
-    doc.deletePage(1);
-    doc.addPage("a4", "portrait");
-    const trimmed: ResumeData = {
-      ...resume,
-      projects: resume.projects.slice(0, 1), // keep 1 project instead of 0
-      certifications: resume.certifications.slice(0, 4), // keep up to 4
-      languages: resume.languages.slice(0, 4), // keep up to 4
-      achievements: resume.achievements?.slice(0, 2), // keep up to 2
-    };
-    // Use extra-compressed sizes
-    const extraCompressed = compressSizes(compressSizes(currentSizes));
-    renderResumeToPdf(doc, trimmed, extraCompressed, accentRgb);
-    const pages = doc.getNumberOfPages();
-    if (pages <= 2) {
-      // Accept 2 pages as fallback rather than losing content, but flag it
-      result = {
-        ok: true,
-        pages,
-        error: pages > 1 ? `Resume fits on ${pages} pages. Some content was compressed. Consider reducing content for a single-page resume.` : undefined,
-      };
-    } else {
-      // More than 2 pages — this is a real failure, not a silent success
-      result = { ok: false, pages, error: `Resume is ${pages} pages after aggressive compression. Please reduce content manually.` };
-    }
+    const fname = (resume.name || "resume").replace(/\s+/g, "_") + "_resume.pdf";
+    doc.save(fname);
+    return result;
+  } catch (err) {
+    console.error("[exporter] HTML-to-PDF rendering failed:", err);
+    return { ok: false, pages: 0, error: `PDF rendering error: ${err instanceof Error ? err.message : String(err)}` };
   }
-
-  // Validation: prefer 1 page, but allow 2 as fallback rather than losing content
-  if (opts.enforceOnePage !== false && result.pages > 2) {
-    return { ok: false, pages: result.pages, error: `Resume is ${result.pages} pages — too long. Please reduce content manually.` };
-  }
-
-  // HARDENING: Validate no content was silently clipped
-  // If the rendered resume has fewer sections than the input, flag a warning
-  const originalSectionCount = countResumeSections(resume);
-  const renderedSectionCount = result.ok ? originalSectionCount : 0; // only count if ok
-  if (result.ok && renderedSectionCount > 0 && !result.error) {
-    // All sections preserved — clean success
-  }
-
-  const fname = (resume.name || "resume").replace(/\s+/g, "_") + "_resume.pdf";
-  doc.save(fname);
-  return result;
 }
 
 // ============================================================================
@@ -903,7 +1014,7 @@ export async function exportResumeDOCX(resume: ResumeData, layout?: ResumeLayout
   if (resume.education.length) {
     addSection("EDUCATION");
     for (const ed of resume.education) {
-      const leftSide = `${ed.degree} ${ed.institution}${ed.location ? ` | ${ed.location}` : ""}`;
+      const leftSide = `${ed.degree} ${ed.institution}${ed.field ? ` (${ed.field})` : ""}${ed.location ? ` | ${ed.location}` : ""}`;
       const dateStr = ed.startDate || ed.endDate ? `${fmtInfohasDate(ed.startDate)} – ${fmtInfohasDate(ed.endDate)}` : "";
 
       children.push(new Paragraph({

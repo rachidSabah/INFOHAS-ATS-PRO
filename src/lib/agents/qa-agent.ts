@@ -495,7 +495,7 @@ export function checkProfessionalTone(resume: ResumeData): ProfessionalToneResul
  */
 export async function checkExportQuality(resume: ResumeData): Promise<ExportQualityResult> {
   try {
-    const result = exportResumePDF(resume, { enforceOnePage: true });
+    const result = await exportResumePDF(resume, { enforceOnePage: true });
 
     if (!result.ok) {
       return {

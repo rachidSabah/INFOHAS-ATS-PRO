@@ -17,8 +17,8 @@ export function Downloads() {
   const incUsage = useApp((s) => s.incUsage);
   const log = useApp((s) => s.log);
 
-  const downloadResume = (r: any, fmt: "pdf" | "docx" | "txt") => {
-    if (fmt === "pdf") { const res = exportResumePDF(r, { enforceOnePage: true }); if (!res.ok) return; }
+  const downloadResume = async (r: any, fmt: "pdf" | "docx" | "txt") => {
+    if (fmt === "pdf") { const res = await exportResumePDF(r, { enforceOnePage: true }); if (!res.ok) return; }
     if (fmt === "docx") exportResumeDOCX(r);
     if (fmt === "txt") exportResumeTXT(r);
     incUsage("downloads");

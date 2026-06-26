@@ -1037,17 +1037,17 @@ export function Optimizer() {
                 <CardHeader><CardTitle className="text-base">Download your optimized resume</CardTitle></CardHeader>
                 <CardContent>
                   <div className="flex flex-wrap gap-2">
-                    <Button onClick={() => {
+                    <Button onClick={async () => {
                       // FINAL validation before PDF export — no error leaks allowed
                       const exportCheck = validateResumeForExport(optimizedResume);
                       if (!exportCheck.valid && exportCheck.cleanedResume) {
                         toast.warning("Cleaned error leaks from resume before export.");
-                        const r = exportResumePDF(exportCheck.cleanedResume, { enforceOnePage: true });
+                        const r = await exportResumePDF(exportCheck.cleanedResume, { enforceOnePage: true });
                         if (r.ok) { incUsage("downloads"); toast.success("PDF exported — 1 A4 page."); } else toast.error(r.error || "Export failed.");
                       } else if (!exportCheck.valid) {
                         toast.error("Resume contains errors and cannot be exported. Please regenerate.");
                       } else {
-                        const r = exportResumePDF(optimizedResume, { enforceOnePage: true });
+                        const r = await exportResumePDF(optimizedResume, { enforceOnePage: true });
                         if (r.ok) { incUsage("downloads"); toast.success("PDF exported — 1 A4 page."); } else toast.error(r.error || "Export failed.");
                       }
                     }} className="bg-brand hover:bg-brand-dark text-white gap-2"><Icon name="Download" className="w-4 h-4" /> optimized_resume.pdf</Button>
