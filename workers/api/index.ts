@@ -18,15 +18,44 @@ app.use("*", logger());
 app.use(
   "*",
   cors({
+    // Allow all origins by default. Cloudflare Pages deployments have
+    // dynamic URLs (e.g., bcf5bbd9.resumeai-pro.pages.dev) that change on
+    // each deploy, so restricting to a single origin breaks the frontend.
+    // For production, set CORS_ORIGIN to your custom domain (e.g., https://resumeai-pro.com).
     origin: (origin, c) => {
       const allowed = c.env.CORS_ORIGIN || "*";
-      return origin === allowed ? origin : allowed === "*" ? origin : null;
+      if (allowed === "*") {
+        // Wildcard mode: allow any origin (return the request origin so
+        // credentials: true works — can't use "*" with credentials)
+        return origin || "*";
+      }
+      // Specific origin mode: check if the request origin is allowed.
+      // Support comma-separated list of allowed origins.
+      const allowedList = allowed.split(",").map((o) => o.trim());
+      if (origin && allowedList.includes(origin)) {
+        return origin;
+      }
+      // Also allow any *.pages.dev subdomain (Cloudflare Pages preview deployments)
+      if (origin && /\.pages\.dev$/.test(new URL(origin).hostname)) {
+        return origin;
+      }
+      // Also allow any *.workers.dev subdomain (Cloudflare Workers preview)
+      if (origin && /\.workers\.dev$/.test(new URL(origin).hostname)) {
+        return origin;
+      }
+      return null;
     },
     credentials: true,
-    allowHeaders: ["Content-Type", "Authorization", "X-User-Id"],
+    allowHeaders: ["Content-Type", "Authorization", "X-User-Id", "X-Requested-With"],
     allowMethods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    exposeHeaders: ["Content-Length", "X-Total-Count"],
+    maxAge: 86400, // Cache preflight for 24 hours
   })
 );
+
+// Explicit OPTIONS handler — ensures preflight requests always get a 200
+// response with CORS headers, even if no route matches.
+app.options("*", (c) => c.text("", 200));
 
 // Helper: parse JSON body
 async function parseBody(req: Request): Promise<Record<string, unknown>> {
