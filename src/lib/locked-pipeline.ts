@@ -21,7 +21,7 @@
 
 "use client";
 
-import type { ResumeData, JobDescription } from "./types";
+import type { ResumeData, JobDescription, AgentDirectives } from "./types";
 import { runBulletOnlyOptimizer, buildOptimizerInput } from "./bullet-only-optimizer";
 import { assembleResume } from "./resume-assembler";
 import { runStructureGuardian } from "./structure-guardian";
@@ -69,6 +69,7 @@ export async function runLockedPipeline(
   sourceResume: ResumeData,
   jd: JobDescription,
   intelligenceContext: string,
+  agentDirectives?: AgentDirectives,
 ): Promise<LockedPipelineResult> {
   const warnings: string[] = [];
   const errors: string[] = [];
@@ -79,12 +80,15 @@ export async function runLockedPipeline(
   // Fingerprints are computed on-demand by the assembler, so no explicit
   // step needed here. But we log the source experience count for verification.
   console.info(`[Locked Pipeline] Source resume: ${sourceResume.experience.length} experience entries, ${sourceResume.education.length} education entries, ${sourceResume.languages.length} languages`);
+  if (agentDirectives) {
+    console.info(`[Locked Pipeline] Agent directives: supervisor.strictMode=${agentDirectives.supervisor.strictMode}, summary.atsAggressiveness=${agentDirectives.summary.atsAggressiveness}, experience.rewriteBulletsOnly=${agentDirectives.experience.rewriteBulletsOnly}`);
+  }
 
   // ========================================================================
   // Step 2: Run Bullet-Only Optimizer
   // ========================================================================
-  const optimizerInput = buildOptimizerInput(sourceResume, jd, intelligenceContext);
-  const optimizerResult = await runBulletOnlyOptimizer(sourceResume, jd, intelligenceContext);
+  const optimizerInput = buildOptimizerInput(sourceResume, jd, intelligenceContext, agentDirectives);
+  const optimizerResult = await runBulletOnlyOptimizer(sourceResume, jd, intelligenceContext, agentDirectives);
   warnings.push(...optimizerResult.warnings);
 
   console.info(`[Locked Pipeline] Optimizer returned: ${optimizerResult.output.experiences?.length ?? 0} experiences, ${optimizerResult.output.skills?.length ?? 0} skills`);

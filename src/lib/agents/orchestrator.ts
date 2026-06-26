@@ -882,8 +882,10 @@ Bridging Strategy: ${result.skillGap.bridgingStrategy}`);
           const intelligenceContext = intelligenceBlocks.join("\n\n");
 
           // Run the locked pipeline
+          // Pass the user-configured per-agent directives from the store
           const { runLockedPipeline } = await import("../locked-pipeline");
-          const lockedResult = await runLockedPipeline(resume, jd, intelligenceContext);
+          const agentDirectives = (useApp.getState() as any)?.optimizerDirective?.agentDirectives;
+          const lockedResult = await runLockedPipeline(resume, jd, intelligenceContext, agentDirectives);
 
           optimizeResult = {
             resume: lockedResult.resume,

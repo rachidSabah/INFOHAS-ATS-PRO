@@ -553,6 +553,105 @@ export interface OptimizerDirectiveConfig {
   // If non-empty, this COMPLETELY REPLACES the generated directive text.
   // Use for advanced fine-tuning that the structured fields above can't express.
   customDirectiveOverride: string;
+
+  // === PER-AGENT DIRECTIVES ===
+  // Configurable directives for each agent in the multi-agent pipeline.
+  // These control what each agent is allowed to do, with what aggressiveness,
+  // and with what constraints. They are injected into each agent's prompt.
+  agentDirectives: AgentDirectives;
+}
+
+/**
+ * Per-agent directive configuration.
+ * Each agent has its own set of knobs that control its behavior.
+ */
+export interface AgentDirectives {
+  supervisor: SupervisorDirective;
+  summary: SummaryAgentDirective;
+  skills: SkillsAgentDirective;
+  experience: ExperienceAgentDirective;
+  education: EducationAgentDirective;
+  languages: LanguagesAgentDirective;
+}
+
+/**
+ * Supervisor Directive — controls the orchestration behavior.
+ */
+export interface SupervisorDirective {
+  /** If true, pipeline hard-fails on any critical issue (no graceful degradation) */
+  strictMode: boolean;
+  /** If true, retry failed optimization attempts with a different provider */
+  enableRetries: boolean;
+  /** If true, switch to next provider when current one fails/times out */
+  enableProviderSwitch: boolean;
+  /** If true, immutable entities (company, dates, education) are enforced post-optimization */
+  enforceImmutableEntities: boolean;
+  /** If true, emit detailed debug logs to console */
+  enableDebugLogs: boolean;
+  /** If true, show before/after diff viewer in the UI */
+  enableDiffViewer: boolean;
+}
+
+/**
+ * Summary Agent Directive — controls summary rewriting.
+ */
+export interface SummaryAgentDirective {
+  /** 0-100: how aggressively to inject ATS keywords (0 = minimal, 100 = maximal) */
+  atsAggressiveness: number;
+  /** If true, never add facts not present in the source resume */
+  preserveFacts: boolean;
+  /** Maximum character count for the summary */
+  maxCharacters: number;
+  /** Minimum character count for the summary */
+  minCharacters: number;
+}
+
+/**
+ * Skills Agent Directive — controls skills enrichment.
+ */
+export interface SkillsAgentDirective {
+  /** Maximum number of skills to include */
+  maxKeywords: number;
+  /** If true, add transferable skills that bridge JD gaps */
+  allowTransferableSkills: boolean;
+  /** If true, allow company names as skills (FORBIDDEN — always false) */
+  allowCompanyKeywords: boolean;
+  /** If true, allow location names as skills (FORBIDDEN — always false) */
+  allowLocationKeywords: boolean;
+}
+
+/**
+ * Experience Agent Directive — controls bullet rewriting.
+ */
+export interface ExperienceAgentDirective {
+  /** If true, only rewrite bullets (never title/company/dates/location) */
+  rewriteBulletsOnly: boolean;
+  /** If true, allow title rewriting (FORBIDDEN in locked pipeline) */
+  rewriteTitle: boolean;
+  /** If true, allow company rewriting (FORBIDDEN in locked pipeline) */
+  rewriteCompany: boolean;
+  /** If true, allow date rewriting (FORBIDDEN in locked pipeline) */
+  rewriteDates: boolean;
+  /** If true, allow location rewriting (FORBIDDEN in locked pipeline) */
+  rewriteLocation: boolean;
+  /** Max percentage by which bullets can expand vs original (0 = no expansion, 50 = allow 50% longer) */
+  maxExpansionPercent: number;
+}
+
+/**
+ * Education Agent Directive — formatting only, no inference.
+ */
+export interface EducationAgentDirective {
+  /** If true, only format education (never add/infer entries) */
+  formatOnly: boolean;
+}
+
+/**
+ * Languages Agent Directive — formatting only, no inference.
+ */
+export interface LanguagesAgentDirective {
+  /** If true, only format languages (never add/infer entries) */
+  formatOnly: boolean;
 }
 
 /**

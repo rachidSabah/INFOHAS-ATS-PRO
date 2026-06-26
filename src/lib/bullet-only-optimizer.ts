@@ -28,7 +28,7 @@
 
 "use client";
 
-import type { ResumeData, ResumeSkill, JobDescription } from "./types";
+import type { ResumeData, ResumeSkill, JobDescription, AgentDirectives } from "./types";
 import { callAI, extractJSON, OPTIMIZER_CALL_TIMEOUT_MS } from "./ai";
 import { cleanupGrammar, repairMalformedJSON, stripMarkdown } from "./ai-response-processor";
 import type { OptimizerOutput } from "./resume-assembler";
@@ -53,6 +53,7 @@ export function buildOptimizerInput(
   sourceResume: ResumeData,
   jd: JobDescription,
   intelligenceContext: string,
+  agentDirectives?: AgentDirectives,
 ): { systemPrompt: string; userPrompt: string } {
   // The source resume sent to the LLM — includes IDs for experience entries
   // so the LLM can echo them back.
@@ -162,6 +163,8 @@ CRITICAL RULES:
    - Embed 2-3 priority keywords naturally.
    - Must describe the candidate, NOT critique the resume.
    - NEVER include analysis phrases like "The original resume lacks..." or "Missing keywords:".
+
+${agentDirectives ? buildAgentDirectiveSection(agentDirectives) : ""}
 
 Return ONLY valid JSON. No prose, no markdown fences, no HTML.`;
 
@@ -311,8 +314,9 @@ export async function runBulletOnlyOptimizer(
   sourceResume: ResumeData,
   jd: JobDescription,
   intelligenceContext: string,
+  agentDirectives?: AgentDirectives,
 ): Promise<BulletOnlyOptimizerResult> {
-  const { systemPrompt, userPrompt } = buildOptimizerInput(sourceResume, jd, intelligenceContext);
+  const { systemPrompt, userPrompt } = buildOptimizerInput(sourceResume, jd, intelligenceContext, agentDirectives);
 
   const result = await callAI({
     systemPrompt,
@@ -340,4 +344,64 @@ export async function runBulletOnlyOptimizer(
     rawResponse: result.text,
     warnings,
   };
+}
+
+/**
+ * Build the agent directive section that gets injected into the LLM prompt.
+ *
+ * This reflects the user's configured per-agent directives (from the UI)
+ * into the actual prompt text sent to the LLM.
+ */
+function buildAgentDirectiveSection(d: AgentDirectives): string {
+  const lines: string[] = [];
+
+  lines.push("═══════════════════════════════════════════════════════════════");
+  lines.push("AGENT DIRECTIVES (user-configured — MUST follow)");
+  lines.push("═══════════════════════════════════════════════════════════════");
+
+  // Summary Agent
+  lines.push("");
+  lines.push("SUMMARY AGENT DIRECTIVE:");
+  lines.push(`- ATS Aggressiveness: ${d.summary.atsAggressiveness}/100 ${
+    d.summary.atsAggressiveness < 30 ? "(minimal — only rephrase, do not add new keywords)" :
+    d.summary.atsAggressiveness < 70 ? "(moderate — embed keywords naturally)" :
+    "(aggressive — maximize keyword density, but never stuff)"
+  }`);
+  lines.push(`- Preserve Facts: ${d.summary.preserveFacts ? "YES — never add facts not in source" : "NO (warning: may add inferred facts)"}`);
+  lines.push(`- Summary Length: ${d.summary.minCharacters}-${d.summary.maxCharacters} characters`);
+
+  // Skills Agent
+  lines.push("");
+  lines.push("SKILLS AGENT DIRECTIVE:");
+  lines.push(`- Max Keywords: ${d.skills.maxKeywords}`);
+  lines.push(`- Transferable Skills: ${d.skills.allowTransferableSkills ? "ALLOWED — bridge JD gaps with transferable skills" : "NOT allowed"}`);
+  lines.push(`- Company Keywords: ${d.skills.allowCompanyKeywords ? "allowed" : "FORBIDDEN (never use company names as skills)"}`);
+  lines.push(`- Location Keywords: ${d.skills.allowLocationKeywords ? "allowed" : "FORBIDDEN (never use location names as skills)"}`);
+
+  // Experience Agent
+  lines.push("");
+  lines.push("EXPERIENCE AGENT DIRECTIVE:");
+  lines.push(`- Rewrite: ${d.experience.rewriteBulletsOnly ? "BULLETS ONLY (title, company, dates, location are LOCKED)" : "all fields (warning: may corrupt locked fields)"}`);
+  lines.push(`- Max Expansion: ${d.experience.maxExpansionPercent}% (bullets can be at most ${d.experience.maxExpansionPercent}% longer than original)`);
+
+  // Education Agent
+  lines.push("");
+  lines.push("EDUCATION AGENT DIRECTIVE:");
+  lines.push(`- ${d.education.formatOnly ? "FORMAT ONLY — never add, remove, or infer education" : "Full edit allowed (warning: may corrupt education)"}`);
+
+  // Languages Agent
+  lines.push("");
+  lines.push("LANGUAGES AGENT DIRECTIVE:");
+  lines.push(`- ${d.languages.formatOnly ? "FORMAT ONLY — never add, remove, or infer languages" : "Full edit allowed (warning: may corrupt languages)"}`);
+
+  // Supervisor
+  lines.push("");
+  lines.push("SUPERVISOR DIRECTIVE:");
+  lines.push(`- Strict Mode: ${d.supervisor.strictMode ? "ENABLED — hard-fail on any critical issue" : "disabled (graceful degradation)"}`);
+  lines.push(`- Immutable Entity Enforcement: ${d.supervisor.enforceImmutableEntities ? "ENABLED" : "disabled"}`);
+
+  lines.push("");
+  lines.push("═══════════════════════════════════════════════════════════════");
+
+  return lines.join("\n");
 }

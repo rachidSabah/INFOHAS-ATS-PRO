@@ -616,6 +616,46 @@ export const SEED_OPTIMIZER_DIRECTIVE: OptimizerDirectiveConfig = {
 
   // === CUSTOM DIRECTIVE (ADVANCED) ===
   customDirectiveOverride: "", // empty = use generated directive
+
+  // === PER-AGENT DIRECTIVES ===
+  // Default values for each agent's behavior knobs.
+  // Users can override these in the Optimizer Directive → Agent Directives tab.
+  agentDirectives: {
+    supervisor: {
+      strictMode: true,
+      enableRetries: true,
+      enableProviderSwitch: true,
+      enforceImmutableEntities: true,
+      enableDebugLogs: false,
+      enableDiffViewer: true,
+    },
+    summary: {
+      atsAggressiveness: 60, // moderate — embed keywords naturally, don't stuff
+      preserveFacts: true,
+      maxCharacters: 600,
+      minCharacters: 350,
+    },
+    skills: {
+      maxKeywords: 15,
+      allowTransferableSkills: true,
+      allowCompanyKeywords: false, // FORBIDDEN — always false
+      allowLocationKeywords: false, // FORBIDDEN — always false
+    },
+    experience: {
+      rewriteBulletsOnly: true,
+      rewriteTitle: false,        // FORBIDDEN in locked pipeline
+      rewriteCompany: false,      // FORBIDDEN in locked pipeline
+      rewriteDates: false,        // FORBIDDEN in locked pipeline
+      rewriteLocation: false,     // FORBIDDEN in locked pipeline
+      maxExpansionPercent: 20,    // bullets can be up to 20% longer than original
+    },
+    education: {
+      formatOnly: true,
+    },
+    languages: {
+      formatOnly: true,
+    },
+  },
 };
 
 /**

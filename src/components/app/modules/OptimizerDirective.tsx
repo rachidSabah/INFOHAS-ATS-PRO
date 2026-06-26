@@ -11,7 +11,7 @@ import { Badge, Icon } from "@/components/shared";
 import { useApp } from "@/lib/store";
 import { SEED_OPTIMIZER_DIRECTIVE } from "@/lib/mock-data";
 import { toast } from "sonner";
-import type { OptimizerDirectiveConfig } from "@/lib/types";
+import type { OptimizerDirectiveConfig, AgentDirectives } from "@/lib/types";
 
 export function OptimizerDirective() {
   const config = useApp((s) => s.optimizerDirective);
@@ -246,6 +246,9 @@ export function OptimizerDirective() {
         </CardContent>
       </Card>
 
+      {/* PER-AGENT DIRECTIVES */}
+      <AgentDirectivesSection draft={draft} patch={patch} />
+
       {/* Live preview of generated directive */}
       <Card>
         <CardHeader>
@@ -316,6 +319,305 @@ function ColorField({ label, value, onChange }: { label: string; value: string; 
         />
         <Input value={value} onChange={(e) => onChange(e.target.value)} className="flex-1 font-mono text-xs" placeholder="#000000" />
       </div>
+    </div>
+  );
+}
+
+// === Agent Directives Section ===
+
+function AgentDirectivesSection({ draft, patch }: { draft: OptimizerDirectiveConfig; patch: (p: Partial<OptimizerDirectiveConfig>) => void }) {
+  const updateAgent = <K extends keyof AgentDirectives>(key: K, value: Partial<AgentDirectives[K]>) => {
+    patch({
+      agentDirectives: {
+        ...draft.agentDirectives,
+        [key]: { ...draft.agentDirectives[key], ...value },
+      },
+    });
+  };
+
+  return (
+    <>
+      {/* Section header */}
+      <div className="flex items-center gap-2 pt-4">
+        <Icon name="Bot" className="w-5 h-5 text-brand" />
+        <h2 className="font-display text-xl font-bold">Per-Agent Directives</h2>
+        <Badge variant="outline" className="text-[10px] ml-2">New</Badge>
+      </div>
+      <p className="text-sm text-muted-foreground">
+        Configure what each agent in the multi-agent pipeline is allowed to do. These directives are injected into each agent's prompt and enforced by the Resume Structure Guardian.
+      </p>
+
+      {/* Supervisor Directive */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-lg flex items-center gap-2">
+            <Icon name="Shield" className="w-4 h-4 text-brand" /> Supervisor Agent
+          </CardTitle>
+          <CardDescription>Controls orchestration, retries, provider switching, and strict mode enforcement.</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <SwitchRow
+            label="Strict Mode"
+            description="Hard-fail on any critical issue (no graceful degradation). Returns REQUIRES_MANUAL_REVIEW."
+            checked={draft.agentDirectives.supervisor.strictMode}
+            onChange={(v) => updateAgent("supervisor", { strictMode: v })}
+          />
+          <SwitchRow
+            label="Enable Retries"
+            description="Retry failed optimization attempts (up to 4 attempts)."
+            checked={draft.agentDirectives.supervisor.enableRetries}
+            onChange={(v) => updateAgent("supervisor", { enableRetries: v })}
+          />
+          <SwitchRow
+            label="Enable Provider Switch"
+            description="Switch to next AI provider when current one fails or times out."
+            checked={draft.agentDirectives.supervisor.enableProviderSwitch}
+            onChange={(v) => updateAgent("supervisor", { enableProviderSwitch: v })}
+          />
+          <SwitchRow
+            label="Enforce Immutable Entities"
+            description="Post-optimization enforcement of company names, dates, education, languages."
+            checked={draft.agentDirectives.supervisor.enforceImmutableEntities}
+            onChange={(v) => updateAgent("supervisor", { enforceImmutableEntities: v })}
+          />
+          <SwitchRow
+            label="Enable Debug Logs"
+            description="Emit detailed console logs for each pipeline stage (source, optimizer input/output, assembler, guardian)."
+            checked={draft.agentDirectives.supervisor.enableDebugLogs}
+            onChange={(v) => updateAgent("supervisor", { enableDebugLogs: v })}
+          />
+          <SwitchRow
+            label="Enable Diff Viewer"
+            description="Show before/after diff viewer in the UI after optimization completes."
+            checked={draft.agentDirectives.supervisor.enableDiffViewer}
+            onChange={(v) => updateAgent("supervisor", { enableDiffViewer: v })}
+          />
+        </CardContent>
+      </Card>
+
+      {/* Summary Agent Directive */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-lg flex items-center gap-2">
+            <Icon name="AlignLeft" className="w-4 h-4 text-brand" /> Summary Agent
+          </CardTitle>
+          <CardDescription>Controls professional summary rewriting and ATS keyword injection.</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div>
+            <div className="flex items-center justify-between mb-1">
+              <Label>ATS Aggressiveness</Label>
+              <Badge variant="outline" className="text-[10px]">{draft.agentDirectives.summary.atsAggressiveness}/100</Badge>
+            </div>
+            <input
+              type="range"
+              min={0}
+              max={100}
+              step={5}
+              value={draft.agentDirectives.summary.atsAggressiveness}
+              onChange={(e) => updateAgent("summary", { atsAggressiveness: parseInt(e.target.value) })}
+              className="w-full"
+            />
+            <p className="text-xs text-muted-foreground mt-1">
+              {draft.agentDirectives.summary.atsAggressiveness < 30 ? "Minimal — only rephrase existing content" :
+               draft.agentDirectives.summary.atsAggressiveness < 70 ? "Moderate — embed keywords naturally" :
+               "Aggressive — maximize keyword density (risk of stuffing)"}
+            </p>
+          </div>
+          <SwitchRow
+            label="Preserve Facts"
+            description="Never add facts (employers, locations, languages, education) not in source resume."
+            checked={draft.agentDirectives.summary.preserveFacts}
+            onChange={(v) => updateAgent("summary", { preserveFacts: v })}
+          />
+          <div className="grid grid-cols-2 gap-3">
+            <NumberField
+              label="Min Characters"
+              value={draft.agentDirectives.summary.minCharacters}
+              onChange={(v) => updateAgent("summary", { minCharacters: v })}
+              step={50}
+              min={100}
+              max={1000}
+            />
+            <NumberField
+              label="Max Characters"
+              value={draft.agentDirectives.summary.maxCharacters}
+              onChange={(v) => updateAgent("summary", { maxCharacters: v })}
+              step={50}
+              min={300}
+              max={1500}
+            />
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Skills Agent Directive */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-lg flex items-center gap-2">
+            <Icon name="Tags" className="w-4 h-4 text-brand" /> Skills Agent
+          </CardTitle>
+          <CardDescription>Controls skills enrichment and forbidden keyword filtering.</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <NumberField
+            label="Max Keywords"
+            value={draft.agentDirectives.skills.maxKeywords}
+            onChange={(v) => updateAgent("skills", { maxKeywords: v })}
+            step={1}
+            min={5}
+            max={30}
+          />
+          <SwitchRow
+            label="Allow Transferable Skills"
+            description="Add transferable skills that bridge gaps between candidate experience and JD requirements."
+            checked={draft.agentDirectives.skills.allowTransferableSkills}
+            onChange={(v) => updateAgent("skills", { allowTransferableSkills: v })}
+          />
+          <div className="rounded-lg bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-800 p-3 space-y-2">
+            <div className="flex items-center justify-between">
+              <div>
+                <Label className="text-red-800 dark:text-red-200">Allow Company Keywords</Label>
+                <p className="text-xs text-red-700 dark:text-red-300">FORBIDDEN — company names as skills (e.g., "Qatar Duty Free")</p>
+              </div>
+              <Switch
+                checked={draft.agentDirectives.skills.allowCompanyKeywords}
+                onCheckedChange={(v) => updateAgent("skills", { allowCompanyKeywords: v })}
+                disabled
+              />
+            </div>
+            <div className="flex items-center justify-between">
+              <div>
+                <Label className="text-red-800 dark:text-red-200">Allow Location Keywords</Label>
+                <p className="text-xs text-red-700 dark:text-red-300">FORBIDDEN — location names as skills (e.g., "Doha", "Qatar")</p>
+              </div>
+              <Switch
+                checked={draft.agentDirectives.skills.allowLocationKeywords}
+                onCheckedChange={(v) => updateAgent("skills", { allowLocationKeywords: v })}
+                disabled
+              />
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Experience Agent Directive */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-lg flex items-center gap-2">
+            <Icon name="Briefcase" className="w-4 h-4 text-brand" /> Experience Agent
+          </CardTitle>
+          <CardDescription>Controls bullet rewriting and immutable field protection.</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <SwitchRow
+            label="Rewrite Bullets Only"
+            description="Only rewrite bullet points. Never modify title, company, dates, or location."
+            checked={draft.agentDirectives.experience.rewriteBulletsOnly}
+            onChange={(v) => updateAgent("experience", { rewriteBulletsOnly: v })}
+          />
+          <div className="rounded-lg bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-800 p-3 space-y-2">
+            <p className="text-xs font-medium text-red-800 dark:text-red-200">Immutable Fields (FORBIDDEN to rewrite in locked pipeline):</p>
+            <div className="grid grid-cols-2 gap-2">
+              <ImmutableSwitch
+                label="Rewrite Title"
+                checked={draft.agentDirectives.experience.rewriteTitle}
+                onChange={(v) => updateAgent("experience", { rewriteTitle: v })}
+              />
+              <ImmutableSwitch
+                label="Rewrite Company"
+                checked={draft.agentDirectives.experience.rewriteCompany}
+                onChange={(v) => updateAgent("experience", { rewriteCompany: v })}
+              />
+              <ImmutableSwitch
+                label="Rewrite Dates"
+                checked={draft.agentDirectives.experience.rewriteDates}
+                onChange={(v) => updateAgent("experience", { rewriteDates: v })}
+              />
+              <ImmutableSwitch
+                label="Rewrite Location"
+                checked={draft.agentDirectives.experience.rewriteLocation}
+                onChange={(v) => updateAgent("experience", { rewriteLocation: v })}
+              />
+            </div>
+          </div>
+          <div>
+            <div className="flex items-center justify-between mb-1">
+              <Label>Max Expansion</Label>
+              <Badge variant="outline" className="text-[10px]">{draft.agentDirectives.experience.maxExpansionPercent}%</Badge>
+            </div>
+            <input
+              type="range"
+              min={0}
+              max={50}
+              step={5}
+              value={draft.agentDirectives.experience.maxExpansionPercent}
+              onChange={(e) => updateAgent("experience", { maxExpansionPercent: parseInt(e.target.value) })}
+              className="w-full"
+            />
+            <p className="text-xs text-muted-foreground mt-1">
+              Maximum percentage by which bullets can expand vs original length. 0% = same length, 50% = allow 50% longer.
+            </p>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Education Agent Directive */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-lg flex items-center gap-2">
+            <Icon name="GraduationCap" className="w-4 h-4 text-brand" /> Education Agent
+          </CardTitle>
+          <CardDescription>Formatting only — no inference or additions.</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <SwitchRow
+            label="Format Only"
+            description="Only format education entries. Never add, remove, or infer education."
+            checked={draft.agentDirectives.education.formatOnly}
+            onChange={(v) => updateAgent("education", { formatOnly: v })}
+          />
+        </CardContent>
+      </Card>
+
+      {/* Languages Agent Directive */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-lg flex items-center gap-2">
+            <Icon name="Languages" className="w-4 h-4 text-brand" /> Languages Agent
+          </CardTitle>
+          <CardDescription>Formatting only — no inference or additions.</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <SwitchRow
+            label="Format Only"
+            description="Only format language entries. Never add, remove, or infer languages."
+            checked={draft.agentDirectives.languages.formatOnly}
+            onChange={(v) => updateAgent("languages", { formatOnly: v })}
+          />
+        </CardContent>
+      </Card>
+    </>
+  );
+}
+
+function SwitchRow({ label, description, checked, onChange }: { label: string; description: string; checked: boolean; onChange: (v: boolean) => void }) {
+  return (
+    <div className="flex items-center justify-between">
+      <div>
+        <Label>{label}</Label>
+        <p className="text-xs text-muted-foreground">{description}</p>
+      </div>
+      <Switch checked={checked} onCheckedChange={onChange} />
+    </div>
+  );
+}
+
+function ImmutableSwitch({ label, checked, onChange }: { label: string; checked: boolean; onChange: (v: boolean) => void }) {
+  return (
+    <div className="flex items-center justify-between bg-white dark:bg-secondary/30 rounded-md p-2 border border-red-100 dark:border-red-900/50">
+      <Label className="text-xs text-red-800 dark:text-red-200">{label}</Label>
+      <Switch checked={checked} onCheckedChange={onChange} disabled />
     </div>
   );
 }
