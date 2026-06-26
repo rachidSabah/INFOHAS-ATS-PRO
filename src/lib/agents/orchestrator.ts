@@ -20,7 +20,7 @@
 //   - Intermediate artifacts are returned to the caller (UI) for persistence
 // ============================================================================
 
-import type { ResumeData, JobDescription, OptimizerDirectiveConfig } from "../types";
+import type { ResumeData, ResumeExperience, ResumeEducation, JobDescription, OptimizerDirectiveConfig } from "../types";
 import type { JobIntelligence } from "../job-intelligence";
 import { analyzeJobIntelligence } from "../job-intelligence";
 import { callAI, getOptimizerDirective, extractJSON } from "../ai";
@@ -2368,115 +2368,120 @@ function mapAviationResultToResumeData(result: AviationOptimizeResult, original:
     },
     dateOfBirth: result.resume.dateOfBirth || original.dateOfBirth,
     summary: String(result.resume.summary || ""),
-    experience: (result.resume.experience ?? []).length > 0
-      ? result.resume.experience.map((e: any, i: number) => {
-          // === ID-BASED MATCHING (required by locked pipeline) ===
-          // 1. Try ID match (100% reliable)
-          // 2. Try fingerprint match (title+company+location+dates hash)
-          // 3. Try company/title match (fuzzy fallback)
-          // 4. Last resort: index fallback (logged)
-          let origMatch: any = null;
+    experience: (() => {
+      // === EXPERIENCE MAPPING WITH DROPPED ENTRY RESTORATION ===
+      // Maps AI experience entries to source (preserving immutable fields),
+      // then restores any entries the AI dropped.
+      const aiExp = result.resume.experience ?? [];
+      if (aiExp.length === 0) return original.experience;
 
-          // 1. ID match
-          if (e.id) {
-            origMatch = original.experience.find((o) => o.id === e.id);
-          }
+      const mappedExp = aiExp.map((e: any, i: number) => {
+        // === ID-BASED MATCHING (required by locked pipeline) ===
+        let origMatch: any = null;
 
-          // 2. Fingerprint match
-          if (!origMatch) {
-            // Inline fingerprint computation (avoids require() which is forbidden)
-            const fpParts = [
-              (e.title || "").toLowerCase().trim(),
-              (e.company || "").toLowerCase().trim(),
-              (e.location || "").toLowerCase().trim(),
-              (e.startDate || "").toLowerCase().trim(),
-              (e.endDate || "").toLowerCase().trim(),
+        // 1. ID match
+        if (e.id) {
+          origMatch = original.experience.find((o) => o.id === e.id);
+        }
+
+        // 2. Fingerprint match
+        if (!origMatch) {
+          const fpParts = [
+            (e.title || "").toLowerCase().trim(),
+            (e.company || "").toLowerCase().trim(),
+            (e.location || "").toLowerCase().trim(),
+            (e.startDate || "").toLowerCase().trim(),
+            (e.endDate || "").toLowerCase().trim(),
+          ];
+          const aiFp = fpParts.join("|");
+          origMatch = original.experience.find((o) => {
+            const oParts = [
+              (o.title || "").toLowerCase().trim(),
+              (o.company || "").toLowerCase().trim(),
+              (o.location || "").toLowerCase().trim(),
+              (o.startDate || "").toLowerCase().trim(),
+              (o.endDate || "").toLowerCase().trim(),
             ];
-            const aiFp = fpParts.join("|");
-            origMatch = original.experience.find((o) => {
-              const oParts = [
-                (o.title || "").toLowerCase().trim(),
-                (o.company || "").toLowerCase().trim(),
-                (o.location || "").toLowerCase().trim(),
-                (o.startDate || "").toLowerCase().trim(),
-                (o.endDate || "").toLowerCase().trim(),
-              ];
-              return oParts.join("|") === aiFp;
-            });
-          }
+            return oParts.join("|") === aiFp;
+          });
+        }
 
-          // 3. Company/title match (fuzzy)
-          if (!origMatch) {
-            const aiCompanyLower = (e.company || "").toLowerCase().trim();
-            const aiTitleLower = (e.title || "").toLowerCase().trim();
-            origMatch = original.experience.find((o) => {
-              const oCompanyLower = (o.company || "").toLowerCase().trim();
-              const oTitleLower = (o.title || "").toLowerCase().trim();
-              return (oCompanyLower && (oCompanyLower === aiCompanyLower ||
-                oCompanyLower.includes(aiCompanyLower) || aiCompanyLower.includes(oCompanyLower))) ||
-                (oTitleLower && (oTitleLower === aiTitleLower ||
-                oTitleLower.includes(aiTitleLower) || aiTitleLower.includes(oTitleLower)));
-            });
-          }
+        // 3. Company/title match (fuzzy)
+        if (!origMatch) {
+          const aiCompanyLower = (e.company || "").toLowerCase().trim();
+          const aiTitleLower = (e.title || "").toLowerCase().trim();
+          origMatch = original.experience.find((o) => {
+            const oCompanyLower = (o.company || "").toLowerCase().trim();
+            const oTitleLower = (o.title || "").toLowerCase().trim();
+            return (oCompanyLower && (oCompanyLower === aiCompanyLower ||
+              oCompanyLower.includes(aiCompanyLower) || aiCompanyLower.includes(oCompanyLower))) ||
+              (oTitleLower && (oTitleLower === aiTitleLower ||
+              oTitleLower.includes(aiTitleLower) || aiTitleLower.includes(oTitleLower)));
+          });
+        }
 
-          // 4. Index fallback (last resort — logged)
-          if (!origMatch && i < original.experience.length) {
-            origMatch = original.experience[i];
-            console.warn(`[mapAviationResult] Experience entry ${i}: no ID/fingerprint/company match — using index fallback`);
-          }
+        // 4. Index fallback (last resort — logged)
+        if (!origMatch && i < original.experience.length) {
+          origMatch = original.experience[i];
+          console.warn(`[mapAviationResult] Experience entry ${i}: no ID/fingerprint/company match — using index fallback`);
+        }
 
-          return {
-            // PRESERVE source ID (immutable) — don't generate a new one
-            id: origMatch?.id || e.id || uid("e"),
-            title: String(origMatch?.title || e.title || ""),
-            // STRICT: company ALWAYS from source. If source is empty, use "".
-            company: String(origMatch?.company || ""),
-            location: origMatch?.location || flattenLocation(e.location) || "",
-            // STRICT: dates ALWAYS from source. If source is empty, use "".
-            startDate: String(origMatch?.startDate || ""),
-            endDate: String(origMatch?.endDate || ""),
-            bullets: Array.isArray(e.bullets) ? e.bullets.map((b: any) => flattenValue(b)) : [],
-          };
-        })
-      : original.experience,
-    education: (result.resume.education ?? []).length > 0
-      ? result.resume.education.map((ed: any, i: number) => {
-          // CRITICAL FIX: Match AI education to original by institution or degree.
-          // Always use original institution/dates if matched.
-          const aiInstLower = (ed.institution || "").toLowerCase().trim();
-          const aiDegreeLower = (ed.degree || "").toLowerCase().trim();
-          const origEduMatch = original.education.find((o) => {
-            const oInstLower = (o.institution || "").toLowerCase().trim();
-            const oDegreeLower = (o.degree || "").toLowerCase().trim();
-            return (oInstLower && (oInstLower === aiInstLower ||
-              oInstLower.includes(aiInstLower) || aiInstLower.includes(oInstLower))) ||
-              (oDegreeLower && (oDegreeLower === aiDegreeLower ||
-              oDegreeLower.includes(aiDegreeLower) || aiDegreeLower.includes(oDegreeLower)));
-          }) ?? original.education[i];
+        return {
+          id: origMatch?.id || e.id || uid("e"),
+          title: String(origMatch?.title || e.title || ""),
+          company: String(origMatch?.company || ""),
+          location: origMatch?.location || flattenLocation(e.location) || "",
+          startDate: String(origMatch?.startDate || ""),
+          endDate: String(origMatch?.endDate || ""),
+          bullets: Array.isArray(e.bullets) ? e.bullets.map((b: any) => flattenValue(b)) : [],
+        };
+      });
 
-          return {
-            id: uid("ed"),
-            degree: String(ed.degree || origEduMatch?.degree || ""),
-            institution: String(origEduMatch?.institution ?? ed.institution ?? ""),
-            field: String(ed.field || origEduMatch?.field || ""),
-            location: flattenLocation(ed.location) || origEduMatch?.location || "",
-            startDate: String(origEduMatch?.startDate ?? ed.startDate ?? ""),
-            endDate: String(origEduMatch?.endDate ?? ed.endDate ?? ""),
-            highlights: ed.modules ? [`Modules: ${flattenValue(ed.modules)}`] : ed.highlights || origEduMatch?.highlights || [],
-          };
-        })
-      : original.education,
+      // === RESTORE DROPPED ENTRIES ===
+      // If the AI returned fewer entries than the source, restore the missing ones.
+      const mappedIds = new Set(mappedExp.map((e: any) => e.id));
+      const finalExp: ResumeExperience[] = [...mappedExp];
+      for (const srcExp of original.experience) {
+        if (!mappedIds.has(srcExp.id)) {
+          finalExp.push({ ...srcExp });
+          console.warn(`[mapAviationResult] Restored dropped experience: ${srcExp.title} at ${srcExp.company}`);
+        }
+      }
+
+      return finalExp;
+    })(),
+    education: (() => {
+      // STRICT: education is IMMUTABLE — always use original.education[i]
+      // Don't trust AI's institution/degree (may contain language leaks like "English: fluent")
+      const aiEdu = (result.resume.education ?? []);
+      const eduResult: ResumeEducation[] = aiEdu.slice(0, original.education.length).map((ed: any, i: number) => {
+        const orig = original.education[i];
+        if (!orig) return null;
+        return {
+          id: orig.id, // PRESERVE source ID
+          degree: String(orig.degree || ed.degree || ""),
+          institution: String(orig.institution || ""),
+          field: String(orig.field || ed.field || ""),
+          location: orig.location || flattenLocation(ed.location) || "",
+          startDate: String(orig.startDate || ""),
+          endDate: String(orig.endDate || ""),
+          highlights: ed.modules ? [`Modules: ${flattenValue(ed.modules)}`] : (ed.highlights || orig.highlights || []),
+        } as ResumeEducation;
+      }).filter(Boolean) as ResumeEducation[];
+
+      // Restore any dropped entries
+      const finalEdu = [...eduResult];
+      for (let i = eduResult.length; i < original.education.length; i++) {
+        finalEdu.push({ ...original.education[i] });
+      }
+      return finalEdu;
+    })(),
     skills: aiSkills.length > 0 ? aiSkills : original.skills,
     projects: original.projects,
     certifications: original.certifications,
-    languages: (result.resume.languages ?? []).length > 0
-      ? result.resume.languages.map((l: any) => ({
-          id: uid("l"),
-          name: l.name || "",
-          proficiency: (l.proficiency || "fluent").toLowerCase() as any,
-          ...(l.note ? { note: l.note } : {}),
-        })) as any
-      : original.languages,
+    // STRICT: languages are IMMUTABLE — ALWAYS use original, never trust AI output
+    // (AI frequently corrupts languages: empty names, leading colons, proficiency as name)
+    languages: original.languages.map((l) => ({ ...l })),
     template: "infohas-pro",
     accentColor: "#0563C1",
     photoUrl: original.photoUrl,
