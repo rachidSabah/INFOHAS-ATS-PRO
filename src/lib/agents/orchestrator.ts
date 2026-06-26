@@ -840,7 +840,17 @@ async function _runOptimizationPipelineInner(input: PipelineInput, watchdog: Opt
         // experiences, hallucinated employers, education/language corruption.
         // ====================================================================
         const useLockedPipeline = process.env.NEXT_PUBLIC_USE_LOCKED_PIPELINE !== "false"; // default: enabled
-        if (useLockedPipeline) {
+        // GUARD: Don't use the locked pipeline if the source resume has NO experience
+        // entries. The locked pipeline requires experience IDs to match — if there
+        // are none, it will produce an empty resume. Fall back to the legacy path
+        // which has more robust handling for edge cases (empty resumes, parser failures).
+        const sourceHasContent = resume.experience.length > 0 || resume.education.length > 0 || resume.languages.length > 0;
+        const useLockedPipelineEffective = useLockedPipeline && sourceHasContent;
+        if (useLockedPipeline && !sourceHasContent) {
+          console.warn(`[Pipeline] Source resume has 0 experience, 0 education, 0 languages — falling back to legacy path (locked pipeline requires source content).`);
+          log("Resume Optimizer", `Source resume has no content — using legacy path instead of locked pipeline.`);
+        }
+        if (useLockedPipelineEffective) {
           log("Resume Optimizer", `Locked Pipeline (bullet-only optimizer + assembler) — attempt ${optimizeAttempt}/${maxOptimizeAttempts}.`);
           emitProgress(3, `Running locked pipeline: bullet-only optimizer → assembler → structure guardian…`);
 
@@ -976,7 +986,12 @@ Bridging Strategy: ${result.skillGap.bridgingStrategy}`);
         }
 
         // MANDATORY: Call finalizeResume() — the single shared function ALL providers must use.
-        if (optimizeResult?.resume) {
+        // SKIP this when the locked pipeline is active — the locked pipeline already does
+        // assembly + cleanup + validation internally. Calling finalizeResume again would
+        // re-run restoreLockedEntities on the already-assembled resume, which is redundant
+        // and can cause issues (e.g., trying to restore entities on a resume that was
+        // already assembled from source).
+        if (optimizeResult?.resume && !useLockedPipelineEffective) {
           try {
             const { finalizeResume } = await import("../unified-pipeline");
             optimizeResult.resume = finalizeResume(optimizeResult.resume, resume);
@@ -1021,7 +1036,11 @@ Bridging Strategy: ${result.skillGap.bridgingStrategy}`);
       // them on the locked pipeline output would risk re-introducing the
       // corruption we just prevented.
       // ========================================================================
-      const useLockedPipelineForV3 = process.env.NEXT_PUBLIC_USE_LOCKED_PIPELINE !== "false";
+      // Recompute whether the locked pipeline was used (the variable was scoped
+      // inside the try block above, so we recompute it here for the V3 decision).
+      const _sourceHasContent = resume.experience.length > 0 || resume.education.length > 0 || resume.languages.length > 0;
+      const _useLockedPipeline = process.env.NEXT_PUBLIC_USE_LOCKED_PIPELINE !== "false";
+      const useLockedPipelineForV3 = _useLockedPipeline && _sourceHasContent;
       if (useLockedPipelineForV3) {
         log("Resume Optimizer", `Skipping V3 pipeline (locked pipeline already produced validated output).`);
       } else {
@@ -1068,15 +1087,32 @@ Bridging Strategy: ${result.skillGap.bridgingStrategy}`);
       // LOCKED PIPELINE EXCEPTION: The locked pipeline produces cleaner, more
       // concise output (no padding/filler). Accept >= 1500 chars from the locked
       // pipeline since it doesn't waste tokens on redundant content.
-      const minCharThreshold = useLockedPipelineForV3 ? 1500 : 2500;
+      //
+      // SOURCE CONTENT EXCEPTION: If the source resume has very little content
+      // (e.g., only 1 short experience entry), the optimized resume will naturally
+      // be short. In this case, accept whatever the pipeline produced rather than
+      // retrying 4 times and failing. The source content is the limiting factor,
+      // not the optimizer.
+      const sourceCharCount = JSON.stringify({
+        summary: resume.summary, experience: resume.experience,
+        skills: resume.skills, education: resume.education, languages: resume.languages,
+      }).length;
+      const minCharThreshold = useLockedPipelineForV3
+        ? Math.min(1500, Math.max(500, sourceCharCount * 0.5))
+        : 2500;
       const pageFillVal = validatePageFill(result.optimizedResume!, directiveConfig);
       const pageFill = pageFillVal.pageUsage / 100;
 
-      console.log(`[Pipeline Page Validator] Attempt ${optimizeAttempt}: pageFill = ${pageFill.toFixed(2)} (${pageFillVal.pageUsage}%), charCount = ${result.charCount}, threshold = ${minCharThreshold}`);
+      console.log(`[Pipeline Page Validator] Attempt ${optimizeAttempt}: pageFill = ${pageFill.toFixed(2)} (${pageFillVal.pageUsage}%), charCount = ${result.charCount}, threshold = ${minCharThreshold}, sourceChars = ${sourceCharCount}`);
 
       // Accept if: chars >= threshold (minimum) — page fill is calculated as min(100, chars/target)
       // so even if chars > target, pageFill = 100% which passes >= 0.70
-      if (result.charCount >= minCharThreshold) {
+      // ALSO accept on the LAST attempt regardless — never fail the pipeline just
+      // because the output is short (the source may have insufficient content).
+      if (result.charCount >= minCharThreshold || optimizeAttempt === maxOptimizeAttempts) {
+        if (result.charCount < minCharThreshold) {
+          console.warn(`[Pipeline Page Validator] Accepting short output on final attempt (${result.charCount} < ${minCharThreshold}) — source may have insufficient content.`);
+        }
         success = true;
         const optLog = `✓ Generated ${result.charCount} chars (page fill ${pageFillVal.pageUsage}%) via ${result.provider}. Embedded ${optimizeResult.keywordsAdded} keywords. Attempts: ${optimizeAttempt}.`;
         log("Resume Optimizer", optLog);

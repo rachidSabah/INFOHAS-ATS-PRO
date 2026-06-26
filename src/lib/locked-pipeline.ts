@@ -84,6 +84,36 @@ export async function runLockedPipeline(
     console.info(`[Locked Pipeline] Agent directives: supervisor.strictMode=${agentDirectives.supervisor.strictMode}, summary.atsAggressiveness=${agentDirectives.summary.atsAggressiveness}, experience.rewriteBulletsOnly=${agentDirectives.experience.rewriteBulletsOnly}`);
   }
 
+  // GUARD: If source resume has NO experience entries, the locked pipeline
+  // cannot function (it requires experience IDs to match). In this case,
+  // return the source resume as-is with a warning. The orchestrator should
+  // fall back to the legacy path, but if it doesn't, this guard prevents
+  // the pipeline from producing a completely empty resume.
+  if (sourceResume.experience.length === 0 && sourceResume.education.length === 0 && sourceResume.languages.length === 0) {
+    console.warn(`[Locked Pipeline] Source resume is EMPTY (0 experience, 0 education, 0 languages). Returning source as-is — the parser may have failed to extract the PDF content.`);
+    warnings.push("Source resume is empty — the parser may have failed to extract the PDF content. Returning source resume without optimization.");
+    errors.push("Source resume has no content to optimize.");
+    const charCount = JSON.stringify({
+      summary: sourceResume.summary, experience: sourceResume.experience,
+      skills: sourceResume.skills, education: sourceResume.education, languages: sourceResume.languages,
+    }).length;
+    return {
+      resume: sourceResume,
+      provider: "none",
+      charCount,
+      keywordsAdded: 0,
+      warnings,
+      errors,
+      guardianScore: 0,
+      guardianStatus: "REQUIRES_MANUAL_REVIEW",
+      fingerprintValid: true,
+      assemblerStats: {
+        matchedById: 0, matchedByFingerprint: 0, matchedByTitleCompany: 0,
+        matchedByIndex: 0, unmatched: 0,
+      },
+    };
+  }
+
   // ========================================================================
   // Step 2: Run Bullet-Only Optimizer
   // ========================================================================
