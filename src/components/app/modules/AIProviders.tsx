@@ -251,10 +251,10 @@ export function AIProviders() {
                         <td className="px-4 py-3">
                           <div className="flex gap-0.5 justify-end">
                             <IconBtn icon="Pencil" label="Edit" onClick={() => { setEditing(p); setShowAdd(true); }} />
-                            <IconBtn icon="Zap" label="Test connection" onClick={() => handleTest(p)} color="#F59E0B" />
+                            <IconBtn icon="Zap" label="Test connection" onClick={() => handleTest(p)} color="#F59E2B" />
                             <IconBtn icon="Copy" label="Duplicate" onClick={() => { const id = ProviderManager.duplicate(p.id); if (id) toast.success("Provider duplicated."); }} />
-                            <IconBtn icon={p.isDefault ? "Star" : "StarOff"} label="Set as default" onClick={() => { ProviderManager.setDefault(p.id); toast.success(`${p.name} set as default.`); }} color={p.isDefault ? "#F59E0B" : undefined} />
-                            {!p.isBuiltIn && <IconBtn icon="Trash2" label="Delete" color="#DC2626" onClick={() => { if (confirm(`Delete provider "${p.name}"?`)) { ProviderManager.remove(p.id); toast.success("Provider deleted."); } }} />}
+                            <IconBtn icon={p.isDefault ? "Star" : "StarOff"} label="Set as default" onClick={() => { ProviderManager.setDefault(p.id); toast.success(`${p.name} set as default.`); }} color={p.isDefault ? "#F59E2B" : undefined} />
+                            {!p.isBuiltIn && <IconBtn icon="Trash2" label="Delete" color="#DC2626" onClick={() => { if (confirm(`Delete provider "${p.name}"?`)) { ProviderManager.remove(p.id); toast.success(`Provider deleted.`); } }} />}
                           </div>
                         </td>
                       </tr>

@@ -217,10 +217,21 @@ export function syncProviderConfigs(d1Providers: AIProvider[]): {
   }
 
   // Backfill missing seed providers
+  const deletedIds: string[] = typeof window !== "undefined"
+    ? (() => {
+        try {
+          return JSON.parse(localStorage.getItem("resumeai-deleted-providers") || "[]");
+        } catch { return []; }
+      })()
+    : [];
+
   const existingIds = new Set(mergedProviders.map((p) => p.id));
   const existingNames = new Set(mergedProviders.map((p) => p.name.toLowerCase()));
   const backfilled: AIProvider[] = [];
   for (const seed of SEED_PROVIDERS) {
+    if (deletedIds.includes(seed.id)) {
+      continue; // Skip explicitly deleted provider
+    }
     if (!existingIds.has(seed.id) && !existingNames.has(seed.name.toLowerCase())) {
       if (seed.isActive) {
         console.info(`[PROVIDER SYNC] Backfilling missing provider: ${seed.name}`);

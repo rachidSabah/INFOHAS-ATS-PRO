@@ -1080,6 +1080,15 @@ export const useApp = create<AppState>()(
         } catch { /* non-fatal */ }
       },
       removeProvider: (id) => {
+        // Track deleted provider in localStorage to prevent seed backfill
+        if (typeof window !== "undefined") {
+          try {
+            const deleted = JSON.parse(localStorage.getItem("resumeai-deleted-providers") || "[]");
+            if (!deleted.includes(id)) {
+              localStorage.setItem("resumeai-deleted-providers", JSON.stringify([...deleted, id]));
+            }
+          } catch (e) { console.warn("[store] Failed to save deleted provider to localStorage:", e); }
+        }
         set((s) => ({
           providers: s.providers.filter((p) => p.id !== id),
           providerLogs: s.providerLogs.filter((l) => l.providerId !== id),
