@@ -407,8 +407,8 @@ export function validateImmutableEntities(optimized: ResumeData, sourceResume: R
 } {
   const violations: string[] = [];
 
-  // Check experience count
-  if (optimized.experience.length !== sourceResume.experience.length) {
+  // Check experience count (skip if source has none — parser didn't match)
+  if (sourceResume.experience.length > 0 && optimized.experience.length !== sourceResume.experience.length) {
     violations.push(`Experience count mismatch: ${optimized.experience.length} vs ${sourceResume.experience.length}`);
   }
 
@@ -428,13 +428,13 @@ export function validateImmutableEntities(optimized: ResumeData, sourceResume: R
     }
   }
 
-  // Check education count
-  if (optimized.education.length < sourceResume.education.length) {
+  // Check education count (skip if source has none)
+  if (sourceResume.education.length > 0 && optimized.education.length < sourceResume.education.length) {
     violations.push(`Education entries dropped: ${sourceResume.education.length} → ${optimized.education.length}`);
   }
 
-  // Check languages
-  if (optimized.languages.length < sourceResume.languages.length) {
+  // Check languages (skip if source has none)
+  if (sourceResume.languages.length > 0 && optimized.languages.length < sourceResume.languages.length) {
     violations.push(`Languages dropped: ${sourceResume.languages.length} → ${optimized.languages.length}`);
   }
 

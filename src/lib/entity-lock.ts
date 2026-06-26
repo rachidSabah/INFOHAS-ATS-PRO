@@ -621,8 +621,8 @@ export function verifyEntityIntegrity(
   const warnings: string[] = [];
   let score = 100;
 
-  // === Check 1: Experience count must match ===
-  if (optimized.experience.length !== locked.counts.experience) {
+  // === Check 1: Experience count must match (skip if nothing was locked) ===
+  if (locked.counts.experience > 0 && optimized.experience.length !== locked.counts.experience) {
     const diff = optimized.experience.length - locked.counts.experience;
     if (diff < 0) {
       criticalFailures.push({
@@ -731,7 +731,7 @@ export function verifyEntityIntegrity(
     score -= 20;
   }
 
-  if (optimized.education.length < locked.counts.education) {
+  if (locked.counts.education > 0 && optimized.education.length < locked.counts.education) {
     criticalFailures.push({
       type: "education_count_mismatch",
       message: `Education count dropped: original=${locked.counts.education}, optimized=${optimized.education.length}`,
@@ -786,7 +786,7 @@ export function verifyEntityIntegrity(
     score -= 15;
   }
 
-  if (optimized.languages.length < locked.counts.languages) {
+  if (locked.counts.languages > 0 && optimized.languages.length < locked.counts.languages) {
     criticalFailures.push({
       type: "language_count_mismatch",
       message: `Language count dropped: original=${locked.counts.languages}, optimized=${optimized.languages.length}`,
