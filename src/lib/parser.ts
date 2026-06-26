@@ -584,17 +584,25 @@ export function extractResumeFromText(text: string, fileName: string): ResumeDat
       // Enrich existing summary with missing high‑impact keywords if job description is provided
       return enrichSummary(lines, jobDesc).join('\n');
     }
-    // Build a four‑line generic summary when insufficient content
+    // Build a four‑line generic summary when insufficient content — keep original text as first line
+    const original = lines.join(' ').trim();
     const title = jobDesc ? extractTitle(jobDesc) : 'Customer‑focused';
     const industry = jobDesc ? extractIndustry(jobDesc) : 'retail';
     const role = jobDesc ? extractDesiredRole(jobDesc) : 'Sales Assistant';
     const generated = [
-      `${title} professional with experience in ${industry} environments,`
-      + ` known for delivering exceptional customer experiences.`,
-      `Skilled in identifying needs, presenting solutions using the F.A.B. approach,`
-      + ` and maximizing sales opportunities.`,
-      `Seeking a ${role} position to contribute to award‑winning retail performance.`
+      ...(original ? [original] : [`${title} professional with experience in ${industry} environments, known for delivering exceptional customer experiences.`]),
+      ...(original ? [
+        `Skilled in identifying needs, presenting solutions using the F.A.B. approach, and maximizing sales opportunities.`,
+        `Seeking a ${role} position to contribute to award‑winning retail performance.`
+      ] : [
+        `Skilled in identifying needs, presenting solutions using the F.A.B. approach, and maximizing sales opportunities.`,
+        `Seeking a ${role} position to contribute to award‑winning retail performance.`
+      ])
     ];
+    // Pad to at least 3 lines
+    while (generated.length < 3) {
+      generated.push(`Seeking a ${role} position to contribute to award‑winning retail performance.`);
+    }
     return generated.join('\n');
   }
 
@@ -1086,6 +1094,8 @@ function parseExperiences(lines: string[], jobDesc?: string): ResumeData["experi
   return out;
 }
 
+*/
+
 function parseDateRange(s: string): { start: string; end: string } {
   // Try splitting on common date separators: -, –, —, "to"
   const parts = s.split(new RegExp("\\s*(?:[\\-–—]|\\bto\\b)\\s*", "i")).filter(Boolean);
@@ -1205,10 +1215,16 @@ function parseEducation(lines: string[]): ResumeData["education"] {
         endDate = yrMatch[1];
         break;
       } else if (yrMatch && yrMatch.length === 1) {
-        startDate = yrMatch[0];
-        if (/present/i.test(l)) endDate = "Present";
-        else if (/ongoing/i.test(l)) endDate = "Ongoing";
-        break;
+        if (/present/i.test(l)) {
+          startDate = yrMatch[0];
+          endDate = "Present";
+          break;
+        } else if (/ongoing/i.test(l)) {
+          startDate = yrMatch[0];
+          endDate = "Ongoing";
+          break;
+        }
+        // Single year without present/ongoing — don't break yet, keep looking
       }
     }
 
@@ -1266,19 +1282,26 @@ function parseEducation(lines: string[]): ResumeData["education"] {
 
 
         if (!institution) {
-          // Attempt to extract institution from the previous line if it contains a colon.
-          const prevIdx = i - 1;
-          if (prevIdx >= 0) {
-            const prevLine = cleanedEntryLines[prevIdx];
-            const colonPos = prevLine.indexOf(':');
-            if (colonPos !== -1) {
-              const possibleInst = prevLine.slice(colonPos + 1).trim();
-              if (possibleInst && !yearRangePattern.test(possibleInst)) {
-                institution = possibleInst;
+            // Attempt to extract institution from the previous line if it contains a colon.
+            const prevIdx = i - 1;
+            if (prevIdx >= 0) {
+              const prevLine = cleanedEntryLines[prevIdx];
+              const colonPos = prevLine.indexOf(':');
+              if (colonPos !== -1) {
+                const possibleInst = prevLine.slice(colonPos + 1).trim();
+                if (possibleInst && !yearRangePattern.test(possibleInst)) {
+                  institution = possibleInst;
+                }
+              }
+              // If no colon, use the entire previous non-degree line as institution
+              if (!institution) {
+                const possibleInst = prevLine.trim();
+                if (possibleInst && !degreePattern.test(possibleInst) && !yearRangePattern.test(possibleInst) && !new RegExp("^[\\-\\-·▪◦]").test(possibleInst)) {
+                  institution = possibleInst;
+                }
               }
             }
           }
-        }
 
       } else if (!institution && !degreePattern.test(cleanedLine) && !yearRangePattern.test(cleanedLine) && !new RegExp("^[•\\-\\*·▪◦]").test(cleanedLine)) {
         institution = cleanedLine;

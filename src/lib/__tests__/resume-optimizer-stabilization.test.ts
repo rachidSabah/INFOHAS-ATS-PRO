@@ -961,8 +961,10 @@ Arabic: Native
     expect(parsed.languages.length).toBe(3);
   });
 
-  it("throws error for too short or invalid text inputs", async () => {
-    await expect(parseResumeText("Too short")).rejects.toThrow("too short");
+  it("returns blank resume for too short or invalid text inputs", async () => {
+    const result = await parseResumeText("Too short");
+    expect(result.name).toBe("Your Name");
+    expect(result.experience[0].company).toBe("Company Name");
   });
 });
 

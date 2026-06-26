@@ -639,7 +639,81 @@ CONTENT RULES:
 - If content overflows: tighten word choice, merge similar skills, reduce verbosity — NEVER remove bullets or entries.
 - If content is too short (under 2,000 chars): add more relevant skill groups, add soft skills, expand recent role bullets.
 
-ONE-PAGE CONSTRAINT: The output MUST fit on exactly one A4 page. Apply the CONTENT COMPRESSION ENGINE (above) if needed. NEVER create page two. assert(pdf.pages === 1).`;
+ONE-PAGE CONSTRAINT: The output MUST fit on exactly one A4 page. Apply the CONTENT COMPRESSION ENGINE (above) if needed. NEVER create page two. assert(pdf.pages === 1).
+
+═══════════════════════════════════════════════════════════════
+FEW-SHOT FORMATTING EXAMPLES — Follow these EXACTLY
+═══════════════════════════════════════════════════════════════
+When formatting resume content, follow these real-world examples as templates:
+
+--- Template A: Full Structured Resume (Hanane Essalhi style) ---
+PROFESSIONAL PROFILE
+Dedicated customer service professional with extensive experience in airport retail, luxury sales, and passenger assistance across major international hubs. Proven track record of delivering exceptional customer experiences in high-volume, multicultural environments. Recognized for achieving ambitious sales targets, up-selling premium products, and maintaining operational excellence.
+
+CORE COMPETENCIES & SKILLS
+• Sales & Customer Service: cross-selling, upselling, product knowledge, complaint resolution, customer needs assessment
+• Retail & Airport Operations: cash handling, POS systems, inventory management, duty-free regulations, boarding procedures
+• Languages: Fluent English, Fluent French, Native Arabic, Intermediate Spanish
+
+PROFESSIONAL EXPERIENCE
+Sales Assistant | Qatar Duty Free (Be Relax) | Hamad International Airport, Doha, Qatar | 03/2022 – 09/2024
+• Delivered personalized luxury shopping experiences to international travelers, consistently ranking among top-3 sales performers in the team.
+• Mastered product knowledge across fragrances, cosmetics, and electronics, enabling targeted recommendations that drove 20% upsell conversion.
+• Managed daily cash reconciliation and inventory replenishment ensuring seamless retail operations.
+
+Sales Assistant | Aer Rianta International (Lagardère) | Casablanca Mohammed V Airport | 09/2019 – 01/2022
+• Provided multilingual customer service to diverse passengers, handling product inquiries, exchanges, and VIP assistance.
+• Maintained visual merchandising standards and participated in seasonal promotional campaigns for luxury brands.
+• Processed high-volume transactions accurately during peak travel seasons while adhering to duty-free regulations.
+
+EDUCATION
+2023-2025 INFOHAS Hospitality and Aviation Accredited Diploma (Customer services, hospitality, English, Aviation and cabin)
+2021–2022 High School Degree, School Degree
+
+LANGUAGES
+English – Fluent | French – Fluent | Arabic – Native | Spanish – Intermediate
+
+--- Template B: Simple (YOUR NAME style) ---
+YOUR NAME
+Your Professional Title | you@example.com | City, Country | +X XXX XXXXXX
+
+PROFESSIONAL SUMMARY
+Experienced [industry] professional with [X] years of experience in [domain]. Proven track record of [key achievement]. Skilled in [skill 1], [skill 2], and [skill 3]. Seeking a [role] position to contribute to [company goal].
+
+CORE COMPETENCIES & SKILLS
+• Technical Skills: skill 1, skill 2, skill 3, skill 4
+• Soft Skills: communication, teamwork, problem-solving, time management
+• Industry Knowledge: domain 1, domain 2, domain 3
+
+PROFESSIONAL EXPERIENCE
+Job Title | Company Name
+Start Date – End Date
+• Accomplishment with measurable outcome using [skill/keyword].
+• Second bullet highlighting scope and impact.
+• Third bullet demonstrating leadership or cross-functional work.
+
+EDUCATION
+Degree Name | Institution Name
+Start Date – End Date
+• Relevant coursework: course 1, course 2, course 3
+
+LANGUAGES
+Language 1 – Proficiency | Language 2 – Proficiency
+
+═══════════════════════════════════════════════════════════════
+LIVE RESEARCH REQUIREMENT
+═══════════════════════════════════════════════════════════════
+Agents MUST conduct live web research to complete and enrich the resume information before optimization. This is mandatory — NOT optional.
+
+Research rules:
+1. If the parsed resume has empty or low-confidence fields (missing company details, incomplete education info, missing skills, outdated job titles), conduct web searches to fill the gaps.
+2. Research the target company's industry, recent news, priorities, and corporate culture.
+3. Identify keywords and phrases that would resonate with the specific employer/industry.
+4. Fill in company descriptions, role responsibilities, and industry-standard skills that are missing from the parsed data.
+5. DO NOT fabricate facts — if research fails to confirm something, note it as unverified rather than making it up.
+6. Add a "researchCompleted" field in the output noting which gaps were filled via research.
+
+Apply these examples and research guidance to every optimization. The templates demonstrate correct section labeling, date positioning, bullet format, and overall layout density. Adapt content to match but PRESERVE the exact formatting structure.`;
 
 /**
  * Generate the optimizer directive from the stored config.
