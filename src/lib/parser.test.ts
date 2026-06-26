@@ -219,3 +219,65 @@ describe("Parser — AYA_CHABAKI regression", () => {
   });
 });
 
+describe("Parser — MELLOUKI_IKRAME regression", () => {
+  const MELLOUKI_IKRAME_TEXT = `MELLOUKI IKRAME
+' PHONE +212 669 - 322842
+ikramikrammellouki@gmail.com • +212 669 - 322842
+
+PROFESSIONAL SUMMARY
+I am seeking a position that will enable me to utilize my education and skills to make a positive impact on the organization.
+
+PROFESSIONAL EXPERIENCE
+Customer Service Agent — International Airport Dec 2022 – Feb 2023
+of Casablanca, Morocco
+
+EDUCATION
+2022 – 
+Sep 2022 - Ongoing: INFOHAS Hospitality and Aviation Accredited
+Diploma
+(Customer services, hospitality English, Aviation and cabin
+2021 - 2022: High School Degree 2021 – 2022
+School Degree
+
+SKILLS
+quality. • Sales • Retail • Customer Service • Qatar Duty Free • Qatar Airways Group • Airport • Merchandising • 
+Communication`;
+
+  const parsed = extractResumeFromText(MELLOUKI_IKRAME_TEXT, "MELLOUKI_IKRAME_resume.pdf");
+
+  it("filters forbidden company skills like 'Qatar Duty Free' and 'Qatar Airways Group' from skills", () => {
+    const skillNames = parsed.skills.map((s) => s.name);
+    expect(skillNames).not.toContain("Qatar Duty Free");
+    expect(skillNames).not.toContain("Qatar Airways Group");
+    expect(skillNames).toContain("Sales");
+    expect(skillNames).toContain("Retail");
+    expect(skillNames).toContain("Customer Service");
+  });
+
+  it("extracts the Casablanca, Morocco location from the next line as location and does not treat it as a bullet", () => {
+    expect(parsed.experience.length).toBe(1);
+    expect(parsed.experience[0].title).toBe("Customer Service Agent");
+    expect(parsed.experience[0].company).toBe("International Airport");
+    expect(parsed.experience[0].location).toBe("Casablanca, Morocco");
+    expect(parsed.experience[0].bullets).not.toContain("of Casablanca, Morocco");
+    expect(parsed.experience[0].bullets).not.toContain("Casablanca, Morocco");
+  });
+
+  it("correctly parses education entries, grouping INFOHAS and Diploma, and stripping dates from institution names", () => {
+    console.log("DEBUG PARSED EDUCATION:", JSON.stringify(parsed.education, null, 2));
+    expect(parsed.education.length).toBe(2);
+    
+    // Entry 1: INFOHAS
+    expect(parsed.education[0].institution).toBe("INFOHAS Hospitality and Aviation Accredited");
+    expect(parsed.education[0].degree).toBe("Diploma");
+    expect(parsed.education[0].startDate).toBe("2022");
+    expect(parsed.education[0].endDate).toBe("Ongoing");
+
+    // Entry 2: High School Degree
+    expect(parsed.education[1].degree).toBe("High School Degree");
+    expect(parsed.education[1].institution).toBe("Institution");
+    expect(parsed.education[1].startDate).toBe("2021");
+    expect(parsed.education[1].endDate).toBe("2022");
+  });
+});
+

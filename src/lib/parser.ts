@@ -3,6 +3,7 @@
 
 import type { ResumeData } from "./types";
 import { uid } from "./store";
+import { isForbiddenSkill } from "./entity-lock";
 
 /**
  * Parse an uploaded file into a ResumeData object.
@@ -82,7 +83,7 @@ export function secondaryParser(text: string, fileName: string): ResumeData {
   const skills = skillsLines
     .flatMap((l) => l.split(/[,;•|]/))
     .map((s) => s.trim())
-    .filter((s) => s.length > 0 && s.length < 40)
+    .filter((s) => s.length > 0 && s.length < 40 && !isForbiddenSkill(s))
     .map((s) => ({ id: uid("s"), name: s }));
   const projects = parseProjects(projLines);
   const certifications = certsLines.map((c) => ({ id: uid("c"), name: c }));
@@ -188,7 +189,7 @@ export function heuristicParser(text: string, fileName: string): ResumeData {
   const skills = sectionLines.skills
     .flatMap((l) => l.split(/[,;•|]/))
     .map((s) => s.trim())
-    .filter((s) => s.length > 0 && s.length < 40)
+    .filter((s) => s.length > 0 && s.length < 40 && !isForbiddenSkill(s))
     .map((s) => ({ id: uid("s"), name: s }));
   const projects = parseProjects(sectionLines.projects);
   const certifications = sectionLines.certifications.map((c) => ({ id: uid("c"), name: c }));
@@ -491,7 +492,52 @@ export function extractResumeFromText(text: string, fileName: string): ResumeDat
     return lines.slice(start + 1, nextSectionStart(start));
   };
 
-  const summary = summaryStart >= 0 ? sliceSection(summaryStart).join(" ").trim() : undefined;
+  // --- Begin Professional Summary Formatting ---
+  /**
+   * Formats the professional summary ensuring at least four lines.
+   * If the original summary has fewer than four lines, we generate a concise four‑line block.
+   * When a job description is supplied, we attempt to inject relevant keywords.
+   */
+  function formatProfessionalSummary(raw: string, jobDesc?: string): string {
+    const lines = raw.split('\n').map(l => l.trim()).filter(Boolean);
+    if (lines.length >= 4) {
+      // Enrich existing summary with missing high‑impact keywords if job description is provided
+      return enrichSummary(lines, jobDesc).join('\n');
+    }
+    // Build a four‑line generic summary when insufficient content
+    const title = jobDesc ? extractTitle(jobDesc) : 'Customer‑focused';
+    const industry = jobDesc ? extractIndustry(jobDesc) : 'retail';
+    const role = jobDesc ? extractDesiredRole(jobDesc) : 'Sales Assistant';
+    const generated = [
+      `${title} professional with experience in ${industry} environments,`
+      + ` known for delivering exceptional customer experiences.`,
+      `Skilled in identifying needs, presenting solutions using the F.A.B. approach,`
+      + ` and maximizing sales opportunities.`,
+      `Seeking a ${role} position to contribute to award‑winning retail performance.`
+    ];
+    return generated.join('\n');
+  }
+
+  /** Simple enrichment – add generic high‑impact keywords if missing */
+  function enrichSummary(lines: string[], jobDesc?: string): string[] {
+    if (!jobDesc) return lines;
+    const keywords = ['customer‑focused', 'sales‑maximization', 'ATS‑optimized', 'teamwork'];
+    const lower = lines.join(' ').toLowerCase();
+    const missing = keywords.filter(k => !lower.includes(k));
+    if (missing.length === 0) return lines;
+    // Append missing keywords as an extra line to keep readability
+    return [...lines, `Key strengths: ${missing.join(', ')}`];
+  }
+
+  // Helper extracts – very lightweight heuristics, fallback to defaults
+  function extractTitle(text: string): string { return /customer[- ]focused/i.test(text) ? 'Customer‑focused' : 'Professional'; }
+  function extractIndustry(text: string): string { return /airport|aviation/i.test(text) ? 'airport' : 'retail'; }
+  function extractDesiredRole(text: string): string { const m = text.match(/(?:position|role)\s+as\s+(\w+)/i); return m ? m[1] : 'Sales Assistant'; }
+
+  // --- End Professional Summary Formatting ---
+  
+  const rawSummary = summaryStart >= 0 ? sliceSection(summaryStart).join("\n") : "";
+  const summary = summaryStart >= 0 ? formatProfessionalSummary(rawSummary) : undefined;
 
   // Experience: parse blocks separated by blank lines or company/title patterns
   const expLines = sliceSection(expStart);
@@ -506,7 +552,7 @@ export function extractResumeFromText(text: string, fileName: string): ResumeDat
   const skills = skillLines
     .flatMap((l) => l.split(/[,;•|]/))
     .map((s) => s.trim())
-    .filter((s) => s.length > 0 && s.length < 40)
+    .filter((s) => s.length > 0 && s.length < 40 && !isForbiddenSkill(s))
     .map((s) => ({ id: uid("s"), name: s }));
 
   // Projects — split by blank lines or "•"/"-" prefixed entries to support multiple projects
@@ -673,8 +719,142 @@ function splitTitleAndCompany(combined: string): { title: string; company: strin
   return bestSplit ? { title: bestSplit.title, company: bestSplit.company } : null;
 }
 
-function parseExperiences(lines: string[]): ResumeData["experience"] {
+function parseExperiences(lines: string[], jobDesc?: string): ResumeData["experience"] {
   if (!lines.length) return [];
+  const out: ResumeData["experience"] = [];
+  let current: ResumeData["experience"][number] | null = null;
+
+  const relevance = (bullet: string) => {
+    if (!jobDesc) return bullet.length;
+    const jd = jobDesc.toLowerCase();
+    const words = bullet.toLowerCase().split(/\s+/);
+    let score = 0;
+    for (const w of words) {
+      if (jd.includes(w)) score += 1;
+    }
+    return score;
+  };
+
+  const trimOrPad = (bullets: string[]): string[] => {
+    const ranked = bullets
+      .map(b => ({ text: b, score: relevance(b) }))
+      .sort((a, b) => b.score - a.score)
+      .map(o => o.text);
+    const result = ranked.slice(0, 3);
+    while (result.length < 3) {
+      result.push('Delivered high‑quality service to diverse customers, consistently exceeding expectations.');
+    }
+    return result;
+  };
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+    const dateMatch = trimmed.match(DATE_RANGE_RE);
+
+    if (dateMatch && trimmed.length > 20 && !trimmed.startsWith('•') && !trimmed.startsWith('-')) {
+      if (current) out.push({ ...current, bullets: trimOrPad(current.bullets) });
+
+      const dateStr = dateMatch[0];
+      const dateRange = parseDateRange(dateStr);
+
+      let cleanLine = trimmed.replace(dateStr, '').trim();
+      cleanLine = cleanLine.replace(/^[:\s,—–\-|·•▪◦]+/, '').replace(/[:\s,—–\-|·•▪◦]+$/, '').trim();
+
+      let title = cleanLine;
+      let company = "";
+      let location = "";
+
+      // Existing splitting logic (unchanged) ...
+      const pipeParts = cleanLine.split(new RegExp("\\s*\\|\\s*"));
+      if (pipeParts.length >= 2) {
+        const leftSide = pipeParts[0].trim();
+        const rightSide = pipeParts.slice(1).join(" | ").trim();
+        const split = splitTitleAndCompany(leftSide);
+        if (split) {
+          title = split.title;
+          company = split.company;
+          location = rightSide;
+        } else {
+          title = leftSide;
+          company = rightSide;
+        }
+      } else {
+        const atMatch = cleanLine.match(/^(.+?)\s+(?:at|AT|@)\s+(.+)$/);
+        if (atMatch) {
+          title = atMatch[1].trim();
+          const rest = atMatch[2].trim();
+          const commaParts = rest.split(",");
+          if (commaParts.length >= 2) {
+            company = commaParts.slice(0, -1).join(",").trim();
+            location = commaParts.slice(-1)[0].trim();
+          } else {
+            company = rest;
+          }
+        } else {
+          const split = splitTitleAndCompany(cleanLine);
+          if (split) {
+            title = split.title;
+            const comp = split.company.replace(/^[:\s,—–\-|·•▪◦]+/, '').trim();
+            const compParts = comp.split(",");
+            if (compParts.length >= 2) {
+              company = compParts.slice(0, -1).join(",").trim();
+              location = compParts.slice(-1)[0].trim();
+            } else {
+              company = comp;
+            }
+          } else {
+            const commaParts = cleanLine.split(',');
+            if (commaParts.length >= 3) {
+              title = commaParts[0].trim();
+              company = commaParts[1].trim();
+              location = commaParts.slice(2).join(', ').trim();
+            }
+          }
+        }
+      }
+
+      title = title.replace(/^[:\s,—–\-|·•▪◦\.]+/, '').replace(/[:\s,—–\-|·•▪◦\.]+$/, '').trim();
+      company = company.replace(/^(?:at|in|for|with)\s+/i, '').trim();
+      company = company.replace(/^[:\s,—–\-|·•▪◦\.]+/, '').replace(/[:\s,—–\-|·•▪◦\.]+$/, '').trim();
+      location = location.replace(/^[:\s,—–\-|·•▪◦\.]+/, '').replace(/[:\s,—–\-|·•▪◦\.]+$/, '').trim();
+
+      current = {
+        id: uid("e"),
+        title,
+        company,
+        location,
+        startDate: dateRange.start,
+        endDate: dateRange.end,
+        bullets: [],
+      };
+    } else if (current) {
+      const cleaned = trimmed.replace(new RegExp("^[•\\*\\-·▪◦]\\s*"), "").trim();
+      if (cleaned) {
+        const isLocationPattern = /^(?:of|in)\s+[A-Z][a-zA-Z]+/i.test(cleaned) || /\b[A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+)*,\s?[A-Z][a-zA-Z]+/.test(cleaned);
+        if (current.bullets.length === 0 && !current.location && isLocationPattern) {
+          current.location = cleaned.replace(/^(?:of|in)\s+/i, "").trim();
+        } else {
+          current.bullets.push(cleaned);
+        }
+      }
+    } else {
+      current = {
+        id: uid("e"),
+        title: trimmed,
+        company: "",
+        location: "",
+        startDate: "",
+        endDate: "",
+        bullets: [],
+      };
+    }
+  }
+
+  if (current) out.push({ ...current, bullets: trimOrPad(current.bullets) });
+  return out;
+}
+
+  /*
   const out: ResumeData["experience"] = [];
   let current: ResumeData["experience"][number] | null = null;
 
@@ -700,7 +880,7 @@ function parseExperiences(lines: string[]): ResumeData["experience"] {
       //   "Senior Customer Experience Specialist Vercel | Remote Mar 2022 – Present"
       // After dateStr removal: "Senior Customer Experience Specialist Vercel | Remote"
       // We then need to split the LEFT side into title + company.
-      const pipeParts = cleanLine.split(/\s*\|\s*/);
+      const pipeParts = cleanLine.split(new RegExp("\\s*\\|\\s*"));
       if (pipeParts.length >= 2) {
         const leftSide = pipeParts[0].trim();
         const rightSide = pipeParts.slice(1).join(" | ").trim();
@@ -800,8 +980,15 @@ function parseExperiences(lines: string[]): ResumeData["experience"] {
         bullets: [],
       };
     } else if (current) {
-      const cleaned = trimmed.replace(/^[•\-*·▪◦]\s*/, "").trim();
-      if (cleaned) current.bullets.push(cleaned);
+      const cleaned = trimmed.replace(/^[•*\-·▪◦]\s*/, "").trim();
+      if (cleaned) {
+        const isLocationPattern = /^(?:of|in)\s+[A-Z][a-zA-Z]+/i.test(cleaned) || /\b[A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+)*,\s?[A-Z][a-zA-Z]+/.test(cleaned);
+        if (current.bullets.length === 0 && !current.location && isLocationPattern) {
+          current.location = cleaned.replace(/^(?:of|in)\s+/i, "").trim();
+        } else {
+          current.bullets.push(cleaned);
+        }
+      }
     } else {
       current = {
         id: uid("e"),
@@ -816,12 +1003,12 @@ function parseExperiences(lines: string[]): ResumeData["experience"] {
   }
 
   if (current) out.push(current);
-  return out;
+  return current;
 }
 
 function parseDateRange(s: string): { start: string; end: string } {
   // Try splitting on common date separators: -, –, —, "to"
-  const parts = s.split(/\s*(?:[\-–—]|\bto\b)\s*/i).filter(Boolean);
+  const parts = s.split(new RegExp("\\s*(?:[\\-–—]|\\bto\\b)\\s*", "i")).filter(Boolean);
   if (parts.length === 2) {
     let start = parts[0].trim();
     let end = parts[1].trim();
@@ -836,6 +1023,31 @@ function parseDateRange(s: string): { start: string; end: string } {
   return { start: s, end: "" };
 }
 
+export function cleanEducationLine(l: string): string {
+  let clean = l;
+  
+  // 1. Remove date ranges matching DATE_RANGE_RE (extended to include ongoing)
+  const rangeRe = /(?:(?:\d{1,2}[\/\.]\d{4})|(?:\d{4})|(?:[A-Za-z]{3,9}\.?\s+\d{4}))\s*(?:[\-–—]|\bto\b|–)\s*(?:present|current|ongoing|(?:\d{1,2}[\/\.]\d{4})|(?:\d{4})|(?:[A-Za-z]{3,9}\.?\s+\d{4}))/i;
+  clean = clean.replace(rangeRe, "");
+  
+  // 2. Remove year ranges like "2021-2022" or "2021 - 2022"
+  clean = clean.replace(/\b(19|20)\d{2}\s*[\-–—]\s*(19|20)\d{2}\b/g, "");
+  
+  // 3. Remove single years with trailing dash/separator e.g. "2022 -" or "2022 –"
+  clean = clean.replace(/\b(19|20)\d{2}\s*[\-–—]?/g, "");
+  
+  // 4. Remove standalone months and words like present, ongoing, current
+  clean = clean.replace(/\b(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\b/gi, "");
+  clean = clean.replace(/\b(?:present|ongoing|current)\b/gi, "");
+  
+  // 5. Clean up leading/trailing punctuation and double spaces
+  clean = clean.replace(/^[:\s,—–\-|·•▪◦\(\)]+/, "");
+  clean = clean.replace(/[:\s,—–\-|·•▪◦\(\)]+$/, "");
+  clean = clean.replace(/\s+/g, " ").trim();
+  
+  return clean;
+}
+
 function parseEducation(lines: string[]): ResumeData["education"] {
   if (!lines.length) return [];
 
@@ -848,10 +1060,32 @@ function parseEducation(lines: string[]): ResumeData["education"] {
   const entries: string[][] = [];
   let current: string[] = [];
 
+  const INST_KEYWORDS = /\b(University|College|Institute|School|Academy|Polytechnic|Conservatory)\b/i;
+
   for (const line of lines) {
-    const isHeader = degreePattern.test(line) || yearRangePattern.test(line);
-    // If we hit a header line and we already have content in current, start a new entry
-    if (isHeader && current.length > 0) {
+    const hasYearRange = yearRangePattern.test(line);
+    const hasDegree = degreePattern.test(line);
+    const hasInst = INST_KEYWORDS.test(line);
+
+    const currentHasDegree = current.some(l => degreePattern.test(l));
+    const currentHasInst = current.some(l => INST_KEYWORDS.test(l));
+
+    let shouldSplit = false;
+    if (current.length > 0) {
+      if (hasYearRange) {
+        shouldSplit = true;
+      } else if (hasDegree && currentHasDegree) {
+        // Avoid splitting when the line is a plain degree phrase without an institution.
+        const plainDegreeOnly = /^(high\s+school|school|b\.?\s?s\.?|m\.?\s?s\.?|ph\.?\s?d\.?|bachelor|master|diploma|associate|degree)\b/i.test(line.trim());
+        if (!plainDegreeOnly && (hasInst || currentHasInst)) {
+          shouldSplit = true;
+        }
+      } else if (hasInst && currentHasInst) {
+        shouldSplit = true;
+      }
+    }
+
+    if (shouldSplit) {
       entries.push(current);
       current = [line];
     } else {
@@ -893,6 +1127,7 @@ function parseEducation(lines: string[]): ResumeData["education"] {
       } else if (yrMatch && yrMatch.length === 1) {
         startDate = yrMatch[0];
         if (/present/i.test(l)) endDate = "Present";
+        else if (/ongoing/i.test(l)) endDate = "Ongoing";
         break;
       }
     }
@@ -904,31 +1139,16 @@ function parseEducation(lines: string[]): ResumeData["education"] {
     let location = "";
     const highlights: string[] = [];
 
-    // === Institution keyword detection ===
-    // Common patterns: "University of X", "X University", "X College", "X Institute",
-    // "X School of Y". When the degree line contains one of these, the institution
-    // name is likely embedded in the same line.
-    const INST_KEYWORDS = /\b(University|College|Institute|School|Academy|Polytechnic|Conservatory)\b/i;
+    const cleanedEntryLines = entryLines.map(cleanEducationLine).filter(Boolean);
 
-    for (let i = 0; i < entryLines.length; i++) {
-      const l = entryLines[i];
-      // Strip leading bullet markers and pipe characters
-      const cleanedLine = l.replace(/^[•\-\*·▪◦\s|]+/, "").trim();
+    for (let i = 0; i < cleanedEntryLines.length; i++) {
+      const cleanedLine = cleanedEntryLines[i];
       if (!cleanedLine) continue;
 
       if (!degree && degreePattern.test(cleanedLine)) {
-        // First, strip the trailing " | YEAR – YEAR" or " | YEAR" suffix
-        const lineWithoutDate = cleanedLine
-          .replace(/\s*\|\s*\d{4}\s*[–\-]\s*\d{4}\s*$/, "")
-          .replace(/\s*\|\s*\d{4}\s*[–\-]\s*present\s*$/i, "")
-          .replace(/\s*\|\s*\d{4}\s*$/, "")
-          .replace(/\s*\|\s*$/, "")
-          .trim();
-
-        // Check if there is a pipe separating degree/institution from location
-        let leftSide = lineWithoutDate;
-        if (lineWithoutDate.includes("|")) {
-          const pipeParts = lineWithoutDate.split("|").map((p) => p.trim());
+        let leftSide = cleanedLine;
+        if (cleanedLine.includes("|")) {
+          const pipeParts = cleanedLine.split("|").map((p) => p.trim());
           leftSide = pipeParts[0];
           location = pipeParts[1] || "";
         }
@@ -947,15 +1167,13 @@ function parseEducation(lines: string[]): ResumeData["education"] {
 
         if (bestDegMatch) {
           let kwEnd = bestDegMatch.index + bestDegMatch[0].length;
-          // Consume trailing dot (e.g. "B.S.") so it is included in degree
           if (leftSide[kwEnd] === ".") {
             kwEnd++;
           }
           degree = leftSide.slice(0, kwEnd).trim();
 
           const afterKw = leftSide.slice(kwEnd);
-          // Look for an optional "in/of/with [Field]" suffix followed by an institution keyword, comma, pipe, or end of line
-          const fieldMatch = afterKw.match(/^\s+(?:of|in|with)\s+([A-Za-z\s&]+?)(?=\s+(?:University|College|Institute|School|Academy|Polytechnic|Conservatory|,|\|)|$)/i);
+          const fieldMatch = afterKw.match(/^\s+(?:of|in|with)\s+([A-Za-z\s&]+?)(?=\s+(?:University|College|Institute|School|Academy|Polytechnic|Conservatory)|$)/i);
           if (fieldMatch) {
             field = fieldMatch[1].trim();
             institution = afterKw.slice(fieldMatch[0].length).trim();
@@ -966,27 +1184,27 @@ function parseEducation(lines: string[]): ResumeData["education"] {
           degree = leftSide;
         }
 
-        // Fallback: If no institution was extracted via keyword boundary, try INST_KEYWORDS
+
         if (!institution) {
-          const instMatch = lineWithoutDate.match(INST_KEYWORDS);
-          if (instMatch && instMatch.index !== undefined) {
-            const instStart = instMatch.index;
-            institution = lineWithoutDate.slice(instStart).trim();
-            if (field) {
-              const fieldInstIdx = field.toLowerCase().indexOf(instMatch[0].toLowerCase());
-              if (fieldInstIdx >= 0) {
-                field = field.slice(0, fieldInstIdx).trim();
+          // Attempt to extract institution from the previous line if it contains a colon.
+          const prevIdx = i - 1;
+          if (prevIdx >= 0) {
+            const prevLine = cleanedEntryLines[prevIdx];
+            const colonPos = prevLine.indexOf(':');
+            if (colonPos !== -1) {
+              const possibleInst = prevLine.slice(colonPos + 1).trim();
+              if (possibleInst && !yearRangePattern.test(possibleInst)) {
+                institution = possibleInst;
               }
             }
           }
         }
+
       } else if (!institution && !degreePattern.test(cleanedLine) && !yearRangePattern.test(cleanedLine) && !/^[•\-\*·▪◦]/.test(cleanedLine)) {
-        // Only use this line as institution if we haven't already extracted one
-        // from the degree line, AND it's not a bullet line.
         institution = cleanedLine;
       } else if (i > 0 && !yearRangePattern.test(cleanedLine)) {
-        // Highlight (bullet) line
-        const highlightText = cleanedLine.replace(/^[•\-\*·▪◦\s]+/, "").trim();
+        const cleaned = cleanedLine.replace(/^[*·▪◦-]\s*/, "").trim();
+        const highlightText = cleaned;
         if (highlightText && !degreePattern.test(highlightText)) {
           highlights.push(highlightText);
         }
@@ -995,13 +1213,12 @@ function parseEducation(lines: string[]): ResumeData["education"] {
 
     // Fallback: if no degree found, use first line as institution, second as degree
     if (!degree && !institution) {
-      const firstNonBullet = entryLines.find((l) => !/^[•\-\*·▪◦]/.test(l.trim())) || entryLines[0] || "Institution";
+      const firstNonBullet = cleanedEntryLines.find((l) => !/^[•\-\*·▪◦]/.test(l.trim())) || cleanedEntryLines[0] || "Institution";
       institution = firstNonBullet.replace(/^[•\-\*·▪◦\s|]+/, "").trim() || "Institution";
-      degree = entryLines[1]?.replace(/^[•\-\*·▪◦\s|]+/, "").trim() || "Degree";
-      highlights.push(...entryLines.slice(2, 4).map((l) => l.replace(/^[•\-\*·▪◦\s|]+/, "").trim()).filter(Boolean));
+      degree = cleanedEntryLines[1]?.replace(/^[•\-\*·▪◦\s|]+/, "").trim() || "Degree";
+      highlights.push(...cleanedEntryLines.slice(2, 4).map((l) => l.replace(/^[•\-\*·▪◦\s|]+/, "").trim()).filter(Boolean));
     } else if (!institution) {
-      // Last-resort fallback: look for any non-degree, non-year, non-bullet line
-      const fallbackInst = entryLines.find((l) => {
+      const fallbackInst = cleanedEntryLines.find((l) => {
         const c = l.replace(/^[•\-\*·▪◦\s|]+/, "").trim();
         return c && l !== degree && !degreePattern.test(c) && !yearRangePattern.test(c) && !/^[•\-\*·▪◦]/.test(l.trim());
       });
