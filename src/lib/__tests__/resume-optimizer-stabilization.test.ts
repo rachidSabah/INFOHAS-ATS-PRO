@@ -28,6 +28,7 @@ import type { ResumeData } from "../types";
 import { enforceLockedFields } from "../agents/orchestrator";
 import { buildOptimizerInput } from "../bullet-only-optimizer";
 import { isOpenCodeZenFree, getRecommendedFallbacks, getProviderCapabilities } from "../provider-capabilities";
+import { parseResumeText } from "../parser";
 
 // ============================================================================
 // Test Fixtures
@@ -916,5 +917,51 @@ describe("Free Provider Stabilization & Capabilities", () => {
     expect(ordered[2].provider.type).toBe("opencode");
 
     useApp.setState(originalState);
+  });
+});
+
+// ============================================================================
+// 19. PLAIN TEXT RESUME PARSER
+// ============================================================================
+
+describe("Plain Text Resume Parser", () => {
+  it("successfully parses plain text resume into structured ResumeData", async () => {
+    const rawResumeText = `
+Jane Doe
+jane@example.com | +1234567890 | Rabat, Morocco
+
+PROFESSIONAL SUMMARY
+Experienced customer service professional with 5 years in retail.
+
+PROFESSIONAL EXPERIENCE
+Receptionist at Hotel Atlas, Rabat Morocco Jan 2022 - Mar 2023
+- Managed front desk operations.
+- Handled guest inquiries.
+
+EDUCATION
+Hospitality Diploma
+INFOHAS
+2023 - 2025
+
+LANGUAGES
+English: Fluent
+French: Fluent
+Arabic: Native
+    `;
+
+    const parsed = await parseResumeText(rawResumeText);
+    expect(parsed.name).toBe("Jane Doe");
+    expect(parsed.contact.email).toBe("jane@example.com");
+    expect(parsed.contact.phone).toBe("+1234567890");
+    expect(parsed.contact.location).toBe("Rabat, Morocco");
+    expect(parsed.summary).toContain("Experienced customer service");
+    expect(parsed.experience[0].title).toBe("Receptionist");
+    expect(parsed.experience[0].company).toBe("Hotel Atlas");
+    expect(parsed.education[0].institution).toBe("INFOHAS");
+    expect(parsed.languages.length).toBe(3);
+  });
+
+  it("throws error for too short or invalid text inputs", async () => {
+    await expect(parseResumeText("Too short")).rejects.toThrow("too short");
   });
 });

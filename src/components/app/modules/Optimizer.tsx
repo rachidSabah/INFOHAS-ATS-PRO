@@ -6,9 +6,10 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Badge, Icon, ScoreRing } from "@/components/shared";
 import { useApp, uid } from "@/lib/store";
-import { parseResumeFile } from "@/lib/parser";
+import { parseResumeFile, parseResumeText } from "@/lib/parser";
 import { scoreATS } from "@/lib/ats";
 import { analyzeATS } from "@/lib/agents/ats-analysis";
 import { callAI, extractJSON } from "@/lib/ai";
@@ -77,6 +78,28 @@ export function Optimizer() {
   // Interview prep mode — shows when user clicks "Prepare for Interview"
   const [showInterviewPrep, setShowInterviewPrep] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
+
+  const [pasteText, setPasteText] = useState("");
+  const [parsingText, setParsingText] = useState(false);
+
+  const handlePasteResume = async () => {
+    if (pasteText.trim().length < 30) {
+      toast.error("Please paste your resume text (at least 30 characters).");
+      return;
+    }
+    setParsingText(true);
+    try {
+      const parsed = await parseResumeText(pasteText);
+      setResume(parsed);
+      addResume(parsed);
+      toast.success("Parsed pasted resume successfully");
+      setStep("jd");
+    } catch (e: any) {
+      toast.error(e?.message || "Parse failed");
+    } finally {
+      setParsingText(false);
+    }
+  };
 
   // Responsive preview scale — recomputed on window resize so the A4 preview
   // never overflows the viewport on mobile. The A4Preview component now wraps
@@ -506,25 +529,65 @@ export function Optimizer() {
         {/* Step 1: Upload */}
         {step === "upload" && (
           <motion.div key="upload" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} className="grid lg:grid-cols-2 gap-4">
-            <Card>
-              <CardHeader><CardTitle className="text-lg">Upload an existing resume</CardTitle><CardDescription>PDF, DOCX, or TXT — up to 20MB. Parsed in-browser.</CardDescription></CardHeader>
-              <CardContent>
-                <div
-                  onClick={() => fileRef.current?.click()}
-                  className="rounded-xl border-2 border-dashed border-border p-8 text-center cursor-pointer hover:border-brand/50 hover:bg-secondary/40 transition"
-                >
-                  <Icon name="Upload" className="w-8 h-8 text-brand mx-auto" />
-                  <div className="mt-2 font-medium text-sm">Drop your resume or click to browse</div>
-                  <div className="text-xs text-muted-foreground mt-1">.pdf, .docx, .txt</div>
-                </div>
-                <input ref={fileRef} type="file" accept=".pdf,.docx,.txt" className="hidden" onChange={(e) => uploadResume(e.target.files)} />
-                <div className="mt-3 rounded-lg bg-brand/5 dark:bg-brand/10 border border-brand/20 p-2.5 flex items-start gap-2">
-                  <Icon name="Info" className="w-3.5 h-3.5 text-brand shrink-0 mt-0.5" />
-                  <p className="text-xs text-muted-foreground">
-                    Upload your existing resume in PDF or DOCX. The Parser Agent extracts experience, education, skills, certifications, projects, achievements, and languages — all in your browser, nothing uploaded to a server.
-                  </p>
-                </div>
-              </CardContent>
+            <Card className="flex flex-col">
+              <Tabs defaultValue="file" className="w-full flex-1 flex flex-col">
+                <CardHeader className="pb-2">
+                  <div className="flex items-center justify-between">
+                    <CardTitle className="text-lg">Add your resume</CardTitle>
+                    <TabsList className="grid w-[200px] grid-cols-2">
+                      <TabsTrigger value="file">File Upload</TabsTrigger>
+                      <TabsTrigger value="text">Paste Text</TabsTrigger>
+                    </TabsList>
+                  </div>
+                  <CardDescription>Upload a file or paste your resume text to get started.</CardDescription>
+                </CardHeader>
+                <CardContent className="flex-1 flex flex-col pt-0">
+                  <TabsContent value="file" className="space-y-3 mt-2 flex-1 flex flex-col justify-between">
+                    <div
+                      onClick={() => fileRef.current?.click()}
+                      className="rounded-xl border-2 border-dashed border-border p-8 text-center cursor-pointer hover:border-brand/50 hover:bg-secondary/40 transition flex-1 flex flex-col items-center justify-center min-h-[160px]"
+                    >
+                      <Icon name="Upload" className="w-8 h-8 text-brand mx-auto" />
+                      <div className="mt-2 font-medium text-sm">Drop your resume or click to browse</div>
+                      <div className="text-xs text-muted-foreground mt-1">.pdf, .docx, .txt</div>
+                    </div>
+                    <input ref={fileRef} type="file" accept=".pdf,.docx,.txt" className="hidden" onChange={(e) => uploadResume(e.target.files)} />
+                    <div className="rounded-lg bg-brand/5 dark:bg-brand/10 border border-brand/20 p-2.5 flex items-start gap-2">
+                      <Icon name="Info" className="w-3.5 h-3.5 text-brand shrink-0 mt-0.5" />
+                      <p className="text-xs text-muted-foreground">
+                        Upload your existing resume in PDF or DOCX. The Parser Agent extracts experience, education, skills, certifications, projects, achievements, and languages — all in your browser.
+                      </p>
+                    </div>
+                  </TabsContent>
+                  <TabsContent value="text" className="space-y-3 mt-2 flex-1 flex flex-col justify-between">
+                    <div className="flex-1 min-h-[160px] flex flex-col">
+                      <Textarea
+                        value={pasteText}
+                        onChange={(e) => setPasteText(e.target.value)}
+                        placeholder="Paste your plain text resume here (including summary, work experience, education, languages)..."
+                        className="flex-1 min-h-[140px] text-xs resize-none"
+                      />
+                    </div>
+                    <Button 
+                      onClick={handlePasteResume} 
+                      disabled={parsingText || pasteText.trim().length < 30} 
+                      className="w-full bg-brand hover:bg-brand-dark text-white gap-2 mt-2"
+                    >
+                      {parsingText ? (
+                        <>
+                          <Icon name="Loader2" className="w-4 h-4 animate-spin" />
+                          Parsing resume text...
+                        </>
+                      ) : (
+                        <>
+                          <Icon name="FileText" className="w-4 h-4" />
+                          Parse resume text
+                        </>
+                      )}
+                    </Button>
+                  </TabsContent>
+                </CardContent>
+              </Tabs>
             </Card>
             <Card>
               <CardHeader><CardTitle className="text-lg">Or pick from your library</CardTitle><CardDescription>{resumes.length} resumes available</CardDescription></CardHeader>

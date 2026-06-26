@@ -285,6 +285,23 @@ export async function parseResumeFile(file: File): Promise<ResumeData> {
   return primaryResult;
 }
 
+export async function parseResumeText(text: string): Promise<ResumeData> {
+  if (text.trim().length < 30) {
+    throw new Error("The text appears to be too short to be a valid resume.");
+  }
+
+  const primaryResult = extractResumeFromText(text, "Pasted Resume");
+  const primaryConfidence = calculateParserConfidence(primaryResult);
+  const isValid = validateParsedResume(primaryResult);
+
+  if (!isValid || primaryConfidence < 90) {
+    console.warn(`Primary parser incomplete (valid: ${isValid}, confidence: ${primaryConfidence}). Running RepairParser...`);
+    return RepairParser(text, "Pasted Resume");
+  }
+
+  return primaryResult;
+}
+
 async function parsePdf(file: File): Promise<string> {
   // Load pdf.js v3.11.174 from CDN — most reliable approach for all environments
   // (browser, Cloudflare Pages, Edge runtime). Uses script tag injection.
