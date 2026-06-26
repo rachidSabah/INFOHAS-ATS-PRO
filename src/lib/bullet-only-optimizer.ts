@@ -28,8 +28,8 @@
 
 "use client";
 
-import type { ResumeData, ResumeSkill, JobDescription, AgentDirectives } from "./types";
-import { callAI, extractJSON, OPTIMIZER_CALL_TIMEOUT_MS } from "./ai";
+import type { ResumeData, ResumeSkill, JobDescription, AgentDirectives, OptimizerDirectiveConfig } from "./types";
+import { callAI, extractJSON, OPTIMIZER_CALL_TIMEOUT_MS, getOptimizerDirective } from "./ai";
 import { cleanupGrammar, repairMalformedJSON, stripMarkdown } from "./ai-response-processor";
 import type { OptimizerOutput } from "./resume-assembler";
 
@@ -53,8 +53,9 @@ export function buildOptimizerInput(
   sourceResume: ResumeData,
   jd: JobDescription,
   intelligenceContext: string,
-  agentDirectives?: AgentDirectives,
+  directiveConfig?: OptimizerDirectiveConfig | null,
 ): { systemPrompt: string; userPrompt: string } {
+  const agentDirectives = directiveConfig?.agentDirectives;
   // The source resume sent to the LLM — includes IDs for experience entries
   // so the LLM can echo them back.
   const sourceForLLM = {
@@ -165,6 +166,12 @@ CRITICAL RULES:
    - NEVER include analysis phrases like "The original resume lacks..." or "Missing keywords:".
 
 ${agentDirectives ? buildAgentDirectiveSection(agentDirectives) : ""}
+
+${directiveConfig ? `═══════════════════════════════════════════════════════════════
+LAYOUT & CONFIGURATION DIRECTIVES (UI Configured)
+═══════════════════════════════════════════════════════════════
+${cleanDirectiveForBulletOnly(getOptimizerDirective(), !!directiveConfig.customDirectiveOverride?.trim())}
+` : ""}
 
 Return ONLY valid JSON. No prose, no markdown fences, no HTML.`;
 
@@ -314,11 +321,12 @@ export async function runBulletOnlyOptimizer(
   sourceResume: ResumeData,
   jd: JobDescription,
   intelligenceContext: string,
-  agentDirectives?: AgentDirectives,
+  directiveConfig?: OptimizerDirectiveConfig | null,
   excludeProviderIds?: string[],
 ): Promise<BulletOnlyOptimizerResult> {
-  const { systemPrompt, userPrompt } = buildOptimizerInput(sourceResume, jd, intelligenceContext, agentDirectives);
+  const { systemPrompt, userPrompt } = buildOptimizerInput(sourceResume, jd, intelligenceContext, directiveConfig);
 
+  const agentDirectives = directiveConfig?.agentDirectives;
   const temp = agentDirectives?.supervisor?.temperature ?? 0.15;
   const result = await callAI({
     systemPrompt,
@@ -415,4 +423,37 @@ function buildAgentDirectiveSection(d: AgentDirectives): string {
   lines.push("═══════════════════════════════════════════════════════════════");
 
   return lines.join("\n");
+}
+
+/**
+ * Filter out full-resume specific JSON layout specifications from the compiled
+ * directive so that the bullet-only optimizer is not confused into outputting the full resume.
+ */
+function cleanDirectiveForBulletOnly(directive: string, isCustom: boolean): string {
+  if (isCustom) return directive;
+
+  const delimiter = "═══════════════════════════════════════════════════════════════";
+  const sections = directive.split(delimiter);
+  const cleanSections: string[] = [];
+
+  for (const section of sections) {
+    const trimmed = section.trim();
+    if (!trimmed) continue;
+
+    const lines = trimmed.split("\n");
+    const title = lines[0]?.trim() || "";
+
+    if (
+      title.includes("OUTPUT FORMAT") ||
+      title.includes("OUTPUT CONTRACT") ||
+      title.includes("FORBIDDEN SECTIONS") ||
+      title.includes("SECTION ORDER")
+    ) {
+      continue;
+    }
+
+    cleanSections.push(section);
+  }
+
+  return cleanSections.join(delimiter);
 }

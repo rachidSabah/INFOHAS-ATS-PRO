@@ -95,7 +95,7 @@ import { computeExperienceFingerprint } from "../experience-fingerprint";
  *   - Detects and deduplicates education entries
  *   - Restores any missing bullets (AI must not drop bullets)
  */
-function enforceLockedFields(optimized: ResumeData, original: ResumeData): ResumeData {
+export function enforceLockedFields(optimized: ResumeData, original: ResumeData): ResumeData {
   // Strip pipe characters from all text fields — pipes break ATS parsing
   const stripPipes = (text: string): string => (text || "").replace(/\|/g, "·");
   const cleanTitle = (title: string): string => stripPipes(title);
@@ -160,10 +160,10 @@ function enforceLockedFields(optimized: ResumeData, original: ResumeData): Resum
           return null;
         }
 
-        // Only restore bullets if AI dropped them — keep AI's optimized bullets if they're longer
-        const restoredBullets = orig.bullets.length > e.bullets.length
-          ? orig.bullets
-          : e.bullets;
+        // Only restore bullets if AI dropped them — keep AI's optimized bullets if they exist
+        const restoredBullets = e.bullets && e.bullets.length > 0
+          ? e.bullets
+          : orig.bullets;
 
         return {
           ...e,
@@ -885,8 +885,7 @@ Bridging Strategy: ${result.skillGap.bridgingStrategy}`);
           // Run the locked pipeline
           // Pass the user-configured per-agent directives from the store
           const { runLockedPipeline } = await import("../locked-pipeline");
-          const agentDirectives = (useApp.getState() as any)?.optimizerDirective?.agentDirectives;
-          const lockedResult = await runLockedPipeline(resume, jd, intelligenceContext, agentDirectives);
+          const lockedResult = await runLockedPipeline(resume, jd, intelligenceContext, directiveConfig);
 
           optimizeResult = {
             resume: lockedResult.resume,
@@ -1156,6 +1155,35 @@ Bridging Strategy: ${result.skillGap.bridgingStrategy}`);
         try {
           const { finalizeResume } = await import("../unified-pipeline");
           result.optimizedResume = finalizeResume(result.optimizedResume!, resume);
+
+          // === DYNAMIC PAGE BALANCING (Ensures 90-98% A4 one-page fill) ===
+          try {
+            const { expandResume, compressResume, validatePageFill } = await import("../agents/page-balancer");
+            const pageFill = validatePageFill(result.optimizedResume!, directiveConfig);
+            console.log(`[Final Safety Net Page Balancer] Action: ${pageFill.action}, Chars: ${pageFill.charCount}, Target: ${pageFill.targetChars}`);
+
+            if (pageFill.action === "expand") {
+              const jdKeywords = jd.keywords ?? [];
+              const resumeText = JSON.stringify(result.optimizedResume!).toLowerCase();
+              const missingKeywords = jdKeywords.filter((k) => !resumeText.includes(k.toLowerCase()));
+              result.optimizedResume = expandResume(result.optimizedResume!, {
+                originalResume: resume,
+                jd,
+                targetChars: pageFill.targetChars,
+                currentChars: pageFill.charCount,
+                missingKeywords,
+              });
+            } else if (pageFill.action === "compress") {
+              result.optimizedResume = compressResume(result.optimizedResume!, {
+                targetChars: pageFill.targetChars,
+                maxChars: Math.floor(pageFill.targetChars * 1.04),
+                currentChars: pageFill.charCount,
+              });
+            }
+          } catch (pbErr: any) {
+            console.warn("[Final Safety Net Page Balancer] Failed (non-fatal):", pbErr?.message);
+          }
+
           result.charCount = JSON.stringify({
             summary: result.optimizedResume?.summary,
             experience: result.optimizedResume?.experience,

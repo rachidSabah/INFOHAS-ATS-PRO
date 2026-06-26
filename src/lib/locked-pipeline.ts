@@ -21,12 +21,13 @@
 
 "use client";
 
-import type { ResumeData, JobDescription, AgentDirectives } from "./types";
+import type { ResumeData, JobDescription, AgentDirectives, OptimizerDirectiveConfig } from "./types";
 import { runBulletOnlyOptimizer, buildOptimizerInput } from "./bullet-only-optimizer";
 import { assembleResume } from "./resume-assembler";
 import { runStructureGuardian } from "./structure-guardian";
 import { validateExperienceFingerprints } from "./experience-fingerprint";
 import { createDebugArtifacts, persistDebugArtifacts } from "./debug-persistence";
+import { expandResume, compressResume, validatePageFill } from "./agents/page-balancer";
 
 export interface LockedPipelineResult {
   resume: ResumeData;
@@ -69,8 +70,9 @@ export async function runLockedPipeline(
   sourceResume: ResumeData,
   jd: JobDescription,
   intelligenceContext: string,
-  agentDirectives?: AgentDirectives,
+  directiveConfig?: OptimizerDirectiveConfig | null,
 ): Promise<LockedPipelineResult> {
+  const agentDirectives = directiveConfig?.agentDirectives;
   const warnings: string[] = [];
   const errors: string[] = [];
 
@@ -133,8 +135,8 @@ export async function runLockedPipeline(
       // ========================================================================
       // Step 2: Run Bullet-Only Optimizer (supports excludeProviderIds)
       // ========================================================================
-      const optimizerInput = buildOptimizerInput(sourceResume, jd, intelligenceContext, agentDirectives);
-      const optimizerResult = await runBulletOnlyOptimizer(sourceResume, jd, intelligenceContext, agentDirectives, excludeProviderIds);
+      const optimizerInput = buildOptimizerInput(sourceResume, jd, intelligenceContext, directiveConfig);
+      const optimizerResult = await runBulletOnlyOptimizer(sourceResume, jd, intelligenceContext, directiveConfig, excludeProviderIds);
       warnings.push(...optimizerResult.warnings);
 
       console.info(`[Locked Pipeline] Attempt ${attempts}: Optimizer returned: ${optimizerResult.output.experiences?.length ?? 0} experiences, ${optimizerResult.output.skills?.length ?? 0} skills`);
@@ -145,6 +147,36 @@ export async function runLockedPipeline(
       const assembleResult = assembleResume(sourceResume, optimizerResult.output);
       warnings.push(...assembleResult.warnings);
       errors.push(...assembleResult.errors);
+
+      // ========================================================================
+      // Dynamic Page Balancing (A4 One-Page Fit)
+      // ========================================================================
+      let balancedResume = assembleResult.resume;
+      try {
+        const pageFill = validatePageFill(balancedResume, directiveConfig);
+        console.info(`[Locked Pipeline Page Balancer] Action: ${pageFill.action}, Chars: ${pageFill.charCount}, Target: ${pageFill.targetChars}`);
+        if (pageFill.action === "expand") {
+          const jdKeywords = jd.keywords ?? [];
+          const resumeText = JSON.stringify(balancedResume).toLowerCase();
+          const missingKeywords = jdKeywords.filter((k) => !resumeText.includes(k.toLowerCase()));
+          balancedResume = expandResume(balancedResume, {
+            originalResume: sourceResume,
+            jd,
+            targetChars: pageFill.targetChars,
+            currentChars: pageFill.charCount,
+            missingKeywords,
+          });
+        } else if (pageFill.action === "compress") {
+          balancedResume = compressResume(balancedResume, {
+            targetChars: pageFill.targetChars,
+            maxChars: Math.floor(pageFill.targetChars * 1.04),
+            currentChars: pageFill.charCount,
+          });
+        }
+      } catch (pbErr) {
+        console.warn("[Locked Pipeline Page Balancer] Failed (non-fatal):", pbErr);
+      }
+      assembleResult.resume = balancedResume;
 
       console.info(`[Locked Pipeline] Assembler: ${assembleResult.matchedById} by ID, ${assembleResult.matchedByFingerprint} by fingerprint, ${assembleResult.matchedByTitleCompany} by title/company, ${assembleResult.matchedByIndex} by index, ${assembleResult.unmatched} unmatched`);
 

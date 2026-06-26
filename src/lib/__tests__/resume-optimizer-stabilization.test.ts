@@ -25,6 +25,8 @@ import { runStructureGuardian } from "../structure-guardian";
 import { validateParserIntegrity } from "../production-patch-v1_1-modules";
 import { matchExperienceEntry } from "../pipeline-orchestration-modules";
 import type { ResumeData } from "../types";
+import { enforceLockedFields } from "../agents/orchestrator";
+import { buildOptimizerInput } from "../bullet-only-optimizer";
 
 // ============================================================================
 // Test Fixtures
@@ -733,5 +735,102 @@ describe("Strict ID and Fingerprint Validation", () => {
     const validation = validateExperienceFingerprints(optimized, sourceResume);
     expect(validation.valid).toBe(false);
     expect(validation.violations.some((v) => v.includes("changed fingerprint"))).toBe(true);
+  });
+});
+
+// ============================================================================
+// 17. ENFORCE LOCKED FIELDS BULLET LENGTH FIX & DIRECTIVE CLEANING
+// ============================================================================
+
+describe("Enforce Locked Fields Bullet Length & Directive Cleaning", () => {
+  it("preserves optimized bullets even when fewer than original", () => {
+    const original: ResumeData = {
+      ...sourceResume,
+      experience: [
+        {
+          id: "exp_1",
+          title: "Receptionist",
+          company: "Hotel Atlas",
+          location: "Rabat",
+          startDate: "Jan 2022",
+          endDate: "Mar 2023",
+          bullets: ["Bullet 1", "Bullet 2", "Bullet 3", "Bullet 4"],
+        },
+      ],
+    };
+    const optimized: ResumeData = {
+      ...original,
+      experience: [
+        {
+          id: "exp_1",
+          title: "Receptionist",
+          company: "Hotel Atlas",
+          location: "Rabat",
+          startDate: "Jan 2022",
+          endDate: "Mar 2023",
+          bullets: ["Optimized 1", "Optimized 2"], // fewer bullets
+        },
+      ],
+    };
+    const locked = enforceLockedFields(optimized, original);
+    expect(locked.experience[0].bullets.length).toBe(2);
+    expect(locked.experience[0].bullets[0]).toBe("Optimized 1");
+    expect(locked.experience[0].bullets[1]).toBe("Optimized 2");
+  });
+
+  it("buildOptimizerInput cleans full JSON output instructions from prompt", () => {
+    const directiveConfig = {
+      pageSize: "A4",
+      marginTopMm: 10,
+      marginBottomMm: 10,
+      marginLeftMm: 10,
+      marginRightMm: 10,
+      fontFamily: "Arial",
+      bodyFontSizePt: 10,
+      sectionTitleSizePt: 12,
+      nameSizePt: 14,
+      nameColor: "#000",
+      sectionTitleColor: "#000",
+      bodyTextColor: "#000",
+      lineHeight: 1.2,
+      sectionGapMm: 4,
+      bulletIndentMm: 4,
+      photoEnabled: false,
+      photoWidthMm: 30,
+      photoHeightMm: 40,
+      showPlaceholderIfNoPhoto: false,
+      summaryMinWords: 50,
+      summaryMaxWords: 100,
+      skillsMaxGroups: 5,
+      experienceMaxEntries: 5,
+      experienceBulletsPerEntry: 4,
+      educationMaxEntries: 3,
+      languagesMaxEntries: 3,
+      enforceOnePage: true,
+      minFontSizePt: 8,
+      sectionLimits: {
+        header: { min: 100, max: 200 },
+        summary: { min: 200, max: 400 },
+        skills: { min: 100, max: 300 },
+        experience: { min: 1000, max: 2000 },
+        education: { min: 100, max: 300 },
+        languages: { min: 50, max: 150 },
+        total: { min: 1500, max: 3000 },
+      },
+      customDirectiveOverride: "",
+      agentDirectives: {
+        supervisor: { strictMode: true, enableRetries: true, enableProviderSwitch: true, enforceImmutableEntities: true, enableDebugLogs: true, enableDiffViewer: true },
+        summary: { atsAggressiveness: 50, preserveFacts: true, minCharacters: 100, maxCharacters: 500 },
+        skills: { maxKeywords: 10, allowTransferableSkills: true, allowCompanyKeywords: false, allowLocationKeywords: false },
+        experience: { rewriteBulletsOnly: true, maxExpansionPercent: 20 },
+        education: { formatOnly: true },
+        languages: { formatOnly: true },
+      },
+    } as any;
+
+    const input = buildOptimizerInput(sourceResume, { title: "Manager", company: "Retail" } as any, "Context", directiveConfig);
+    expect(input.systemPrompt).toContain("LAYOUT & CONFIGURATION DIRECTIVES");
+    expect(input.systemPrompt).not.toContain("OUTPUT FORMAT");
+    expect(input.systemPrompt).not.toContain("OUTPUT CONTRACT");
   });
 });
