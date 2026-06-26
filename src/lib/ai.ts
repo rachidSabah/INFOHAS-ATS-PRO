@@ -16,7 +16,7 @@ export { OptimizationProviderExhaustedError, OPTIMIZER_CALL_TIMEOUT_MS } from ".
 import { useApp } from "./store";
 import { startAICall, truncatePromptToTokenLimit, checkTokenLimit, MAX_INPUT_TOKENS } from "./ai-diagnostics";
 import { getRequestQueue, withRateLimitRetry, isRateLimitError, getRateLimitErrorMessage, getRecommendedFallbacks, isOpenCodeZenFree, startOptimizationTracking, stopOptimizationTracking } from "./provider-capabilities";
-import type { AIProvider } from "./types";
+import type { AIProvider, FallbackChainConfig } from "./types";
 import {
   checkPuterUsageStatus as _checkPuterUsageStatus,
   getPuterMonthlyUsage as _getPuterMonthlyUsage,
@@ -59,6 +59,84 @@ export function hasValidApiKey(p: any): boolean {
   const trimmed = key.trim();
   if (trimmed === "" || trimmed === "undefined" || trimmed === "null") return false;
   return true;
+}
+
+/**
+ * Get the user-configured fallback chain from the store.
+ * Returns null if the chain is disabled or not configured.
+ */
+export function getFallbackChain(): FallbackChainConfig | null {
+  try {
+    const state: any = useApp.getState();
+    const chain = state?.fallbackChain;
+    if (!chain || !chain.enabled) return null;
+    return chain as FallbackChainConfig;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Build an ordered list of fallback providers from the user's configured chain.
+ *
+ * This replaces the hardcoded `allProviders.filter(p => p.isActive)` logic.
+ * The chain is traversed in order (index 0 = highest priority).
+ * Each entry specifies a providerId + model, and may override generation params.
+ *
+ * Returns an array of { provider, model, overrides } objects.
+ * Only enabled entries with valid API keys are included.
+ */
+export function getOrderedFallbackProviders(excludeProviderId?: string): Array<{
+  provider: any;
+  model: string;
+  overrides: { temperature?: number; maxTokens?: number; timeoutMs?: number; topP?: number };
+}> {
+  const state: any = useApp.getState();
+  const allProviders: any[] = state?.providers || [];
+  const chain = getFallbackChain();
+
+  // If chain is disabled or empty, fall back to legacy behavior (all active providers)
+  if (!chain || !chain.entries || chain.entries.length === 0) {
+    console.info("[AI] Fallback chain disabled or empty — using legacy provider order (all active providers)");
+    return allProviders
+      .filter((p) => p.isActive && p.type !== "puter" && p.type !== "local" && hasValidApiKey(p) && p.id !== excludeProviderId)
+      .map((p) => ({ provider: p, model: p.modelName || "", overrides: {} }));
+  }
+
+  // Use the user's configured chain order
+  const result: Array<{ provider: any; model: string; overrides: any }> = [];
+  for (const entry of chain.entries) {
+    if (!entry.enabled) continue;
+    if (entry.providerId === excludeProviderId) continue; // don't retry the primary
+
+    const provider = allProviders.find((p) => p.id === entry.providerId);
+    if (!provider) {
+      console.warn(`[AI] Fallback chain entry "${entry.id}": provider "${entry.providerId}" not found — skipping`);
+      continue;
+    }
+    if (!provider.isActive) {
+      console.info(`[AI] Fallback chain entry "${entry.id}": provider "${provider.name}" is inactive — skipping`);
+      continue;
+    }
+    if (!hasValidApiKey(provider)) {
+      console.info(`[AI] Fallback chain entry "${entry.id}": provider "${provider.name}" has no valid API key — skipping`);
+      continue;
+    }
+
+    result.push({
+      provider,
+      model: entry.model || provider.modelName || "",
+      overrides: {
+        temperature: entry.temperature,
+        maxTokens: entry.maxTokens,
+        timeoutMs: entry.timeoutMs,
+        topP: entry.topP,
+      },
+    });
+  }
+
+  console.info(`[AI] Fallback chain: ${result.length} active entries (from ${chain.entries.length} total)`);
+  return result;
 }
 
 export async function selectProvider(): Promise<any> {
@@ -1492,25 +1570,33 @@ export async function callAI(opts: AICallOptions): Promise<AICallResult> {
         tokensEstimate: estTokens(finalOpts.userPrompt + (finalOpts.systemPrompt ?? "")),
       };
     } catch (e: any) {
-      // Puter failed — try secondary providers in the pool
-      console.warn(`[AI] Puter failed: ${e?.message || e}. Trying secondary providers...`);
-      const state = useApp.getState();
-      const allProviders = state.providers || [];
-      const secondary = allProviders.filter((p: any) => p.isActive && p.type !== "puter" && p.type !== "local" && hasValidApiKey(p));
+      // Puter failed — try fallback providers using the USER-CONFIGURED fallback chain
+      console.warn(`[AI] Puter failed: ${e?.message || e}. Trying fallback chain...`);
       const providerErrors: string[] = [`Puter: ${e?.message || e}`];
+      const fallbackChain = getOrderedFallbackProviders(); // respects user's configured order
 
-      for (const fallbackProvider of secondary) {
+      for (const { provider: fallbackProvider, model: fbModel, overrides: fbOverrides } of fallbackChain) {
         const fbCooldownId = fallbackProvider.id || fallbackProvider.name || fallbackProvider.type;
         if (isProviderInCooldown(fbCooldownId)) {
           console.info(`[AI] Skipping ${fallbackProvider.name} — in cooldown.`);
           providerErrors.push(`${fallbackProvider.name}: in cooldown (rate-limited or auth-failed)`);
           continue;
         }
-        console.log(`[ROUTER]\nProvider selected: ${fallbackProvider.name}`);
+        console.log(`[ROUTER]\nProvider selected: ${fallbackProvider.name} (model: ${fbModel || fallbackProvider.modelName || "default"})`);
         try {
+          // Apply chain overrides (model, temperature, maxTokens, timeout)
+          const chainOpts = {
+            ...finalOpts,
+            ...(fbModel ? {} : {}), // model is passed via provider override below
+            ...(fbOverrides.temperature !== undefined ? { temperature: fbOverrides.temperature } : {}),
+            ...(fbOverrides.maxTokens !== undefined ? { maxTokens: fbOverrides.maxTokens } : {}),
+          };
+          const chainTimeoutMs = fbOverrides.timeoutMs || callTimeoutMs;
+          // Override the provider's model for this call
+          const providerWithModel = fbModel ? { ...fallbackProvider, modelName: fbModel } : fallbackProvider;
           const text = await withTimeout(
-            callUserProvider(fallbackProvider, finalOpts),
-            callTimeoutMs,
+            callUserProvider(providerWithModel, chainOpts),
+            chainTimeoutMs,
             `${fallbackProvider.name}.generate`
           );
           assert(text !== "", "Provider response is empty");
@@ -1643,22 +1729,28 @@ export async function callAI(opts: AICallOptions): Promise<AICallResult> {
     }
   }
 
-  // Try all other active secondary providers
-  const otherSecondary = allProviders.filter(
-    (p: any) => p.isActive && p.type !== "puter" && p.type !== "local" && p.id !== provider.id && hasValidApiKey(p)
-  );
-  for (const altProvider of otherSecondary) {
+  // Try fallback providers using the USER-CONFIGURED fallback chain (excludes the primary that just failed)
+  const otherSecondary = getOrderedFallbackProviders(provider.id);
+  for (const { provider: altProvider, model: altModel, overrides: altOverrides } of otherSecondary) {
     const altCooldownId = altProvider.id || altProvider.name || altProvider.type;
     if (isProviderInCooldown(altCooldownId)) {
       console.info(`[AI] Skipping ${altProvider.name} — in cooldown.`);
       providerErrors.push(`${altProvider.name}: in cooldown (rate-limited or auth-failed)`);
       continue;
     }
-    console.log(`[ROUTER]\nProvider selected: ${altProvider.name}`);
+    console.log(`[ROUTER]\nProvider selected: ${altProvider.name} (model: ${altModel || altProvider.modelName || "default"})`);
     try {
+      // Apply chain overrides (model, temperature, maxTokens, timeout)
+      const chainOpts = {
+        ...finalOpts,
+        ...(altOverrides.temperature !== undefined ? { temperature: altOverrides.temperature } : {}),
+        ...(altOverrides.maxTokens !== undefined ? { maxTokens: altOverrides.maxTokens } : {}),
+      };
+      const chainTimeoutMs = altOverrides.timeoutMs || callTimeoutMs;
+      const providerWithModel = altModel ? { ...altProvider, modelName: altModel } : altProvider;
       const text = await withTimeout(
-        callUserProvider(altProvider, finalOpts),
-        callTimeoutMs,
+        callUserProvider(providerWithModel, chainOpts),
+        chainTimeoutMs,
         `${altProvider.name}.generate`
       );
       assert(text !== "", "Provider response is empty");

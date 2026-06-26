@@ -5,7 +5,7 @@ import { create } from "zustand";
 import type {
   User, ResumeData, JobDescription, AIProvider, AIProviderLog, AIProviderSettings, PromptTemplate,
   BrandingConfig, FeatureFlags, AuditLog, ViewKey, CoverLetter, InterviewPackage, ATSReport,
-  OptimizerDirectiveConfig,
+  OptimizerDirectiveConfig, FallbackChainConfig,
   AIDevAgentSettings, AIDevAgentHistory, AIDevReport,
   AITask, AIWorkspacePatch, AIGitBranch, AIGitCommit, AIRollback,
   ResumeReviewReport, AIHealingIssue, AIHealingReport,
@@ -13,7 +13,7 @@ import type {
 import {
   SEED_RESUMES, SEED_JDS, SEED_PROVIDERS, SEED_PROVIDER_LOGS, SEED_PROVIDER_SETTINGS,
   SEED_PROMPTS, SEED_BRANDING, SEED_FLAGS, SEED_LOGS, SEED_COVER_LETTERS, SEED_INTERVIEW, SEED_ATS_REPORTS,
-  SEED_OPTIMIZER_DIRECTIVE,
+  SEED_OPTIMIZER_DIRECTIVE, SEED_FALLBACK_CHAIN,
   SEED_AI_DEV_SETTINGS, SEED_AI_DEV_HISTORY, SEED_AI_DEV_REPORTS,
   SEED_AI_TASKS, SEED_AI_PATCHES, SEED_AI_BRANCHES, SEED_AI_COMMITS, SEED_AI_ROLLBACKS,
 } from "./mock-data";
@@ -84,6 +84,7 @@ interface AppState {
   providers: AIProvider[];
   providerLogs: AIProviderLog[];
   providerSettings: AIProviderSettings;
+  fallbackChain: FallbackChainConfig;
   prompts: PromptTemplate[];
   branding: BrandingConfig;
   flags: FeatureFlags;
@@ -203,6 +204,9 @@ interface AppState {
   updateFlag: (k: keyof FeatureFlags, v: boolean) => void;
   updateOptimizerDirective: (patch: Partial<OptimizerDirectiveConfig>) => void;
   resetOptimizerDirective: () => void;
+  // Fallback Chain
+  updateFallbackChain: (patch: Partial<FallbackChainConfig>) => void;
+  resetFallbackChain: () => void;
   // AI Dev Agent
   updateAIDevSettings: (patch: Partial<AIDevAgentSettings>) => void;
   addAIDevHistory: (entry: Omit<AIDevAgentHistory, "id" | "createdAt">) => void;
@@ -410,6 +414,7 @@ export const useApp = create<AppState>()(
       branding: SEED_BRANDING,
       flags: SEED_FLAGS,
       optimizerDirective: SEED_OPTIMIZER_DIRECTIVE,
+      fallbackChain: SEED_FALLBACK_CHAIN,
       aiDevSettings: SEED_AI_DEV_SETTINGS,
       aiDevHistory: SEED_AI_DEV_HISTORY,
       aiDevReports: SEED_AI_DEV_REPORTS,
@@ -1203,6 +1208,17 @@ export const useApp = create<AppState>()(
         set({ optimizerDirective: SEED_OPTIMIZER_DIRECTIVE });
         cloudApiSafe(cloudApi.updateBranding as any)({ optimizerDirective: SEED_OPTIMIZER_DIRECTIVE }).catch((e) => { console.warn("[store] Cloud sync failed:", e instanceof Error ? e.message : e); });
         useApp.getState().log({ actor: get().user?.email ?? "admin", action: "Optimizer directive reset to defaults", category: "admin", details: "All parameters restored to factory defaults", severity: "warning" });
+      },
+      updateFallbackChain: (patch) => {
+        set((s) => ({ fallbackChain: { ...s.fallbackChain, ...patch } }));
+        // Sync to D1 via the branding/settings endpoint (stored as a JSON blob)
+        cloudApiSafe(cloudApi.updateBranding as any)({ fallbackChain: { ...get().fallbackChain, ...patch } }).catch((e) => { console.warn("[store] Cloud sync failed:", e instanceof Error ? e.message : e); });
+        useApp.getState().log({ actor: get().user?.email ?? "admin", action: "Fallback chain updated", category: "admin", details: `${(patch.entries ?? []).length} entries, enabled=${patch.enabled ?? get().fallbackChain.enabled}`, severity: "info" });
+      },
+      resetFallbackChain: () => {
+        set({ fallbackChain: SEED_FALLBACK_CHAIN });
+        cloudApiSafe(cloudApi.updateBranding as any)({ fallbackChain: SEED_FALLBACK_CHAIN }).catch((e) => { console.warn("[store] Cloud sync failed:", e instanceof Error ? e.message : e); });
+        useApp.getState().log({ actor: get().user?.email ?? "admin", action: "Fallback chain reset to defaults", category: "admin", details: "All fallback entries restored to factory defaults", severity: "warning" });
       },
       updateAIDevSettings: (patch) => {
         set((s) => ({ aiDevSettings: { ...s.aiDevSettings, ...patch } }));

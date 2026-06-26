@@ -438,6 +438,52 @@ export interface AIProviderSettings {
   enableCostTracking: boolean;
 }
 
+// ============================================================================
+// FALLBACK CHAIN CONFIGURATION
+//
+// User-configurable fallback chain stored in D1 and synced to all pipelines,
+// routes, and agents. Replaces the hardcoded fallback logic in ai.ts.
+//
+// The chain is an ordered list of entries. When the primary provider fails,
+// the chain is traversed in order. Each entry specifies:
+//   - which provider to use
+//   - which model to use (overrides the provider's default model)
+//   - whether the entry is enabled
+//   - optional generation parameters (temperature, maxTokens, etc.)
+// ============================================================================
+
+export interface FallbackChainEntry {
+  /** Unique ID for this chain entry (not the provider ID) */
+  id: string;
+  /** The provider ID to use for this fallback entry */
+  providerId: string;
+  /** The model to use (overrides the provider's default model) */
+  model: string;
+  /** Whether this entry is active (disabled entries are skipped) */
+  enabled: boolean;
+  /** Optional: override the provider's temperature for this fallback */
+  temperature?: number;
+  /** Optional: override the provider's maxTokens for this fallback */
+  maxTokens?: number;
+  /** Optional: override the provider's timeout (ms) for this fallback */
+  timeoutMs?: number;
+  /** Optional: top_p value (0-1) */
+  topP?: number;
+}
+
+export interface FallbackChainConfig {
+  /** Ordered list of fallback entries (index 0 = highest priority) */
+  entries: FallbackChainEntry[];
+  /** Whether the fallback chain is enabled (if false, uses legacy hardcoded logic) */
+  enabled: boolean;
+  /** Whether to include Puter as a last-resort fallback before local engine */
+  includePuterLastResort: boolean;
+  /** Whether to fall back to local engine if all providers fail */
+  includeLocalEngineLastResort: boolean;
+  /** When true, respects the user's selected primary model and only uses fallback on failure */
+  respectPrimarySelection: boolean;
+}
+
 export interface PromptTemplate {
   id: string;
   name: string;
@@ -942,6 +988,7 @@ export type ViewKey =
   | "logs"
   | "feature-flags"
   | "optimizer-directive"
+  | "fallback-chain"
   | "ai-dev-agent"
   | "ai-workspace"
   | "ai-achievement"

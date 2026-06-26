@@ -409,6 +409,14 @@ export async function syncAllFromCloud(store: any): Promise<void> {
           store.setState({ optimizerDirective: stored });
         }
       }
+      // Restore fallbackChain if it was stored as part of branding settings
+      if (bd.fallbackChain && typeof bd.fallbackChain === "object") {
+        const stored = bd.fallbackChain;
+        if (stored.entries && Array.isArray(stored.entries) && stored.entries.length > 0) {
+          console.info(`[syncAllFromCloud] Restoring fallbackChain from D1 (${stored.entries.length} entries)`);
+          store.setState({ fallbackChain: stored });
+        }
+      }
       if (bd.aiDevSettings && typeof bd.aiDevSettings === "object") {
         store.setState({ aiDevSettings: { ...store.getState().aiDevSettings, ...bd.aiDevSettings } });
       }

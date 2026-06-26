@@ -7,6 +7,7 @@ import type {
   OptimizerDirectiveConfig,
   AIDevAgentSettings, AIDevAgentHistory, AIDevReport,
   AITask, AIWorkspacePatch, AIGitBranch, AIGitCommit, AIRollback,
+  FallbackChainConfig,
 } from "./types";
 import { BRAND } from "./brand";
 
@@ -471,6 +472,71 @@ export const SEED_PROVIDER_SETTINGS: AIProviderSettings = {
   enableFailover: true,
   enableCaching: true,
   enableCostTracking: true,
+};
+
+/**
+ * Default fallback chain configuration.
+ *
+ * This is the factory default. Users can customize the chain in the
+ * Fallback Chain settings UI. Changes are persisted to D1 and synced
+ * to all pipelines, routes, and agents.
+ *
+ * The chain is ordered: index 0 is tried first, then index 1, etc.
+ * The user's primary provider is ALWAYS tried first (before this chain).
+ * This chain only activates when the primary fails.
+ */
+export const SEED_FALLBACK_CHAIN: FallbackChainConfig = {
+  enabled: true,
+  includePuterLastResort: true,
+  includeLocalEngineLastResort: true,
+  respectPrimarySelection: true,
+  entries: [
+    {
+      id: "fb_001",
+      providerId: "p_zencode",
+      model: "deepseek-v4-flash-free",
+      enabled: true,
+      temperature: 0.15,
+      maxTokens: 8000,
+      timeoutMs: 120000,
+    },
+    {
+      id: "fb_002",
+      providerId: "p_opencode",
+      model: "deepseek-v4-flash-free",
+      enabled: true,
+      temperature: 0.15,
+      maxTokens: 8000,
+      timeoutMs: 120000,
+    },
+    {
+      id: "fb_003",
+      providerId: "p_nvidia",
+      model: "meta/llama-3.3-70b-instruct",
+      enabled: true,
+      temperature: 0.15,
+      maxTokens: 8192,
+      timeoutMs: 90000,
+    },
+    {
+      id: "fb_004",
+      providerId: "p_google",
+      model: "gemini-2.5-flash",
+      enabled: true,
+      temperature: 0.15,
+      maxTokens: 8192,
+      timeoutMs: 90000,
+    },
+    {
+      id: "fb_005",
+      providerId: "p_mistral",
+      model: "mistral-small-latest",
+      enabled: true,
+      temperature: 0.15,
+      maxTokens: 8192,
+      timeoutMs: 90000,
+    },
+  ],
 };
 
 export const SEED_PROMPTS: PromptTemplate[] = [
