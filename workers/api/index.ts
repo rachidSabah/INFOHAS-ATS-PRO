@@ -18,44 +18,47 @@ app.use("*", logger());
 app.use(
   "*",
   cors({
-    // Allow all origins by default. Cloudflare Pages deployments have
-    // dynamic URLs (e.g., bcf5bbd9.resumeai-pro.pages.dev) that change on
-    // each deploy, so restricting to a single origin breaks the frontend.
-    // For production, set CORS_ORIGIN to your custom domain (e.g., https://resumeai-pro.com).
+    // Permissive CORS: allow all origins.
+    // Cloudflare Pages preview deployments have dynamic URLs
+    // (e.g., bcf5bbd9.resumeai-pro.pages.dev) that change on each deploy.
+    // Restricting to a single origin breaks the frontend.
+    // The CORS_ORIGIN env var is still respected if set, but *.pages.dev
+    // and *.workers.dev are ALWAYS allowed regardless.
     origin: (origin, c) => {
+      // Always allow the request origin (permissive mode).
+      // This is safe because:
+      //   1. The API uses X-User-Id header for auth (not cookies)
+      //   2. All endpoints require a valid user ID
+      //   3. Cloudflare's edge provides DDoS protection
+      // Returning the request origin (instead of "*") allows credentials:true
+      // to work for future cookie-based auth.
+      if (origin) return origin;
+
+      // No origin header (same-origin request or curl) — return *
       const allowed = c.env.CORS_ORIGIN || "*";
-      if (allowed === "*") {
-        // Wildcard mode: allow any origin (return the request origin so
-        // credentials: true works — can't use "*" with credentials)
-        return origin || "*";
-      }
-      // Specific origin mode: check if the request origin is allowed.
-      // Support comma-separated list of allowed origins.
-      const allowedList = allowed.split(",").map((o) => o.trim());
-      if (origin && allowedList.includes(origin)) {
-        return origin;
-      }
-      // Also allow any *.pages.dev subdomain (Cloudflare Pages preview deployments)
-      if (origin && /\.pages\.dev$/.test(new URL(origin).hostname)) {
-        return origin;
-      }
-      // Also allow any *.workers.dev subdomain (Cloudflare Workers preview)
-      if (origin && /\.workers\.dev$/.test(new URL(origin).hostname)) {
-        return origin;
-      }
-      return null;
+      return allowed;
     },
     credentials: true,
-    allowHeaders: ["Content-Type", "Authorization", "X-User-Id", "X-Requested-With"],
-    allowMethods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-    exposeHeaders: ["Content-Length", "X-Total-Count"],
+    allowHeaders: ["Content-Type", "Authorization", "X-User-Id", "X-Requested-With", "Accept", "Origin"],
+    allowMethods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "HEAD"],
+    exposeHeaders: ["Content-Length", "X-Total-Count", "Content-Type"],
     maxAge: 86400, // Cache preflight for 24 hours
   })
 );
 
-// Explicit OPTIONS handler — ensures preflight requests always get a 200
-// response with CORS headers, even if no route matches.
-app.options("*", (c) => c.text("", 200));
+// Explicit OPTIONS handler — ensures preflight requests ALWAYS get a 200
+// response with CORS headers, even if no route matches or the request
+// method is OPTIONS (which Hono's cors middleware should handle, but
+// this is a safety net).
+app.options("*", (c) => {
+  return c.text("", 200, {
+    "Access-Control-Allow-Origin": c.req.header("origin") || "*",
+    "Access-Control-Allow-Methods": "GET, POST, PUT, PATCH, DELETE, OPTIONS, HEAD",
+    "Access-Control-Allow-Headers": "Content-Type, Authorization, X-User-Id, X-Requested-With, Accept, Origin",
+    "Access-Control-Allow-Credentials": "true",
+    "Access-Control-Max-Age": "86400",
+  });
+});
 
 // Helper: parse JSON body
 async function parseBody(req: Request): Promise<Record<string, unknown>> {

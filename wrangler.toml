@@ -22,7 +22,10 @@ id = "4521e79873524900bb373a245d095fcf"
 [vars]
 APP_NAME = "ResumeAI Pro"
 APP_URL = "https://resumeai-pro.pages.dev"
-CORS_ORIGIN = "https://resumeai-pro.pages.dev"
+# CORS_ORIGIN: Set to "*" to allow all origins (needed for Cloudflare Pages
+# preview deployments which have dynamic URLs like bcf5bbd9.resumeai-pro.pages.dev).
+# For production with a custom domain, set to "https://yourdomain.com".
+CORS_ORIGIN = "*"
 
 [observability]
 enabled = true
