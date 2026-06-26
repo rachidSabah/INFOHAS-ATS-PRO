@@ -5,6 +5,10 @@ import type { ResumeData } from "./types";
 import { uid } from "./store";
 import { isForbiddenSkill } from "./entity-lock";
 
+function safeCall<T extends (...args: any[]) => any>(fn: T, args: Parameters<T>, fallback: ReturnType<T>): ReturnType<T> {
+  try { return typeof fn === 'function' ? fn(...args) : fallback; } catch { return fallback; }
+}
+
 /**
  * Parse an uploaded file into a ResumeData object.
  * Supports: .txt, .pdf (via pdfjs-dist), .docx (via mammoth)
@@ -78,8 +82,8 @@ export function secondaryParser(text: string, fileName: string): ResumeData {
   const projLines = projMatch ? projMatch[1].split("\n").map(l => l.trim()).filter(Boolean) : [];
   const summary = summaryMatch ? summaryMatch[1].trim() : undefined;
 
-  const experience = parseExperiences(expLines);
-  const education = parseEducation(eduLines);
+  const experience = safeCall(parseExperiences, [expLines], []) as ResumeData["experience"];
+  const education = safeCall(parseEducation, [eduLines], []) as ResumeData["education"];
   const skills = skillsLines
     .flatMap((l) => l.split(new RegExp("[,;•|]")))
     .map((s) => s.trim())
@@ -245,57 +249,83 @@ export function heuristicParser(text: string, fileName: string): ResumeData {
 }
 
 export async function parseResumeFile(file: File): Promise<ResumeData> {
-  const name = file.name.toLowerCase();
-  let rawText = "";
+  try {
+    const name = file.name.toLowerCase();
+    let rawText = "";
 
-  if (name.endsWith(".txt")) {
-    rawText = await file.text();
-  } else if (name.endsWith(".pdf")) {
-    rawText = await parsePdf(file);
-  } else if (name.endsWith(".docx")) {
-    rawText = await parseDocx(file);
-  } else if (name.endsWith(".doc")) {
-    rawText = await file.text().catch(() => "");
-    if (!rawText.trim()) {
-      throw new Error(
-        "Legacy .doc files are not directly parseable in-browser. Please save as .docx or .pdf and try again."
-      );
+    if (name.endsWith(".txt")) {
+      rawText = await file.text();
+    } else if (name.endsWith(".pdf")) {
+      rawText = await parsePdf(file);
+    } else if (name.endsWith(".docx")) {
+      rawText = await parseDocx(file);
+    } else if (name.endsWith(".doc")) {
+      rawText = await file.text().catch(() => "");
+      if (!rawText.trim()) {
+        console.warn("[parser] Legacy .doc not parseable in-browser. Returning blank resume.");
+        return blankResume(file.name.replace(/\.[^/.]+$/, ""));
+      }
+    } else {
+      console.warn("[parser] Unsupported file type. Returning blank resume.");
+      return blankResume(file.name.replace(/\.[^/.]+$/, ""));
     }
-  } else {
-    throw new Error("Unsupported file type. Please upload PDF, DOCX, or TXT.");
+
+    if (rawText.trim().length < 30) {
+      console.warn("[parser] File appears empty or unparseable. Returning blank resume.");
+      return blankResume(file.name.replace(/\.[^/.]+$/, ""));
+    }
+
+    const primaryResult = safeCall(extractResumeFromText, [rawText, file.name], null);
+    if (!primaryResult) {
+      console.warn("[parser] extractResumeFromText failed. Returning blank resume.");
+      return blankResume(file.name.replace(/\.[^/.]+$/, ""));
+    }
+
+    const primaryConfidence = safeCall(calculateParserConfidence, [primaryResult], 0);
+    const isValid = safeCall(validateParsedResume, [primaryResult], false);
+
+    if (!isValid) {
+      console.warn(`[parser] Primary parser incomplete (valid: ${isValid}, confidence: ${primaryConfidence}). Running RepairParser...`);
+      const repaired = safeCall(RepairParser, [rawText, file.name], null);
+      if (repaired) return repaired;
+      console.warn("[parser] RepairParser also failed. Returning primary result as-is.");
+    }
+
+    return primaryResult;
+  } catch (e) {
+    console.error("[parser] parseResumeFile unexpected error:", e);
+    return blankResume(file.name.replace(/\.[^/.]+$/, ""));
   }
-
-  if (rawText.trim().length < 30) {
-    throw new Error("The file appears to be empty or could not be parsed.");
-  }
-
-  const primaryResult = extractResumeFromText(rawText, file.name);
-  const primaryConfidence = calculateParserConfidence(primaryResult);
-  const isValid = validateParsedResume(primaryResult);
-
-  if (!isValid) {
-    console.warn(`Primary parser incomplete (valid: ${isValid}, confidence: ${primaryConfidence}). Running RepairParser...`);
-    return RepairParser(rawText, file.name);
-  }
-
-  return primaryResult;
 }
 
 export async function parseResumeText(text: string): Promise<ResumeData> {
-  if (text.trim().length < 30) {
-    throw new Error("The text appears to be too short to be a valid resume.");
+  try {
+    if (text.trim().length < 30) {
+      console.warn("[parser] Pasted text too short. Returning blank resume.");
+      return blankResume("Pasted Resume");
+    }
+
+    const primaryResult = safeCall(extractResumeFromText, [text, "Pasted Resume"], null);
+    if (!primaryResult) {
+      console.warn("[parser] extractResumeFromText failed for pasted text. Returning blank resume.");
+      return blankResume("Pasted Resume");
+    }
+
+    const primaryConfidence = safeCall(calculateParserConfidence, [primaryResult], 0);
+    const isValid = safeCall(validateParsedResume, [primaryResult], false);
+
+    if (!isValid) {
+      console.warn(`[parser] Primary parser incomplete for pasted text (valid: ${isValid}, confidence: ${primaryConfidence}). Running RepairParser...`);
+      const repaired = safeCall(RepairParser, [text, "Pasted Resume"], null);
+      if (repaired) return repaired;
+      console.warn("[parser] RepairParser also failed for pasted text. Returning primary result as-is.");
+    }
+
+    return primaryResult;
+  } catch (e) {
+    console.error("[parser] parseResumeText unexpected error:", e);
+    return blankResume("Pasted Resume");
   }
-
-  const primaryResult = extractResumeFromText(text, "Pasted Resume");
-  const primaryConfidence = calculateParserConfidence(primaryResult);
-  const isValid = validateParsedResume(primaryResult);
-
-  if (!isValid) {
-    console.warn(`Primary parser incomplete (valid: ${isValid}, confidence: ${primaryConfidence}). Running RepairParser...`);
-    return RepairParser(text, "Pasted Resume");
-  }
-
-  return primaryResult;
 }
 
 async function parsePdf(file: File): Promise<string> {
@@ -344,6 +374,56 @@ async function parsePdf(file: File): Promise<string> {
     if (pageText.trim()) {
       textParts.push(pageText.trim());
     }
+  }
+
+  const extracted = textParts.join("\n\n");
+
+  // If pdf.js extracted little to no text, the PDF is likely a scanned image.
+  // Fall back to Tesseract OCR.
+  if (extracted.trim().length < 80) {
+    console.warn("[parser] pdf.js extracted little text (<80 chars). Trying OCR fallback...");
+    try {
+      const ocrText = await ocrPdf(arrayBuffer);
+      if (ocrText.trim().length > extracted.trim().length) {
+        return ocrText;
+      }
+    } catch (e) {
+      console.warn("[parser] OCR fallback failed:", e);
+    }
+  }
+
+  return extracted;
+}
+
+async function ocrPdf(arrayBuffer: ArrayBuffer): Promise<string> {
+  // Dynamically load Tesseract.js
+  const Tesseract: any = await import("tesseract.js");
+  const blob = new Blob([arrayBuffer], { type: "application/pdf" });
+
+  // Tesseract works on images — convert PDF pages to canvas, then OCR each page.
+  // Load pdf.js (should already be loaded by caller, but guard here too)
+  const pdfjsLib =
+    (window as any).pdfjsLib ||
+    (() => {
+      throw new Error("pdf.js not loaded for OCR pre-render");
+    })();
+
+  const pdf = await pdfjsLib.getDocument({ data: arrayBuffer.slice(0) }).promise;
+  const textParts: string[] = [];
+
+  for (let i = 1; i <= Math.min(pdf.numPages, 5); i++) {
+    const page = await pdf.getPage(i);
+    const viewport = page.getViewport({ scale: 2.0 }); // 2x for OCR quality
+    const canvas = document.createElement("canvas");
+    canvas.width = viewport.width;
+    canvas.height = viewport.height;
+    const ctx = canvas.getContext("2d")!;
+    await page.render({ canvasContext: ctx, viewport }).promise;
+
+    const { data } = await Tesseract.recognize(canvas.toDataURL("image/png"), "eng+fra", {
+      logger: () => {}, // silent
+    });
+    textParts.push(data.text);
   }
 
   return textParts.join("\n\n");
@@ -1003,7 +1083,7 @@ function parseExperiences(lines: string[], jobDesc?: string): ResumeData["experi
   }
 
   if (current) out.push(current);
-  return current;
+  return out;
 }
 
 function parseDateRange(s: string): { start: string; end: string } {
