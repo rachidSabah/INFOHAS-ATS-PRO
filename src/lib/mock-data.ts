@@ -85,7 +85,7 @@ export const SEED_PROVIDERS: AIProvider[] = [
     retryAttempts: 2,
     rateLimitPerMinute: 60,
     modelName: "deepseek-v4-flash-free",
-    enabledModels: ["deepseek-v4-flash-free", "mimo-v2.5-free", "minimax-m2.5-free", "nemotron-3-super-free", "north-mini-code-free", "big-pickle", "claude-sonnet-4-5", "gpt-5", "gemini-3-flash", "claude-opus-4-8", "gpt-5.5"],
+    enabledModels: ["deepseek-v4-flash-free", "mimo-v2.5-free", "minimax-m2.5-free", "nemotron-3-super-free", "nemotron-3-ultra-free", "north-mini-code-free", "big-pickle", "claude-sonnet-4-5", "gpt-5", "gemini-3-flash", "claude-opus-4-8", "gpt-5.5"],
     streamingEnabled: true,
     authType: "bearer",
     costPerInputToken: 0,
@@ -289,6 +289,13 @@ export const SEED_PROVIDERS: AIProvider[] = [
       "gemini-2.0-flash-lite",
       "gemini-1.5-flash",
       "gemini-1.5-pro",
+      "models/gemini-2.5-flash",
+      "models/gemini-2.5-flash-lite",
+      "models/gemini-2.5-pro",
+      "models/gemini-2.0-flash",
+      "models/gemini-2.0-flash-lite",
+      "models/gemini-1.5-flash",
+      "models/gemini-1.5-pro",
     ],
     streamingEnabled: true,
     authType: "bearer",  // Google's OpenAI-compatible endpoint uses Bearer auth
@@ -339,7 +346,7 @@ const NVIDIA_PROVIDER: AIProvider = {
   // was returning errors on the Nvidia free tier. Llama-3.3-70b was working
   // (returned 2874 chars in testing) and has good instruction-following.
   modelName: "meta/llama-3.3-70b-instruct",
-  enabledModels: ["meta/llama-3.3-70b-instruct", "meta/llama-3.1-70b-instruct", "meta/llama-4-scout-17b-16e-instruct", "meta/llama-3.1-405b-instruct"],
+  enabledModels: ["meta/llama-3.3-70b-instruct", "meta/llama-3.1-70b-instruct", "meta/llama-4-scout-17b-16e-instruct", "meta/llama-3.1-405b-instruct", "stepfun-ai/step-3.7-flash"],
   streamingEnabled: true,
   authType: "bearer",
   costPerInputToken: 0,
