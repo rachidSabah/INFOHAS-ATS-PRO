@@ -10,6 +10,7 @@ import { Switch } from "@/components/ui/switch";
 import { Badge, Icon, ScoreRing } from "@/components/shared";
 import { useApp, uid } from "@/lib/store";
 import { toast } from "sonner";
+import { fetchProviderModels, buildFallbackModelChain, describeModel, type DetectedModel } from "@/lib/provider-model-detection";
 import {
   scanCode, analyzeErrors, inspectRoutes, inspectDatabase,
   scanSecurity, analyzePerformance, validateDeployment,
@@ -759,6 +760,9 @@ function SettingsTab() {
   const providers = useApp((s) => s.providers);
   const [draft, setDraft] = useState(settings);
   const [dirty, setDirty] = useState(false);
+  const [detectedModels, setDetectedModels] = useState<DetectedModel[]>([]);
+  const [detecting, setDetecting] = useState(false);
+  const [detectionSource, setDetectionSource] = useState<string>("");
 
   const patch = (p: Partial<typeof draft>) => {
     setDraft((d) => ({ ...d, ...p }));
@@ -773,6 +777,63 @@ function SettingsTab() {
 
   const activeProviders = providers.filter((p) => p.isActive);
 
+  // === Model Detection ===
+  const detectModels = async () => {
+    const providerId = draft.providerId || activeProviders[0]?.id;
+    if (!providerId) {
+      toast.error("No provider selected. Select a provider first.");
+      return;
+    }
+    const provider = providers.find((p) => p.id === providerId);
+    if (!provider) {
+      toast.error("Provider not found.");
+      return;
+    }
+
+    setDetecting(true);
+    try {
+      const result = await fetchProviderModels(provider);
+      setDetectedModels(result.models);
+      setDetectionSource(result.source);
+      if (result.source === "api") {
+        toast.success(`Detected ${result.models.length} models from ${provider.name}'s API.`);
+      } else {
+        toast.info(`Using ${result.models.length} configured models from ${provider.name} (API unreachable: ${result.error || "unknown error"}).`);
+      }
+      // Auto-select the first detected model if no model is set
+      if (result.models.length > 0 && !draft.modelName) {
+        patch({ modelName: result.models[0].id });
+      }
+    } catch (e: any) {
+      toast.error(`Model detection failed: ${e?.message || e}`);
+    } finally {
+      setDetecting(false);
+    }
+  };
+
+  // === Auto-build fallback chain from detected models ===
+  const autoBuildFallback = () => {
+    if (detectedModels.length === 0) {
+      toast.error("No models detected. Click 'Detect Models' first.");
+      return;
+    }
+    if (!draft.modelName) {
+      toast.error("No primary model selected. Select a model first.");
+      return;
+    }
+    const fallbacks = buildFallbackModelChain(detectedModels, draft.modelName, 5);
+    if (fallbacks.length === 0) {
+      toast.info("No fallback models available (only one model detected).");
+      return;
+    }
+    // Set the first fallback as the fallback model
+    patch({
+      fallbackProviderId: draft.providerId || activeProviders[0]?.id || "",
+      fallbackModel: fallbacks[0].id,
+    });
+    toast.success(`Fallback model set to "${fallbacks[0].id}" (${fallbacks.length - 1} more available).`);
+  };
+
   return (
     <div className="space-y-4">
       {/* Provider settings */}
@@ -781,40 +842,145 @@ function SettingsTab() {
           <CardTitle className="text-lg flex items-center gap-2"><Icon name="Cpu" className="w-4 h-4 text-brand" /> Provider</CardTitle>
           <CardDescription>Select the AI provider and model for the agent. Default: DeepSeek V4 Flash via OpenCode-compatible API.</CardDescription>
         </CardHeader>
-        <CardContent className="grid sm:grid-cols-2 gap-4">
-          <div>
-            <Label>Primary Provider</Label>
-            <select
-              value={draft.providerId}
-              onChange={(e) => patch({ providerId: e.target.value })}
-              className="w-full h-9 px-3 rounded-md border border-input bg-background text-sm mt-1"
-            >
-              <option value="">Auto-select (DeepSeek first)</option>
-              {activeProviders.map((p) => (
-                <option key={p.id} value={p.id}>{p.name} ({p.type})</option>
-              ))}
-            </select>
+        <CardContent className="space-y-4">
+          <div className="grid sm:grid-cols-2 gap-4">
+            <div>
+              <Label>Primary Provider</Label>
+              <select
+                value={draft.providerId}
+                onChange={(e) => {
+                  patch({ providerId: e.target.value });
+                  setDetectedModels([]); // clear detected models when provider changes
+                  setDetectionSource("");
+                }}
+                className="w-full h-9 px-3 rounded-md border border-input bg-background text-sm mt-1"
+              >
+                <option value="">Auto-select (DeepSeek first)</option>
+                {activeProviders.map((p) => (
+                  <option key={p.id} value={p.id}>{p.name} ({p.type})</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <Label>Model Name</Label>
+              <div className="flex gap-2 mt-1">
+                <Input value={draft.modelName} onChange={(e) => patch({ modelName: e.target.value })} className="font-mono text-sm flex-1" placeholder="deepseek-v4-flash" />
+                {detectedModels.length > 0 && (
+                  <select
+                    value={draft.modelName}
+                    onChange={(e) => patch({ modelName: e.target.value })}
+                    className="h-9 px-2 rounded-md border border-input bg-background text-xs"
+                    title="Select from detected models"
+                  >
+                    <option value="">(detected)</option>
+                    {detectedModels.map((m) => (
+                      <option key={m.id} value={m.id}>{m.id}</option>
+                    ))}
+                  </select>
+                )}
+              </div>
+            </div>
           </div>
-          <div>
-            <Label>Model Name</Label>
-            <Input value={draft.modelName} onChange={(e) => patch({ modelName: e.target.value })} className="mt-1 font-mono text-sm" placeholder="deepseek-v4-flash" />
+
+          {/* Model Detection Section */}
+          <div className="rounded-lg border border-border bg-secondary/20 p-4 space-y-3">
+            <div className="flex items-center justify-between">
+              <div>
+                <Label className="flex items-center gap-2">
+                  <Icon name="Search" className="w-4 h-4" /> Model Detection
+                </Label>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  Fetch all available models from the provider's API. Detected models can be used for automatic fallback.
+                </p>
+              </div>
+              <div className="flex gap-2">
+                <Button variant="outline" size="sm" onClick={detectModels} disabled={detecting} className="gap-2">
+                  <Icon name={detecting ? "Loader" : "Search"} className={`w-4 h-4 ${detecting ? "animate-spin" : ""}`} />
+                  {detecting ? "Detecting..." : "Detect Models"}
+                </Button>
+                <Button variant="outline" size="sm" onClick={autoBuildFallback} disabled={detectedModels.length === 0 || !draft.modelName} className="gap-2">
+                  <Icon name="Shuffle" className="w-4 h-4" /> Auto-Build Fallback
+                </Button>
+              </div>
+            </div>
+
+            {detectionSource && (
+              <div className="flex items-center gap-2">
+                <Badge variant={detectionSource === "api" ? "success" : "warning"} className="text-[10px]">
+                  {detectionSource === "api" ? "FROM API" : "FROM CONFIG"}
+                </Badge>
+                <span className="text-xs text-muted-foreground">
+                  {detectedModels.length} model(s) detected
+                </span>
+              </div>
+            )}
+
+            {detectedModels.length > 0 && (
+              <div className="max-h-48 overflow-y-auto rounded-md border border-border bg-background">
+                {detectedModels.map((model) => (
+                  <div
+                    key={model.id}
+                    className={`flex items-center justify-between p-2 border-b border-border last:border-0 cursor-pointer hover:bg-secondary/30 ${
+                      draft.modelName === model.id ? "bg-brand/5" : ""
+                    }`}
+                    onClick={() => patch({ modelName: model.id })}
+                  >
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm font-mono truncate">{model.id}</span>
+                        {draft.modelName === model.id && (
+                          <Badge variant="brand" className="text-[9px]">SELECTED</Badge>
+                        )}
+                      </div>
+                      <div className="text-[10px] text-muted-foreground mt-0.5">
+                        {describeModel(model)}
+                      </div>
+                    </div>
+                    <div className="flex gap-1 shrink-0">
+                      {model.supportsReasoning && <Badge variant="outline" className="text-[9px]">REASONING</Badge>}
+                      {model.supportsVision && <Badge variant="outline" className="text-[9px]">VISION</Badge>}
+                      {model.supportsToolCalling && <Badge variant="outline" className="text-[9px]">TOOLS</Badge>}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
-          <div>
-            <Label>Fallback Provider</Label>
-            <select
-              value={draft.fallbackProviderId}
-              onChange={(e) => patch({ fallbackProviderId: e.target.value })}
-              className="w-full h-9 px-3 rounded-md border border-input bg-background text-sm mt-1"
-            >
-              <option value="">None</option>
-              {activeProviders.map((p) => (
-                <option key={p.id} value={p.id}>{p.name} ({p.type})</option>
-              ))}
-            </select>
-          </div>
-          <div>
-            <Label>Fallback Model</Label>
-            <Input value={draft.fallbackModel} onChange={(e) => patch({ fallbackModel: e.target.value })} className="mt-1 font-mono text-sm" placeholder="gpt-4o-mini" />
+
+          {/* Fallback settings */}
+          <div className="grid sm:grid-cols-2 gap-4">
+            <div>
+              <Label>Fallback Provider</Label>
+              <select
+                value={draft.fallbackProviderId}
+                onChange={(e) => patch({ fallbackProviderId: e.target.value })}
+                className="w-full h-9 px-3 rounded-md border border-input bg-background text-sm mt-1"
+              >
+                <option value="">None</option>
+                {activeProviders.map((p) => (
+                  <option key={p.id} value={p.id}>{p.name} ({p.type})</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <Label>Fallback Model</Label>
+              <div className="flex gap-2 mt-1">
+                <Input value={draft.fallbackModel} onChange={(e) => patch({ fallbackModel: e.target.value })} className="font-mono text-sm flex-1" placeholder="gpt-4o-mini" />
+                {detectedModels.length > 0 && (
+                  <select
+                    value={draft.fallbackModel}
+                    onChange={(e) => patch({ fallbackModel: e.target.value })}
+                    className="h-9 px-2 rounded-md border border-input bg-background text-xs"
+                    title="Select fallback from detected models"
+                  >
+                    <option value="">(detected)</option>
+                    {detectedModels.filter((m) => m.id !== draft.modelName).map((m) => (
+                      <option key={m.id} value={m.id}>{m.id}</option>
+                    ))}
+                  </select>
+                )}
+              </div>
+            </div>
           </div>
         </CardContent>
       </Card>

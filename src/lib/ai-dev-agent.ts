@@ -56,6 +56,7 @@ function resolveProvider() {
 
 /**
  * Call the AI with the Dev Agent's configured provider + system prompt.
+ * Falls back to the configured fallback provider/model if the primary fails.
  * Falls back to callAI's built-in provider chain if no provider is configured.
  */
 export async function callDevAgent(opts: {
@@ -63,26 +64,89 @@ export async function callDevAgent(opts: {
   systemPromptOverride?: string;
   maxTokens?: number;
   temperature?: number;
-}): Promise<{ text: string; provider: string; model: string }> {
+}): Promise<{ text: string; provider: string; model: string; fallbackUsed: boolean }> {
   const settings = getAIDevSettings();
   const { provider, model } = resolveProvider();
 
   const systemPrompt = opts.systemPromptOverride || settings.systemPrompt;
 
-  // If we have a configured provider, use callUserProvider via callAI
-  // (callAI already tries the user's default provider first, so this works)
-  const result = await callAI({
-    systemPrompt,
-    userPrompt: opts.userPrompt,
-    maxTokens: opts.maxTokens ?? settings.maxTokens,
-    temperature: opts.temperature ?? settings.temperature,
-  });
+  // Try the primary provider first
+  try {
+    const result = await callAI({
+      systemPrompt,
+      userPrompt: opts.userPrompt,
+      maxTokens: opts.maxTokens ?? settings.maxTokens,
+      temperature: opts.temperature ?? settings.temperature,
+    });
 
-  return {
-    text: result.text,
-    provider: provider?.name || result.provider,
-    model: model || "default",
-  };
+    return {
+      text: result.text,
+      provider: provider?.name || result.provider,
+      model: model || "default",
+      fallbackUsed: false,
+    };
+  } catch (primaryError: any) {
+    // Primary failed — try the fallback provider/model if configured
+    if (settings.fallbackProviderId && settings.fallbackModel) {
+      console.warn(`[AI Dev Agent] Primary provider failed: ${primaryError?.message || primaryError}. Trying fallback: ${settings.fallbackProviderId} / ${settings.fallbackModel}`);
+
+      const state = useApp.getState();
+      const fallbackProvider = (state.providers || []).find((p: any) => p.id === settings.fallbackProviderId && p.isActive);
+
+      if (fallbackProvider) {
+        // Override the provider's model with the fallback model for this call
+        const providerWithFallbackModel = { ...fallbackProvider, modelName: settings.fallbackModel };
+        try {
+          // Temporarily set the fallback as the default provider so callAI uses it
+          const originalDefault = state.providerSettings.defaultProviderId;
+          const originalModel = state.providerSettings.defaultModel;
+          useApp.setState({
+            providerSettings: {
+              ...state.providerSettings,
+              defaultProviderId: settings.fallbackProviderId,
+              defaultModel: settings.fallbackModel,
+            },
+          });
+
+          const result = await callAI({
+            systemPrompt,
+            userPrompt: opts.userPrompt,
+            maxTokens: opts.maxTokens ?? settings.maxTokens,
+            temperature: opts.temperature ?? settings.temperature,
+          });
+
+          // Restore original settings
+          useApp.setState({
+            providerSettings: {
+              ...state.providerSettings,
+              defaultProviderId: originalDefault,
+              defaultModel: originalModel,
+            },
+          });
+
+          return {
+            text: result.text,
+            provider: fallbackProvider.name,
+            model: settings.fallbackModel,
+            fallbackUsed: true,
+          };
+        } catch (fallbackError: any) {
+          console.warn(`[AI Dev Agent] Fallback provider also failed: ${fallbackError?.message || fallbackError}`);
+          // Restore original settings on error
+          useApp.setState({
+            providerSettings: {
+              ...state.providerSettings,
+              defaultProviderId: state.providerSettings.defaultProviderId,
+              defaultModel: state.providerSettings.defaultModel,
+            },
+          });
+        }
+      }
+    }
+
+    // No fallback configured or fallback also failed — rethrow the original error
+    throw primaryError;
+  }
 }
 
 /**
