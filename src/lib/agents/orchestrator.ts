@@ -138,60 +138,42 @@ function enforceLockedFields(optimized: ResumeData, original: ResumeData): Resum
     return PLACEHOLDER_PATTERNS.some((p) => p.test(text));
   };
 
-  // === Lock experience: filter out hallucinated entries + restore locked fields ===
-  // Also restore any experience entries the AI may have dropped.
+  // === Lock experience: STRICT INDEX-BASED matching ===
+  // The previous fuzzy matching (substring contains) was matching wrong entries
+  // and letting hallucinated companies survive. Now we use strict index-based
+  // matching: the i-th AI entry gets the i-th original entry's locked fields.
+  // finalizeResume() already handles this, but enforceLockedFields runs AFTER
+  // V3 pipeline, so we re-apply the strict lock here.
   if (original.experience.length > 0) {
     if (optimized.experience.length >= original.experience.length) {
       // AI returned at least as many entries — filter + lock them
       locked.experience = optimized.experience
         .filter((e) => {
           if (isPlaceholder(e.company)) return false;
-          const companyLower = e.company?.toLowerCase().trim();
-          if (companyLower && !originalCompanies.has(companyLower)) {
-            const fuzzyMatch = Array.from(originalCompanies).some(
-              (orig) => orig.includes(companyLower) || companyLower.includes(orig)
-            );
-            if (!fuzzyMatch) {
-              console.warn(`[enforceLockedFields] Removing hallucinated experience entry: "${e.company}"`);
-              return false;
-            }
-          }
+          // NOTE: We no longer filter by fuzzy company match — that was removing
+          // valid entries when the AI slightly modified the company name.
+          // The strict index-based restore below will fix the company name.
           return true;
         })
+        .slice(0, original.experience.length) // Only keep up to original count
         .map((e, i) => {
-          // Match by substring — AI may have cleaned up company name
-          const eCompanyLower = e.company?.toLowerCase().trim() ?? "";
-          const eTitleLower = e.title?.toLowerCase().trim() ?? "";
-          // Try company match first, then title match, then index — NEVER use [0] fallback
-          const orig = original.experience.find(
-            (o) => {
-              const oCompanyLower = o.company?.toLowerCase().trim() ?? "";
-              return oCompanyLower === eCompanyLower ||
-                oCompanyLower.includes(eCompanyLower) ||
-                eCompanyLower.includes(oCompanyLower);
-            }
-          ) ?? original.experience.find(
-            (o) => {
-              const oTitleLower = o.title?.toLowerCase().trim() ?? "";
-              return oTitleLower === eTitleLower ||
-                oTitleLower.includes(eTitleLower) ||
-                eTitleLower.includes(oTitleLower);
-            }
-          ) ?? original.experience[i]; // Index fallback only — never [0]
+          // STRICT INDEX-BASED: always use original.experience[i]
+          const orig = original.experience[i];
+          if (!orig) return e;
           // Only restore bullets if AI dropped them — keep AI's optimized bullets if they're longer
-          const restoredBullets = orig && orig.bullets.length > e.bullets.length
+          const restoredBullets = orig.bullets.length > e.bullets.length
             ? orig.bullets
             : e.bullets;
           return {
             ...e,
-            // Keep AI's title if present, fall back to original
-            title: cleanTitle(e.title || orig?.title || ""),
-            // ALWAYS use original company name (locked field)
-            company: cleanCompany(orig?.company ?? e.company),
-            // Restore original location, dates (locked fields) — only if we found a match
-            location: orig?.location ?? e.location,
-            startDate: orig?.startDate ?? e.startDate ?? "",
-            endDate: orig?.endDate ?? e.endDate ?? "",
+            // title: prefer source, fall back to AI
+            title: cleanTitle(orig.title || e.title || ""),
+            // STRICT: company ALWAYS from source. If source.company is empty, use "".
+            company: cleanCompany(orig.company || ""),
+            // STRICT: dates ALWAYS from source. If source dates are empty, use "".
+            location: orig.location || e.location || "",
+            startDate: orig.startDate || "",
+            endDate: orig.endDate || "",
             bullets: restoredBullets,
           };
         });
@@ -246,15 +228,19 @@ function enforceLockedFields(optimized: ResumeData, original: ResumeData): Resum
           return true;
         })
         .map((ed, i) => {
+          // STRICT INDEX-BASED matching — never use [0] fallback (causes wrong institution
+          // to be assigned to all entries when AI reorders them).
           const orig = original.education.find(
             (o) => o.institution?.toLowerCase().trim() === ed.institution?.toLowerCase().trim()
-          ) ?? original.education[i] ?? original.education[0];
+          ) ?? original.education[i];
           return {
             ...ed,
-            institution: orig?.institution ?? ed.institution,
+            // STRICT: institution from source only. If source is empty, use "".
+            institution: orig?.institution ?? "",
+            degree: orig?.degree ?? ed.degree,
             location: orig?.location ?? ed.location,
-            startDate: orig?.startDate ?? ed.startDate,
-            endDate: orig?.endDate ?? ed.endDate,
+            startDate: orig?.startDate ?? "",
+            endDate: orig?.endDate ?? "",
           };
         });
     }

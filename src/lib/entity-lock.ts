@@ -933,26 +933,29 @@ export function isForbiddenSkill(skillName: string): boolean {
 
 /**
  * Filter forbidden skills from a skills list.
- * Logs warnings for removed skills.
+ * Returns the filtered list + list of removed skill names.
  */
-export function filterForbiddenSkills(skills: ResumeSkill[]): ResumeSkill[] {
+export function filterForbiddenSkills(skills: ResumeSkill[]): { filtered: ResumeSkill[]; removed: string[] } {
   const filtered: ResumeSkill[] = [];
+  const removed: string[] = [];
   for (const skill of skills) {
     if (isForbiddenSkill(skill.name)) {
       console.warn(`[EntityLock] Removing forbidden skill (company/location/non-skill): "${skill.name}"`);
+      removed.push(skill.name);
       continue;
     }
     filtered.push(skill);
   }
-  return filtered;
+  return { filtered, removed };
 }
 
 /**
  * Apply forbidden skill filtering to a resume.
  */
 export function sanitizeSkills(resume: ResumeData): ResumeData {
+  const { filtered } = filterForbiddenSkills(resume.skills);
   return {
     ...resume,
-    skills: filterForbiddenSkills(resume.skills),
+    skills: filtered,
   };
 }

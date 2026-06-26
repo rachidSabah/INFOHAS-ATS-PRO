@@ -186,11 +186,11 @@ describe("isForbiddenSkill", () => {
 describe("filterForbiddenSkills", () => {
   it("removes company names and locations from skills list", () => {
     const skills = [
-      { name: "JavaScript" },
-      { name: "Qatar Duty Free" },
-      { name: "React" },
-      { name: "Doha" },
-      { name: "Node.js" },
+      { id: "s1", name: "JavaScript" },
+      { id: "s2", name: "Qatar Duty Free" },
+      { id: "s3", name: "React" },
+      { id: "s4", name: "Doha" },
+      { id: "s5", name: "Node.js" },
     ];
     const { filtered, removed } = filterForbiddenSkills(skills);
     expect(filtered.map((s) => s.name)).toEqual(["JavaScript", "React", "Node.js"]);

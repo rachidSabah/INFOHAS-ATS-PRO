@@ -19,7 +19,7 @@
 "use client";
 
 import type { ResumeData } from "./types";
-import { cleanupResumeGrammar, stripMarkdown, repairMalformedJSON } from "./ai-response-processor";
+import { cleanupResumeGrammar, stripMarkdown, repairMalformedJSON, filterForbiddenSkills, isForbiddenSkill } from "./ai-response-processor";
 import { extractJSON } from "./ai";
 import { extractLockedFacts, computeFactDiff, computeFactualIntegrityScore } from "./locked-facts";
 
@@ -38,8 +38,8 @@ export interface UnifiedPipelineResult {
  *
  * Removes:
  * - Duplicate experience entries (same company + title)
- * - Duplicate bullets within an experience entry
- * - Duplicate sentences in summary
+ * - Duplicate bullets within an experience entry (exact + fuzzy prefix match)
+ * - Duplicate sentences in summary (exact + prefix match)
  * - Duplicate education entries (same institution + degree)
  * - Duplicate skills (same name)
  *
@@ -60,15 +60,33 @@ export function deduplicateResume(resume: ResumeData): { resume: ResumeData; dup
         // Also deduplicate bullets within this entry
         if (exp.bullets && exp.bullets.length > 1) {
           const seenBullets = new Set<string>();
+          const seenBulletPrefixes = new Set<string>();
           const uniqueBullets: string[] = [];
           for (const bullet of exp.bullets) {
             const normalized = bullet.toLowerCase().replace(/\s+/g, " ").trim();
-            if (!seenBullets.has(normalized)) {
-              seenBullets.add(normalized);
-              uniqueBullets.push(bullet);
-            } else {
+            // Exact match check
+            if (seenBullets.has(normalized)) {
               removed++;
+              continue;
             }
+            // Prefix match check — if a bullet starts with the same 60 chars as another, consider it a duplicate
+            // (catches "Provided exceptional..." vs "Provided exceptional... in a fast-paced environment")
+            const prefix = normalized.slice(0, 60);
+            if (normalized.length > 60 && seenBulletPrefixes.has(prefix)) {
+              removed++;
+              continue;
+            }
+            // Suffix match check — if a bullet ENDS with the same 60 chars as another, consider it a duplicate
+            // (catches bullets that have different preambles but same core content)
+            const suffix = normalized.slice(-60);
+            if (normalized.length > 60 && seenBullets.has(`__suffix__${suffix}`)) {
+              removed++;
+              continue;
+            }
+            seenBullets.add(normalized);
+            if (normalized.length > 60) seenBulletPrefixes.add(prefix);
+            seenBullets.add(`__suffix__${suffix}`);
+            uniqueBullets.push(bullet);
           }
           exp.bullets = uniqueBullets;
         }
@@ -116,19 +134,41 @@ export function deduplicateResume(resume: ResumeData): { resume: ResumeData; dup
 
   // === Deduplicate summary sentences ===
   if (deduped.summary) {
-    const sentences = deduped.summary.split(/(?<=\.)\s+/);
+    // Split on period followed by space (but keep the period)
+    const sentences = deduped.summary
+      .split(/(?<=\.)\s+/)
+      .map((s) => s.trim())
+      .filter((s) => s.length > 0);
     const seen = new Set<string>();
+    const seenPrefixes = new Set<string>();
     const uniqueSentences: string[] = [];
     for (const sentence of sentences) {
       const normalized = sentence.toLowerCase().replace(/\s+/g, " ").trim();
-      if (!seen.has(normalized) && normalized.length > 10) {
-        seen.add(normalized);
-        uniqueSentences.push(sentence);
-      } else if (normalized.length > 10) {
+      if (normalized.length < 10) {
+        // Skip very short fragments (likely truncated/garbled)
         removed++;
+        continue;
       }
+      // Exact match
+      if (seen.has(normalized)) {
+        removed++;
+        continue;
+      }
+      // Prefix match — if first 50 chars match, consider duplicate
+      const prefix = normalized.slice(0, 50);
+      if (normalized.length > 50 && seenPrefixes.has(prefix)) {
+        removed++;
+        continue;
+      }
+      // Check if sentence is a truncated fragment (doesn't end with period AND next sentence exists)
+      // We'll keep it but mark it
+      seen.add(normalized);
+      if (normalized.length > 50) seenPrefixes.add(prefix);
+      uniqueSentences.push(sentence);
     }
     deduped.summary = uniqueSentences.join(" ").trim();
+    // Fix any double spaces left over
+    deduped.summary = deduped.summary.replace(/\s{2,}/g, " ").trim();
   }
 
   // === Deduplicate languages ===
@@ -160,6 +200,14 @@ export function deduplicateResume(resume: ResumeData): { resume: ResumeData; dup
  * Strictly restores company, title, dates, location from source resume.
  * Uses INDEX-BASED matching (not fuzzy) — the i-th optimized entry gets
  * the i-th original entry's locked fields.
+ *
+ * STRICT POLICY:
+ * - company: ALWAYS from source. If source.company is empty, use "" (NOT AI's hallucinated name).
+ *   The renderer will show the title only — better than showing a wrong company.
+ * - title: From source if available, otherwise keep AI's title (AI may have improved it).
+ * - dates: ALWAYS from source. If source.dates are empty, use "".
+ * - location: From source if available, otherwise keep AI's location.
+ * - bullets: Always keep AI's bullets (the optimization).
  *
  * If the AI returns FEWER entries than original, the missing entries are
  * appended from the original (preserving ALL experience).
@@ -205,13 +253,16 @@ export function restoreExperienceMetadata(optimized: ResumeData, sourceResume: R
 
     return {
       ...entry,
-      // STRICT LOCK: always use source values if they exist.
-      // If source company is empty, DON'T fall back to AI's company (could be hallucinated).
-      // Instead, keep empty — the renderer will show the title only.
-      company: orig.company || entry.company || "",
+      // STRICT LOCK: company is ALWAYS from source. If source.company is empty,
+      // use "" — NEVER fall back to AI's company (could be hallucinated like "Beauty Retailer").
+      // The renderer will show the title only when company is empty.
+      company: orig.company || "",
+      // title: prefer source, but allow AI's title as fallback (AI may have improved capitalization)
       title: orig.title || entry.title || "",
-      startDate: orig.startDate || entry.startDate || "",
-      endDate: orig.endDate || entry.endDate || "",
+      // dates: ALWAYS from source. If source dates are empty, use "" (never "Present")
+      startDate: orig.startDate || "",
+      endDate: orig.endDate || "",
+      // location: prefer source, fall back to AI
       location: orig.location || entry.location || "",
       // Keep AI's bullets (the optimization)
       bullets: entry.bullets || orig.bullets,
@@ -244,6 +295,12 @@ export function restoreExperienceMetadata(optimized: ResumeData, sourceResume: R
  * RESTORE EDUCATION
  *
  * Education entries are immutable. If the AI removes any, restore from source.
+ * STRICT POLICY:
+ * - institution: ALWAYS from source. If source.institution is empty, use "".
+ * - degree: From source if available, otherwise keep AI's degree.
+ * - dates: ALWAYS from source. If source dates are empty, use "".
+ * - location: From source if available, otherwise keep AI's location.
+ * - highlights: Keep AI's highlights (the optimization).
  */
 export function restoreEducation(optimized: ResumeData, sourceResume: ResumeData): {
   resume: ResumeData;
@@ -271,13 +328,23 @@ export function restoreEducation(optimized: ResumeData, sourceResume: ResumeData
     const orig = source[i];
     if (!orig) return entry;
 
+    if (entry.institution !== orig.institution && orig.institution) {
+      restored.push(`Education[${i}]: institution "${entry.institution}" → "${orig.institution}"`);
+    }
+
     return {
       ...entry,
-      institution: orig.institution || entry.institution || "",
+      // STRICT LOCK: institution is ALWAYS from source.
+      // If source.institution is empty, use "" — NEVER fall back to AI's polluted institution
+      // (which may have dates appended like "INFOHAS 2023 – 2025").
+      institution: orig.institution || "",
+      // degree: prefer source, fall back to AI (AI may have improved formatting)
       degree: orig.degree || entry.degree || "",
       location: orig.location || entry.location || "",
-      startDate: orig.startDate || entry.startDate || "",
-      endDate: orig.endDate || entry.endDate || "",
+      startDate: orig.startDate || "",
+      endDate: orig.endDate || "",
+      // Keep AI's highlights (the optimization)
+      highlights: entry.highlights || orig.highlights,
     };
   });
 
@@ -299,7 +366,8 @@ export function restoreEducation(optimized: ResumeData, sourceResume: ResumeData
 /**
  * RESTORE LANGUAGES
  *
- * Languages are immutable. If AI removes them, restore from source.
+ * Languages are immutable. ALWAYS use the original language set —
+ * AI frequently corrupts language format (e.g., ": English: fluent").
  */
 export function restoreLanguages(optimized: ResumeData, sourceResume: ResumeData): {
   resume: ResumeData;
@@ -312,11 +380,12 @@ export function restoreLanguages(optimized: ResumeData, sourceResume: ResumeData
     return { resume: result, restored };
   }
 
-  // If AI removed languages or returned fewer, restore from source
-  if (!result.languages || result.languages.length < sourceResume.languages.length) {
-    result.languages = sourceResume.languages.map((l) => ({ ...l }));
-    restored.push(`Restored languages (${sourceResume.languages.length} entries) — AI had removed/shortened them`);
-  }
+  // ALWAYS use original languages — AI frequently corrupts the format
+  // (e.g., leading colon, wrong proficiency values, missing names).
+  // The original language set is the source of truth.
+  const aiLangCount = result.languages?.length || 0;
+  result.languages = sourceResume.languages.map((l) => ({ ...l }));
+  restored.push(`Restored languages (${sourceResume.languages.length} entries) — using original set (AI had ${aiLangCount})`);
 
   if (restored.length > 0) {
     console.info(`[restoreLanguages] Restored ${restored.length} field(s)`, restored);
@@ -378,6 +447,7 @@ export function validateImmutableEntities(optimized: ResumeData, sourceResume: R
  * RESTORE LOCKED ENTITIES (wrapper — calls all restore functions)
  *
  * This is the main entry point for entity restoration.
+ * Also filters forbidden skills (JD company names, locations) from the skills list.
  */
 export function restoreLockedEntities(optimized: ResumeData, original: ResumeData): {
   resume: ResumeData;
@@ -397,15 +467,59 @@ export function restoreLockedEntities(optimized: ResumeData, original: ResumeDat
     };
   }
 
-  // Lock headline — NEVER replace with JD title
+  // === Lock headline — STRICT PROTECTION ===
+  // The AI frequently replaces the original headline with the JD job title + JD company
+  // (e.g., "Till Assistant | Qatar Duty Free" when the candidate never worked there).
+  // We restore the original headline if ANY of these conditions are true:
+  //   1. AI headline is empty
+  //   2. AI headline contains a JD company name (Qatar Duty Free, Qatar Airways, etc.)
+  //   3. AI headline contains a pipe "|" followed by a company name (likely JD-derived)
+  //   4. AI headline is substantially different from original (different first 3 words)
   if (original.headline && original.headline.trim()) {
-    // Only keep AI's headline if it doesn't contain company names from JD
-    const aiHeadlineLower = (result.headline || "").toLowerCase();
-    const jdCompanyNames = ["qatar duty free", "qatar airways", "hamad international"];
+    const aiHeadline = (result.headline || "").trim();
+    const aiHeadlineLower = aiHeadline.toLowerCase();
+    const origHeadlineLower = original.headline.toLowerCase().trim();
+
+    // JD company names that should NEVER appear in a candidate's headline
+    const jdCompanyNames = [
+      "qatar duty free", "qatar airways", "hamad international",
+      "doha", "qatar", "dubai", "abu dhabi", "uae",
+      "riyadh", "saudi arabia", "kuwait", "bahrain", "oman", "muscat",
+    ];
     const containsJdCompany = jdCompanyNames.some((name) => aiHeadlineLower.includes(name));
-    if (containsJdCompany || !result.headline?.trim()) {
+
+    // Check if AI headline has a pipe with a company-like word after it
+    // (e.g., "Till Assistant | Qatar Duty Free")
+    const pipeMatch = aiHeadline.match(/\|\s*(.+)/);
+    const hasPipeWithCompany = pipeMatch && jdCompanyNames.some((name) =>
+      pipeMatch[1].toLowerCase().includes(name)
+    );
+
+    // Check if first 3 words match between original and AI headline
+    const origFirst3 = origHeadlineLower.split(/\s+/).slice(0, 3).join(" ");
+    const aiFirst3 = aiHeadlineLower.split(/\s+/).slice(0, 3).join(" ");
+    const headlinesDiverge = origFirst3 && aiFirst3 && origFirst3 !== aiFirst3;
+
+    if (!aiHeadline || containsJdCompany || hasPipeWithCompany || headlinesDiverge) {
+      if (containsJdCompany) {
+        allRestored.push(`Headline restored to original (AI had injected JD company name: "${aiHeadline}")`);
+      } else if (hasPipeWithCompany) {
+        allRestored.push(`Headline restored to original (AI had JD company after pipe: "${aiHeadline}")`);
+      } else if (headlinesDiverge) {
+        allRestored.push(`Headline restored to original (AI changed first 3 words: "${aiFirst3}" vs "${origFirst3}")`);
+      } else {
+        allRestored.push(`Headline restored to original (AI headline was empty)`);
+      }
       result.headline = original.headline;
-      allRestored.push(`Headline restored to original (AI had injected JD company name)`);
+    }
+  }
+
+  // === Filter forbidden skills (JD company names, locations) ===
+  if (result.skills && result.skills.length > 0) {
+    const { filtered, removed } = filterForbiddenSkills(result.skills);
+    if (removed.length > 0) {
+      allRestored.push(`Removed ${removed.length} forbidden skill(s): ${removed.join(", ")}`);
+      result.skills = filtered;
     }
   }
 

@@ -529,7 +529,7 @@ function mapAIToResumeData(data: any, original: ResumeData): ResumeData {
     summary: String(data.summary || data.objective || data.profile || ""),
     experience: experience.length > 0 ? experience : original.experience,
     education: education.length > 0 ? education : original.education,
-    skills: skills.length > 0 ? filterForbiddenSkills(skills) : original.skills,
+    skills: skills.length > 0 ? filterForbiddenSkills(skills).filtered : original.skills,
     languages: languages.length > 0 ? languages : original.languages,
     certifications: certifications.length > 0 ? certifications : original.certifications,
     projects: data.projects || original.projects || [],

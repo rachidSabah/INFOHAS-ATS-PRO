@@ -202,12 +202,13 @@ export function isForbiddenSkill(skillName: string): boolean {
 /**
  * Filter forbidden skills from a skills list.
  * Returns the filtered list + list of removed skills for logging.
+ * Generic over the skill type so it preserves the original type (ResumeSkill, etc.).
  */
-export function filterForbiddenSkills(skills: { name: string; category?: string }[]): {
-  filtered: { name: string; category?: string }[];
+export function filterForbiddenSkills<T extends { name: string; category?: string }>(skills: T[]): {
+  filtered: T[];
   removed: string[];
 } {
-  const filtered: { name: string; category?: string }[] = [];
+  const filtered: T[] = [];
   const removed: string[] = [];
   for (const skill of skills) {
     if (isForbiddenSkill(skill.name)) {
@@ -734,12 +735,25 @@ export function isProfessionalResume(resume: ResumeData): {
 // ============================================================================
 
 const FILLER_PHRASES = [
+  // === Generic template phrases that repeat across bullets ===
   /demonstrating strong attention to detail/gi,
   /committed to excellence in all assigned responsibilities/gi,
   /committed to delivering exceptional results/gi,
   /demonstrating reliability and professionalism/gi,
   /consistently meeting operational standards/gi,
   /contributing to team objectives/gi,
+  // === "within <Title>" hallucinations — AI inserts the job title as if it were a company ===
+  // e.g., "within Intern", "within Receptionist", "within Sales Assistant"
+  /\bwithin\s+(?:Intern|Receptionist|Sales Assistant|Cashier|Clerk|Attendant|Steward|Trainee|Apprentice|Associate|Assistant|Manager|Supervisor|Coordinator|Administrator|Specialist|Representative|Agent|Officer|Director|Lead|Head|Captain|Host|Hostess|Waiter|Waitress|Bartender|Barista|Concierge|Porter|Bellhop|Housekeeper|Pilot|Nurse|Therapist|Technician|Mechanic|Teacher|Professor|Accountant|Auditor|Lawyer|Writer|Chef|Cook|Baker|Engineer|Developer|Designer|Architect|Analyst|Consultant)\b/gi,
+  // === "at <Title>" hallucinations — same issue, AI uses title as company ===
+  /\bat\s+(?:Intern|Receptionist|Sales Assistant|Cashier|Clerk|Attendant|Steward|Trainee|Apprentice|Associate|Assistant|Manager|Supervisor|Coordinator|Administrator|Specialist|Representative|Agent|Officer|Director|Lead|Head|Captain|Host|Hostess|Waiter|Waitress|Bartender|Barista|Concierge|Porter|Bellhop|Housekeeper|Pilot|Nurse|Therapist|Technician|Mechanic|Teacher|Professor|Accountant|Auditor|Lawyer|Writer|Chef|Cook|Baker|Engineer|Developer|Designer|Architect|Analyst|Consultant)\b/gi,
+  // === "in the <Title> position at <Title>" hallucinations ===
+  /\bin the\s+(?:Intern|Receptionist|Sales Assistant|Cashier|Clerk|Attendant|Steward|Trainee|Apprentice|Associate|Assistant|Manager|Supervisor|Coordinator|Administrator|Specialist|Representative|Agent|Officer|Director|Lead|Head)\s+position\b/gi,
+  /\bat\s+(?:Intern|Receptionist|Sales Assistant|Cashier|Clerk|Attendant|Steward|Trainee|Apprentice|Associate|Assistant|Manager|Supervisor|Coordinator|Administrator|Specialist|Representative|Agent|Officer|Director|Lead|Head)\s+position/gi,
+  // === "demonstrating strong attention to detail and commitment to excellence in all assigned responsibilities within X" ===
+  // (catch the full compound phrase even when title is not in the list above)
+  /demonstrating strong attention to detail and commitment to excellence in all assigned responsibilities(?:\s+within\s+\w+)?/gi,
+  /demonstrating strong attention to detail and commitment to excellence(?:\s+within\s+\w+)?/gi,
 ];
 
 /**
@@ -747,13 +761,22 @@ const FILLER_PHRASES = [
  * - Double periods (.. → .)
  * - Filler phrases that repeat across bullets
  * - Extra spaces before periods/commas
+ * - Stray backticks (`) that leak from code fences
+ * - Orphaned trailing words (e.g., "skills and" with no continuation)
+ * - Sentences ending with comma instead of period
  */
 export function cleanupGrammar(text: string): string {
   if (!text) return text;
   let result = text;
 
+  // Strip stray backticks (often leak from markdown code fences)
+  result = result.replace(/`/g, "");
+
   // Fix double periods (.. → .)
   result = result.replace(/\.{2,}/g, ".");
+
+  // Fix triple+ periods (ellipsis) → single period
+  result = result.replace(/\.{3,}/g, ".");
 
   // Fix space before period/comma ( ." → ".")
   result = result.replace(/\s+\./g, ".");
@@ -767,8 +790,27 @@ export function cleanupGrammar(text: string): string {
   // Clean up double spaces left by removals
   result = result.replace(/\s{2,}/g, " ");
 
+  // Fix " ," → ","
+  result = result.replace(/\s+,/g, ",");
+
+  // Fix " ." → "."
+  result = result.replace(/\s+\./g, ".");
+
   // Fix sentences that end with comma instead of period
   result = result.replace(/,\s*$/gm, ".");
+
+  // Fix "word ," → "word,"
+  result = result.replace(/\s+,/g, ",");
+
+  // Remove empty bullets / bullets that are just punctuation
+  result = result.replace(/^[\s.,;:|-]+$/gm, "");
+
+  // Fix orphaned trailing words at end of text (e.g., "with a solid understanding of" with no continuation)
+  // If the text ends with a preposition/article and no period, remove the trailing fragment
+  result = result.replace(/\s+(?:of|in|on|at|with|for|and|the|a|an|to|by|from)\s*$/i, "");
+
+  // Fix duplicate consecutive words ("the the" → "the")
+  result = result.replace(/\b(\w+)\s+\1\b/gi, "$1");
 
   return result.trim();
 }
@@ -776,10 +818,24 @@ export function cleanupGrammar(text: string): string {
 /**
  * Clean up grammar in a parsed resume object.
  * Fixes double periods and filler phrases in all text fields.
+ * Also strips stray backticks, normalizes whitespace, and removes
+ * date fragments that leak into institution/degree fields.
  */
 export function cleanupResumeGrammar<T>(data: T): T {
   if (!data || typeof data !== "object") return data;
   const cleaned = JSON.parse(JSON.stringify(data)) as any;
+
+  // Helper: strip date patterns from a field (e.g., "INFOHAS 2023 – 2025" → "INFOHAS")
+  const stripDates = (text: string): string => {
+    if (!text) return text;
+    return text
+      // Remove "2023 – 2025", "2023-2025", "2023 – Present", "Jan 2020 – Mar 2022"
+      .replace(/\s+\d{4}\s*[–\-—]\s*(?:\d{4}|Present|Current)\s*/gi, " ")
+      // Remove trailing duplicate date range (e.g., "2023 – 2025 2023 – 2025")
+      .replace(/(\d{4}\s*[–\-—]\s*(?:\d{4}|Present|Current))\s+\1/gi, "$1")
+      .replace(/\s{2,}/g, " ")
+      .trim();
+  };
 
   // Clean summary
   if (cleaned.summary) {
@@ -791,23 +847,53 @@ export function cleanupResumeGrammar<T>(data: T): T {
     cleaned.headline = cleanupGrammar(cleaned.headline);
   }
 
-  // Clean experience bullets
+  // Clean experience bullets + company + title
   if (Array.isArray(cleaned.experience)) {
     for (const exp of cleaned.experience) {
       if (Array.isArray(exp.bullets)) {
-        exp.bullets = exp.bullets.map((b: string) => cleanupGrammar(b)).filter((b: string) => b.length > 0);
+        exp.bullets = exp.bullets
+          .map((b: string) => cleanupGrammar(b))
+          .filter((b: string) => b && b.length > 0);
       }
       if (exp.title) exp.title = cleanupGrammar(exp.title);
+      if (exp.company) exp.company = cleanupGrammar(exp.company);
+      if (exp.location) exp.location = cleanupGrammar(exp.location);
     }
   }
 
-  // Clean education highlights
+  // Clean education — strip dates from institution, clean degree
   if (Array.isArray(cleaned.education)) {
     for (const edu of cleaned.education) {
       if (Array.isArray(edu.highlights)) {
         edu.highlights = edu.highlights.map((h: string) => cleanupGrammar(h));
       }
-      if (edu.degree) edu.degree = cleanupGrammar(edu.degree);
+      if (edu.degree) {
+        edu.degree = cleanupGrammar(edu.degree);
+        // Strip "Specialized modules include: ..." from degree field (should be in highlights)
+        edu.degree = edu.degree.replace(/Specialized modules include:.*$/i, "").trim();
+      }
+      if (edu.institution) {
+        edu.institution = cleanupGrammar(edu.institution);
+        // Strip dates that leaked into institution field
+        edu.institution = stripDates(edu.institution);
+      }
+      if (edu.location) edu.location = cleanupGrammar(edu.location);
+    }
+  }
+
+  // Clean skills (strip backticks, fix whitespace)
+  if (Array.isArray(cleaned.skills)) {
+    for (const skill of cleaned.skills) {
+      if (skill.name) skill.name = cleanupGrammar(skill.name);
+      if (skill.category) skill.category = cleanupGrammar(skill.category);
+    }
+  }
+
+  // Clean languages
+  if (Array.isArray(cleaned.languages)) {
+    for (const lang of cleaned.languages) {
+      if (lang.name) lang.name = cleanupGrammar(lang.name);
+      if (lang.proficiency) lang.proficiency = cleanupGrammar(lang.proficiency);
     }
   }
 
