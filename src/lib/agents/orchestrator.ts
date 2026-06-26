@@ -1172,12 +1172,14 @@ Bridging Strategy: ${result.skillGap.bridgingStrategy}`);
                 targetChars: pageFill.targetChars,
                 currentChars: pageFill.charCount,
                 missingKeywords,
+                directiveConfig,
               });
             } else if (pageFill.action === "compress") {
               result.optimizedResume = compressResume(result.optimizedResume!, {
                 targetChars: pageFill.targetChars,
                 maxChars: Math.floor(pageFill.targetChars * 1.04),
                 currentChars: pageFill.charCount,
+                directiveConfig,
               });
             }
           } catch (pbErr: any) {
@@ -1897,10 +1899,12 @@ CONTENT REQUIREMENTS:
         normalizedResume = expandResume(normalizedResume, {
           originalResume: resume, jd, targetChars: pageFill.targetChars,
           currentChars: pageFill.charCount, missingKeywords,
+          directiveConfig,
         });
       } else if (pageFill.action === "compress") {
         normalizedResume = compressResume(normalizedResume, {
           targetChars: pageFill.targetChars, maxChars: Math.floor(pageFill.targetChars * 1.04), currentChars: pageFill.charCount,
+          directiveConfig,
         });
       }
     } catch (e) { console.warn("[Page Balancer] Failed (non-fatal):", e); }
@@ -2281,6 +2285,7 @@ CONTENT REQUIREMENTS:
         targetChars: pageFill.targetChars,
         currentChars: pageFill.charCount,
         missingKeywords,
+        directiveConfig,
       });
 
       // Recompute char count after expansion
@@ -2294,6 +2299,7 @@ CONTENT REQUIREMENTS:
         targetChars: pageFill.targetChars,
         maxChars: Math.floor(pageFill.targetChars * 1.04), // 98% cap
         currentChars: pageFill.charCount,
+        directiveConfig,
       });
 
       const newCharCount = computeResumeCharCount(normalizedResume);

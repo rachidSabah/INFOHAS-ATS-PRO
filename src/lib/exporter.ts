@@ -13,41 +13,53 @@ import {
 import { saveAs } from "file-saver";
 import type { ResumeData, CoverLetter, InterviewPackage, ResumeLayoutModel } from "./types";
 import { getDocxHtml, resumeToDirectiveHtml } from "./ats-directives";
+import { useApp } from "./store";
 
 // ============================================================================
 // ResumeLayoutModel — single source of truth for PDF + DOCX layout
 // ============================================================================
 
 export function getDefaultResumeLayout(): ResumeLayoutModel {
+  let config: any = null;
+  try {
+    config = useApp.getState()?.optimizerDirective;
+  } catch (err) {
+    console.warn("[exporter] Failed to read optimizerDirective from store, using defaults:", err);
+  }
+
+  const fontFamily = config?.fontFamily || "Times New Roman";
+  const bodyFontSizePt = config?.bodyFontSizePt ?? 10.5;
+  const lineHeight = config?.lineHeight ?? 1.2;
+
   return {
-    pageSize: "A4",
-    marginTopMm: 6.35,
-    marginBottomMm: 6.35,
-    marginLeftMm: 8.89,
-    marginRightMm: 8.89,
+    pageSize: config?.pageSize || "A4",
+    marginTopMm: config?.marginTopMm ?? 6.35,
+    marginBottomMm: config?.marginBottomMm ?? 6.35,
+    marginLeftMm: config?.marginLeftMm ?? 8.89,
+    marginRightMm: config?.marginRightMm ?? 8.89,
 
-    fontFamily: "Times New Roman",
+    fontFamily,
     fallbackFontFamily: "Liberation Serif",
-    nameSizePt: 14,
-    sectionTitleSizePt: 12,
-    bodyFontSizePt: 10.5,
+    nameSizePt: config?.nameSizePt ?? 14,
+    sectionTitleSizePt: config?.sectionTitleSizePt ?? 12,
+    bodyFontSizePt,
 
-    nameColor: "#8B0000",
-    sectionTitleColor: "#8B0000",
-    bodyTextColor: "#000000",
-    contactColor: "#000000",
+    nameColor: config?.nameColor || "#8B0000",
+    sectionTitleColor: config?.sectionTitleColor || "#8B0000",
+    bodyTextColor: config?.bodyTextColor || "#000000",
+    contactColor: config?.bodyTextColor || "#000000",
 
-    lineHeightMm: 12 * 0.352778,
-    sectionGapMm: 3,
+    lineHeightMm: bodyFontSizePt * 0.352778 * lineHeight,
+    sectionGapMm: config?.sectionGapMm ?? 3,
     headerGapMm: 1,
-    bulletIndentMm: 6.4,
+    bulletIndentMm: config?.bulletIndentMm ?? 6.4,
     paragraphSpacingMm: 1.5,
 
-    photoWidthMm: 30,
-    photoHeightMm: 40,
+    photoWidthMm: config?.photoWidthMm ?? 30,
+    photoHeightMm: config?.photoHeightMm ?? 40,
 
-    enforceOnePage: true,
-    minFontSizePt: 10,
+    enforceOnePage: config?.enforceOnePage ?? true,
+    minFontSizePt: config?.minFontSizePt ?? 10,
   };
 }
 
@@ -454,21 +466,40 @@ function renderResumeToPdf(doc: jsPDF, r: ResumeData, sizes: ResumeSizes, accent
     y = sectionTitle(doc, "PROFESSIONAL EXPERIENCE", left, y, sizes.section, accent);
     for (const exp of r.experience) {
       if (y > pageH - MARGIN - 20) break;
-      // Title — company line
+
+      let dateStr = "";
+      if (exp.startDate || exp.endDate) {
+        dateStr = `${formatDate(exp.startDate)} – ${formatDate(exp.endDate)}`;
+      }
+
+      doc.setFont("helvetica", "italic");
+      doc.setTextColor(100, 116, 139);
+      doc.setFontSize(sizes.small);
+      const dateWidth = dateStr ? doc.getTextWidth(dateStr) : 0;
+
+      // Title/company text
       doc.setFont("helvetica", "bold");
       doc.setTextColor(11, 31, 58);
       doc.setFontSize(sizes.subhead);
       const titleStr = `${exp.title}${exp.company ? " — " + exp.company : ""}`;
-      doc.text(titleStr, left, y + sizes.subhead * 0.35);
-      y += sizes.subhead * 0.5 + 1;
+      const titleWidth = contentW - (dateWidth > 0 ? dateWidth + 4 : 0);
+      const titleLines = doc.splitTextToSize(titleStr, titleWidth);
 
-      if (exp.startDate || exp.endDate) {
+      // Render date right-aligned on first line
+      if (dateStr) {
         doc.setFont("helvetica", "italic");
         doc.setTextColor(100, 116, 139);
         doc.setFontSize(sizes.small);
-        const dateStr = `${formatDate(exp.startDate)} – ${formatDate(exp.endDate)}`;
-        doc.text(dateStr, left, y + sizes.small * 0.35);
-        y += sizes.small * 0.5 + 1.5;
+        doc.text(dateStr, right, y + sizes.subhead * 0.35, { align: "right" });
+      }
+
+      // Render title lines
+      doc.setFont("helvetica", "bold");
+      doc.setTextColor(11, 31, 58);
+      doc.setFontSize(sizes.subhead);
+      for (let i = 0; i < titleLines.length; i++) {
+        doc.text(titleLines[i], left, y + sizes.subhead * 0.35);
+        y += sizes.subhead * 0.5 + 1;
       }
 
       doc.setFont("helvetica", "normal");
@@ -486,17 +517,54 @@ function renderResumeToPdf(doc: jsPDF, r: ResumeData, sizes: ResumeSizes, accent
   if (r.education.length) {
     y = sectionTitle(doc, "EDUCATION", left, y, sizes.section, accent);
     for (const ed of r.education) {
+      if (y > pageH - MARGIN - 20) break;
+
+      let dateStr = "";
+      if (ed.startDate || ed.endDate) {
+        dateStr = `${formatDate(ed.startDate)} – ${formatDate(ed.endDate)}`;
+      }
+
+      doc.setFont("helvetica", "italic");
+      doc.setTextColor(100, 116, 139);
+      doc.setFontSize(sizes.small);
+      const dateWidth = dateStr ? doc.getTextWidth(dateStr) : 0;
+
+      // Degree/field
       doc.setFont("helvetica", "bold");
       doc.setTextColor(11, 31, 58);
       doc.setFontSize(sizes.subhead);
       const edStr = `${ed.degree}${ed.field ? " in " + ed.field : ""}`;
-      doc.text(edStr, left, y + sizes.subhead * 0.35);
-      y += sizes.subhead * 0.5 + 1;
+      const edWidth = contentW - (dateWidth > 0 ? dateWidth + 4 : 0);
+      const edLines = doc.splitTextToSize(edStr, edWidth);
+
+      // Render date right-aligned on the first line
+      if (dateStr) {
+        doc.setFont("helvetica", "italic");
+        doc.setTextColor(100, 116, 139);
+        doc.setFontSize(sizes.small);
+        doc.text(dateStr, right, y + sizes.subhead * 0.35, { align: "right" });
+      }
+
+      // Render degree lines
+      doc.setFont("helvetica", "bold");
+      doc.setTextColor(11, 31, 58);
+      doc.setFontSize(sizes.subhead);
+      for (let i = 0; i < edLines.length; i++) {
+        doc.text(edLines[i], left, y + sizes.subhead * 0.35);
+        y += sizes.subhead * 0.5 + 1;
+      }
+
+      // Render institution below
       doc.setFont("helvetica", "normal");
       doc.setTextColor(100, 116, 139);
       doc.setFontSize(sizes.small);
-      doc.text(`${ed.institution}${ed.startDate || ed.endDate ? "  •  " + formatDate(ed.startDate) + " – " + formatDate(ed.endDate) : ""}`, left, y + sizes.small * 0.35);
-      y += sizes.small * 0.5 + 2;
+      const instStr = ed.institution;
+      const instLines = doc.splitTextToSize(instStr, contentW);
+      for (let i = 0; i < instLines.length; i++) {
+        doc.text(instLines[i], left, y + sizes.small * 0.35);
+        y += sizes.small * 0.5 + 1.5;
+      }
+      y += 0.5; // small padding
     }
   }
 

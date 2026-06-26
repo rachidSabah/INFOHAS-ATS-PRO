@@ -2,6 +2,7 @@
 
 import { forwardRef } from "react";
 import type { ResumeData } from "@/lib/types";
+import { useApp } from "@/lib/store";
 
 interface A4PreviewProps {
   resume: ResumeData;
@@ -90,19 +91,35 @@ const TEMPLATE_MAP: Record<string, React.FC<{ resume: ResumeData; accent: string
 //   - Section headers: UPPERCASE, blue, bold, with blue underline
 //   - Sections in order: Summary → Core Competencies & Skills → Experience → Education → Languages
 function InfohasProTemplate({ resume, accent }: { resume: ResumeData; accent: string }) {
-  const DARK_RED = "#8B0000";
-  const BLACK = "#000000";
-  // Photo frame: 54mm × 81mm portrait, positioned top-right
-  // Page is 210mm wide, photo ends ~6mm from right edge → starts at x = 210 - 6 - 54 = 150mm
-  // We position it absolutely in a header zone ~0..92mm tall
+  const config = useApp((s) => s.optimizerDirective);
+
+  const L = {
+    fontFamily: config?.fontFamily || "'Times New Roman', 'Georgia', 'Cambria', serif",
+    bodyFontSizePt: config?.bodyFontSizePt ?? 10.5,
+    lineHeight: config?.lineHeight ?? 1.2,
+    marginTopMm: config?.marginTopMm ?? 6.35,
+    marginBottomMm: config?.marginBottomMm ?? 6.35,
+    marginLeftMm: config?.marginLeftMm ?? 8.89,
+    marginRightMm: config?.marginRightMm ?? 8.89,
+    nameSizePt: config?.nameSizePt ?? 14,
+    sectionTitleSizePt: config?.sectionTitleSizePt ?? 12,
+    nameColor: config?.nameColor || "#8B0000",
+    sectionTitleColor: config?.sectionTitleColor || "#8B0000",
+    bodyTextColor: config?.bodyTextColor || "#000000",
+    sectionGapMm: config?.sectionGapMm ?? 3,
+    bulletIndentMm: config?.bulletIndentMm ?? 6.4,
+  };
+
+  const BLACK = L.bodyTextColor;
+
   return (
     <div
-      className="relative text-slate-800"
+      className="relative"
       style={{
-        fontFamily: "'Times New Roman', 'Georgia', 'Cambria', serif",
-        fontSize: "10.5pt", // body 10-11pt per master layout
-        lineHeight: 1.2, // compact single-spacing
-        padding: "6.35mm 8.89mm", // 0.25" top/bottom, 0.35" left/right
+        fontFamily: L.fontFamily,
+        fontSize: `${L.bodyFontSizePt}pt`,
+        lineHeight: L.lineHeight,
+        padding: `${L.marginTopMm}mm ${L.marginRightMm}mm ${L.marginBottomMm}mm ${L.marginLeftMm}mm`,
         minHeight: "297mm",
         color: BLACK,
       }}
@@ -132,12 +149,12 @@ function InfohasProTemplate({ resume, accent }: { resume: ResumeData; accent: st
           </div>
         )}
 
-        {/* Name — maroon, bold, 13pt, uppercase (matches model) */}
+        {/* Name — bold, uppercase */}
         <div
           style={{
-            color: DARK_RED,
+            color: L.nameColor,
             fontWeight: 700,
-            fontSize: "14pt",
+            fontSize: `${L.nameSizePt}pt`,
             letterSpacing: "0.3pt",
             marginBottom: "0.5mm",
             lineHeight: 1.1,
@@ -147,47 +164,44 @@ function InfohasProTemplate({ resume, accent }: { resume: ResumeData; accent: st
           {(resume.name || "YOUR NAME").toUpperCase()}
         </div>
 
-        {/* Headline — black, 13pt */}
+        {/* Headline */}
         {resume.headline && (
-          <div style={{ fontSize: "10.5pt", color: BLACK, marginBottom: "0.3mm", lineHeight: 1.2 }}>
+          <div style={{ fontSize: `${L.bodyFontSizePt}pt`, color: BLACK, marginBottom: "0.3mm", lineHeight: 1.2 }}>
             {resume.headline}
           </div>
         )}
 
-        {/* Contact lines — black, 13pt */}
-        <div style={{ fontSize: "10.5pt", color: BLACK, marginBottom: "0.3mm", lineHeight: 1.2 }}>
+        {/* Contact lines */}
+        <div style={{ fontSize: `${L.bodyFontSizePt}pt`, color: BLACK, marginBottom: "0.3mm", lineHeight: 1.2 }}>
           {[resume.contact.location, resume.contact.phone].filter(Boolean).join(" | ")}
         </div>
         {resume.contact.email && (
-          <div style={{ fontSize: "10.5pt", color: BLACK, marginBottom: "0.3mm", lineHeight: 1.2 }}>
+          <div style={{ fontSize: `${L.bodyFontSizePt}pt`, color: BLACK, marginBottom: "0.3mm", lineHeight: 1.2 }}>
             {resume.contact.email}
           </div>
         )}
         {resume.dateOfBirth && (
-          <div style={{ fontSize: "10.5pt", color: BLACK, marginBottom: "0.3mm", lineHeight: 1.2 }}>
+          <div style={{ fontSize: `${L.bodyFontSizePt}pt`, color: BLACK, marginBottom: "0.3mm", lineHeight: 1.2 }}>
             Date Of Birth : {resume.dateOfBirth}
           </div>
         )}
-
-        {/* No blue rule under header — the model PDF has none */}
       </header>
 
       {/* ============ BODY ============ */}
-      {/* 27pt gap from header to first section header (matches model PDF) */}
       <div style={{ marginTop: "3mm" }}>
         {/* PROFESSIONAL SUMMARY */}
         {resume.summary && (
-          <InfohasSection title="PROFESSIONAL SUMMARY">
-            <p style={{ margin: 0, textAlign: "justify", color: "#000" }}>{resume.summary}</p>
+          <InfohasSection title="PROFESSIONAL SUMMARY" titleColor={L.sectionTitleColor} titleSize={`${L.sectionTitleSizePt}pt`} gap={`${L.sectionGapMm}mm`}>
+            <p style={{ margin: 0, textAlign: "justify", color: BLACK }}>{resume.summary}</p>
           </InfohasSection>
         )}
 
         {/* CORE COMPETENCIES & SKILLS */}
         {resume.skills.length > 0 && (
-          <InfohasSection title="CORE COMPETENCIES & SKILLS">
-            <ul style={{ margin: 0, paddingLeft: "5mm", listStyleType: "•" }}>
+          <InfohasSection title="CORE COMPETENCIES & SKILLS" titleColor={L.sectionTitleColor} titleSize={`${L.sectionTitleSizePt}pt`} gap={`${L.sectionGapMm}mm`}>
+            <ul style={{ margin: 0, paddingLeft: `${L.bulletIndentMm}mm`, listStyleType: "•" }}>
               {groupSkillsByCategory(resume.skills).map((g, i) => (
-                <li key={i} style={{ marginBottom: "1mm", color: "#000" }}>
+                <li key={i} style={{ marginBottom: "1mm", color: BLACK }}>
                   <span style={{ fontWeight: 700 }}>{g.category}:</span>{" "}
                   <span>{g.items.join(", ")}.</span>
                 </li>
@@ -198,21 +212,21 @@ function InfohasProTemplate({ resume, accent }: { resume: ResumeData; accent: st
 
         {/* PROFESSIONAL EXPERIENCE */}
         {resume.experience.length > 0 && (
-          <InfohasSection title="PROFESSIONAL EXPERIENCE">
+          <InfohasSection title="PROFESSIONAL EXPERIENCE" titleColor={L.sectionTitleColor} titleSize={`${L.sectionTitleSizePt}pt`} gap={`${L.sectionGapMm}mm`}>
             <div style={{ display: "flex", flexDirection: "column", gap: "2mm" }}>
               {resume.experience.map((e) => (
                 <div key={e.id}>
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: "0.5mm" }}>
-                    <div>
-                      <span style={{ fontWeight: 700, color: "#000" }}>{e.title}</span>{" "}
-                      <span style={{ color: "#000" }}>{e.company}</span>
-                      {e.location && <span style={{ color: "#000" }}> | {e.location}</span>}
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: "0.5mm", gap: "2mm" }}>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <span style={{ fontWeight: 700, color: BLACK }}>{e.title}</span>{" "}
+                      <span style={{ color: BLACK }}>{e.company}</span>
+                      {e.location && <span style={{ color: BLACK }}> | {e.location}</span>}
                     </div>
-                    <span style={{ color: "#000", whiteSpace: "nowrap", marginLeft: "2mm", flexShrink: 0 }}>{fmtDateInfohas(e.startDate)} – {fmtDateInfohas(e.endDate)}</span>
+                    <span style={{ color: BLACK, whiteSpace: "nowrap", flexShrink: 0 }}>{fmtDateInfohas(e.startDate)} – {fmtDateInfohas(e.endDate)}</span>
                   </div>
-                  <ul style={{ margin: 0, paddingLeft: "5mm", listStyleType: "•" }}>
+                  <ul style={{ margin: 0, paddingLeft: `${L.bulletIndentMm}mm`, listStyleType: "•" }}>
                     {e.bullets.map((b, i) => (
-                      <li key={i} style={{ marginBottom: "0.5mm", color: "#000", textAlign: "justify" }}>{b}</li>
+                      <li key={i} style={{ marginBottom: "0.5mm", color: BLACK, textAlign: "justify" }}>{b}</li>
                     ))}
                   </ul>
                 </div>
@@ -223,24 +237,26 @@ function InfohasProTemplate({ resume, accent }: { resume: ResumeData; accent: st
 
         {/* EDUCATION */}
         {resume.education.length > 0 && (
-          <InfohasSection title="EDUCATION">
+          <InfohasSection title="EDUCATION" titleColor={L.sectionTitleColor} titleSize={`${L.sectionTitleSizePt}pt`} gap={`${L.sectionGapMm}mm`}>
             <div style={{ display: "flex", flexDirection: "column", gap: "1.5mm" }}>
               {resume.education.map((ed) => (
                 <div key={ed.id}>
-                  <div>
-                    <span style={{ fontWeight: 700, color: "#000" }}>{ed.degree}</span>{" "}
-                    <span style={{ color: "#000" }}>{ed.institution}</span>
-                    {(ed.location || ed.startDate || ed.endDate) && (
-                      <span style={{ color: "#000" }}>
-                        {" | "}
-                        {[ed.location, ed.startDate && ed.endDate ? `${fmtDateInfohas(ed.startDate)} – ${fmtDateInfohas(ed.endDate)}` : ed.startDate || ed.endDate].filter(Boolean).join(" | ")}
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: "0.5mm", gap: "2mm" }}>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <span style={{ fontWeight: 700, color: BLACK }}>{ed.degree}</span>{" "}
+                      <span style={{ color: BLACK }}>{ed.institution}</span>
+                      {ed.location && <span style={{ color: BLACK }}> | {ed.location}</span>}
+                    </div>
+                    {(ed.startDate || ed.endDate) && (
+                      <span style={{ color: BLACK, whiteSpace: "nowrap", flexShrink: 0 }}>
+                        {fmtDateInfohas(ed.startDate)} – {fmtDateInfohas(ed.endDate)}
                       </span>
                     )}
                   </div>
                   {ed.highlights && ed.highlights.length > 0 && (
-                    <ul style={{ margin: "0.5mm 0 0 0", paddingLeft: "5mm", listStyleType: "•" }}>
+                    <ul style={{ margin: "0.5mm 0 0 0", paddingLeft: `${L.bulletIndentMm}mm`, listStyleType: "•" }}>
                       {ed.highlights.map((h, i) => (
-                        <li key={i} style={{ color: "#000" }}>{h}</li>
+                        <li key={i} style={{ color: BLACK }}>{h}</li>
                       ))}
                     </ul>
                   )}
@@ -252,10 +268,10 @@ function InfohasProTemplate({ resume, accent }: { resume: ResumeData; accent: st
 
         {/* LANGUAGES */}
         {resume.languages.length > 0 && (
-          <InfohasSection title="LANGUAGES">
+          <InfohasSection title="LANGUAGES" titleColor={L.sectionTitleColor} titleSize={`${L.sectionTitleSizePt}pt`} gap={`${L.sectionGapMm}mm`}>
             <div style={{ display: "flex", flexDirection: "column", gap: "0.5mm" }}>
               {resume.languages.map((l) => (
-                <div key={l.id} style={{ color: "#000" }}>
+                <div key={l.id} style={{ color: BLACK }}>
                   <span style={{ fontWeight: 700 }}>{l.name}:</span>{" "}
                   <span style={{ textTransform: "capitalize" }}>{l.proficiency}</span>
                   {(l as any).note ? <span> ({(l as any).note})</span> : null}
@@ -270,15 +286,27 @@ function InfohasProTemplate({ resume, accent }: { resume: ResumeData; accent: st
 }
 
 /** Infohas section header - per master layout:
- * 12pt BOLD UPPERCASE DARK RED (#8B0000), no underline, compact spacing. */
-function InfohasSection({ title, children }: { title: string; children: React.ReactNode }) {
+ * 12pt BOLD UPPERCASE configured color, no underline, compact spacing. */
+function InfohasSection({
+  title,
+  titleColor,
+  titleSize,
+  gap,
+  children,
+}: {
+  title: string;
+  titleColor: string;
+  titleSize: string;
+  gap: string;
+  children: React.ReactNode;
+}) {
   return (
-    <section style={{ marginBottom: "3mm" }}>
+    <section style={{ marginBottom: gap }}>
       <h2
         style={{
-          color: "#8B0000",
+          color: titleColor,
           fontWeight: 700,
-          fontSize: "12pt",
+          fontSize: titleSize,
           letterSpacing: "0.3pt",
           margin: "0 0 1mm 0",
           paddingBottom: 0,
@@ -289,7 +317,7 @@ function InfohasSection({ title, children }: { title: string; children: React.Re
       >
         {title}
       </h2>
-      <div style={{ fontSize: "10.5pt", lineHeight: 1.2 }}>{children}</div>
+      <div style={{ fontSize: "inherit", lineHeight: "inherit" }}>{children}</div>
     </section>
   );
 }
@@ -357,11 +385,11 @@ function ATSProfessionalTemplate({ resume, accent }: { resume: ResumeData; accen
           <div className="space-y-2">
             {resume.experience.map((e) => (
               <div key={e.id}>
-                <div className="flex justify-between items-baseline">
-                  <div className="font-semibold text-[10pt] text-slate-900">
+                <div className="flex justify-between items-baseline gap-2">
+                  <div className="font-semibold text-[10pt] text-slate-900 flex-1 min-w-0">
                     {e.title}{e.company && <span className="font-normal text-slate-700"> — {e.company}</span>}
                   </div>
-                  <div className="text-[8.5pt] text-slate-500 italic">{fmtDate(e.startDate)} – {fmtDate(e.endDate)}</div>
+                  <div className="text-[8.5pt] text-slate-500 italic shrink-0 whitespace-nowrap">{fmtDate(e.startDate)} – {fmtDate(e.endDate)}</div>
                 </div>
                 <ul className="mt-1 space-y-0.5">
                   {e.bullets.map((b, i) => (
@@ -381,14 +409,14 @@ function ATSProfessionalTemplate({ resume, accent }: { resume: ResumeData; accen
         <Section title="EDUCATION" accent={accent}>
           <div className="space-y-1.5">
             {resume.education.map((ed) => (
-              <div key={ed.id} className="flex justify-between items-baseline">
-                <div>
-                  <div className="font-semibold text-[10pt] text-slate-900">
+              <div key={ed.id} className="flex justify-between items-baseline gap-2">
+                <div className="flex-1 min-w-0">
+                  <div className="font-semibold text-[10pt] text-slate-900 truncate">
                     {ed.degree}{ed.field && <span className="font-normal text-slate-700"> in {ed.field}</span>}
                   </div>
-                  <div className="text-[9pt] text-slate-600">{ed.institution}</div>
+                  <div className="text-[9pt] text-slate-600 truncate">{ed.institution}</div>
                 </div>
-                <div className="text-[8.5pt] text-slate-500 italic">{fmtDate(ed.startDate)} – {fmtDate(ed.endDate)}</div>
+                <div className="text-[8.5pt] text-slate-500 italic shrink-0 whitespace-nowrap">{fmtDate(ed.startDate)} – {fmtDate(ed.endDate)}</div>
               </div>
             ))}
           </div>
@@ -552,9 +580,9 @@ function ModernTemplate({ resume, accent }: { resume: ResumeData; accent: string
             <div className="space-y-3">
               {resume.experience.map((e) => (
                 <div key={e.id}>
-                  <div className="flex justify-between items-baseline">
-                    <div className="font-bold text-[10.5pt] text-slate-900">{e.title}</div>
-                    <div className="text-[8.5pt] text-slate-500">{fmtDate(e.startDate)} – {fmtDate(e.endDate)}</div>
+                  <div className="flex justify-between items-baseline gap-2">
+                    <div className="font-bold text-[10.5pt] text-slate-900 flex-1 min-w-0">{e.title}</div>
+                    <div className="text-[8.5pt] text-slate-500 shrink-0 whitespace-nowrap">{fmtDate(e.startDate)} – {fmtDate(e.endDate)}</div>
                   </div>
                   <div className="text-[9.5pt] font-medium" style={{ color: accent }}>{e.company}</div>
                   <ul className="mt-1 space-y-0.5">
@@ -636,11 +664,11 @@ function CompactTemplate({ resume, accent }: { resume: ResumeData; accent: strin
           <div className="space-y-1.5">
             {resume.experience.map((e) => (
               <div key={e.id}>
-                <div className="flex justify-between items-baseline">
-                  <div className="font-semibold text-[9.5pt] text-slate-900">
+                <div className="flex justify-between items-baseline gap-2">
+                  <div className="font-semibold text-[9.5pt] text-slate-900 flex-1 min-w-0">
                     {e.title}{e.company && <span className="font-normal text-slate-600"> · {e.company}</span>}
                   </div>
-                  <div className="text-[8pt] text-slate-500">{fmtDate(e.startDate)} – {fmtDate(e.endDate)}</div>
+                  <div className="text-[8pt] text-slate-500 shrink-0 whitespace-nowrap">{fmtDate(e.startDate)} – {fmtDate(e.endDate)}</div>
                 </div>
                 <ul className="mt-0.5 space-y-0">
                   {e.bullets.map((b, i) => (
@@ -730,9 +758,9 @@ function TechTemplate({ resume, accent }: { resume: ResumeData; accent: string }
           <div className="space-y-2.5">
             {resume.experience.map((e) => (
               <div key={e.id}>
-                <div className="flex justify-between items-baseline">
-                  <div className="font-bold text-[10.5pt] text-slate-900">{e.title}</div>
-                  <div className="text-[8.5pt] text-slate-500" style={{ fontFamily: "'Geist Mono', monospace" }}>{fmtDate(e.startDate)} → {fmtDate(e.endDate)}</div>
+                <div className="flex justify-between items-baseline gap-2">
+                  <div className="font-bold text-[10.5pt] text-slate-900 flex-1 min-w-0">{e.title}</div>
+                  <div className="text-[8.5pt] text-slate-500 shrink-0 whitespace-nowrap" style={{ fontFamily: "'Geist Mono', monospace" }}>{fmtDate(e.startDate)} → {fmtDate(e.endDate)}</div>
                 </div>
                 <div className="text-[9.5pt] font-medium mb-0.5" style={{ color: accent }}>{e.company}{e.location && ` · ${e.location}`}</div>
                 <ul className="space-y-0.5">
@@ -814,9 +842,9 @@ function AcademicTemplate({ resume, accent }: { resume: ResumeData; accent: stri
           <div className="space-y-2">
             {resume.experience.map((e) => (
               <div key={e.id}>
-                <div className="flex justify-between items-baseline">
-                  <div className="font-bold text-[10.5pt] text-slate-900">{e.title}, <span className="italic">{e.company}</span></div>
-                  <div className="text-[9.5pt] text-slate-600">{fmtDate(e.startDate)} – {fmtDate(e.endDate)}</div>
+                <div className="flex justify-between items-baseline gap-2">
+                  <div className="font-bold text-[10.5pt] text-slate-900 flex-1 min-w-0">{e.title}, <span className="italic">{e.company}</span></div>
+                  <div className="text-[9.5pt] text-slate-600 shrink-0 whitespace-nowrap">{fmtDate(e.startDate)} – {fmtDate(e.endDate)}</div>
                 </div>
                 {e.location && <div className="text-[9.5pt] text-slate-600 italic">{e.location}</div>}
                 <ul className="mt-0.5 space-y-0">
@@ -836,9 +864,9 @@ function AcademicTemplate({ resume, accent }: { resume: ResumeData; accent: stri
           <div className="space-y-1">
             {resume.education.map((ed) => (
               <div key={ed.id}>
-                <div className="flex justify-between items-baseline">
-                  <div className="font-bold text-[10.5pt] text-slate-900">{ed.degree}{ed.field && ` in ${ed.field}`}, <span className="italic">{ed.institution}</span></div>
-                  <div className="text-[9.5pt] text-slate-600">{fmtDate(ed.startDate)} – {fmtDate(ed.endDate)}</div>
+                <div className="flex justify-between items-baseline gap-2">
+                  <div className="font-bold text-[10.5pt] text-slate-900 flex-1 min-w-0">{ed.degree}{ed.field && ` in ${ed.field}`}, <span className="italic">{ed.institution}</span></div>
+                  <div className="text-[9.5pt] text-slate-600 shrink-0 whitespace-nowrap">{fmtDate(ed.startDate)} – {fmtDate(ed.endDate)}</div>
                 </div>
                 {ed.highlights && ed.highlights.length > 0 && (
                   <div className="text-[9.5pt] text-slate-600 italic mt-0.5">{ed.highlights.join("; ")}</div>
@@ -908,9 +936,9 @@ function ConsultingTemplate({ resume, accent }: { resume: ResumeData; accent: st
           <div className="space-y-3">
             {resume.experience.map((e) => (
               <div key={e.id}>
-                <div className="flex justify-between items-baseline">
-                  <div className="font-bold text-[11pt] text-slate-900">{e.title}</div>
-                  <div className="text-[9pt] text-slate-500 font-medium">{fmtDate(e.startDate)} – {fmtDate(e.endDate)}</div>
+                <div className="flex justify-between items-baseline gap-2">
+                  <div className="font-bold text-[11pt] text-slate-900 flex-1 min-w-0">{e.title}</div>
+                  <div className="text-[9pt] text-slate-500 font-medium shrink-0 whitespace-nowrap">{fmtDate(e.startDate)} – {fmtDate(e.endDate)}</div>
                 </div>
                 <div className="text-[10pt] font-medium mb-1" style={{ color: accent }}>{e.company}{e.location && ` | ${e.location}`}</div>
                 <ul className="space-y-1">
@@ -1000,9 +1028,9 @@ function StartupTemplate({ resume, accent }: { resume: ResumeData; accent: strin
             <div className="space-y-3">
               {resume.experience.map((e) => (
                 <div key={e.id} className="pl-3 border-l-2" style={{ borderColor: accent }}>
-                  <div className="flex justify-between items-baseline">
-                    <div className="font-bold text-[11pt] text-slate-900">{e.title}</div>
-                    <div className="text-[9pt] text-slate-500 font-medium px-2 py-0.5 rounded-full" style={{ background: `${accent}15`, color: accent }}>{fmtDate(e.startDate)} – {fmtDate(e.endDate)}</div>
+                  <div className="flex justify-between items-baseline gap-2">
+                    <div className="font-bold text-[11pt] text-slate-900 flex-1 min-w-0">{e.title}</div>
+                    <div className="text-[9pt] text-slate-500 font-medium px-2 py-0.5 rounded-full shrink-0 whitespace-nowrap" style={{ background: `${accent}15`, color: accent }}>{fmtDate(e.startDate)} – {fmtDate(e.endDate)}</div>
                   </div>
                   <div className="text-[10pt] font-medium mb-1 text-slate-600">{e.company}{e.location && ` · ${e.location}`}</div>
                   <ul className="space-y-0.5">

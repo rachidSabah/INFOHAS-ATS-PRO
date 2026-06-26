@@ -4,7 +4,7 @@ import { useRef, useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Icon } from "@/components/shared";
 import type { ResumeData, ResumeLanguage } from "@/lib/types";
-import { uid } from "@/lib/store";
+import { uid, useApp } from "@/lib/store";
 
 /**
  * Safely render any value as a string. Prevents React error #31
@@ -75,14 +75,33 @@ type EditTarget =
   | `education:${string}`
   | "languages";
 
-// Master layout colors — DARK RED for section headers and name (per strict directive)
-const DARK_RED = "#8B0000";
-const BLACK = "#000000";
+// Master layout colors — BLACK fallback
+const BLACK_FALLBACK = "#000000";
 
 export function EditableA4Preview({ resume, onChange, scale = 0.7, className }: EditableA4PreviewProps) {
   const [editing, setEditing] = useState<EditTarget>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const isTouch = useIsTouchDevice();
+  const config = useApp((s) => s.optimizerDirective);
+
+  const L = {
+    fontFamily: config?.fontFamily || "'Times New Roman', 'Georgia', 'Cambria', serif",
+    bodyFontSizePt: config?.bodyFontSizePt ?? 10.5,
+    lineHeight: config?.lineHeight ?? 1.2,
+    marginTopMm: config?.marginTopMm ?? 6.35,
+    marginBottomMm: config?.marginBottomMm ?? 6.35,
+    marginLeftMm: config?.marginLeftMm ?? 8.89,
+    marginRightMm: config?.marginRightMm ?? 8.89,
+    nameSizePt: config?.nameSizePt ?? 14,
+    sectionTitleSizePt: config?.sectionTitleSizePt ?? 12,
+    nameColor: config?.nameColor || "#8B0000",
+    sectionTitleColor: config?.sectionTitleColor || "#8B0000",
+    bodyTextColor: config?.bodyTextColor || "#000000",
+    sectionGapMm: config?.sectionGapMm ?? 3,
+    bulletIndentMm: config?.bulletIndentMm ?? 6.4,
+  };
+
+  const BLACK = L.bodyTextColor;
 
   // No local draft — the parent owns the state. Edits call onChange() directly,
   // which updates the parent's `resume` prop, which re-renders this component.
@@ -140,10 +159,10 @@ export function EditableA4Preview({ resume, onChange, scale = 0.7, className }: 
           <div
             className="relative"
             style={{
-              fontFamily: "'Times New Roman', 'Georgia', 'Cambria', serif",
-              fontSize: "10.5pt", // body 10-11pt per master layout
-              lineHeight: 1.2, // compact single-spacing
-              padding: "6.35mm 8.89mm", // 0.25" top/bottom, 0.35" left/right — per master layout
+              fontFamily: L.fontFamily,
+              fontSize: `${L.bodyFontSizePt}pt`,
+              lineHeight: L.lineHeight,
+              padding: `${L.marginTopMm}mm ${L.marginRightMm}mm ${L.marginBottomMm}mm ${L.marginLeftMm}mm`,
               minHeight: "297mm",
               color: BLACK,
             }}
@@ -219,15 +238,15 @@ export function EditableA4Preview({ resume, onChange, scale = 0.7, className }: 
               )}
 
               {/* LEFT COLUMN — name, headline, contact, DOB (70% width, left-aligned, compact) */}
-              <div style={{ color: DARK_RED, fontWeight: 700, fontSize: "14pt", letterSpacing: "0.3pt", marginBottom: "0.5mm", lineHeight: 1.1, textTransform: "uppercase" }}>
+              <div style={{ color: L.nameColor, fontWeight: 700, fontSize: `${L.nameSizePt}pt`, letterSpacing: "0.3pt", marginBottom: "0.5mm", lineHeight: 1.1, textTransform: "uppercase" }}>
                 {(resume.name || "YOUR NAME").toUpperCase()}
               </div>
-              {resume.headline && <div style={{ fontSize: "10.5pt", color: BLACK, marginBottom: "0.5mm", lineHeight: 1.2 }}>{safeRender(resume.headline)}</div>}
-              <div style={{ fontSize: "10.5pt", color: BLACK, marginBottom: "0.3mm", lineHeight: 1.2 }}>
+              {resume.headline && <div style={{ fontSize: `${L.bodyFontSizePt}pt`, color: BLACK, marginBottom: "0.5mm", lineHeight: 1.2 }}>{safeRender(resume.headline)}</div>}
+              <div style={{ fontSize: `${L.bodyFontSizePt}pt`, color: BLACK, marginBottom: "0.3mm", lineHeight: 1.2 }}>
                 {[safeRender(resume.contact.location), safeRender(resume.contact.phone)].filter(Boolean).join(" | ")}
               </div>
-              {resume.contact.email && <div style={{ fontSize: "10.5pt", color: BLACK, marginBottom: "0.3mm", lineHeight: 1.2 }}>{safeRender(resume.contact.email)}</div>}
-              {resume.dateOfBirth && <div style={{ fontSize: "10.5pt", color: BLACK, marginBottom: "0.3mm", lineHeight: 1.2 }}>Date of Birth: {safeRender(resume.dateOfBirth)}</div>}
+              {resume.contact.email && <div style={{ fontSize: `${L.bodyFontSizePt}pt`, color: BLACK, marginBottom: "0.3mm", lineHeight: 1.2 }}>{safeRender(resume.contact.email)}</div>}
+              {resume.dateOfBirth && <div style={{ fontSize: `${L.bodyFontSizePt}pt`, color: BLACK, marginBottom: "0.3mm", lineHeight: 1.2 }}>Date of Birth: {safeRender(resume.dateOfBirth)}</div>}
             </header>
           </EditableBlock>
 
@@ -247,7 +266,7 @@ export function EditableA4Preview({ resume, onChange, scale = 0.7, className }: 
             {resume.skills.length > 0 && (
               <EditableBlock isEditing={editing === "skills"} onEdit={() => setEditing("skills")} label="Edit skills" isTouch={isTouch}>
                 <InfohasSection title="CORE COMPETENCIES & SKILLS">
-                  <ul style={{ margin: 0, paddingLeft: "4mm", listStyleType: "•", lineHeight: 1.2 }}>
+                  <ul style={{ margin: 0, paddingLeft: `${L.bulletIndentMm}mm`, listStyleType: "•", lineHeight: 1.2 }}>
                     {groupSkillsByCategory(resume.skills).slice(0, 4).map((g, i) => (
                       <li key={i} style={{ marginBottom: 0, color: BLACK, lineHeight: 1.2, textAlign: "justify" }}>
                         <span style={{ fontWeight: 700 }}>{safeRender(g.category)}:</span> <span>{g.items.map((item: any) => safeRender(item)).join(", ")}.</span>
@@ -270,22 +289,16 @@ export function EditableA4Preview({ resume, onChange, scale = 0.7, className }: 
                     label="Edit experience"
                     isTouch={isTouch}
                   >
-                    <div style={{ marginBottom: "1.5mm" }}>
+                    <div style={{ marginBottom: "1mm" }}>
                       <div style={{ marginBottom: "0.3mm", lineHeight: 1.2, display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: "2mm" }}>
-                        {/* minWidth: 0 is CRITICAL here — without it, flex items default to
-                            min-width: auto, which means the title span won't shrink below
-                            its content's intrinsic width. The date span (flexShrink: 0) then
-                            gets pushed past the right edge of the page and clipped by the
-                            parent's overflow: hidden. Setting minWidth: 0 lets the title span
-                            shrink so the date span stays fully visible. */}
-                        <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                        <span style={{ flex: 1, minWidth: 0 }}>
                           <span style={{ fontWeight: 700, color: BLACK }}>{String(e.title || "")}</span>
                           {e.company && <span style={{ color: BLACK }}> | {String(e.company)}</span>}
                           {e.location && <span style={{ color: BLACK }}> | {safeRender(e.location)}</span>}
                         </span>
                         <span style={{ color: BLACK, whiteSpace: "nowrap", flexShrink: 0 }}>{fmtDateInfohas(e.startDate)}{e.endDate ? ` – ${fmtDateInfohas(e.endDate)}` : ""}</span>
                       </div>
-                      <ul style={{ margin: 0, paddingLeft: "4mm", listStyleType: "•", lineHeight: 1.2 }}>
+                      <ul style={{ margin: 0, paddingLeft: `${L.bulletIndentMm}mm`, listStyleType: "•", lineHeight: 1.2 }}>
                         {e.bullets.map((b, i) => (
                           <li key={i} style={{ marginBottom: 0, color: BLACK, textAlign: "justify", lineHeight: 1.2 }}>{safeRender(b)}</li>
                         ))}
@@ -309,18 +322,20 @@ export function EditableA4Preview({ resume, onChange, scale = 0.7, className }: 
                     isTouch={isTouch}
                   >
                     <div style={{ marginBottom: "1mm", lineHeight: 1.2 }}>
-                      <div style={{ lineHeight: 1.2 }}>
-                        <span style={{ fontWeight: 700, color: BLACK }}>{safeRender(ed.degree)}</span>
-                        {ed.institution && <span style={{ color: BLACK }}> | {safeRender(ed.institution)}</span>}
-                        {(ed.location || ed.startDate || ed.endDate) && (
-                          <span style={{ color: BLACK }}>
-                            {" | "}
-                            {[ed.location, ed.startDate && ed.endDate ? `${fmtDateInfohas(ed.startDate)} – ${fmtDateInfohas(ed.endDate)}` : ed.startDate || ed.endDate].filter(Boolean).join(" | ")}
+                      <div style={{ lineHeight: 1.2, display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: "2mm" }}>
+                        <span style={{ flex: 1, minWidth: 0 }}>
+                          <span style={{ fontWeight: 700, color: BLACK }}>{safeRender(ed.degree)}</span>
+                          {ed.institution && <span style={{ color: BLACK }}> | {safeRender(ed.institution)}</span>}
+                          {ed.location && <span style={{ color: BLACK }}> | {safeRender(ed.location)}</span>}
+                        </span>
+                        {(ed.startDate || ed.endDate) && (
+                          <span style={{ color: BLACK, whiteSpace: "nowrap", flexShrink: 0 }}>
+                            {fmtDateInfohas(ed.startDate)} – {fmtDateInfohas(ed.endDate)}
                           </span>
                         )}
                       </div>
                   {ed.highlights && ed.highlights.length > 0 && (
-                    <ul style={{ margin: "0.3mm 0 0 0", paddingLeft: "4mm", listStyleType: "•", lineHeight: 1.2 }}>
+                    <ul style={{ margin: "0.3mm 0 0 0", paddingLeft: `${L.bulletIndentMm}mm`, listStyleType: "•", lineHeight: 1.2 }}>
                       {ed.highlights.map((h, i) => (
                         <li key={i} style={{ color: BLACK, lineHeight: 1.2, textAlign: "justify" }}>{safeRender(h)}</li>
                       ))}
@@ -424,15 +439,20 @@ function EditableBlock({
 }
 
 /** Infohas section header - per master layout:
- * 12pt BOLD UPPERCASE DARK RED (#8B0000), no underline, compact spacing. */
+ * Configured BOLD UPPERCASE color, no underline, compact spacing. */
 function InfohasSection({ title, children }: { title: string; children: React.ReactNode }) {
+  const config = useApp((s) => s.optimizerDirective);
+  const titleColor = config?.sectionTitleColor || "#8B0000";
+  const fontSize = config?.sectionTitleSizePt ? `${config.sectionTitleSizePt}pt` : "12pt";
+  const sectionGap = config?.sectionGapMm ? `${config.sectionGapMm}mm` : "3mm";
+
   return (
-    <section style={{ marginBottom: "3mm" }}>
+    <section style={{ marginBottom: sectionGap }}>
       <h2
         style={{
-          color: DARK_RED,
+          color: titleColor,
           fontWeight: 700,
-          fontSize: "12pt",
+          fontSize: fontSize,
           letterSpacing: "0.3pt",
           margin: "0 0 1mm 0",
           paddingBottom: 0,
@@ -443,21 +463,26 @@ function InfohasSection({ title, children }: { title: string; children: React.Re
       >
         {title}
       </h2>
-      <div style={{ fontSize: "10.5pt", lineHeight: 1.2 }}>{children}</div>
+      <div style={{ fontSize: "inherit", lineHeight: 1.2 }}>{children}</div>
     </section>
   );
 }
 
-/** Section header for grouped experience/education entries - 12pt bold UPPERCASE DARK RED */
+/** Section header for grouped experience/education entries - Configured bold UPPERCASE color */
 function SectionDividerInline({ title }: { title: string }) {
+  const config = useApp((s) => s.optimizerDirective);
+  const titleColor = config?.sectionTitleColor || "#8B0000";
+  const fontSize = config?.sectionTitleSizePt ? `${config.sectionTitleSizePt}pt` : "12pt";
+  const sectionGap = config?.sectionGapMm ? `${config.sectionGapMm}mm` : "3mm";
+
   return (
     <h2
       style={{
-        color: DARK_RED,
+        color: titleColor,
         fontWeight: 700,
-        fontSize: "12pt",
+        fontSize: fontSize,
         letterSpacing: "0.3pt",
-        margin: "3mm 0 1mm 0" /* compact gap */,
+        margin: `${sectionGap} 0 1mm 0` /* compact gap */,
         paddingBottom: 0,
         borderBottom: "none",
         textTransform: "uppercase",

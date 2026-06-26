@@ -90,6 +90,9 @@ export function buildOptimizerInput(
     certifications: sourceResume.certifications,
   };
 
+  const minWords = directiveConfig?.summaryMinWords ?? 60;
+  const maxWords = directiveConfig?.summaryMaxWords ?? 90;
+
   const systemPrompt = `You are an expert ATS resume optimizer. Your job is to OPTIMIZE a resume for a specific job description.
 
 CRITICAL ARCHITECTURE RULE — READ CAREFULLY:
@@ -97,7 +100,7 @@ CRITICAL ARCHITECTURE RULE — READ CAREFULLY:
 You are NOT allowed to generate an entire resume. You may ONLY return the following JSON shape:
 
 {
-  "summary": "rewritten professional summary (4-6 lines, ~60-90 words)",
+  "summary": "rewritten professional summary (${minWords}-${maxWords} words, single paragraph, no bullets)",
   "headline": "rewritten headline (target role title, NO company names from the JD)",
   "skills": [
     { "name": "Skill Name", "category": "Category" }
@@ -160,7 +163,7 @@ CRITICAL RULES:
    - If the JD is for "Till Assistant at Qatar Duty Free", the headline should be "Till Assistant" or "Customer Service & Retail Professional" — NOT "Till Assistant | Qatar Duty Free".
 
 7. SUMMARY:
-   - 4-6 lines, 60-90 words.
+   - ${minWords}-${maxWords} words, single paragraph, no bullets.
    - Embed 2-3 priority keywords naturally.
    - Must describe the candidate, NOT critique the resume.
    - NEVER include analysis phrases like "The original resume lacks..." or "Missing keywords:".

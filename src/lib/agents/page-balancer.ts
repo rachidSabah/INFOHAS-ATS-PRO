@@ -153,6 +153,8 @@ export interface ExpandOptions {
   currentChars: number;
   /** Missing keywords from the JD that should be embedded naturally. */
   missingKeywords?: string[];
+  /** The UI configured optimizer directives. */
+  directiveConfig?: OptimizerDirectiveConfig | null;
 }
 
 /**
@@ -250,10 +252,11 @@ export function expandResume(
     }
   }
 
-  // === Strategy 3: Expand the summary if < 60 words ===
+  // === Strategy 3: Expand the summary if < summaryMinWords ===
   if (expanded.summary) {
     const wordCount = expanded.summary.split(/\s+/).length;
-    if (wordCount < 60) {
+    const minWords = opts.directiveConfig?.summaryMinWords ?? 60;
+    if (wordCount < minWords) {
       // Add a value-proposition sentence using the candidate's top skills + target role
       const topSkills = expanded.skills.slice(0, 3).map((s) => s.name).filter(Boolean).join(", ");
       const targetRole = jd.title ?? "the target role";
@@ -294,6 +297,8 @@ export interface CompressOptions {
   maxChars: number;
   /** Current character count. */
   currentChars: number;
+  /** The UI configured optimizer directives. */
+  directiveConfig?: OptimizerDirectiveConfig | null;
 }
 
 /**
@@ -337,10 +342,11 @@ export function compressResume(
   charsNow = computeResumeCharCount(compressed);
   if (charsNow <= maxChars) return compressed;
 
-  // === Strategy 2: Shorten the summary (if > 90 words) ===
+  // === Strategy 2: Shorten the summary (if > summaryMaxWords) ===
   if (compressed.summary) {
     const words = compressed.summary.split(/\s+/);
-    if (words.length > 90) {
+    const maxWords = opts.directiveConfig?.summaryMaxWords ?? 90;
+    if (words.length > maxWords) {
       // Take the first 2-3 sentences (usually the strongest)
       const sentences = compressed.summary.match(/[^.!?]+[.!?]+/g) ?? [compressed.summary];
       const shortened = sentences.slice(0, 3).join(" ").trim();

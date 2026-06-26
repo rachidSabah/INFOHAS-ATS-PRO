@@ -165,12 +165,14 @@ export async function runLockedPipeline(
             targetChars: pageFill.targetChars,
             currentChars: pageFill.charCount,
             missingKeywords,
+            directiveConfig,
           });
         } else if (pageFill.action === "compress") {
           balancedResume = compressResume(balancedResume, {
             targetChars: pageFill.targetChars,
             maxChars: Math.floor(pageFill.targetChars * 1.04),
             currentChars: pageFill.charCount,
+            directiveConfig,
           });
         }
       } catch (pbErr) {
