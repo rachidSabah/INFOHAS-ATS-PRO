@@ -2000,20 +2000,33 @@ CONTENT REQUIREMENTS:
     dateOfBirth: data.dateOfBirth || resume.dateOfBirth,
     summary: String(data.summary || ""),
     experience: (data.experience ?? []).length > 0
-      ? data.experience.map((e: any, i: number) => ({
-          id: uid("e"),
-          title: String(e.title || ""),
-          company: String(e.company || ""),
-          location: flattenLocation(e.location) || "",
-          // === PRESERVE ORIGINAL DATES — never default to "Present" ===
-          // If the AI returned empty dates, use the original resume's dates
-          // for this entry (by index). The enforceLockedFields function will
-          // also restore by company-name match, but this prevents "Present"
-          // from appearing in the intermediate step.
-          startDate: String(e.startDate || resume.experience[i]?.startDate || ""),
-          endDate: String(e.endDate || resume.experience[i]?.endDate || ""),
-          bullets: Array.isArray(e.bullets) ? e.bullets.map((b: any) => flattenValue(b)) : [],
-        }))
+      ? data.experience.map((e: any, i: number) => {
+          // === ID-BASED MATCHING (not index-based) ===
+          // Find the matching source experience by ID first, then fallback
+          // to index. This is required by the locked pipeline architecture.
+          let sourceExp: any = null;
+          if (e.id) {
+            sourceExp = resume.experience.find((src) => src.id === e.id);
+          }
+          if (!sourceExp && i < resume.experience.length) {
+            // Last-resort index fallback (logged for debugging)
+            sourceExp = resume.experience[i];
+            console.warn(`[mapAItoResume] Experience entry ${i}: ID "${e.id}" not found in source — using index fallback`);
+          }
+
+          return {
+            // PRESERVE source ID (immutable) — don't generate a new one
+            id: sourceExp?.id || e.id || uid("e"),
+            title: String(e.title || sourceExp?.title || ""),
+            company: String(sourceExp?.company || e.company || ""),
+            location: flattenLocation(e.location) || sourceExp?.location || "",
+            // === PRESERVE ORIGINAL DATES — never default to "Present" ===
+            // Use ID-matched source dates, not index-based
+            startDate: String(sourceExp?.startDate || e.startDate || ""),
+            endDate: String(sourceExp?.endDate || e.endDate || ""),
+            bullets: Array.isArray(e.bullets) ? e.bullets.map((b: any) => flattenValue(b)) : [],
+          };
+        })
       : resume.experience,
     education: (data.education ?? []).length > 0
       ? data.education.map((ed: any) => ({
@@ -2292,31 +2305,71 @@ function mapAviationResultToResumeData(result: AviationOptimizeResult, original:
     summary: String(result.resume.summary || ""),
     experience: (result.resume.experience ?? []).length > 0
       ? result.resume.experience.map((e: any, i: number) => {
-          // CRITICAL FIX: Match AI entry to original by company name or title.
-          // If matched, ALWAYS use original company/dates/location (locked fields).
-          // If not matched, keep AI's data (it may be a rephrased entry).
-          const aiCompanyLower = (e.company || "").toLowerCase().trim();
-          const aiTitleLower = (e.title || "").toLowerCase().trim();
-          const origMatch = original.experience.find((o) => {
-            const oCompanyLower = (o.company || "").toLowerCase().trim();
-            const oTitleLower = (o.title || "").toLowerCase().trim();
-            return (oCompanyLower && (oCompanyLower === aiCompanyLower ||
-              oCompanyLower.includes(aiCompanyLower) || aiCompanyLower.includes(oCompanyLower))) ||
-              (oTitleLower && (oTitleLower === aiTitleLower ||
-              oTitleLower.includes(aiTitleLower) || aiTitleLower.includes(oTitleLower)));
-          }) ?? original.experience[i];
+          // === ID-BASED MATCHING (required by locked pipeline) ===
+          // 1. Try ID match (100% reliable)
+          // 2. Try fingerprint match (title+company+location+dates hash)
+          // 3. Try company/title match (fuzzy fallback)
+          // 4. Last resort: index fallback (logged)
+          let origMatch: any = null;
+
+          // 1. ID match
+          if (e.id) {
+            origMatch = original.experience.find((o) => o.id === e.id);
+          }
+
+          // 2. Fingerprint match
+          if (!origMatch) {
+            // Inline fingerprint computation (avoids require() which is forbidden)
+            const fpParts = [
+              (e.title || "").toLowerCase().trim(),
+              (e.company || "").toLowerCase().trim(),
+              (e.location || "").toLowerCase().trim(),
+              (e.startDate || "").toLowerCase().trim(),
+              (e.endDate || "").toLowerCase().trim(),
+            ];
+            const aiFp = fpParts.join("|");
+            origMatch = original.experience.find((o) => {
+              const oParts = [
+                (o.title || "").toLowerCase().trim(),
+                (o.company || "").toLowerCase().trim(),
+                (o.location || "").toLowerCase().trim(),
+                (o.startDate || "").toLowerCase().trim(),
+                (o.endDate || "").toLowerCase().trim(),
+              ];
+              return oParts.join("|") === aiFp;
+            });
+          }
+
+          // 3. Company/title match (fuzzy)
+          if (!origMatch) {
+            const aiCompanyLower = (e.company || "").toLowerCase().trim();
+            const aiTitleLower = (e.title || "").toLowerCase().trim();
+            origMatch = original.experience.find((o) => {
+              const oCompanyLower = (o.company || "").toLowerCase().trim();
+              const oTitleLower = (o.title || "").toLowerCase().trim();
+              return (oCompanyLower && (oCompanyLower === aiCompanyLower ||
+                oCompanyLower.includes(aiCompanyLower) || aiCompanyLower.includes(oCompanyLower))) ||
+                (oTitleLower && (oTitleLower === aiTitleLower ||
+                oTitleLower.includes(aiTitleLower) || aiTitleLower.includes(oTitleLower)));
+            });
+          }
+
+          // 4. Index fallback (last resort — logged)
+          if (!origMatch && i < original.experience.length) {
+            origMatch = original.experience[i];
+            console.warn(`[mapAviationResult] Experience entry ${i}: no ID/fingerprint/company match — using index fallback`);
+          }
 
           return {
-            id: uid("e"),
-            title: String(e.title || origMatch?.title || ""),
-            // ALWAYS use original company if it exists — AI must not rename employers.
-            // If original company is empty, fall back to AI's company (better than empty).
-            company: String(origMatch?.company || e.company || ""),
-            location: flattenLocation(e.location) || origMatch?.location || "",
-            // ALWAYS use original dates if they exist — AI must not change dates.
-            // If original dates are empty, fall back to AI's dates.
-            startDate: String(origMatch?.startDate || e.startDate || ""),
-            endDate: String(origMatch?.endDate || e.endDate || ""),
+            // PRESERVE source ID (immutable) — don't generate a new one
+            id: origMatch?.id || e.id || uid("e"),
+            title: String(origMatch?.title || e.title || ""),
+            // STRICT: company ALWAYS from source. If source is empty, use "".
+            company: String(origMatch?.company || ""),
+            location: origMatch?.location || flattenLocation(e.location) || "",
+            // STRICT: dates ALWAYS from source. If source is empty, use "".
+            startDate: String(origMatch?.startDate || ""),
+            endDate: String(origMatch?.endDate || ""),
             bullets: Array.isArray(e.bullets) ? e.bullets.map((b: any) => flattenValue(b)) : [],
           };
         })

@@ -253,6 +253,9 @@ export function restoreExperienceMetadata(optimized: ResumeData, sourceResume: R
 
     return {
       ...entry,
+      // STRICT LOCK: ID is ALWAYS from source (immutable).
+      // The AI must never change, remove, or regenerate IDs.
+      id: orig.id,
       // STRICT LOCK: company is ALWAYS from source. If source.company is empty,
       // use "" — NEVER fall back to AI's company (could be hallucinated like "Beauty Retailer").
       // The renderer will show the title only when company is empty.
