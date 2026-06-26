@@ -25,6 +25,9 @@ import { PipelineResults } from "@/components/optimizer/PipelineResults";
 import { InterviewPrepSuite } from "@/components/interview/InterviewPrepSuite";
 import { toast } from "sonner";
 import type { ResumeData, JobDescription, ResumeSkill } from "@/lib/types";
+import { DiffPreview } from "@/components/resume/DiffPreview";
+import { ATSScoreSimulator } from "@/components/optimizer/ATSScoreSimulator";
+import { OptimizationSession } from "@/lib/agents/session-memory";
 
 // Lazy-load the V3 Pipeline Dashboard so it doesn't bloat the initial bundle
 const PipelineDashboardLazy = lazy(() =>
@@ -334,6 +337,15 @@ export function Optimizer() {
     setAiLog((l) => [...l, `Mode: ${industryMode ? `Industry ATS (${INDUSTRY_PROFILES[industryId]?.label ?? "Generic"})` : "Standard"}`]);
     setAiLog((l) => [...l, "Starting 6-agent pipeline (V2) + post-optimization agents (V3)…"]);
 
+    // Start session memory round
+    const session = OptimizationSession.getInstance();
+    session.startRound(resume.id, {
+      industryMode,
+      industryId,
+      employer,
+      usingOverride,
+    });
+
     try {
       // === V3: Delegate to the Supervisor, which wraps the existing V2
       // pipeline AND triggers post-optimization agents (CoverLetter,
@@ -408,6 +420,13 @@ export function Optimizer() {
         setAiThinking(false);
         // Stay on the optimize step so the user can retry
         toast.error(`Optimization failed: ${errMsg.slice(0, 120)}`);
+        OptimizationSession.getInstance().completeRound({
+          beforeATS: 0,
+          afterATS: 0,
+          strategies: [],
+          successes: [],
+          failures: [errMsg],
+        });
         return;
       }
 
@@ -433,6 +452,15 @@ export function Optimizer() {
       const confidence = result.qa?.confidence ?? 0;
       const deltaStr = delta >= 0 ? `+${delta}` : `${delta}`;
       toast.success(`Optimization complete — ATS ${result.beforeATS?.scores.ats ?? "?"} → ${result.afterATS?.scores.ats ?? "?"} (${deltaStr} pts) · Confidence ${confidence}/100`);
+
+      // Record session memory round
+      OptimizationSession.getInstance().completeRound({
+        beforeATS: result.beforeATS?.scores.ats ?? 0,
+        afterATS: result.afterATS?.scores.ats ?? 0,
+        strategies: result.steps.map((s) => s.name),
+        successes: result.steps.filter((s) => s.status === "completed").map((s) => s.name),
+        failures: result.steps.filter((s) => s.status === "failed").map((s) => s.name),
+      });
     } catch (e: any) {
       if (controller.signal.aborted) return;
       // Check for provider authentication errors — surface them specifically
@@ -686,6 +714,12 @@ export function Optimizer() {
                 </div>
               </CardContent>
             </Card>
+
+            {/* === ATS Score Simulator — keyword density + section completeness gauge === */}
+            {resume && (
+              <ATSScoreSimulator resume={resume} jd={jdParsed} />
+            )}
+
             <Card>
               <CardContent className="p-5 flex flex-wrap items-center justify-between gap-3">
                 <div>
@@ -723,6 +757,12 @@ export function Optimizer() {
                 </div>
               </CardContent>
             </Card>
+
+            {/* === Pre-optimization ATS gauge (compact) === */}
+            {resume && (
+              <ATSScoreSimulator resume={resume} jd={jdParsed} compact />
+            )}
+
             <Card className="lg:col-span-2">
               <CardHeader><CardTitle className="text-lg">Optimization plan</CardTitle><CardDescription>What the AI will do.</CardDescription></CardHeader>
               <CardContent>
@@ -926,6 +966,11 @@ export function Optimizer() {
                 </div>
               </CardContent>
             </Card>
+
+            {/* === Resume Preview Panel — before/after comparison === */}
+            {resume && optimizedResume && (
+              <DiffPreview original={resume} optimized={optimizedResume} />
+            )}
 
             {/* === 5-agent pipeline results (before/after ATS, keyword improvements, recommendations, confidence, reflection) === */}
             {pipelineResult && (
