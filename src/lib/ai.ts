@@ -230,9 +230,10 @@ export function getOrderedFallbackProviders(excludeProviderIdOrIds?: string | st
       gemini: 1,
       mistral: 2,
       nvidia: 3,
-      openrouter: 4,
-      zencode: 5,
-      opencode: 6,
+      "opencode-zen": 4,
+      openrouter: 5,
+      zencode: 6,
+      opencode: 7,
     };
     active.sort((a, b) => {
       const isFreeA = isOpenCodeZenFree(a);

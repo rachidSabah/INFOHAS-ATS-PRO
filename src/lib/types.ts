@@ -347,7 +347,11 @@ export type AIProviderType =
   | "azure-openai"
   | "bedrock"
   | "opencode"
+  | "opencode-zen"
+  | "zencode"
+  | "nvidia"
   | "custom";
+
 
 export interface AIProvider {
   id: string;

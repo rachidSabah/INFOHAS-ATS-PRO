@@ -153,7 +153,7 @@ export function routeProvider(taskCategory: TaskCategory): RouteResult {
   }
 
   // Priority order for API providers (for document tasks)
-  const apiPriorityOrder = ["opencode", "deepseek", "openrouter", "groq", "openai", "claude", "gemini", "mistral", "cohere", "perplexity", "together", "huggingface", "custom"];
+  const apiPriorityOrder = ["opencode", "deepseek", "opencode-zen", "zencode", "nvidia", "openrouter", "groq", "openai", "claude", "gemini", "mistral", "cohere", "perplexity", "together", "huggingface", "custom"];
 
   // 1. Check user's configured default
   let primary: AIProvider | null = null;
@@ -216,6 +216,9 @@ export function routeProvider(taskCategory: TaskCategory): RouteResult {
 export const DOCUMENT_ROUTING_POLICY = [
   "opencode",
   "deepseek",
+  "opencode-zen",
+  "zencode",
+  "nvidia",
   "openrouter",
   "groq",
   "openai",

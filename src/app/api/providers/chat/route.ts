@@ -130,10 +130,17 @@ export async function POST(req: NextRequest) {
         } else if (errJson?.error?.code && errJson?.error?.message) {
           errorMessage = `Error ${errJson.error.code}: ${errJson.error.message}`;
         } else if (errJson?.message) { errorMessage = errJson.message; }
+        else if (errJson?.detail) { errorMessage = errJson.detail; }
       } catch { /* not JSON */ }
+
+      let cleanMessage = errorMessage;
+      if (res.status === 401) {
+        cleanMessage = `Invalid API Key. Please verify that your API key is correct and has the necessary permissions. Detail: ${errorMessage}`;
+      }
+
       return NextResponse.json({
         ok: false, latencyMs,
-        error: `API returned HTTP ${res.status}: ${errorMessage}`,
+        error: `API returned HTTP ${res.status}: ${cleanMessage}`,
       }, { status: res.status });
     }
 

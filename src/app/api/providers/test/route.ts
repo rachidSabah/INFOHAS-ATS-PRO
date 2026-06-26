@@ -167,10 +167,21 @@ export async function POST(req: NextRequest) {
           errorMessage = `Error ${errJson.error.code}: ${errJson.error.message}`;
         } else if (errJson?.message) {
           errorMessage = errJson.message;
+        } else if (errJson?.detail) {
+          errorMessage = errJson.detail;
         }
       } catch {
         // Not JSON — use raw text
       }
+
+      if (res.status === 401) {
+        return NextResponse.json({
+          ok: false,
+          latencyMs,
+          message: `API returned HTTP 401 Unauthorized: Invalid API Key. Please verify that your API key is correct and has the necessary permissions. Detail: ${errorMessage}`,
+        });
+      }
+
       return NextResponse.json({
         ok: false,
         latencyMs,

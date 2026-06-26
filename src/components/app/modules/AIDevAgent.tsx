@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -776,6 +776,24 @@ function SettingsTab() {
   };
 
   const activeProviders = providers.filter((p) => p.isActive);
+
+  const selectedProvider = providers.find((p) => p.id === draft.providerId) || activeProviders[0];
+
+  useEffect(() => {
+    if (selectedProvider) {
+      const fallback = selectedProvider.enabledModels || [];
+      if (fallback.length > 0) {
+        setDetectedModels(fallback.map((id) => ({ id, name: id, supportsStreaming: true })));
+        setDetectionSource("configured");
+      } else {
+        setDetectedModels([]);
+        setDetectionSource("");
+      }
+    } else {
+      setDetectedModels([]);
+      setDetectionSource("");
+    }
+  }, [draft.providerId, selectedProvider]);
 
   // === Model Detection ===
   const detectModels = async () => {

@@ -11,10 +11,16 @@ import { zaiFallbackProvider } from "../providers/zai-fallback";
 
 // OpenCode Zen uses the OpenAI-compatible API schema
 const opencodeProvider = new OpenAICompatibleProvider("opencode");
+const opencodeZenProvider = new OpenAICompatibleProvider("opencode-zen");
+const zencodeProvider = new OpenAICompatibleProvider("zencode");
+const nvidiaProvider = new OpenAICompatibleProvider("nvidia");
 
 const REGISTRY: Record<string, AIProviderAdapter> = {
   openai: openaiProvider,
   opencode: opencodeProvider,   // OpenCode Zen — OpenAI-compatible, free models
+  "opencode-zen": opencodeZenProvider,
+  zencode: zencodeProvider,
+  nvidia: nvidiaProvider,
   deepseek: deepseekProvider,
   groq: groqProvider,
   openrouter: openrouterProvider,

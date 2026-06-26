@@ -57,6 +57,14 @@ export function mergeProviderWithSeed(d1Provider: AIProvider, seedProvider?: AIP
     merged.baseUrl = seedProvider.baseUrl || seedProvider.apiUrl || "";
   }
 
+  // Update enabledModels: union the D1 models and the seed models to ensure the seed's defaults are always available
+  const seedModels = seedProvider.enabledModels || [];
+  const currentModels = merged.enabledModels || [];
+  const mergedModels = Array.from(new Set([...seedModels, ...currentModels]));
+  if (mergedModels.length > currentModels.length || !merged.enabledModels) {
+    merged.enabledModels = mergedModels;
+  }
+
   // Fix model name: if the D1 model is not in the seed's enabledModels,
   // use the seed's default model (which is known to work)
   const enabledModels = seedProvider.enabledModels || [];
