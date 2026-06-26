@@ -30,6 +30,8 @@ import { FeatureFlags } from "./modules/FeatureFlags";
 import { Logs } from "./modules/Logs";
 import { OptimizerDirective } from "./modules/OptimizerDirective";
 import { FallbackChain } from "./modules/FallbackChain";
+import { PipelineProfiles } from "./modules/PipelineProfiles";
+import { AgentConfigCenter } from "./modules/AgentConfigCenter";
 import { AIDevAgent } from "./modules/AIDevAgent";
 import { AIWorkspace } from "./modules/AIWorkspace";
 import {
@@ -74,6 +76,8 @@ const VIEW_COMPONENTS: Record<ViewKey, React.FC> = {
   "feature-flags": FeatureFlags,
   "optimizer-directive": OptimizerDirective,
   "fallback-chain": FallbackChain,
+  "pipeline-profiles": PipelineProfiles,
+  "agent-config": AgentConfigCenter,
   "ai-dev-agent": AIDevAgent,
   "ai-workspace": AIWorkspace,
   "linkedin-import": LinkedinImport,
@@ -124,6 +128,8 @@ const SUPER_ADMIN_VIEWS: ViewKey[] = [
   "feature-flags",
   "optimizer-directive",
   "fallback-chain",
+  "pipeline-profiles",
+  "agent-config",
   "ai-dev-agent",
   "ai-workspace",
   "logs",

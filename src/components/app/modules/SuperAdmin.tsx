@@ -23,8 +23,10 @@ export function SuperAdmin() {
 
   const quickLinks = [
     { label: "AI Providers", desc: `${activeProviders} active of ${providers.length}`, icon: "Cpu", view: "ai-providers", color: "#1154A3" },
-    { label: "Fallback Chain", desc: "Configure ordered provider fallback", icon: "Shuffle", view: "fallback-chain", color: "#6366F1" },
-    { label: "Optimizer Directive", desc: "Per-agent behavior & layout", icon: "SlidersHorizontal", view: "optimizer-directive", color: "#0EA5E9" },
+    { label: "Pipeline Profiles", desc: "Orchestration strategy selector", icon: "Workflow", view: "pipeline-profiles", color: "#6366F1" },
+    { label: "Agent Config Center", desc: "Per-agent provider, model, prompt", icon: "Bot", view: "agent-config", color: "#0EA5E9" },
+    { label: "Fallback Chain", desc: "Configure ordered provider fallback", icon: "Shuffle", view: "fallback-chain", color: "#10B981" },
+    { label: "Optimizer Directive", desc: "Per-agent behavior & layout", icon: "SlidersHorizontal", view: "optimizer-directive", color: "#F59E0B" },
     { label: "Prompt Library", desc: `${prompts.length} templates · ${activePrompts} active`, icon: "Brain", view: "prompts", color: "#8B5CF6" },
     { label: "Branding", desc: "Customize logo, colors, email", icon: "Palette", view: "branding", color: "#EC4899" },
     { label: "Feature Flags", desc: `${Object.values(flags).filter(Boolean).length}/${Object.keys(flags).length} enabled`, icon: "Flag", view: "feature-flags", color: "#F59E0B" },

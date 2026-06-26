@@ -10,6 +10,9 @@ import type {
   AITask, AIWorkspacePatch, AIGitBranch, AIGitCommit, AIRollback,
   ResumeReviewReport, AIHealingIssue, AIHealingReport,
 } from "./types";
+import type {
+  PipelineProfile, AgentConfig, PromptVersion,
+} from "./pipeline-orchestration-types";
 import {
   SEED_RESUMES, SEED_JDS, SEED_PROVIDERS, SEED_PROVIDER_LOGS, SEED_PROVIDER_SETTINGS,
   SEED_PROMPTS, SEED_BRANDING, SEED_FLAGS, SEED_LOGS, SEED_COVER_LETTERS, SEED_INTERVIEW, SEED_ATS_REPORTS,
@@ -17,6 +20,9 @@ import {
   SEED_AI_DEV_SETTINGS, SEED_AI_DEV_HISTORY, SEED_AI_DEV_REPORTS,
   SEED_AI_TASKS, SEED_AI_PATCHES, SEED_AI_BRANCHES, SEED_AI_COMMITS, SEED_AI_ROLLBACKS,
 } from "./mock-data";
+import {
+  SEED_PIPELINE_PROFILES, SEED_AGENT_CONFIGS, SEED_PROMPT_VERSIONS,
+} from "./pipeline-orchestration-seeds";
 import { BRAND, getRoleForEmail } from "./brand";
 import { hashPassword, verifyPassword, SUPER_ADMIN_SEED, canSignIn, canAccessApp } from "./auth-utils";
 import type { UserStatus as US } from "./types";
@@ -85,6 +91,11 @@ interface AppState {
   providerLogs: AIProviderLog[];
   providerSettings: AIProviderSettings;
   fallbackChain: FallbackChainConfig;
+  // Pipeline Orchestration (additive — enhanced Supervisor architecture)
+  pipelineProfiles: PipelineProfile[];
+  selectedProfileId: string;
+  agentConfigs: AgentConfig[];
+  promptVersions: PromptVersion[];
   prompts: PromptTemplate[];
   branding: BrandingConfig;
   flags: FeatureFlags;
@@ -207,6 +218,15 @@ interface AppState {
   // Fallback Chain
   updateFallbackChain: (patch: Partial<FallbackChainConfig>) => void;
   resetFallbackChain: () => void;
+  // Pipeline Orchestration
+  updatePipelineProfile: (id: string, patch: Partial<PipelineProfile>) => void;
+  addPipelineProfile: (profile: PipelineProfile) => void;
+  removePipelineProfile: (id: string) => void;
+  selectPipelineProfile: (id: string) => void;
+  updateAgentConfig: (agentType: string, patch: Partial<AgentConfig>) => void;
+  updatePromptVersion: (id: string, patch: Partial<PromptVersion>) => void;
+  addPromptVersion: (prompt: PromptVersion) => void;
+  resetPipelineOrchestration: () => void;
   // AI Dev Agent
   updateAIDevSettings: (patch: Partial<AIDevAgentSettings>) => void;
   addAIDevHistory: (entry: Omit<AIDevAgentHistory, "id" | "createdAt">) => void;
@@ -415,6 +435,10 @@ export const useApp = create<AppState>()(
       flags: SEED_FLAGS,
       optimizerDirective: SEED_OPTIMIZER_DIRECTIVE,
       fallbackChain: SEED_FALLBACK_CHAIN,
+      pipelineProfiles: SEED_PIPELINE_PROFILES,
+      selectedProfileId: SEED_PIPELINE_PROFILES.find((p) => p.isDefault)?.id || SEED_PIPELINE_PROFILES[0]?.id || "",
+      agentConfigs: SEED_AGENT_CONFIGS,
+      promptVersions: SEED_PROMPT_VERSIONS,
       aiDevSettings: SEED_AI_DEV_SETTINGS,
       aiDevHistory: SEED_AI_DEV_HISTORY,
       aiDevReports: SEED_AI_DEV_REPORTS,
@@ -1219,6 +1243,75 @@ export const useApp = create<AppState>()(
         set({ fallbackChain: SEED_FALLBACK_CHAIN });
         cloudApiSafe(cloudApi.updateBranding as any)({ fallbackChain: SEED_FALLBACK_CHAIN }).catch((e) => { console.warn("[store] Cloud sync failed:", e instanceof Error ? e.message : e); });
         useApp.getState().log({ actor: get().user?.email ?? "admin", action: "Fallback chain reset to defaults", category: "admin", details: "All fallback entries restored to factory defaults", severity: "warning" });
+      },
+      // === Pipeline Orchestration Actions ===
+      updatePipelineProfile: (id, patch) => {
+        set((s) => ({
+          pipelineProfiles: s.pipelineProfiles.map((p) =>
+            p.id === id ? { ...p, ...patch, updatedAt: new Date().toISOString() } : p,
+          ),
+        }));
+        cloudApiSafe(cloudApi.updateBranding as any)({ pipelineProfiles: get().pipelineProfiles }).catch((e) => { console.warn("[store] Cloud sync failed:", e instanceof Error ? e.message : e); });
+        useApp.getState().log({ actor: get().user?.email ?? "admin", action: "Pipeline profile updated", category: "admin", details: `Profile ${id}: ${Object.keys(patch).join(", ")}`, severity: "info" });
+      },
+      addPipelineProfile: (profile) => {
+        set((s) => ({ pipelineProfiles: [...s.pipelineProfiles, profile] }));
+        cloudApiSafe(cloudApi.updateBranding as any)({ pipelineProfiles: get().pipelineProfiles }).catch((e) => { console.warn("[store] Cloud sync failed:", e instanceof Error ? e.message : e); });
+        useApp.getState().log({ actor: get().user?.email ?? "admin", action: "Pipeline profile added", category: "admin", details: `Profile: ${profile.name} (${profile.type})`, severity: "info" });
+      },
+      removePipelineProfile: (id) => {
+        const profile = get().pipelineProfiles.find((p) => p.id === id);
+        if (profile?.isBuiltIn) {
+          console.warn("[store] Cannot remove built-in profile");
+          return;
+        }
+        set((s) => ({ pipelineProfiles: s.pipelineProfiles.filter((p) => p.id !== id) }));
+        cloudApiSafe(cloudApi.updateBranding as any)({ pipelineProfiles: get().pipelineProfiles }).catch((e) => { console.warn("[store] Cloud sync failed:", e instanceof Error ? e.message : e); });
+        useApp.getState().log({ actor: get().user?.email ?? "admin", action: "Pipeline profile removed", category: "admin", details: `Profile: ${id}`, severity: "warning" });
+      },
+      selectPipelineProfile: (id) => {
+        set({ selectedProfileId: id });
+        cloudApiSafe(cloudApi.updateBranding as any)({ selectedProfileId: id }).catch((e) => { console.warn("[store] Cloud sync failed:", e instanceof Error ? e.message : e); });
+        const profile = get().pipelineProfiles.find((p) => p.id === id);
+        useApp.getState().log({ actor: get().user?.email ?? "admin", action: "Pipeline profile selected", category: "admin", details: `Selected: ${profile?.name || id}`, severity: "info" });
+      },
+      updateAgentConfig: (agentType, patch) => {
+        set((s) => ({
+          agentConfigs: s.agentConfigs.map((a) =>
+            a.agentType === agentType ? { ...a, ...patch, updatedAt: new Date().toISOString() } : a,
+          ),
+        }));
+        cloudApiSafe(cloudApi.updateBranding as any)({ agentConfigs: get().agentConfigs }).catch((e) => { console.warn("[store] Cloud sync failed:", e instanceof Error ? e.message : e); });
+        useApp.getState().log({ actor: get().user?.email ?? "admin", action: "Agent config updated", category: "admin", details: `Agent: ${agentType}, fields: ${Object.keys(patch).join(", ")}`, severity: "info" });
+      },
+      updatePromptVersion: (id, patch) => {
+        set((s) => ({
+          promptVersions: s.promptVersions.map((p) =>
+            p.id === id ? { ...p, ...patch, lastModified: new Date().toISOString() } : p,
+          ),
+        }));
+        cloudApiSafe(cloudApi.updateBranding as any)({ promptVersions: get().promptVersions }).catch((e) => { console.warn("[store] Cloud sync failed:", e instanceof Error ? e.message : e); });
+        useApp.getState().log({ actor: get().user?.email ?? "admin", action: "Prompt version updated", category: "admin", details: `Prompt: ${id}`, severity: "info" });
+      },
+      addPromptVersion: (prompt) => {
+        set((s) => ({ promptVersions: [...s.promptVersions, prompt] }));
+        cloudApiSafe(cloudApi.updateBranding as any)({ promptVersions: get().promptVersions }).catch((e) => { console.warn("[store] Cloud sync failed:", e instanceof Error ? e.message : e); });
+        useApp.getState().log({ actor: get().user?.email ?? "admin", action: "Prompt version added", category: "admin", details: `Prompt: ${prompt.name} v${prompt.version}`, severity: "info" });
+      },
+      resetPipelineOrchestration: () => {
+        set({
+          pipelineProfiles: SEED_PIPELINE_PROFILES,
+          selectedProfileId: SEED_PIPELINE_PROFILES.find((p) => p.isDefault)?.id || SEED_PIPELINE_PROFILES[0]?.id || "",
+          agentConfigs: SEED_AGENT_CONFIGS,
+          promptVersions: SEED_PROMPT_VERSIONS,
+        });
+        cloudApiSafe(cloudApi.updateBranding as any)({
+          pipelineProfiles: SEED_PIPELINE_PROFILES,
+          selectedProfileId: get().selectedProfileId,
+          agentConfigs: SEED_AGENT_CONFIGS,
+          promptVersions: SEED_PROMPT_VERSIONS,
+        }).catch((e) => { console.warn("[store] Cloud sync failed:", e instanceof Error ? e.message : e); });
+        useApp.getState().log({ actor: get().user?.email ?? "admin", action: "Pipeline orchestration reset to defaults", category: "admin", details: "All profiles, agents, and prompts restored to factory defaults", severity: "warning" });
       },
       updateAIDevSettings: (patch) => {
         set((s) => ({ aiDevSettings: { ...s.aiDevSettings, ...patch } }));

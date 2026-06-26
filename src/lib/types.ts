@@ -989,6 +989,8 @@ export type ViewKey =
   | "feature-flags"
   | "optimizer-directive"
   | "fallback-chain"
+  | "pipeline-profiles"
+  | "agent-config"
   | "ai-dev-agent"
   | "ai-workspace"
   | "ai-achievement"

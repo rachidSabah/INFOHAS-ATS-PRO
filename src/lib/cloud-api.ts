@@ -417,6 +417,22 @@ export async function syncAllFromCloud(store: any): Promise<void> {
           store.setState({ fallbackChain: stored });
         }
       }
+      // Restore pipeline orchestration config (profiles, agent configs, prompt versions)
+      if (bd.pipelineProfiles && Array.isArray(bd.pipelineProfiles) && bd.pipelineProfiles.length > 0) {
+        console.info(`[syncAllFromCloud] Restoring pipelineProfiles from D1 (${bd.pipelineProfiles.length} profiles)`);
+        store.setState({ pipelineProfiles: bd.pipelineProfiles });
+      }
+      if (bd.selectedProfileId && typeof bd.selectedProfileId === "string") {
+        store.setState({ selectedProfileId: bd.selectedProfileId });
+      }
+      if (bd.agentConfigs && Array.isArray(bd.agentConfigs) && bd.agentConfigs.length > 0) {
+        console.info(`[syncAllFromCloud] Restoring agentConfigs from D1 (${bd.agentConfigs.length} agents)`);
+        store.setState({ agentConfigs: bd.agentConfigs });
+      }
+      if (bd.promptVersions && Array.isArray(bd.promptVersions) && bd.promptVersions.length > 0) {
+        console.info(`[syncAllFromCloud] Restoring promptVersions from D1 (${bd.promptVersions.length} prompts)`);
+        store.setState({ promptVersions: bd.promptVersions });
+      }
       if (bd.aiDevSettings && typeof bd.aiDevSettings === "object") {
         store.setState({ aiDevSettings: { ...store.getState().aiDevSettings, ...bd.aiDevSettings } });
       }
