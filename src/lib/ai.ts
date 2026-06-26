@@ -109,7 +109,27 @@ export function getOrderedFallbackProviders(excludeProviderId?: string): Array<{
     if (!entry.enabled) continue;
     if (entry.providerId === excludeProviderId) continue; // don't retry the primary
 
-    const provider = allProviders.find((p) => p.id === entry.providerId);
+    // Try exact ID match first
+    let provider = allProviders.find((p) => p.id === entry.providerId);
+
+    // If not found, try matching by type (e.g., "p_nvidia" might be stored as "nvidia-xxx")
+    if (!provider) {
+      const entryType = entry.providerId.replace(/^p_/, "").replace(/_/g, "-");
+      provider = allProviders.find((p) =>
+        p.type === entryType ||
+        p.type === entry.providerId.replace(/^p_/, "") ||
+        p.id?.includes(entryType) ||
+        p.name?.toLowerCase().includes(entryType)
+      );
+    }
+
+    // If still not found, try matching by model (the chain entry's model might match a provider's enabledModels)
+    if (!provider) {
+      provider = allProviders.find((p) =>
+        p.enabledModels?.includes(entry.model) || p.modelName === entry.model
+      );
+    }
+
     if (!provider) {
       console.warn(`[AI] Fallback chain entry "${entry.id}": provider "${entry.providerId}" not found — skipping`);
       continue;
@@ -133,6 +153,16 @@ export function getOrderedFallbackProviders(excludeProviderId?: string): Array<{
         topP: entry.topP,
       },
     });
+  }
+
+  // CRITICAL: If the fallback chain found NO providers (all IDs mismatched),
+  // fall back to ALL active providers so the user still gets results.
+  // This prevents the "Fallback chain: 0 active entries" → all providers fail scenario.
+  if (result.length === 0) {
+    console.warn("[AI] Fallback chain found 0 active providers — falling back to ALL active providers");
+    return allProviders
+      .filter((p) => p.isActive && p.type !== "puter" && p.type !== "local" && hasValidApiKey(p) && p.id !== excludeProviderId)
+      .map((p) => ({ provider: p, model: p.modelName || "", overrides: {} }));
   }
 
   console.info(`[AI] Fallback chain: ${result.length} active entries (from ${chain.entries.length} total)`);
