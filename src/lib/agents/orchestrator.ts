@@ -829,7 +829,85 @@ async function _runOptimizationPipelineInner(input: PipelineInput, watchdog: Opt
       optimizeAttempt++;
       const optHandle = watchdog.startStep(`Resume Optimizer (attempt ${optimizeAttempt})`);
       try {
-        if (aviationMode) {
+        // ====================================================================
+        // NEW ARCHITECTURE: Locked Pipeline (bullet-only optimizer + assembler)
+        //
+        // The LLM is NO LONGER allowed to generate an entire resume.
+        // It may ONLY return { summary, headline, skills, experiences: [{id, bullets}] }.
+        // The Resume Assembler merges this with the source resume (immutable fields).
+        //
+        // This eliminates: missing company names, missing dates, duplicated
+        // experiences, hallucinated employers, education/language corruption.
+        // ====================================================================
+        const useLockedPipeline = process.env.NEXT_PUBLIC_USE_LOCKED_PIPELINE !== "false"; // default: enabled
+        if (useLockedPipeline) {
+          log("Resume Optimizer", `Locked Pipeline (bullet-only optimizer + assembler) — attempt ${optimizeAttempt}/${maxOptimizeAttempts}.`);
+          emitProgress(3, `Running locked pipeline: bullet-only optimizer → assembler → structure guardian…`);
+
+          // Build the intelligence context (same as standard path)
+          const intelligenceBlocks: string[] = [];
+          if (result.jobIntelligence) {
+            intelligenceBlocks.push(`JOB INTELLIGENCE:
+Industry: ${result.jobIntelligence.industry}
+Business Function: ${result.jobIntelligence.businessFunction}
+Recruiter Intent: ${result.jobIntelligence.recruiterIntent}
+Priority Keywords: ${result.jobIntelligence.priorityKeywords.join(", ")}
+Required Skills: ${result.jobIntelligence.requiredSkills.join(", ")}
+Required Competencies: ${result.jobIntelligence.requiredCompetencies.join(", ")}`);
+          }
+          if (result.companyIntelligence) {
+            intelligenceBlocks.push(`COMPANY INTELLIGENCE (${result.companyIntelligence.companyName}):
+Culture: ${result.companyIntelligence.culture}
+Values: ${result.companyIntelligence.values.join(", ")}
+Leadership Principles: ${result.companyIntelligence.leadershipPrinciples.join(", ")}
+Hiring Priorities: ${result.companyIntelligence.hiringPriorities.join(", ")}
+Valued Competencies: ${result.companyIntelligence.valuedCompetencies.join(", ")}
+Company-Specific Priorities: ${result.companyIntelligence.companySpecificPriorities.join(", ")}
+Positioning Advice: ${result.companyIntelligence.positioningAdvice}`);
+          }
+          if (result.skillGap) {
+            intelligenceBlocks.push(`SKILL GAP INTELLIGENCE:
+Overall Match: ${result.skillGap.overallMatch}%
+Missing Skills (CRITICAL — bridge via transferable skills, do NOT fabricate): ${result.skillGap.missingSkills.critical.join(", ") || "(none)"}
+Missing Skills (IMPORTANT): ${result.skillGap.missingSkills.important.join(", ") || "(none)"}
+Transferable Skills (use these to bridge gaps):
+${result.skillGap.transferableSkills.map((t) => `  - ${t.candidateSkill} ≈ ${t.equivalentTo} (${t.rationale})`).join("\n") || "  (none)"}
+Bridging Strategy: ${result.skillGap.bridgingStrategy}`);
+          }
+          const jdKeywords = jd.keywords ?? [];
+          const resumeText = JSON.stringify(resume).toLowerCase();
+          const missingKeywords = jdKeywords.filter((k) => !resumeText.includes(k.toLowerCase()));
+          intelligenceBlocks.push(`MISSING JD KEYWORDS TO EMBED NATURALLY (semantic optimization, NOT stuffing): ${missingKeywords.join(", ") || "(none — focus on rewriting for impact)"}`);
+
+          const intelligenceContext = intelligenceBlocks.join("\n\n");
+
+          // Run the locked pipeline
+          const { runLockedPipeline } = await import("../locked-pipeline");
+          const lockedResult = await runLockedPipeline(resume, jd, intelligenceContext);
+
+          optimizeResult = {
+            resume: lockedResult.resume,
+            provider: lockedResult.provider,
+            charCount: lockedResult.charCount,
+            keywordsAdded: lockedResult.keywordsAdded,
+          };
+
+          // Log warnings
+          for (const w of lockedResult.warnings) {
+            console.warn(`[Locked Pipeline] ${w}`);
+          }
+
+          log("Resume Optimizer",
+            `✓ Locked pipeline complete: ${lockedResult.charCount} chars, ` +
+            `guardian: ${lockedResult.guardianStatus} (${lockedResult.guardianScore}/100), ` +
+            `fingerprint: ${lockedResult.fingerprintValid ? "PASS" : "FAIL"}, ` +
+            `matched: ${lockedResult.assemblerStats.matchedById} by ID / ${lockedResult.assemblerStats.matchedByTitleCompany} by title / ${lockedResult.assemblerStats.matchedByIndex} by index. ` +
+            `Provider: ${lockedResult.provider}`,
+          );
+          emitProgress(3, `✓ Locked pipeline complete. Guardian: ${lockedResult.guardianScore}/100. ${lockedResult.charCount} chars.`);
+
+          optHandle.complete();
+        } else if (aviationMode) {
           log("Resume Optimizer", `Industry ATS mode → ${aviationMode.airlineProfile}. Calling aviationOptimize() with unified directive…`);
           const aviationResult = await aviationOptimize(resume, jd.rawText ?? "", aviationMode.airlineProfile, aviationMode.settings);
           result.optimizedResume = mapAviationResultToResumeData(aviationResult, resume);
@@ -933,38 +1011,50 @@ async function _runOptimizationPipelineInner(input: PipelineInput, watchdog: Opt
 
       // ========================================================================
       // [V3 MULTI-AGENT PIPELINE] Post-optimization agents (ContentExpansionAgent)
+      //
+      // SKIP V3 pipeline when using the locked pipeline — the locked pipeline
+      // already produces a complete, validated resume. V3 agents (Keyword
+      // Embedding, Fact Verification, Layout Optimization) were designed for
+      // the old architecture where the LLM generated the full resume. Running
+      // them on the locked pipeline output would risk re-introducing the
+      // corruption we just prevented.
       // ========================================================================
-      try {
-        const { runV3PostOptimizationPipeline } = await import("../v3-agents");
-        log("Resume Optimizer", `Running V3 post-optimization agents: Keyword Embedding → Fact Verification → Layout Optimization...`);
-        emitProgress(3, `V3 agents: embedding keywords, verifying facts, optimizing layout...`);
+      const useLockedPipelineForV3 = process.env.NEXT_PUBLIC_USE_LOCKED_PIPELINE !== "false";
+      if (useLockedPipelineForV3) {
+        log("Resume Optimizer", `Skipping V3 pipeline (locked pipeline already produced validated output).`);
+      } else {
+        try {
+          const { runV3PostOptimizationPipeline } = await import("../v3-agents");
+          log("Resume Optimizer", `Running V3 post-optimization agents: Keyword Embedding → Fact Verification → Layout Optimization...`);
+          emitProgress(3, `V3 agents: embedding keywords, verifying facts, optimizing layout...`);
 
-        const v3Result = runV3PostOptimizationPipeline(result.optimizedResume!, resume, jd, 3);
-        result.optimizedResume = v3Result.resume;
-        // CRITICAL FIX (Anomaly #2): Re-apply enforceLockedFields after V3 pipeline.
-        // V3 agents (Keyword Embedding, Fact Verification, Layout Optimization) may
-        // inadvertently modify locked fields (dates, company names). This ensures
-        // all locked fields are restored to their original values.
-        result.optimizedResume = enforceLockedFields(result.optimizedResume!, resume);
-        result.charCount = v3Result.finalCharCount;
-        result.metCharTarget = v3Result.finalCharCount >= 2800 && v3Result.finalCharCount <= 3800;
+          const v3Result = runV3PostOptimizationPipeline(result.optimizedResume!, resume, jd, 3);
+          result.optimizedResume = v3Result.resume;
+          // CRITICAL FIX (Anomaly #2): Re-apply enforceLockedFields after V3 pipeline.
+          // V3 agents (Keyword Embedding, Fact Verification, Layout Optimization) may
+          // inadvertently modify locked fields (dates, company names). This ensures
+          // all locked fields are restored to their original values.
+          result.optimizedResume = enforceLockedFields(result.optimizedResume!, resume);
+          result.charCount = v3Result.finalCharCount;
+          result.metCharTarget = v3Result.finalCharCount >= 2800 && v3Result.finalCharCount <= 3800;
 
-        for (const report of v3Result.agentReports) {
-          for (const change of report.changes) {
-            console.info(`[V3 ${report.agentName}] ${change}`);
+          for (const report of v3Result.agentReports) {
+            for (const change of report.changes) {
+              console.info(`[V3 ${report.agentName}] ${change}`);
+            }
           }
-        }
 
-        log("Resume Optimizer",
-          `✓ V3 pipeline complete: ${v3Result.totalChanges} total changes, ` +
-          `${v3Result.hallucinationsRemoved} hallucinations removed, ` +
-          `${v3Result.keywordsEmbedded} keywords embedded, ` +
-          `${v3Result.finalCharCount} chars, ` +
-          `quality ${v3Result.qualityReport.overallScore}/100`
-        );
-        emitProgress(3, `✓ V3 agents complete. Quality: ${v3Result.qualityReport.overallScore}/100, ${v3Result.finalCharCount} chars`);
-      } catch (v3Err: any) {
-        console.warn("[V3 Pipeline] Failed (non-fatal):", v3Err?.message);
+          log("Resume Optimizer",
+            `✓ V3 pipeline complete: ${v3Result.totalChanges} total changes, ` +
+            `${v3Result.hallucinationsRemoved} hallucinations removed, ` +
+            `${v3Result.keywordsEmbedded} keywords embedded, ` +
+            `${v3Result.finalCharCount} chars, ` +
+            `quality ${v3Result.qualityReport.overallScore}/100`
+          );
+          emitProgress(3, `✓ V3 agents complete. Quality: ${v3Result.qualityReport.overallScore}/100, ${v3Result.finalCharCount} chars`);
+        } catch (v3Err: any) {
+          console.warn("[V3 Pipeline] Failed (non-fatal):", v3Err?.message);
+        }
       }
 
       // === PAGE VALIDATION ===
@@ -972,21 +1062,26 @@ async function _runOptimizationPipelineInner(input: PipelineInput, watchdog: Opt
       // If chars > 4200 (too long), compress instead of rejecting.
       // If chars < 2500 (too short), expand via V3 pipeline.
       // NEVER reject — always accept best result and fix via V3.
+      //
+      // LOCKED PIPELINE EXCEPTION: The locked pipeline produces cleaner, more
+      // concise output (no padding/filler). Accept >= 1500 chars from the locked
+      // pipeline since it doesn't waste tokens on redundant content.
+      const minCharThreshold = useLockedPipelineForV3 ? 1500 : 2500;
       const pageFillVal = validatePageFill(result.optimizedResume!, directiveConfig);
       const pageFill = pageFillVal.pageUsage / 100;
 
-      console.log(`[Pipeline Page Validator] Attempt ${optimizeAttempt}: pageFill = ${pageFill.toFixed(2)} (${pageFillVal.pageUsage}%), charCount = ${result.charCount}`);
+      console.log(`[Pipeline Page Validator] Attempt ${optimizeAttempt}: pageFill = ${pageFill.toFixed(2)} (${pageFillVal.pageUsage}%), charCount = ${result.charCount}, threshold = ${minCharThreshold}`);
 
-      // Accept if: chars >= 2500 (minimum) — page fill is calculated as min(100, chars/target)
+      // Accept if: chars >= threshold (minimum) — page fill is calculated as min(100, chars/target)
       // so even if chars > target, pageFill = 100% which passes >= 0.70
-      if (result.charCount >= 2500) {
+      if (result.charCount >= minCharThreshold) {
         success = true;
         const optLog = `✓ Generated ${result.charCount} chars (page fill ${pageFillVal.pageUsage}%) via ${result.provider}. Embedded ${optimizeResult.keywordsAdded} keywords. Attempts: ${optimizeAttempt}.`;
         log("Resume Optimizer", optLog);
         emitProgress(3, optLog);
         break;
       } else {
-        console.warn(`[Pipeline Page Validator] Attempt ${optimizeAttempt}: charCount ${result.charCount} < 2500 minimum. Retrying...`);
+        console.warn(`[Pipeline Page Validator] Attempt ${optimizeAttempt}: charCount ${result.charCount} < ${minCharThreshold} minimum. Retrying...`);
         optimizeResult = null;
         if (optimizeAttempt < maxOptimizeAttempts) {
           log("Resume Optimizer", `Attempt ${optimizeAttempt} — content too short (${result.charCount} chars). Retrying...`);

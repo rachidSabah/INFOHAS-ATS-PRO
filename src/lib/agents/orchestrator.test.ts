@@ -8,9 +8,9 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import type { ResumeData, JobDescription } from "../types";
 
 // Mock callAI to avoid real API calls during tests
-// The standard optimizer path expects the flat OPTIMIZER_DIRECTIVE JSON shape
-// (name, summary, experience at the top level — NOT nested under "resume").
-// The aviation path expects the nested { resume: {...}, score, ... } shape.
+// The locked pipeline expects the NEW optimizer contract:
+//   { summary, headline, skills, experiences: [{id, bullets}] }
+// The legacy path expects the flat/full resume JSON shape.
 vi.mock("../ai", () => ({
   callAI: vi.fn().mockImplementation((opts: any) => {
     // Check if this is the reflection agent call (systemPrompt mentions "Reflection Agent")
@@ -25,7 +25,46 @@ vi.mock("../ai", () => ({
         usage: { promptTokens: 100, completionTokens: 200 },
       });
     }
-    // Standard optimizer path — return flat JSON shape
+    // Check if this is the NEW locked pipeline call (systemPrompt mentions the new contract)
+    if (opts.systemPrompt?.includes("ONLY return the following JSON shape") ||
+        opts.systemPrompt?.includes("Bullet-Only Optimizer") ||
+        opts.userPrompt?.includes("experiences") && opts.userPrompt?.includes("EXACT_SOURCE_ID")) {
+      // Return the NEW optimizer contract: { summary, headline, skills, experiences: [{id, bullets}] }
+      return Promise.resolve({
+        text: JSON.stringify({
+          summary: "Senior engineer with 8+ years of experience building scalable web applications. Proven track record of leading teams and delivering high-impact products. Skilled in React, Node.js, and cloud architecture. Passionate about mentorship and code quality.",
+          headline: "Senior Software Engineer",
+          skills: [
+            { name: "React", category: "Frontend" },
+            { name: "TypeScript", category: "Frontend" },
+            { name: "Next.js", category: "Frontend" },
+            { name: "Node.js", category: "Backend" },
+            { name: "Python", category: "Backend" },
+            { name: "PostgreSQL", category: "Backend" },
+            { name: "AWS", category: "Cloud" },
+            { name: "Docker", category: "Cloud" },
+            { name: "Kubernetes", category: "Cloud" },
+          ],
+          experiences: [
+            {
+              id: "e1", // MUST match the source resume's experience ID
+              bullets: [
+                "Led migration to microservices architecture, reducing deployment time by 65% and improving system reliability.",
+                "Mentored 5 junior engineers, with 3 receiving promotions within 18 months of joining the team.",
+                "Built real-time analytics dashboard processing 2M+ events daily using React, WebSocket, and Redis.",
+                "Designed scalable APIs handling 10k requests per second with 99.99% uptime.",
+                "Collaborated with product and design teams to deliver new features consistently.",
+              ],
+            },
+          ],
+          missingKeywordsAdded: ["microservices", "Redis", "WebSocket"],
+          bulletsRewritten: 3,
+        }),
+        provider: "test-provider",
+        usage: { promptTokens: 500, completionTokens: 800 },
+      });
+    }
+    // Legacy optimizer path — return flat JSON shape (full resume)
     return Promise.resolve({
       text: JSON.stringify({
         name: "Test User",
@@ -83,6 +122,9 @@ vi.mock("../ai", () => ({
   }),
   extractJSON: vi.fn((text: string) => JSON.parse(text)),
   getOptimizerDirective: vi.fn(() => "Test directive"),
+  OPTIMIZER_CALL_TIMEOUT_MS: 120000,
+  PIPELINE_STEP_CALL_TIMEOUT_MS: 90000,
+  OptimizationProviderExhaustedError: class extends Error {},
 }));
 
 // Mock store
