@@ -400,25 +400,36 @@ export async function exportResumePDF(resume: ResumeData, opts: PDFOptions = {},
       if (y > maxY - 20) break;
 
       const dateStr = e.startDate || e.endDate ? `${fmt(e.startDate)} \u2013 ${fmt(e.endDate)}` : "";
-      const dateWidth = dateStr ? doc.getTextWidth(dateStr) : 0;
-      const titleWidth = contentW - (dateWidth > 0 ? dateWidth + 3 : 0);
-      const leftSide = `${e.title}${e.company ? ` \u2014 ${e.company}` : ""}`;
-      const titleLines = doc.splitTextToSize(leftSide, titleWidth);
+      const titleStr = e.title?.trim() || "";
+      const companyStr = e.company?.trim() || "";
 
       // Date right-aligned
       doc.setFont("times", "bold");
       doc.setFontSize(L.bodyFontSizePt);
       doc.setTextColor(bodyRgb[0], bodyRgb[1], bodyRgb[2]);
       if (dateStr) {
-        doc.setFont("times", "bold");
         doc.text(dateStr, right, textY(L.bodyFontSizePt), { align: "right" });
       }
 
-      // Title lines
-      doc.setFont("times", "bold");
-      for (let i = 0; i < titleLines.length; i++) {
-        doc.text(titleLines[i], left, textY(L.bodyFontSizePt));
-        advanceLine();
+      // Title — bold, full available width
+      if (titleStr) {
+        const titleLines = doc.splitTextToSize(titleStr, contentW);
+        for (const line of titleLines) {
+          if (y > maxY - 10) break;
+          doc.text(line, left, textY(L.bodyFontSizePt));
+          advanceLine();
+        }
+      }
+
+      // Company — normal weight, below title
+      if (companyStr) {
+        doc.setFont("times", "normal");
+        const companyLines = doc.splitTextToSize(companyStr, contentW);
+        for (const line of companyLines) {
+          if (y > maxY - 10) break;
+          doc.text(line, left, textY(L.bodyFontSizePt));
+          advanceLine();
+        }
       }
 
       // Bullets
@@ -438,12 +449,11 @@ export async function exportResumePDF(resume: ResumeData, opts: PDFOptions = {},
     for (const ed of resume.education) {
       if (y > maxY - 20) break;
 
-      // Match PROFESSIONAL EXPERIENCE format: Title — Company | Location
-      const leftSide = `${ed.degree}${ed.field ? ` in ${ed.field}` : ""} — ${ed.institution}${ed.location ? ` | ${ed.location}` : ""}`;
       const dateStr = ed.startDate || ed.endDate ? `${fmt(ed.startDate)} \u2013 ${fmt(ed.endDate)}` : "";
-      const dateWidth = dateStr ? doc.getTextWidth(dateStr) : 0;
-      const titleWidth = contentW - (dateWidth > 0 ? dateWidth + 3 : 0);
-      const titleLines = doc.splitTextToSize(leftSide, titleWidth);
+      const degreeStr = ed.degree?.trim() || "";
+      const institutionStr = ed.institution?.trim() || "";
+      const fieldStr = ed.field?.trim() || "";
+      const locationStr = ed.location?.trim() || "";
 
       doc.setFont("times", "bold");
       doc.setFontSize(L.bodyFontSizePt);
@@ -451,12 +461,32 @@ export async function exportResumePDF(resume: ResumeData, opts: PDFOptions = {},
       if (dateStr) {
         doc.text(dateStr, right, textY(L.bodyFontSizePt), { align: "right" });
       }
-      for (const line of titleLines) {
-        doc.text(line, left, textY(L.bodyFontSizePt));
-        advanceLine();
+
+      // Degree — bold
+      if (degreeStr) {
+        const degText = fieldStr ? `${degreeStr} in ${fieldStr}` : degreeStr;
+        const degLines = doc.splitTextToSize(degText, contentW);
+        for (const line of degLines) {
+          if (y > maxY - 10) break;
+          doc.text(line, left, textY(L.bodyFontSizePt));
+          advanceLine();
+        }
       }
 
-      // Education highlights (keep as bullets, same as experience)
+      // Institution — normal weight, below degree
+      if (institutionStr) {
+        doc.setFont("times", "normal");
+        const lines = locationStr
+          ? [`${institutionStr} | ${locationStr}`]
+          : doc.splitTextToSize(institutionStr, contentW);
+        for (const line of lines) {
+          if (y > maxY - 10) break;
+          doc.text(line, left, textY(L.bodyFontSizePt));
+          advanceLine();
+        }
+      }
+
+      // Education highlights
       if (ed.highlights?.length) {
         doc.setFont("times", "normal");
         for (const h of ed.highlights) {
@@ -483,16 +513,18 @@ export async function exportResumePDF(resume: ResumeData, opts: PDFOptions = {},
     }
     for (const [cat, skills] of categorized) {
       if (y > maxY - 10) break;
-      const line = `${cat}: ${skills.join(", ")}`;
+      const fullLine = `${cat}: ${skills.join(", ")}`;
       const textWidth = contentW - L.bulletIndentMm;
-      const lines = doc.splitTextToSize(line, textWidth);
+      const lines = doc.splitTextToSize(fullLine, textWidth);
       for (let i = 0; i < lines.length; i++) {
         if (y > maxY - 10) break;
         if (i === 0) {
-          doc.text(`${cat}:`, left, textY(L.bodyFontSizePt));
-          const catW = doc.getTextWidth(`${cat}: `);
-          doc.text(skills.join(", "), left + catW, textY(L.bodyFontSizePt));
+          // Draw cat: in bold, then skills in normal on same line
+          doc.setFont("times", "bold");
+          doc.text(lines[i], left, textY(L.bodyFontSizePt));
+          doc.setFont("times", "normal");
         } else {
+          doc.setFont("times", "normal");
           doc.text(lines[i], left + L.bulletIndentMm, textY(L.bodyFontSizePt));
         }
         advanceLine();
