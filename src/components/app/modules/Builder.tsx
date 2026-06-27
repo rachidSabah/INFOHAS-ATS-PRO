@@ -29,14 +29,15 @@ export function Builder() {
   const incUsage = useApp((s) => s.incUsage);
   const log = useApp((s) => s.log);
   const jobDescriptions = useApp((s) => s.jobDescriptions);
+
+  const resume = useMemo(() => resumes.find((r) => r.id === activeId) ?? resumes[0], [resumes, activeId]);
   const autoSave = useAutoSave(resume);
   const undoRedo = useUndoRedo(resume);
   const activeJD = jobDescriptions.find(j => j.id === useApp.getState().activeJobId);
   const atsScore = useLiveATSScore(resume, activeJD);
 
-  const resume = useMemo(() => resumes.find((r) => r.id === activeId) ?? resumes[0], [resumes, activeId]);
-
-  const [tab, setTab] = useState<"basics" | "experience" | "education" | "skills" | "extra" | "design">("basics");
+  const patch = (p: Partial<ResumeData>) => updateResume(resume.id, p);
+  const [tab, setTab] = useState<\"basics\" | \"experience\" | \"education\" | \"skills\" | \"extra\" | \"design\">(\"basics\");
   const [scale, setScale] = useState(0.6);
   const [exporting, setExporting] = useState(false);
   const [importing, setImporting] = useState(false);
