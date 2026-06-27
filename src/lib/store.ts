@@ -439,7 +439,19 @@ export const useApp = create<AppState>()(
       selectedProfileId: SEED_PIPELINE_PROFILES.find((p) => p.isDefault)?.id || SEED_PIPELINE_PROFILES[0]?.id || "",
       agentConfigs: SEED_AGENT_CONFIGS,
       promptVersions: SEED_PROMPT_VERSIONS,
-      aiDevSettings: SEED_AI_DEV_SETTINGS,
+      aiDevSettings: (() => {
+        if (typeof localStorage === "undefined") return SEED_AI_DEV_SETTINGS;
+        try {
+          const saved = localStorage.getItem("resumeai-ai-dev-settings");
+          if (saved) {
+            const ls = JSON.parse(saved);
+            if (ls.providerId || ls.modelName) {
+              return { ...SEED_AI_DEV_SETTINGS, ...ls };
+            }
+          }
+        } catch (syncErr) { console.warn("[store] AI Dev settings load failed:", syncErr instanceof Error ? syncErr.message : syncErr); }
+        return SEED_AI_DEV_SETTINGS;
+      })(),
       aiDevHistory: SEED_AI_DEV_HISTORY,
       aiDevReports: SEED_AI_DEV_REPORTS,
       aiTasks: SEED_AI_TASKS,
@@ -1324,6 +1336,8 @@ export const useApp = create<AppState>()(
       },
       updateAIDevSettings: (patch) => {
         set((s) => ({ aiDevSettings: { ...s.aiDevSettings, ...patch } }));
+        // Persist to localStorage so settings survive browser refresh
+        try { localStorage.setItem("resumeai-ai-dev-settings", JSON.stringify({ ...get().aiDevSettings, ...patch })); } catch {}
         cloudApiSafe(cloudApi.updateBranding as any)({ aiDevSettings: { ...get().aiDevSettings, ...patch } }).catch((e) => { console.warn("[store] Cloud sync failed:", e instanceof Error ? e.message : e); });
         useApp.getState().log({ actor: get().user?.email ?? "admin", action: "AI Dev Agent settings updated", category: "admin", details: Object.keys(patch).join(", "), severity: "info" });
       },
