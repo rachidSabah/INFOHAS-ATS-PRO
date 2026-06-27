@@ -1282,23 +1282,11 @@ Bridging Strategy: ${result.skillGap.bridgingStrategy}`);
       // Instead of hard-failing when all AI providers are rate-limited/unavailable,
       // return the ORIGINAL resume with JD keywords added to skills.
       // This ensures the user always gets a usable result and can retry later.
-      console.warn(`[Pipeline] All ${maxOptimizeAttempts} optimization attempts failed. Falling back to original resume + JD keywords.`);
-      log("Resume Optimizer", `⚠ All AI providers failed after ${maxOptimizeAttempts} attempts. Returning original resume with JD keywords added. Please retry when AI providers recover.`);
+      console.warn(`[Pipeline] All ${maxOptimizeAttempts} optimization attempts failed. Returning original resume as-is (no AI provider available).`);
+      log("Resume Optimizer", `⚠ All AI providers failed after ${maxOptimizeAttempts} attempts. Returning original resume. Please retry when AI providers recover.`);
 
-      // Add JD keywords to the original resume's skills
-      const jdKeywords = jd.keywords ?? [];
-      const existingSkillNames = new Set(resume.skills.map((s) => s.name.toLowerCase()));
-      const keywordsToAdd: ResumeSkill[] = jdKeywords
-        .filter((k) => !existingSkillNames.has(k.toLowerCase()))
-        .slice(0, 8)
-        .map((name) => ({ id: uid("s"), name, category: "Targeted Keywords" }));
-
-      result.optimizedResume = {
-        ...resume,
-        skills: [...resume.skills, ...keywordsToAdd],
-        updatedAt: new Date().toISOString(),
-        source: "ai-optimized-degraded" as any,
-      };
+      // Return original resume as-is — do NOT inject JD keywords as "Targeted Keywords" skills
+      result.optimizedResume = { ...resume, updatedAt: new Date().toISOString(), source: "ai-optimized-degraded" as any };
       result.provider = "Local Engine (degraded)";
       result.charCount = JSON.stringify({
         summary: result.optimizedResume.summary,
@@ -1313,7 +1301,7 @@ Bridging Strategy: ${result.skillGap.bridgingStrategy}`);
       step.completedAt = new Date().toISOString();
       step.durationMs = Date.now() - new Date(step.startedAt).getTime();
       step.status = "completed";
-      emitProgress(3, `⚠ AI providers unavailable. Original resume + ${keywordsToAdd.length} keywords. Retry later for full optimization.`);
+      emitProgress(3, `⚠ AI providers unavailable. Original resume returned as-is. Retry later for full optimization.`);
       // Skip the throw — continue to QA step
     }
 
@@ -2057,18 +2045,12 @@ CONTENT REQUIREMENTS:
     } else if (result.provider === "Local Engine (offline mode)") {
       // Return the original resume instead of throwing — the user always
       // gets a result. They can retry when AI providers recover.
-      console.warn("[Optimizer] All AI providers failed — returning original resume with keywords added.");
-      const jdKeywords = jd.keywords ?? [];
-      const existingSkillNames = new Set(resume.skills.map((s) => s.name.toLowerCase()));
-      const keywordsToAdd: ResumeSkill[] = jdKeywords
-        .filter((k) => !existingSkillNames.has(k.toLowerCase()))
-        .slice(0, 5)
-        .map((name) => ({ id: uid("s"), name, category: "Targeted Keywords" }));
+      console.warn("[Optimizer] All AI providers failed — returning original resume as-is.");
       return {
-        resume: { ...resume, skills: [...resume.skills, ...keywordsToAdd] },
+        resume: { ...resume },
         provider: "Local Engine (offline mode)",
         charCount: JSON.stringify(resume).length,
-        keywordsAdded: keywordsToAdd.length,
+        keywordsAdded: 0,
       };
     } else {
       throw new Error(`${errorType} (response length: ${responseLength}). Provider: ${result.provider}. Please try again or configure an API provider in AI Routing Settings.`);
