@@ -296,6 +296,16 @@ export async function selectProvider(excludeIds?: string[]): Promise<any> {
     return secondary[0];
   }
 
+  // No real provider available — log diagnostics
+  const activeProviders = providers.filter((p: any) => p.isActive && p.type !== "puter" && p.type !== "local");
+  const withKeys = activeProviders.filter((p: any) => hasValidApiKey(p));
+  console.warn(
+    `[ROUTER] No AI provider available. ` +
+    `Active providers: ${activeProviders.length}, ` +
+    `With valid API keys: ${withKeys.length}, ` +
+    `Excluded IDs: ${JSON.stringify(excludeIds || [])}`
+  );
+
   // 3. Offline Engine
   return { id: "local-engine", name: "Local Engine (offline mode)", type: "local" };
 }
