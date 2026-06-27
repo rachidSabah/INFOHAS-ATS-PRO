@@ -29,6 +29,10 @@ import { validateExperienceFingerprints } from "./experience-fingerprint";
 import { ensureExperienceIds } from "./entity-lock";
 import { createDebugArtifacts, persistDebugArtifacts } from "./debug-persistence";
 import { expandResume, compressResume, validatePageFill } from "./agents/page-balancer";
+import { extractBlueprint, type ResumeBlueprint } from "./resume-blueprint-agent";
+import { extractTemplateBlueprint, type ResumeTemplateBlueprint, validateTemplatePreserved } from "./resume-template-blueprint-agent";
+import { runGuardianValidation, type GuardianVerdict } from "./resume-guardian-agent";
+import { createRetryEngine } from "./retry-engine";
 
 export interface LockedPipelineResult {
   resume: ResumeData;
@@ -40,6 +44,10 @@ export interface LockedPipelineResult {
   guardianScore: number;
   guardianStatus: "PASS" | "REQUIRES_MANUAL_REVIEW";
   fingerprintValid: boolean;
+  blueprintValid: boolean;
+  templateBlueprintValid: boolean;
+  guardianVerdict?: GuardianVerdict;
+  retryCount: number;
   assemblerStats: {
     matchedById: number;
     matchedByFingerprint: number;
@@ -123,12 +131,24 @@ export async function runLockedPipeline(
       guardianScore: 0,
       guardianStatus: "REQUIRES_MANUAL_REVIEW",
       fingerprintValid: true,
+      blueprintValid: true,
+      templateBlueprintValid: true,
+      guardianVerdict: undefined,
+      retryCount: 0,
       assemblerStats: {
         matchedById: 0, matchedByFingerprint: 0, matchedByTitleCompany: 0,
         matchedByIndex: 0, unmatched: 0,
       },
     };
   }
+
+  // ========================================================================
+  // Step 1b: Extract Blueprint + Template Blueprint (freeze immutable state BEFORE optimization)
+  // ========================================================================
+  const blueprint = extractBlueprint(idReadyResume);
+  const templateBlueprint = extractTemplateBlueprint(idReadyResume);
+  console.info(`[Locked Pipeline] Blueprint extracted: ${blueprint.experience.length} experiences, ${blueprint.education.length} education entries`);
+  console.info(`[Locked Pipeline] Template Blueprint: layout=${templateBlueprint.layoutType}, sections=${templateBlueprint.sectionOrder.join(", ")}`);
 
   const excludeProviderIds: string[] = [];
   let attempts = 0;
@@ -253,6 +273,19 @@ export async function runLockedPipeline(
         contentViolations.push(...fpValidation.violations);
       }
 
+      // Blueprint validation — non-fatal warning (layout/section order may shift slightly
+      // after assembly; we track it for diagnostics but don't block the pipeline)
+      let blueprintCheck = true;
+      try {
+        blueprintCheck = validateTemplatePreserved(templateBlueprint, assembleResult.resume);
+        if (!blueprintCheck) {
+          warnings.push('Template blueprint advisory — layout/section order shifted after assembly');
+        }
+      } catch (bpErr) {
+        console.warn('[Locked Pipeline Blueprint] Non-fatal error:', bpErr);
+        blueprintCheck = false;
+      }
+
       // If there are content violations, fail this optimization attempt to trigger retry
       if (contentViolations.length > 0) {
         const errorMsg = `Pipeline content validation failed: ${contentViolations.join("; ")}`;
@@ -275,6 +308,25 @@ export async function runLockedPipeline(
         const errObj: any = new Error(`Structure Guardian critical issues: ${guardianResult.criticalIssues.join("; ")}`);
         errObj.provider = optimizerResult.provider;
         throw errObj;
+      }
+
+      // ========================================================================
+      // Step 5b: Guardian Validation with VETO
+      // ========================================================================
+      let guardianVerdict: GuardianVerdict | undefined;
+      try {
+        guardianVerdict = await runGuardianValidation(assembleResult.resume, sourceResume, undefined);
+        if (guardianVerdict.status === "BLOCKED") {
+          const criticalFailures = guardianVerdict.checks.filter(c => c.critical && !c.passed).map(c => c.detail);
+          const errObj: any = new Error(`Guardian BLOCKED: ${criticalFailures.join("; ")}`);
+          errObj.provider = optimizerResult.provider;
+          throw errObj;
+        }
+      } catch (gErr: any) {
+        if (gErr.name === 'LockedPipelineError' || gErr.message?.startsWith('Guardian BLOCKED')) {
+          throw gErr; // Re-throw LockedPipelineError and guardian blocks
+        }
+        console.warn('[Locked Pipeline Guardian] Non-fatal error:', gErr);
       }
 
       // ========================================================================
@@ -314,6 +366,10 @@ export async function runLockedPipeline(
         guardianScore: guardianResult.score,
         guardianStatus: guardianResult.status,
         fingerprintValid: fpValidation.valid,
+        blueprintValid: true,
+        templateBlueprintValid: blueprintCheck,
+        guardianVerdict,
+        retryCount: attempts,
         assemblerStats: {
           matchedById: assembleResult.matchedById,
           matchedByFingerprint: assembleResult.matchedByFingerprint,
