@@ -224,7 +224,19 @@ export function ResumeSharing() {
 
   const generateShareLink = () => {
     if (!resume) { toast.error("Create a resume first."); return; }
-    const url = `${window.location.origin}/r/${resume.id}`;
+    
+    // Encode resume data for cross-device sharing (works even if store is empty on viewer's device)
+    const shareData = {
+      n: resume.name || "Resume",
+      h: resume.headline || "",
+      s: (resume.summary || "").slice(0, 500),
+      e: (resume.experience || []).map(e => ({ t: e.title, c: e.company, d: `${e.startDate} - ${e.endDate}` })),
+      edu: (resume.education || []).map(e => ({ d: e.degree, i: e.institution })),
+      sk: (resume.skills || []).map(s => s.name).slice(0, 15),
+      l: (resume.languages || []).map(l => l.name),
+    };
+    const encoded = encodeURIComponent(btoa(JSON.stringify(shareData)));
+    const url = `${window.location.origin}/r/${resume.id}?d=${encoded}`;
     setShareUrl(url);
     navigator.clipboard.writeText(url);
     toast.success("Share link copied to clipboard!");
