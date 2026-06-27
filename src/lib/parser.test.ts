@@ -273,9 +273,9 @@ Communication`;
     expect(parsed.education[0].startDate).toBe("2022");
     expect(parsed.education[0].endDate).toBe("Ongoing");
 
-    // Entry 2: High School Degree
+    // Entry 2: High School Degree — institution left empty (no school name in source)
     expect(parsed.education[1].degree).toBe("High School Degree");
-    expect(parsed.education[1].institution).toBe("Institution");
+    expect(parsed.education[1].institution).toBe("");
     expect(parsed.education[1].startDate).toBe("2021");
     expect(parsed.education[1].endDate).toBe("2022");
   });

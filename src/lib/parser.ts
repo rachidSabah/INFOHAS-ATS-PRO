@@ -1314,18 +1314,42 @@ function parseEducation(lines: string[]): ResumeData["education"] {
       }
     }
 
+    // ========================================================================
+    // POST-PROCESS institution: strip em-dash garbling.
+    // The parser often captures trailing dashes + detail text as part of the
+    // institution field (e.g., "— — Specialized modules include: ...").
+    // Extract only the real institution name and move details to highlights.
+    // ========================================================================
+    if (institution) {
+      // Strip leading em dashes, en dashes, hyphens, and whitespace
+      const stripped = institution.replace(/^[\s—–\-]+/, "").trim();
+      if (stripped !== institution) {
+        institution = stripped;
+      }
+      // If institution still contains an em-dash-separated detail,
+      // split: text before dash = real institution, text after = highlight
+      const dashSplitIdx = institution.search(/[\s][—–\-][\s]/);
+      if (dashSplitIdx > 0) { // Only split if there's text BEFORE the dash
+        const detailText = institution.slice(dashSplitIdx).replace(/^[\s—–\-]+/, "").trim();
+        institution = institution.slice(0, dashSplitIdx).trim();
+        if (detailText && detailText.length > 2) {
+          highlights.push(detailText);
+        }
+      }
+    }
+
     // Fallback: if no degree found, use first line as institution, second as degree
     if (!degree && !institution) {
-      const firstNonBullet = cleanedEntryLines.find((l) => !new RegExp("^[•\\-\\*·▪◦]").test(l.trim())) || cleanedEntryLines[0] || "Institution";
-      institution = firstNonBullet.replace(new RegExp("^[•\\-\\*·▪◦\\s|]+"), "").trim() || "Institution";
-      degree = cleanedEntryLines[1]?.replace(new RegExp("^[•\\-\\*·▪◦\\s|]+"), "").trim() || "Degree";
+      const firstNonBullet = cleanedEntryLines.find((l) => !new RegExp("^[•\\-\\*·▪◦]").test(l.trim())) || cleanedEntryLines[0] || "";
+      institution = firstNonBullet.replace(new RegExp("^[•\\-\\*·▪◦\\s|]+"), "").trim() || "";
+      degree = cleanedEntryLines[1]?.replace(new RegExp("^[•\\-\\*·▪◦\\s|]+"), "").trim() || "";
       highlights.push(...cleanedEntryLines.slice(2, 4).map((l) => l.replace(new RegExp("^[•\\-\\*·▪◦\\s|]+"), "").trim()).filter(Boolean));
     } else if (!institution) {
       const fallbackInst = cleanedEntryLines.find((l) => {
         const c = l.replace(new RegExp("^[•\\-\\*·▪◦\\s|]+"), "").trim();
         return c && l !== degree && !degreePattern.test(c) && !yearRangePattern.test(c) && !new RegExp("^[•\\-\\*·▪◦]").test(l.trim());
       });
-      institution = fallbackInst?.replace(new RegExp("^[•\\-\\*·▪◦\\s|]+"), "").trim() || "Institution";
+      institution = fallbackInst?.replace(new RegExp("^[•\\-\\*·▪◦\\s|]+"), "").trim() || "";
     }
 
     return {
