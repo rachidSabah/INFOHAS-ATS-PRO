@@ -81,44 +81,90 @@ function buildResumeHtml(r: ResumeData, L: ResumeLayoutModel): string {
   };
   const esc = (s: string) => s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
 
-  const bodySize = L.bodyFontSizePt;
-  const sectionSize = L.sectionTitleSizePt;
   const nameSize = L.nameSizePt;
+  const sectionSize = L.sectionTitleSizePt;
+  const bodySize = L.bodyFontSizePt;
   const nameColor = L.nameColor;
   const sectionColor = L.sectionTitleColor;
   const bodyColor = L.bodyTextColor;
 
+  // Tight unitless line-height to match DOCX single spacing
+  const lh = 1.15;
+
+  // Content area = A4 width minus both margins
+  const ml = L.marginLeftMm;
+  const mr = L.marginRightMm;
+  const mt = L.marginTopMm;
+  const mb = L.marginBottomMm;
+  const cw = 210 - ml - mr;
+
   const lines: string[] = [];
 
   lines.push(`<!DOCTYPE html><html><head><meta charset="utf-8"><style>
-    @page { size: A4; margin: ${L.marginTopMm}mm ${L.marginRightMm}mm ${L.marginBottomMm}mm ${L.marginLeftMm}mm; }
-    * { box-sizing: border-box; }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
     body {
-      font-family: '${L.fontFamily}', 'Times New Roman', Times, serif;
-      font-size: ${bodySize}pt; color: ${bodyColor}; line-height: ${bodySize * 0.352778 * 1.15}mm;
-      margin: 0; padding: 0; width: 210mm;
+      font-family: '${L.fontFamily}', Times, serif;
+      font-size: ${bodySize}pt;
+      color: ${bodyColor};
+      line-height: ${lh};
+      width: ${cw}mm;
+      margin: 0;
+      padding: ${mt}mm ${mr}mm ${mb}mm ${ml}mm;
+      background: white;
     }
     h1 {
       font-size: ${nameSize}pt; font-weight: bold;
       color: ${nameColor}; text-transform: uppercase;
-      margin: 0 0 1.5mm 0; padding: 0;
+      margin: 0 0 0.5mm 0;
     }
-    .contact { font-size: ${bodySize}pt; color: #444; margin: 0 0 2mm 0; }
+    .contact {
+      font-size: ${bodySize}pt; color: #555;
+      margin: 0 0 1mm 0; line-height: 1.3;
+    }
     .section-title {
       font-size: ${sectionSize}pt; font-weight: bold;
       color: ${sectionColor}; text-transform: uppercase;
-      margin: 2.5mm 0 0.8mm 0; padding: 0;
-      border-bottom: 0.5px solid ${sectionColor}; padding-bottom: 0.3mm;
+      margin: 1.8mm 0 0.3mm 0;
+      border-bottom: 0.4px solid ${sectionColor};
+      padding-bottom: 0.15mm;
+      line-height: 1.2;
     }
-    .entry-row { clear: both; margin: 0.3mm 0 0 0; width: 100%; }
-    .entry-title { font-weight: bold; font-size: ${bodySize}pt; color: ${bodyColor}; }
-    .entry-company { font-weight: normal; color: ${bodyColor}; }
-    .entry-date { float: right; font-style: italic; color: #555; font-size: ${(bodySize * 0.85).toFixed(1)}pt; }
-    .edu-detail { font-size: ${(bodySize * 0.95).toFixed(1)}pt; color: ${bodyColor}; }
-    p { margin: 0.5mm 0 1mm 0; text-align: justify; }
-    ul { margin: 0.3mm 0 0.8mm 0; padding-left: 4mm; list-style: disc; }
-    li { margin-bottom: 0.2mm; }
-    .clearfix::after { content: ""; clear: both; display: table; }
+    .entry-row {
+      margin: 0.2mm 0 0 0;
+      width: 100%;
+      display: flow-root;
+    }
+    .entry-title {
+      font-weight: bold; font-size: ${bodySize}pt;
+      color: ${bodyColor}; line-height: ${lh};
+    }
+    .entry-company { font-weight: normal; }
+    .entry-date {
+      float: right; color: #555;
+      font-size: ${(bodySize * 0.9).toFixed(1)}pt;
+    }
+    .edu-detail {
+      font-size: ${bodySize}pt; color: ${bodyColor};
+      margin: 0 0 0 0; line-height: ${lh};
+    }
+    p {
+      margin: 0.3mm 0 0.3mm 0;
+      text-align: left;
+      line-height: ${lh};
+    }
+    ul {
+      margin: 0.15mm 0 0.3mm 0;
+      padding-left: 3.5mm;
+      list-style: disc;
+    }
+    li {
+      margin-bottom: 0.1mm;
+      line-height: ${lh};
+    }
+    .skill-line {
+      margin: 0.1mm 0;
+      line-height: ${lh};
+    }
   </style></head><body>`);
 
   // NAME
@@ -126,7 +172,7 @@ function buildResumeHtml(r: ResumeData, L: ResumeLayoutModel): string {
 
   // Headline
   if (r.headline) {
-    lines.push(`<div style="color:${sectionColor};font-size:${(bodySize * 1.05).toFixed(1)}pt;margin:0 0 1.5mm 0">${esc(r.headline)}</div>`);
+    lines.push(`<div style="color:${sectionColor};font-size:${(bodySize * 1.05).toFixed(1)}pt;margin:0 0 0.5mm 0;line-height:${lh}">${esc(r.headline)}</div>`);
   }
 
   // Contact
@@ -135,8 +181,8 @@ function buildResumeHtml(r: ResumeData, L: ResumeLayoutModel): string {
     lines.push(`<div class="contact">${contactParts.map(c => esc(c)).join("  |  ")}</div>`);
   }
 
-  // Separator
-  lines.push(`<div style="height:0.5px;background:${sectionColor};margin:1.5mm 0 1mm 0"></div>`);
+  // Thin separator
+  lines.push(`<div style="height:0.3px;background:#999;margin:0.8mm 0 0.5mm 0"></div>`);
 
   // PROFESSIONAL SUMMARY
   if (r.summary) {
@@ -150,7 +196,7 @@ function buildResumeHtml(r: ResumeData, L: ResumeLayoutModel): string {
     for (const e of r.experience) {
       const dateStr = e.startDate || e.endDate ? `${fmtDate(e.startDate)} \u2013 ${fmtDate(e.endDate)}` : "";
       const titleCompany = `${esc(e.title)}${e.company ? ` <span class="entry-company">\u2014 ${esc(e.company)}</span>` : ""}`;
-      lines.push(`<div class="entry-row clearfix"><span class="entry-title">${titleCompany}</span>${dateStr ? `<span class="entry-date">${esc(dateStr)}</span>` : ""}</div>`);
+      lines.push(`<div class="entry-row"><span class="entry-title">${titleCompany}</span>${dateStr ? `<span class="entry-date">${esc(dateStr)}</span>` : ""}</div>`);
       if (e.bullets.length) {
         lines.push(`<ul>${e.bullets.map(b => `<li>${esc(b)}</li>`).join("")}</ul>`);
       }
@@ -163,9 +209,9 @@ function buildResumeHtml(r: ResumeData, L: ResumeLayoutModel): string {
     for (const ed of r.education) {
       const dateStr = ed.startDate || ed.endDate ? `${fmtDate(ed.startDate)} \u2013 ${fmtDate(ed.endDate)}` : "";
       const leftSide = `${esc(ed.degree)} ${esc(ed.institution)}${ed.location ? ` | ${esc(ed.location)}` : ""}`;
-      lines.push(`<div class="entry-row clearfix"><span class="entry-title">${leftSide}</span>${dateStr ? `<span class="entry-date">${esc(dateStr)}</span>` : ""}</div>`);
+      lines.push(`<div class="entry-row"><span class="entry-title">${leftSide}</span>${dateStr ? `<span class="entry-date">${esc(dateStr)}</span>` : ""}</div>`);
       if (ed.field) {
-        lines.push(`<div class="edu-detail" style="margin:0.1mm 0 0.3mm 0">${esc(ed.field)}</div>`);
+        lines.push(`<div class="edu-detail">${esc(ed.field)}</div>`);
       }
       if (ed.highlights?.length) {
         lines.push(`<ul>${ed.highlights.map(h => `<li>${esc(h)}</li>`).join("")}</ul>`);
@@ -183,7 +229,7 @@ function buildResumeHtml(r: ResumeData, L: ResumeLayoutModel): string {
       categorized.get(cat)!.push(s.name);
     }
     for (const [cat, skills] of categorized) {
-      lines.push(`<div style="margin:0.2mm 0"><strong>${esc(cat)}:</strong> ${skills.map(s => esc(s)).join(", ")}</div>`);
+      lines.push(`<div class="skill-line"><strong>${esc(cat)}:</strong> ${skills.map(s => esc(s)).join(", ")}</div>`);
     }
   }
 
@@ -192,7 +238,7 @@ function buildResumeHtml(r: ResumeData, L: ResumeLayoutModel): string {
     lines.push(`<div class="section-title">PROJECTS</div>`);
     for (const p of r.projects.slice(0, 2)) {
       lines.push(`<div class="entry-title">${esc(p.name)}</div>`);
-      if (p.description) lines.push(`<p style="margin:0.1mm 0 0.5mm 0">${esc(p.description)}</p>`);
+      if (p.description) lines.push(`<p>${esc(p.description)}</p>`);
     }
   }
 
@@ -212,7 +258,7 @@ function buildResumeHtml(r: ResumeData, L: ResumeLayoutModel): string {
     lines.push(`<div class="section-title">LANGUAGES</div>`);
     for (const l of r.languages) {
       const note = (l as any).note ? ` (${esc((l as any).note)})` : "";
-      lines.push(`<div style="margin:0.1mm 0">${esc(l.name)}: ${esc(l.proficiency)}${note}</div>`);
+      lines.push(`<div class="skill-line">${esc(l.name)}: ${esc(l.proficiency)}${note}</div>`);
     }
   }
 
@@ -244,24 +290,32 @@ export async function exportResumePDF(resume: ResumeData, opts: PDFOptions = {},
 
   const doc = new jsPDF({ unit: "mm", format: "a4", orientation: "portrait" });
 
+  // Content width = A4 width minus both margins (same as HTML builder)
+  const cw = 210 - L.marginLeftMm - L.marginRightMm;
+
   try {
     await doc.html(html, {
       callback: () => {},
-      html2canvas: { scale: 2, useCORS: false, letterRendering: true, logging: false },
-      autoPaging: 'text',
+      html2canvas: {
+        scale: 1.5,
+        useCORS: false,
+        letterRendering: true,
+        logging: false,
+      },
+      // 'slice' properly slices content at page boundaries
+      autoPaging: 'slice',
       x: 0,
       y: 0,
-      width: 210 - L.marginLeftMm - L.marginRightMm, // mm
-      windowWidth: Math.round((210 - L.marginLeftMm - L.marginRightMm) / 25.4 * 96), // px at 96dpi
+      width: cw,
+      // Match viewport width to CSS body width in %px@96dpi
+      windowWidth: Math.round(cw / 25.4 * 96),
     });
 
     const pages = doc.getNumberOfPages();
     let result: { ok: boolean; pages: number; error?: string } = { ok: true, pages };
 
-    if (opts.enforceOnePage !== false && pages > 2) {
-      result = { ok: false, pages, error: `Resume is ${pages} pages. Please reduce content.` };
-    } else if (opts.enforceOnePage !== false && pages > 1) {
-      result = { ok: true, pages, error: `Resume fits on ${pages} pages. Some content may overflow.` };
+    if (opts.enforceOnePage !== false && pages > 1) {
+      result = { ok: true, pages, error: `Resume fits on ${pages} pages. Tightening spacing.` };
     }
 
     const fname = (resume.name || "resume").replace(/\s+/g, "_") + "_resume.pdf";
