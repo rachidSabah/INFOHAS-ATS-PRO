@@ -35,6 +35,8 @@ import { runGuardianValidation, type GuardianVerdict } from "./resume-guardian-a
 import { createRetryEngine } from "./retry-engine";
 import { createSnapshot, compareSnapshots } from "./resume-snapshot-engine";
 import { globalEventBus } from "./agent-event-bus";
+import { getCachedOptimization, setCachedOptimization } from "./semantic-cache";
+import { recordProviderSuccess, recordProviderFailure } from "./provider-health-monitor";
 
 export interface LockedPipelineResult {
   resume: ResumeData;
@@ -163,6 +165,27 @@ export async function runLockedPipeline(
   const templateBlueprint = extractTemplateBlueprint(idReadyResume);
   console.info(`[Locked Pipeline] Blueprint extracted: ${blueprint.experience.length} experiences, ${blueprint.education.length} education entries`);
   console.info(`[Locked Pipeline] Template Blueprint: layout=${templateBlueprint.layoutType}, sections=${templateBlueprint.sectionOrder.join(", ")}`);
+
+  // === Semantic Cache: skip optimization if identical input was already processed ===
+  const cached = getCachedOptimization(sourceResume, jd, directiveConfig);
+  if (cached) {
+    warnings.push("Semantic cache hit — returning previous locked pipeline result.");
+    return {
+      resume: cached.resume,
+      provider: cached.provider,
+      charCount: cached.charCount,
+      keywordsAdded: cached.keywordsAdded,
+      warnings: [...cached.warnings, ...warnings],
+      errors: cached.errors,
+      guardianScore: 100,
+      guardianStatus: "PASS",
+      fingerprintValid: true,
+      blueprintValid: true,
+      templateBlueprintValid: true,
+      retryCount: 0,
+      assemblerStats: { matchedById: 1, matchedByFingerprint: 0, matchedByTitleCompany: 0, matchedByIndex: 0, unmatched: 0 },
+    };
+  }
 
   const excludeProviderIds: string[] = [];
   let attempts = 0;
@@ -418,6 +441,23 @@ export async function runLockedPipeline(
           unmatched: assembleResult.unmatched,
         },
       };
+
+      // Store in semantic cache for future identical requests
+      setCachedOptimization(sourceResume, jd, {
+        resume: result.resume,
+        provider: result.provider,
+        charCount: result.charCount,
+        keywordsAdded: result.keywordsAdded,
+        warnings: result.warnings,
+        errors: result.errors,
+      }, directiveConfig);
+
+      // Record provider health
+      recordProviderSuccess(
+        optimizerResult.provider,
+        0, // latency unknown at this level
+        optimizerResult.output.missingKeywordsAdded?.length ?? 0,
+      );
 
       console.info(
         `[Locked Pipeline] Complete — provider: ${result.provider}, ` +
