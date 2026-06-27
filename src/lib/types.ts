@@ -625,6 +625,7 @@ export interface AgentDirectives {
   experience: ExperienceAgentDirective;
   education: EducationAgentDirective;
   languages: LanguagesAgentDirective;
+  guardian: GuardianAgentDirective;
 }
 
 /**
@@ -709,6 +710,25 @@ export interface EducationAgentDirective {
 export interface LanguagesAgentDirective {
   /** If true, only format languages (never add/infer entries) */
   formatOnly: boolean;
+}
+
+/**
+ * Guardian Agent Directive — controls final validation sensitivity.
+ * Configure which checks trigger VETO (block export) vs warning (allow with notice).
+ */
+export interface GuardianAgentDirective {
+  /** If true, block export on any company/school/language mismatch */
+  enforceEntityIntegrity: boolean;
+  /** If true, block export when page utilization is below threshold */
+  enforcePageUtilization: boolean;
+  /** If true, block export when content length is below minimum */
+  enforceContentLength: boolean;
+  /** If true, block export on duplicate sentences */
+  enforceNoDuplicates: boolean;
+  /** If true, reject generic/unoptimized summaries */
+  enforceSummaryQuality: boolean;
+  /** Minimum Guardian score required to pass (0-100, default 80) */
+  minimumScore: number;
 }
 
 /**

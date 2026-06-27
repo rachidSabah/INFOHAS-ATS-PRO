@@ -795,6 +795,14 @@ export const SEED_OPTIMIZER_DIRECTIVE: OptimizerDirectiveConfig = {
     languages: {
       formatOnly: true,
     },
+    guardian: {
+      enforceEntityIntegrity: true,
+      enforcePageUtilization: false,  // false = advisory only (non-critical)
+      enforceContentLength: false,    // false = advisory only (non-critical)
+      enforceNoDuplicates: true,
+      enforceSummaryQuality: false,   // false = skip summary quality check
+      minimumScore: 80,
+    },
   },
 };
 

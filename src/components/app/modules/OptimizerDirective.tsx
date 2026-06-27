@@ -634,6 +634,56 @@ function AgentDirectivesSection({ draft, patch }: { draft: OptimizerDirectiveCon
           />
         </CardContent>
       </Card>
+
+      {/* Guardian Agent Directive */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-lg flex items-center gap-2">
+            <Icon name="ShieldCheck" className="w-4 h-4 text-brand" /> Guardian Agent
+          </CardTitle>
+          <CardDescription>Controls final validation sensitivity. Configure which checks trigger VETO (block export) vs warning (allow with notice).</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <SwitchRow
+            label="Enforce Entity Integrity"
+            description="VETO on any company/school/language mismatch between original and optimized."
+            checked={draft.agentDirectives.guardian.enforceEntityIntegrity}
+            onChange={(v) => updateAgent("guardian", { enforceEntityIntegrity: v })}
+          />
+          <SwitchRow
+            label="Enforce Page Utilization"
+            description="VETO when page usage is below 85% (disabling makes it advisory-only)."
+            checked={draft.agentDirectives.guardian.enforcePageUtilization}
+            onChange={(v) => updateAgent("guardian", { enforcePageUtilization: v })}
+          />
+          <SwitchRow
+            label="Enforce Content Length"
+            description="VETO when total resume content is below minimum character threshold."
+            checked={draft.agentDirectives.guardian.enforceContentLength}
+            onChange={(v) => updateAgent("guardian", { enforceContentLength: v })}
+          />
+          <SwitchRow
+            label="Enforce No Duplicates"
+            description="VETO when duplicate sentences are detected in the optimized resume."
+            checked={draft.agentDirectives.guardian.enforceNoDuplicates}
+            onChange={(v) => updateAgent("guardian", { enforceNoDuplicates: v })}
+          />
+          <SwitchRow
+            label="Enforce Summary Quality"
+            description="VETO when summary is too short or generic (below word count target)."
+            checked={draft.agentDirectives.guardian.enforceSummaryQuality}
+            onChange={(v) => updateAgent("guardian", { enforceSummaryQuality: v })}
+          />
+          <NumberField
+            label="Minimum Guardian Score"
+            value={draft.agentDirectives.guardian.minimumScore}
+            onChange={(v) => updateAgent("guardian", { minimumScore: v })}
+            step={5}
+            min={50}
+            max={100}
+          />
+        </CardContent>
+      </Card>
     </>
   );
 }
