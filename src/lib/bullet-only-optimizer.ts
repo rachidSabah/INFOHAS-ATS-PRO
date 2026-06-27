@@ -54,6 +54,7 @@ export function buildOptimizerInput(
   jd: JobDescription,
   intelligenceContext: string,
   directiveConfig?: OptimizerDirectiveConfig | null,
+  optimizationPolicy?: string | null,
 ): { systemPrompt: string; userPrompt: string } {
   const agentDirectives = directiveConfig?.agentDirectives;
   // The source resume sent to the LLM — includes IDs for experience entries
@@ -93,7 +94,7 @@ export function buildOptimizerInput(
   const minWords = directiveConfig?.summaryMinWords ?? 60;
   const maxWords = directiveConfig?.summaryMaxWords ?? 90;
 
-  const systemPrompt = `You are an expert ATS resume optimizer. Your job is to OPTIMIZE a resume for a specific job description.
+  const systemPrompt = `${optimizationPolicy ? optimizationPolicy + "\n\n" : ""}You are an expert ATS resume optimizer. Your job is to OPTIMIZE a resume for a specific job description.
 
 CRITICAL ARCHITECTURE RULE — READ CAREFULLY:
 
@@ -326,8 +327,9 @@ export async function runBulletOnlyOptimizer(
   intelligenceContext: string,
   directiveConfig?: OptimizerDirectiveConfig | null,
   excludeProviderIds?: string[],
+  optimizationPolicy?: string | null,
 ): Promise<BulletOnlyOptimizerResult> {
-  const { systemPrompt, userPrompt } = buildOptimizerInput(sourceResume, jd, intelligenceContext, directiveConfig);
+  const { systemPrompt, userPrompt } = buildOptimizerInput(sourceResume, jd, intelligenceContext, directiveConfig, optimizationPolicy);
 
   const agentDirectives = directiveConfig?.agentDirectives;
   const temp = agentDirectives?.supervisor?.temperature ?? 0.15;

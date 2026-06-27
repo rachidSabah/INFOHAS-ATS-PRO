@@ -331,6 +331,35 @@ export function findMatchingExperience(
 }
 
 /**
+ * Compute a stable fingerprint for an education entry.
+ * Based on institution + degree + field (normalized).
+ */
+export function computeEducationFingerprint(ed: {
+  institution?: string;
+  degree?: string;
+  field?: string;
+}): string {
+  const parts = [
+    (ed.institution || "").toLowerCase().trim(),
+    (ed.degree || "").toLowerCase().trim(),
+    (ed.field || "").toLowerCase().trim(),
+  ];
+  return parts.join("|");
+}
+
+/**
+ * Compute a stable fingerprint for a locked education entry.
+ */
+function computeLockedEducationFingerprint(ed: LockedEducation): string {
+  const parts = [
+    (ed.institution || "").toLowerCase().trim(),
+    (ed.degree || "").toLowerCase().trim(),
+    (ed.field || "").toLowerCase().trim(),
+  ];
+  return parts.join("|");
+}
+
+/**
  * Find the best matching locked education for an optimized education entry.
  */
 export function findMatchingEducation(
@@ -340,9 +369,21 @@ export function findMatchingEducation(
 ): LockedEducation | null {
   const optInst = (optimized.institution || "").toLowerCase().trim();
   const optDegree = (optimized.degree || "").toLowerCase().trim();
+  const optId = (optimized as any).id;
+
+  // Strategy 0: ID match (primary)
+  if (optId) {
+    const idMatch = locked.find((l) => l.id === optId);
+    if (idMatch) return idMatch;
+  }
+
+  // Strategy 0.5: Fingerprint match
+  const optFp = computeEducationFingerprint(optimized);
+  let match = locked.find((l) => computeLockedEducationFingerprint(l) === optFp);
+  if (match) return match;
 
   // Strategy 1: Exact institution match
-  let match = locked.find((l) => l.institution.toLowerCase().trim() === optInst);
+  match = locked.find((l) => l.institution.toLowerCase().trim() === optInst);
   if (match) return match;
 
   // Strategy 2: Substring institution match
@@ -913,13 +954,38 @@ const FORBIDDEN_SKILL_PATTERNS = [
   // Company names (common)
   /^qatar duty free$/i, /^qatar airways/i, /^hamad international/i, /^qdfc$/i,
   /^retail company$/i, /^beauty retailer$/i, /^duty free$/i,
+  /^the millennium hotel/i, /^emaar$/i, /^madini perfume/i,
+  /^qatar airways group$/i, /^qatar aviation/i, /^matar$/i,
+  /^qatar energy$/i, /^qatar petroleum$/i, /^qatar foundation$/i,
+  /^qatar national/i, /^qatar museum/i, /^qatar rail/i,
   // Locations
   /^doha$/i, /^qatar$/i, /^dubai$/i, /^abu dhabi$/i, /^uae$/i,
   /^riyadh$/i, /^saudi/i, /^kuwait$/i, /^bahrain$/i, /^oman$/i,
+  /^muscat$/i, /^sharjah$/i, /^ajman$/i, /^ras al khaimah$/i,
+  /^fujairah$/i, /^umm al quwain$/i, /^al ain$/i,
+  // Keywords that are NOT skills (targeted job keywords often dumped into skills)
+  /^airport$/i, /^integrity$/i, /^safety first$/i, /^safety regulations$/i,
+  /^airline$/i, /^aviation operations$/i, /^cabin safety$/i,
+  /^punctuality$/i, /^customer focus$/i, /^service orientation$/i,
+  /^attention to detail$/i, /^time management$/i, /^teamwork$/i,
+  /^problem.solving$/i, /^flexibility$/i, /^adaptability$/i,
+  /^conflict resolution$/i, /^communication skills$/i,
+  /^multitasking$/i, /^active listening$/i, /^empathetic$/i,
+  /^result.orientation$/i, /^team player$/i,
+  // Physical attributes (not skills)
+  /^height/i, /^weight/i, /^appearance/i, /^grooming/i,
+  /^arm.reach$/i, /^swimming ability$/i,
+  // Role/position names (not skills)
+  /^till assistant$/i, /^sales assistant$/i, /^receptionist$/i,
+  /^cashier$/i, /^waitress$/i, /^bartender$/i, /^steward(ess)?$/i,
+  /^cabin crew$/i, /^flight attendant$/i,
   // Generic non-skills
   /^unknown$/i, /^n\/a$/i, /^placeholder$/i, /^sample$/i, /^example$/i,
+  /^none$/i, /^no skills?$/i, /^not applicable$/i,
   // Years (not skills)
-  /^20\d{2}$/i, /^\d{4}-\d{4}$/i,
+  /^20\d{2}$/i, /^\d{4}-\d{4}$/i, /^\d{2}\/\d{4}$/i,
+  // Single characters or numbers (typos, debris)
+  /^\d{1}$/i, /^[a-zA-Z]{1}$/i,
 ];
 
 /**
@@ -947,6 +1013,23 @@ export function filterForbiddenSkills(skills: ResumeSkill[]): { filtered: Resume
     filtered.push(skill);
   }
   return { filtered, removed };
+}
+
+/**
+ * Generate unique IDs for experiences and education entries missing them.
+ * The locked pipeline requires all entries to have IDs.
+ */
+export function ensureExperienceIds(resume: ResumeData): ResumeData {
+  const updated = { ...resume };
+  updated.experience = resume.experience.map((exp, i) => ({
+    ...exp,
+    id: exp.id || `exp_gen_${i}_${Date.now()}`,
+  }));
+  updated.education = resume.education.map((ed, i) => ({
+    ...ed,
+    id: ed.id || `edu_gen_${i}_${Date.now()}`,
+  }));
+  return updated;
 }
 
 /**

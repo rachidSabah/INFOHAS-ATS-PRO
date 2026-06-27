@@ -816,6 +816,16 @@ async function _runOptimizationPipelineInner(input: PipelineInput, watchdog: Opt
       console.warn("[Orchestrator] Failed to read optimizerDirective:", directiveErr2 instanceof Error ? directiveErr2.message : directiveErr2);
     }
 
+    // Build policy from directive config — single source of truth for all agents
+    let optimizationPolicy: string | null = null;
+    try {
+      const { buildOptimizationPolicy, formatPolicyForPrompt } = await import("../directive-policy");
+      const policy = buildOptimizationPolicy(directiveConfig, resume);
+      optimizationPolicy = formatPolicyForPrompt(policy);
+    } catch (policyErr) {
+      console.warn("[Orchestrator] Failed to build optimization policy:", policyErr instanceof Error ? policyErr.message : policyErr);
+    }
+
     while (optimizeAttempt < maxOptimizeAttempts) {
       optimizeAttempt++;
       const optHandle = watchdog.startStep(`Resume Optimizer (attempt ${optimizeAttempt})`);
@@ -885,7 +895,7 @@ Bridging Strategy: ${result.skillGap.bridgingStrategy}`);
           // Run the locked pipeline
           // Pass the user-configured per-agent directives from the store
           const { runLockedPipeline } = await import("../locked-pipeline");
-          const lockedResult = await runLockedPipeline(resume, jd, intelligenceContext, directiveConfig);
+          const lockedResult = await runLockedPipeline(resume, jd, intelligenceContext, directiveConfig, optimizationPolicy);
 
           optimizeResult = {
             resume: lockedResult.resume,

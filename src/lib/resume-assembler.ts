@@ -180,13 +180,56 @@ export function assembleResume(
   }
 
   // ========================================================================
-  // 2. SUMMARY — from optimizer (mutable)
+  // 2. SUMMARY — from optimizer (mutable) with strict validation
   // ========================================================================
   let summary: string = optimizerOutput.summary ?? sourceResume.summary ?? "";
   summary = cleanupGrammar(summary);
+
+  // Check minimum character length (was 30 chars ≈ 6 words)
   if (!summary || summary.trim().length < 30) {
-    warnings.push("Optimizer summary was empty or too short — using source summary");
+    warnings.push("Optimizer summary was empty or too short (< 30 chars) — using source summary");
     summary = sourceResume.summary ?? "";
+  }
+
+  // Check word count — target 80-130 words per spec
+  const wordCount = summary.trim() ? summary.trim().split(/\s+/).length : 0;
+  if (summary && wordCount < 60) {
+    warnings.push(`Optimizer summary too short (${wordCount} words, minimum 60) — using source summary`);
+    summary = sourceResume.summary ?? "";
+  }
+
+  // Check for duplicate sentences
+  if (summary) {
+    const sentences = summary.split(/[.!?]+/).filter((s) => s.trim().length > 10);
+    const seenSentences = new Set<string>();
+    for (const sent of sentences) {
+      const normalized = sent.toLowerCase().trim().replace(/\s+/g, " ");
+      if (seenSentences.has(normalized)) {
+        warnings.push(`Summary contains duplicate sentence — falling back to source summary`);
+        summary = sourceResume.summary ?? "";
+        break;
+      }
+      seenSentences.add(normalized);
+    }
+    // Check for double periods
+    if (summary.includes("..")) {
+      summary = summary.replace(/\.\.+/g, ".");
+      warnings.push("Fixed double periods in summary");
+    }
+  }
+
+  // Reject summary that contains JD company names (hallucinated references)
+  if (summary) {
+    const jdCompaniesForSummary = [
+      "qatar duty free", "qatar airways", "hamad international",
+      "the millennium hotel", "emaar", "madini perfume",
+    ];
+    const summaryLower = summary.toLowerCase();
+    const containsJdCompany = jdCompaniesForSummary.some((c) => summaryLower.includes(c));
+    if (containsJdCompany) {
+      warnings.push("Optimizer summary contains JD company name — using source summary");
+      summary = sourceResume.summary ?? "";
+    }
   }
 
   // ========================================================================
@@ -236,6 +279,15 @@ export function assembleResume(
   // 5. EDUCATION — ALWAYS from source (immutable)
   // ========================================================================
   const education = sourceResume.education.map((ed) => ({ ...ed }));
+  // Warn if optimizer attempted to modify education (it shouldn't per interface,
+  // but check via any cast for defensive debugging)
+  const optEducation = (optimizerOutput as any).education;
+  if (optEducation && Array.isArray(optEducation) && optEducation.length > 0) {
+    warnings.push(
+      `Education immutable guard: optimizer returned ${optEducation.length} education entries. ` +
+      `Using source education as-is (education is immutable).`
+    );
+  }
 
   // ========================================================================
   // 6. LANGUAGES — ALWAYS from source (immutable)

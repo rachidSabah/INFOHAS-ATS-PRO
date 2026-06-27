@@ -26,6 +26,7 @@ import { runBulletOnlyOptimizer, buildOptimizerInput } from "./bullet-only-optim
 import { assembleResume } from "./resume-assembler";
 import { runStructureGuardian } from "./structure-guardian";
 import { validateExperienceFingerprints } from "./experience-fingerprint";
+import { ensureExperienceIds } from "./entity-lock";
 import { createDebugArtifacts, persistDebugArtifacts } from "./debug-persistence";
 import { expandResume, compressResume, validatePageFill } from "./agents/page-balancer";
 
@@ -71,22 +72,27 @@ export async function runLockedPipeline(
   jd: JobDescription,
   intelligenceContext: string,
   directiveConfig?: OptimizerDirectiveConfig | null,
+  optimizationPolicy?: string | null,
 ): Promise<LockedPipelineResult> {
   const agentDirectives = directiveConfig?.agentDirectives;
   const warnings: string[] = [];
   const errors: string[] = [];
 
   // ========================================================================
-  // Step 1: Lock Entities (verify immutable IDs exist)
+  // Step 1: Ensure IDs exist, then Lock Entities
   // ========================================================================
   console.info(`[Locked Pipeline] Source resume: ${sourceResume.experience.length} experience entries, ${sourceResume.education.length} education entries, ${sourceResume.languages.length} languages`);
   if (agentDirectives) {
     console.info(`[Locked Pipeline] Agent directives: supervisor.strictMode=${agentDirectives.supervisor.strictMode}, summary.atsAggressiveness=${agentDirectives.summary.atsAggressiveness}, experience.rewriteBulletsOnly=${agentDirectives.experience.rewriteBulletsOnly}`);
   }
 
+  // Generate IDs for any experience/education entries that are missing them
+  const idReadyResume = ensureExperienceIds(sourceResume);
+  console.info(`[Locked Pipeline] ensureExperienceIds: ${sourceResume.experience.filter(e => !e.id).length} experiences + ${sourceResume.education.filter(e => !(e as any).id).length} education entries got IDs`);
+
   // Validate that every source experience has an ID
-  for (let i = 0; i < sourceResume.experience.length; i++) {
-    const exp = sourceResume.experience[i];
+  for (let i = 0; i < idReadyResume.experience.length; i++) {
+    const exp = idReadyResume.experience[i];
     if (!exp.id) {
       throw new LockedPipelineError(
         `Pipeline failed: Source experience at index ${i} is missing a required immutable ID.`,
@@ -99,16 +105,16 @@ export async function runLockedPipeline(
   // GUARD: If source resume has NO experience entries, the locked pipeline
   // cannot function (it requires experience IDs to match). In this case,
   // return the source resume as-is with a warning.
-  if (sourceResume.experience.length === 0 && sourceResume.education.length === 0 && sourceResume.languages.length === 0) {
+  if (idReadyResume.experience.length === 0 && idReadyResume.education.length === 0 && idReadyResume.languages.length === 0) {
     console.warn(`[Locked Pipeline] Source resume is EMPTY (0 experience, 0 education, 0 languages). Returning source as-is.`);
     warnings.push("Source resume is empty. Returning source resume without optimization.");
     errors.push("Source resume has no content to optimize.");
     const charCount = JSON.stringify({
-      summary: sourceResume.summary, experience: sourceResume.experience,
-      skills: sourceResume.skills, education: sourceResume.education, languages: sourceResume.languages,
+      summary: idReadyResume.summary, experience: idReadyResume.experience,
+      skills: idReadyResume.skills, education: idReadyResume.education, languages: idReadyResume.languages,
     }).length;
     return {
-      resume: sourceResume,
+      resume: idReadyResume,
       provider: "none",
       charCount,
       keywordsAdded: 0,
@@ -135,8 +141,8 @@ export async function runLockedPipeline(
       // ========================================================================
       // Step 2: Run Bullet-Only Optimizer (supports excludeProviderIds)
       // ========================================================================
-      const optimizerInput = buildOptimizerInput(sourceResume, jd, intelligenceContext, directiveConfig);
-      const optimizerResult = await runBulletOnlyOptimizer(sourceResume, jd, intelligenceContext, directiveConfig, excludeProviderIds);
+      const optimizerInput = buildOptimizerInput(idReadyResume, jd, intelligenceContext, directiveConfig, optimizationPolicy);
+      const optimizerResult = await runBulletOnlyOptimizer(idReadyResume, jd, intelligenceContext, directiveConfig, excludeProviderIds, optimizationPolicy);
       warnings.push(...optimizerResult.warnings);
 
       console.info(`[Locked Pipeline] Attempt ${attempts}: Optimizer returned: ${optimizerResult.output.experiences?.length ?? 0} experiences, ${optimizerResult.output.skills?.length ?? 0} skills`);
@@ -144,7 +150,7 @@ export async function runLockedPipeline(
       // ========================================================================
       // Step 3: Assemble Resume (application-owned)
       // ========================================================================
-      const assembleResult = assembleResume(sourceResume, optimizerResult.output);
+      const assembleResult = assembleResume(idReadyResume, optimizerResult.output);
       warnings.push(...assembleResult.warnings);
       errors.push(...assembleResult.errors);
 
@@ -160,7 +166,7 @@ export async function runLockedPipeline(
           const resumeText = JSON.stringify(balancedResume).toLowerCase();
           const missingKeywords = jdKeywords.filter((k) => !resumeText.includes(k.toLowerCase()));
           balancedResume = expandResume(balancedResume, {
-            originalResume: sourceResume,
+            originalResume: idReadyResume,
             jd,
             targetChars: pageFill.targetChars,
             currentChars: pageFill.charCount,
@@ -179,6 +185,23 @@ export async function runLockedPipeline(
         console.warn("[Locked Pipeline Page Balancer] Failed (non-fatal):", pbErr);
       }
       assembleResult.resume = balancedResume;
+
+      // ========================================================================
+      // Layout Validation (A4 One-Page Check)
+      // ========================================================================
+      try {
+        const { validateLayout } = await import("./layout-validator");
+        const layoutResult = validateLayout(assembleResult.resume);
+        if (!layoutResult.valid) {
+          warnings.push(`Layout: ${layoutResult.issues.join("; ")}`);
+          for (const rec of layoutResult.recommendations) {
+            warnings.push(`Layout suggestion: ${rec}`);
+          }
+        }
+        console.info(`[Locked Pipeline Layout] ${layoutResult.valid ? "PASS" : "ISSUES"} — ${layoutResult.charCount} chars, ${layoutResult.pageUtilization}% util`);
+      } catch (lvErr) {
+        console.warn("[Locked Pipeline Layout Validator] Failed (non-fatal):", lvErr);
+      }
 
       console.info(`[Locked Pipeline] Assembler: ${assembleResult.matchedById} by ID, ${assembleResult.matchedByFingerprint} by fingerprint, ${assembleResult.matchedByTitleCompany} by title/company, ${assembleResult.matchedByIndex} by index, ${assembleResult.unmatched} unmatched`);
 

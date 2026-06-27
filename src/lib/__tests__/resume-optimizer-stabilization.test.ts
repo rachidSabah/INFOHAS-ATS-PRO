@@ -521,7 +521,7 @@ describe("Structure Guardian", () => {
 describe("Resume Assembler", () => {
   it("merges source immutable + optimizer mutable", () => {
     const optimizerOutput = {
-      summary: "New optimized summary with ATS keywords.",
+      summary: "New optimized summary with ATS keywords. Experienced customer service professional with over five years in retail and hospitality environments. Skilled in guest relations, conflict resolution, and team collaboration. Multilingual candidate with fluency in English, French, and Arabic seeking to leverage expertise in premium service environments. Dedicated to delivering exceptional customer experiences while maintaining operational efficiency and professional standards. Proven track record of exceeding performance targets.",
       headline: "New Headline",
       skills: [{ name: "New Skill", category: "Tech" }],
       experiences: [
@@ -531,7 +531,7 @@ describe("Resume Assembler", () => {
     const result = assembleResume(sourceResume, optimizerOutput);
 
     // Mutable fields from optimizer
-    expect(result.resume.summary).toBe("New optimized summary with ATS keywords.");
+    expect(result.resume.summary).toBe("New optimized summary with ATS keywords. Experienced customer service professional with over five years in retail and hospitality environments. Skilled in guest relations, conflict resolution, and team collaboration. Multilingual candidate with fluency in English, French, and Arabic seeking to leverage expertise in premium service environments. Dedicated to delivering exceptional customer experiences while maintaining operational efficiency and professional standards. Proven track record of exceeding performance targets.");
     expect(result.resume.skills.some((s) => s.name === "New Skill")).toBe(true);
     expect(result.resume.experience[0].bullets[0]).toBe("Rewritten bullet 1");
 
