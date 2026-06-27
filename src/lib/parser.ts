@@ -1246,7 +1246,29 @@ function parseEducation(lines: string[]): ResumeData["education"] {
         if (cleanedLine.includes("|")) {
           const pipeParts = cleanedLine.split("|").map((p) => p.trim());
           leftSide = pipeParts[0];
-          location = pipeParts[1] || "";
+          // The pipe part could be location OR institution depending on format:
+          // - "degree | institution" → pipe part is institution
+          // - "degree institution | location" → pipe part is location
+          // Find the degree keyword match to see if there's text after it in leftSide
+          const degMatchForPipe = leftSide.match(degreePattern);
+          if (degMatchForPipe && degMatchForPipe.index !== undefined) {
+            const afterDeg = leftSide.slice(degMatchForPipe.index + degMatchForPipe[0].length).trim();
+            if (afterDeg.length > 1) {
+              // Text after degree → pipe part is location
+              location = pipeParts[1] || "";
+            } else {
+              // No text after degree → pipe part is institution
+              institution = pipeParts[1] || "";
+              if (pipeParts.length >= 3) {
+                location = pipeParts[2] || "";
+              }
+            }
+          } else {
+            institution = pipeParts[1] || "";
+            if (pipeParts.length >= 3) {
+              location = pipeParts[2] || "";
+            }
+          }
         }
 
         // Try to separate degree + field from institution in leftSide.

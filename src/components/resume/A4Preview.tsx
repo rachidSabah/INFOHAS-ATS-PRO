@@ -243,8 +243,8 @@ function InfohasProTemplate({ resume, accent }: { resume: ResumeData; accent: st
                 <div key={ed.id}>
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: "0.5mm", gap: "2mm" }}>
                     <div style={{ flex: 1, minWidth: 0 }}>
-                      <span style={{ fontWeight: 700, color: BLACK }}>{ed.degree}</span>{" "}
-                      <span style={{ color: BLACK }}>{ed.institution}</span>
+                      <span style={{ fontWeight: 700, color: BLACK }}>{ed.degree}</span>
+                      {ed.institution && <span style={{ color: BLACK }}> | {ed.institution}</span>}
                       {ed.location && <span style={{ color: BLACK }}> | {ed.location}</span>}
                     </div>
                     {(ed.startDate || ed.endDate) && (

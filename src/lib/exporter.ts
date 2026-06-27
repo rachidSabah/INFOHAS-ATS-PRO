@@ -208,7 +208,7 @@ function buildResumeHtml(r: ResumeData, L: ResumeLayoutModel): string {
     lines.push(`<div class="section-title">EDUCATION</div>`);
     for (const ed of r.education) {
       const dateStr = ed.startDate || ed.endDate ? `${fmtDate(ed.startDate)} \u2013 ${fmtDate(ed.endDate)}` : "";
-      const leftSide = `${esc(ed.degree)} ${esc(ed.institution)}${ed.location ? ` | ${esc(ed.location)}` : ""}`;
+      const leftSide = `${esc(ed.degree)}${ed.institution ? ` | ${esc(ed.institution)}` : ""}${ed.location ? ` | ${esc(ed.location)}` : ""}`;
       lines.push(`<div class="entry-row"><span class="entry-title">${leftSide}</span>${dateStr ? `<span class="entry-date">${esc(dateStr)}</span>` : ""}</div>`);
       if (ed.field) {
         lines.push(`<div class="edu-detail">${esc(ed.field)}</div>`);
@@ -767,7 +767,7 @@ function exportInfohasProPDF(resume: ResumeData, opts: PDFOptions = {}, layout?:
       if (y > pageH - L.marginBottomMm - 20) break;
       doc.setFont("times", "bold");
       doc.setTextColor(bodyRgb[0], bodyRgb[1], bodyRgb[2]);
-      const eduLine = `${ed.degree} ${ed.institution}${ed.location ? ` | ${ed.location}` : ""}${ed.startDate || ed.endDate ? ` | ${fmtInfohasDate(ed.startDate)} – ${fmtInfohasDate(ed.endDate)}` : ""}`;
+      const eduLine = `${ed.degree}${ed.institution ? ` | ${ed.institution}` : ""}${ed.location ? ` | ${ed.location}` : ""}${ed.startDate || ed.endDate ? ` | ${fmtInfohasDate(ed.startDate)} – ${fmtInfohasDate(ed.endDate)}` : ""}`;
       const eduLines = doc.splitTextToSize(eduLine, contentW);
       for (const line of eduLines) {
         doc.text(line, left, textY(L.bodyFontSizePt));
@@ -1167,7 +1167,7 @@ export function exportResumeTXT(resume: ResumeData) {
   if (resume.education.length) {
     lines.push("EDUCATION");
     for (const ed of resume.education) {
-      lines.push(`${ed.degree}${ed.field ? " in " + ed.field : ""} — ${ed.institution}  (${formatDate(ed.startDate)} – ${formatDate(ed.endDate)})`);
+      lines.push(`${ed.degree}${ed.field ? " in " + ed.field : ""}${ed.institution ? ` | ${ed.institution}` : ""}  (${formatDate(ed.startDate)} – ${formatDate(ed.endDate)})`);
     }
     lines.push("");
   }
@@ -1332,7 +1332,7 @@ export async function exportResumeDOCX(resume: ResumeData, layout?: ResumeLayout
   if (resume.education.length) {
     addSection("EDUCATION");
     for (const ed of resume.education) {
-      const leftSide = `${ed.degree}${ed.field ? ` in ${ed.field}` : ""} — ${ed.institution}${ed.location ? ` | ${ed.location}` : ""}`;
+      const leftSide = `${ed.degree}${ed.field ? ` in ${ed.field}` : ""}${ed.institution ? ` | ${ed.institution}` : ""}${ed.location ? ` | ${ed.location}` : ""}`;
       const dateStr = ed.startDate || ed.endDate ? `${fmtInfohasDate(ed.startDate)} – ${fmtInfohasDate(ed.endDate)}` : "";
 
       children.push(new Paragraph({
