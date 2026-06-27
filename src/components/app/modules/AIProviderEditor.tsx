@@ -200,7 +200,7 @@ export function ProviderEditor({ provider, onClose, onSave }: {
             </div>
             <Field label="Base URL"><Input value={form.baseUrl} onChange={(e) => setForm({ ...form, baseUrl: e.target.value })} placeholder={cfg?.defaultUrl ?? "https://api.example.com/v1"} /></Field>
             <Field label="API key (encrypted at rest)">
-              <Input type="password" value={form.apiKey} onChange={(e) => setForm({ ...form, apiKey: *** })} placeholder={isPuter ? "(not required for Puter)" : "sk-..."} disabled={isPuter} />
+              <Input type="password" value={form.apiKey} onChange={(e) => setForm({ ...form, apiKey: e.target.value })} placeholder={isPuter ? "(not required for Puter)" : "sk-..."} disabled={isPuter} />
             </Field>
             <Field label="Alternate API keys (one per line — rotated when primary is rate-limited)">
               <textarea
