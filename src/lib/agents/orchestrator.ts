@@ -893,6 +893,29 @@ Bridging Strategy: ${result.skillGap.bridgingStrategy}`);
 
           const intelligenceContext = intelligenceBlocks.join("\n\n");
 
+          // Check if parallel pipeline is enabled via env var
+          const useParallel = process.env.NEXT_PUBLIC_USE_PARALLEL_PIPELINE === "true";
+
+          if (useParallel) {
+            log("Resume Optimizer", "Parallel pipeline mode — running summary, skills, and experience agents concurrently.");
+            const { runParallelOptimizer } = await import("../parallel-pipeline");
+            const parallelResult = await runParallelOptimizer({
+              resume, jd, directiveConfig, optimizationPolicy,
+            });
+            optimizeResult = {
+              resume: parallelResult.resume,
+              provider: parallelResult.provider,
+              charCount: parallelResult.charCount,
+              keywordsAdded: parallelResult.keywordsAdded,
+            };
+            for (const w of parallelResult.warnings) {
+              console.warn(`[Parallel Pipeline] ${w}`);
+            }
+            log("Resume Optimizer",
+              `✓ Parallel pipeline complete: ${parallelResult.charCount} chars, ` +
+              `provider: ${parallelResult.provider}, keywords: ${parallelResult.keywordsAdded}`
+            );
+          } else {
           // Run the locked pipeline
           // Pass the user-configured per-agent directives from the store
           const { runLockedPipeline } = await import("../locked-pipeline");
@@ -918,6 +941,8 @@ Bridging Strategy: ${result.skillGap.bridgingStrategy}`);
             `Provider: ${lockedResult.provider}`,
           );
           emitProgress(3, `✓ Locked pipeline complete. Guardian: ${lockedResult.guardianScore}/100. ${lockedResult.charCount} chars.`);
+
+          } // end if/else (useParallel / locked pipeline)
 
           optHandle.complete();
         } else if (aviationMode) {
