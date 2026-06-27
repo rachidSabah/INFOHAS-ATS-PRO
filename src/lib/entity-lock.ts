@@ -787,7 +787,11 @@ export function verifyEntityIntegrity(
     const ed = optimized.education[i];
     const origEd = locked.education[i];
 
-    if (isPlaceholderInstitution(ed.institution)) {
+    // Skip placeholder check if original institution was also empty/N/A
+    const origInst = (origEd?.institution || "").trim().toLowerCase();
+    const origWasEmpty = !origInst || origInst === "n/a" || origInst === "institution";
+
+    if (isPlaceholderInstitution(ed.institution) && !origWasEmpty) {
       criticalFailures.push({
         type: "hallucinated_university",
         message: `Education #${i + 1} has placeholder institution: "${ed.institution}". Original: "${origEd?.institution || "N/A"}"`,
