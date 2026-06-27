@@ -184,6 +184,22 @@ export function Builder() {
             <Icon name="FilePlus2" className="w-6 h-6 text-brand" /> Resume Builder
           </h1>
           <p className="text-sm text-muted-foreground mt-1 hidden sm:block">Edit on the left, see the live A4 preview on the right. Always one page.</p>
+          <div class="flex items-center gap-2 mt-1.5 flex-wrap">
+            {atsScore && (
+              <Badge variant={atsScore.overall >= 60 ? "default" : atsScore.overall >= 30 ? "secondary" : "destructive"} className="text-[10px] gap-1">
+                <Icon name="Target" className="w-3 h-3" /> ATS: {atsScore.overall}%
+              </Badge>
+            )}
+            <Badge variant="outline" className="text-[10px] gap-1">
+              <Icon name="Save" className="w-3 h-3" /> Auto-saved
+            </Badge>
+            <button onClick={() => { const data = undoRedo.undo(); if (data) patch(data); }} disabled={!undoRedo.canUndo} className="text-[10px] text-muted-foreground hover:text-foreground disabled:opacity-30 p-1" title="Undo">
+              <Icon name="Undo2" className="w-3 h-3" />
+            </button>
+            <button onClick={() => { const data = undoRedo.redo(); if (data) patch(data); }} disabled={!undoRedo.canRedo} className="text-[10px] text-muted-foreground hover:text-foreground disabled:opacity-30 p-1" title="Redo">
+              <Icon name="Redo2" className="w-3 h-3" />
+            </button>
+          </div>
         </div>
         {/* Export buttons — compact on mobile, full labels on desktop */}
         <div className="flex gap-1.5 flex-wrap items-center">
