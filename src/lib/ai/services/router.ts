@@ -73,6 +73,27 @@ export class ProviderRouter {
       );
     }
 
+    // === Capability-Weighted Model Selection ===
+    // When an agent task is specified, use Model Registry to find the best model
+    // for that task's capability profile, then prioritize that model's provider.
+    if (opts.agentTask && modelRegistry.size() > 0) {
+      const bestModel = modelRegistry.getBestForTask(opts.agentTask);
+      if (bestModel) {
+        const bestProvider = providers.find((p) => p.id === bestModel.providerId);
+        if (bestProvider && !rateLimitTracker.isRateLimited(bestProvider.id)) {
+          // Move the best-capability provider to the front of the chain
+          const existingIdx = chain.findIndex((p) => p.id === bestProvider.id);
+          if (existingIdx > 0) {
+            chain.splice(existingIdx, 1);
+            chain.unshift(bestProvider);
+          } else if (existingIdx === -1) {
+            chain.unshift(bestProvider);
+          }
+          console.info(`[Router] Task "${opts.agentTask}" → best model: ${bestModel.modelName} (${bestModel.providerName})`);
+        }
+      }
+    }
+
     const errors: string[] = [];
     for (const provider of chain) {
       // Skip rate-limited providers
