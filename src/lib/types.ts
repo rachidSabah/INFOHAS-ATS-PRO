@@ -376,6 +376,9 @@ export interface AIProvider {
   apiUrl?: string;
   baseUrl?: string;
   apiKey?: string;
+  /** Alternate API keys tried when primary key hits rate limit (429).
+   * Each key is tried in order before marking the provider as rate-limited. */
+  alternateApiKeys?: string[];
   headersJson?: string;
   parametersJson?: string;
   requestTemplate?: string;

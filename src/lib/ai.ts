@@ -1888,6 +1888,47 @@ export async function callAI(opts: AICallOptions): Promise<AICallResult> {
       const eMsg = e?.message || String(e);
       if (e?.statusCode === 429 || /429/.test(eMsg) || /rate.?limit/i.test(eMsg) || /FreeUsageLimitError/i.test(eMsg)) {
         console.log("[PROVIDER]\nPrimary provider returned 429.");
+        
+        // Try alternate API keys before marking as rate-limited
+        const alternateKeys = (provider as any).alternateApiKeys as string[] | undefined;
+        if (alternateKeys && alternateKeys.length > 0) {
+          let altSuccess = false;
+          for (let ki = 0; ki < alternateKeys.length; ki++) {
+            const altKey = alternateKeys[ki];
+            if (!altKey || altKey.trim() === "") continue;
+            console.log(`[PROVIDER] Trying alternate API key #${ki + 1} for ${provider.name}...`);
+            try {
+              const altProvider = { ...provider, apiKey: altKey };
+              const text = await withTimeout(
+                callUserProvider(altProvider, finalOpts),
+                callTimeoutMs,
+                `${provider.name}.generate (alt key #${ki + 1})`
+              );
+              assert(text !== "", "Provider response is empty");
+              if (text && text.length > 0) {
+                console.log(`[PROVIDER] Alternate key #${ki + 1} succeeded for ${provider.name}.`);
+                altSuccess = true;
+                return {
+                  text,
+                  provider: provider.name,
+                  latencyMs: Math.round(performance.now() - t0),
+                  tokensEstimate: estTokens(finalOpts.userPrompt + (finalOpts.systemPrompt ?? "")),
+                };
+              }
+            } catch (altErr: any) {
+              const altMsg = altErr?.message || String(altErr);
+              if (altErr?.statusCode === 429 || /429/.test(altMsg) || /rate.?limit/i.test(altMsg)) {
+                console.warn(`[PROVIDER] Alternate key #${ki + 1} also rate-limited for ${provider.name}.`);
+              } else {
+                console.warn(`[PROVIDER] Alternate key #${ki + 1} failed for ${provider.name}: ${altMsg}`);
+              }
+            }
+          }
+          if (!altSuccess) {
+            console.warn(`[PROVIDER] All ${alternateKeys.length} alternate keys exhausted for ${provider.name}. Marking as rate-limited.`);
+          }
+        }
+        
         markProvider429Cooldown(primaryCooldownId);
       } else if (e?.statusCode === 401 || /401/.test(eMsg) || /billing/i.test(eMsg) || /payment/i.test(eMsg) || /CreditsError/i.test(eMsg)) {
         markProvider401Cooldown(primaryCooldownId);
