@@ -163,12 +163,14 @@ describe("hasValidApiKey", () => {
   });
 
   it("should return false for providers with empty, null, undefined, or placeholder API keys", () => {
-    expect(hasValidApiKey({ type: "opencode" })).toBe(false);
-    expect(hasValidApiKey({ type: "opencode", apiKey: null })).toBe(false);
-    expect(hasValidApiKey({ type: "opencode", apiKey: "" })).toBe(false);
-    expect(hasValidApiKey({ type: "opencode", apiKey: "   " })).toBe(false);
-    expect(hasValidApiKey({ type: "opencode", apiKey: "undefined" })).toBe(false);
-    expect(hasValidApiKey({ type: "opencode", apiKey: "null" })).toBe(false);
+    // opencode and zencode are free providers — always valid
+    expect(hasValidApiKey({ type: "opencode" })).toBe(true);
+    expect(hasValidApiKey({ type: "zencode" })).toBe(true);
+    // Non-free providers with empty/invalid keys return false
+    expect(hasValidApiKey({ type: "gemini", apiKey: "" })).toBe(false);
+    expect(hasValidApiKey({ type: "mistral", apiKey: null })).toBe(false);
+    expect(hasValidApiKey({ type: "openrouter", apiKey: undefined })).toBe(false);
+    expect(hasValidApiKey({ type: "nvidia", apiKey: "undefined" })).toBe(false);
   });
 
   it("should return true for providers with a valid API key string", () => {
