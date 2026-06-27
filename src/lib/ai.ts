@@ -53,9 +53,9 @@ export function hasValidApiKey(p: any): boolean {
   if (!p) return false;
   // Free providers that don't require API keys
   if (p.type === "puter" || p.type === "local") return true;
-  if (p.type === "opencode" || p.type === "zencode") return true;
+  if (p.type === "opencode") return true; // OpenCode: explicitly free models (factory.ts L20)
   if (p.type === "custom" && p.authType === "none") return true;
-  // Providers that explicitly don't require an API key
+  // Providers that explicitly declare no API key needed
   if (p.requiresApiKey === false) return true;
   const key = p.apiKey;
   if (key === undefined || key === null) return false;

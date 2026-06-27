@@ -163,9 +163,10 @@ describe("hasValidApiKey", () => {
   });
 
   it("should return false for providers with empty, null, undefined, or placeholder API keys", () => {
-    // opencode and zencode are free providers — always valid
+    // opencode is a free provider — always valid
     expect(hasValidApiKey({ type: "opencode" })).toBe(true);
-    expect(hasValidApiKey({ type: "zencode" })).toBe(true);
+    // zencode requires API key
+    expect(hasValidApiKey({ type: "zencode" })).toBe(false);
     // Non-free providers with empty/invalid keys return false
     expect(hasValidApiKey({ type: "gemini", apiKey: "" })).toBe(false);
     expect(hasValidApiKey({ type: "mistral", apiKey: null })).toBe(false);
