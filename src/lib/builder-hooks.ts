@@ -11,7 +11,7 @@ import type { ResumeData, JobDescription } from "@/lib/types";
 // ============================================================================
 export function useAutoSave(resume: ResumeData | undefined, delay = 2000) {
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const lastSavedRef = useRef<number>(Date.now());
+  const [lastSaved, setLastSaved] = useState(Date.now());
 
   useEffect(() => {
     if (!resume?.id) return;
@@ -22,11 +22,11 @@ export function useAutoSave(resume: ResumeData | undefined, delay = 2000) {
         resumeData: resume,
         savedAt: Date.now(),
       }));
-      lastSavedRef.current = Date.now();
+      setLastSaved(Date.now());
     }, delay);
   }, [resume, delay]);
 
-  return { lastSaved: lastSavedRef.current };
+  return { lastSaved };
 }
 
 // ============================================================================

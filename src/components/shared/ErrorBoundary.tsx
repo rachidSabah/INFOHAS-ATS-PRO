@@ -22,12 +22,12 @@ export class ErrorBoundary extends Component<Props, State> {
     this.setState((s) => ({ crashCount: s.crashCount + 1 }));
   }
 
-  handleRestore = () => {
+  handleRestore = async () => {
     const saved = localStorage.getItem("resume-builder-autosave");
     if (saved) {
       try {
         const data = JSON.parse(saved);
-        const { useApp } = require("@/lib/store");
+        const { useApp } = await import("@/lib/store");
         const state = useApp.getState();
         if (data.resumeId && data.resumeData) {
           state.updateResume(data.resumeId, data.resumeData);
