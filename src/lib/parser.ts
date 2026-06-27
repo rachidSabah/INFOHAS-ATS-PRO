@@ -184,6 +184,12 @@ export function heuristicParser(text: string, fileName: string): ResumeData {
       continue;
     }
 
+    // Extract inline "Languages: English, French, Arabic" from skills section
+    if (currentSection === "skills" && /^\s*languages?\s*:?\s*:/i.test(line)) {
+      sectionLines.languages.push(line);
+      continue;
+    }
+
     sectionLines[currentSection].push(line);
   }
 
