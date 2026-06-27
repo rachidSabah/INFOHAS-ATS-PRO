@@ -71,8 +71,6 @@ export function Builder() {
     );
   }
 
-  const patch = (p: Partial<ResumeData>) => updateResume(resume.id, p);
-
   const addExperience = () => patch({
     experience: [...resume.experience, { id: uid("e"), company: "", title: "", startDate: "", endDate: "Present", bullets: [""] }],
   });
