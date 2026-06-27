@@ -1117,7 +1117,7 @@ export function cleanEducationLine(l: string): string {
   let clean = l;
   
   // 1. Remove date ranges matching DATE_RANGE_RE (extended to include ongoing)
-  const rangeRe = new RegExp("(?:(?:\\d{1,2}[\\/\\.]\\d{4})|(?:\\d{4})|(?:[A-Za-z]{3,9}\\.?\\s+\\d{4}))\\s*(?:[\\-–—]|\\bto\\b|–)\\s*(?:present|current|ongoing|(?:\\d{1,2}[\\/\\.]\\d{4})|(?:\\d{4})|(?:[A-Za-z]{3,9}\\.?\\s+\\d{4}))", "i");
+  const rangeRe = new RegExp("(?:(?:\\d{1,2}[\\/\\.]\\d{4})|(?:\\d{4})|(?:(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\\.?\\s+\\d{4}))\\s*(?:[\\-–—]|\\bto\\b|–)\\s*(?:present|current|ongoing|(?:\\d{1,2}[\\/\\.]\\d{4})|(?:\\d{4})|(?:(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\\.?\\s+\\d{4}))", "i");
   clean = clean.replace(rangeRe, "");
   
   // 2. Remove year ranges like "2021-2022" or "2021 - 2022"
@@ -1131,8 +1131,10 @@ export function cleanEducationLine(l: string): string {
   clean = clean.replace(/\b(?:present|ongoing|current)\b/gi, "");
   
   // 5. Clean up leading/trailing punctuation and double spaces
+  // NOTE: Pipe (|) is a valid field separator — only strip from line START, never from end.
+  // Stripping trailing pipe destroys "Diploma | INFOHAS" to just "Diploma".
   clean = clean.replace(new RegExp("^[:\\s,—–\\-|·•▪◦\\(\\)]+"), "");
-  clean = clean.replace(new RegExp("[:\\s,—–\\-|·•▪◦\\(\\)]+$"), "");
+  clean = clean.replace(new RegExp("[:\\s,—–\\-·•▪◦\\(\\)]+$"), "");
   clean = clean.replace(/\s+/g, " ").trim();
   
   return clean;
