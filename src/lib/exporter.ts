@@ -438,8 +438,8 @@ export async function exportResumePDF(resume: ResumeData, opts: PDFOptions = {},
     for (const ed of resume.education) {
       if (y > maxY - 20) break;
 
-      // Match DOCX format: Degree Institution (Field) | Location
-      const leftSide = `${ed.degree} ${ed.institution}${ed.field ? ` (${ed.field})` : ""}${ed.location ? ` | ${ed.location}` : ""}`;
+      // Match PROFESSIONAL EXPERIENCE format: Title — Company | Location
+      const leftSide = `${ed.degree}${ed.field ? ` in ${ed.field}` : ""} — ${ed.institution}${ed.location ? ` | ${ed.location}` : ""}`;
       const dateStr = ed.startDate || ed.endDate ? `${fmt(ed.startDate)} \u2013 ${fmt(ed.endDate)}` : "";
       const dateWidth = dateStr ? doc.getTextWidth(dateStr) : 0;
       const titleWidth = contentW - (dateWidth > 0 ? dateWidth + 3 : 0);
@@ -1300,7 +1300,7 @@ export async function exportResumeDOCX(resume: ResumeData, layout?: ResumeLayout
   if (resume.education.length) {
     addSection("EDUCATION");
     for (const ed of resume.education) {
-      const leftSide = `${ed.degree} ${ed.institution}${ed.field ? ` (${ed.field})` : ""}${ed.location ? ` | ${ed.location}` : ""}`;
+      const leftSide = `${ed.degree}${ed.field ? ` in ${ed.field}` : ""} — ${ed.institution}${ed.location ? ` | ${ed.location}` : ""}`;
       const dateStr = ed.startDate || ed.endDate ? `${fmtInfohasDate(ed.startDate)} – ${fmtInfohasDate(ed.endDate)}` : "";
 
       children.push(new Paragraph({
