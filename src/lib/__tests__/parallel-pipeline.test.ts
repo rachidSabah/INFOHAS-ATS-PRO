@@ -41,6 +41,8 @@ vi.mock("../ai", () => {
 
 import { runParallelOptimizer } from "../parallel-pipeline";
 import { globalEventBus } from "../agent-event-bus";
+import { clearSemanticCache } from "../semantic-cache";
+import { clearJobCache } from "../job-memory-cache";
 import { callAI } from "../ai";
 
 const MOCK_RESUME: ResumeData = {
@@ -96,6 +98,8 @@ describe("Parallel Optimizer", () => {
       isLocalEngine: false,
     });
     globalEventBus.clearHistory();
+    clearSemanticCache();
+    clearJobCache();
   });
 
   it("preserves all education entries from source", async () => {

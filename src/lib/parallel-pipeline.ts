@@ -19,6 +19,8 @@ import { assembleResume } from "./resume-assembler";
 import { ensureExperienceIds } from "./entity-lock";
 import { createSnapshot, compareSnapshots } from "./resume-snapshot-engine";
 import { globalEventBus } from "./agent-event-bus";
+import { getCachedOptimization, setCachedOptimization } from "./semantic-cache";
+import { recordProviderSuccess, recordProviderFailure } from "./provider-health-monitor";
 
 export interface ParallelOptimizerInput {
   resume: ResumeData;
@@ -50,6 +52,20 @@ export async function runParallelOptimizer(
   const { resume, jd, directiveConfig, optimizationPolicy } = input;
   const warnings: string[] = [];
   const errors: string[] = [];
+
+  // === Semantic Cache: skip optimization if identical input was already processed ===
+  const cached = getCachedOptimization(resume, jd, directiveConfig);
+  if (cached) {
+    warnings.push("Semantic cache hit — returning previous optimization result.");
+    globalEventBus.emit({
+      agent: "SemanticCache",
+      action: "cache_hit",
+      resumeId: resume.id,
+      success: true,
+      metadata: { charCount: cached.charCount, provider: cached.provider },
+    });
+    return cached;
+  }
   const idReadyResume = ensureExperienceIds(resume);
 
   // Take snapshot before optimization
@@ -150,7 +166,7 @@ export async function runParallelOptimizer(
     assembleResult.resume.summary.toLowerCase().includes(k.toLowerCase())
   ).length;
 
-  return {
+  const result: ParallelOptimizerResult = {
     resume: assembleResult.resume,
     provider: summaryResult.provider,
     charCount,
@@ -158,6 +174,11 @@ export async function runParallelOptimizer(
     warnings,
     errors,
   };
+
+  // Store in semantic cache for future identical requests
+  setCachedOptimization(resume, jd, result, directiveConfig);
+
+  return result;
 }
 
 // ============================================================================
@@ -199,6 +220,10 @@ Return ONLY JSON: {"summary": "...", "headline": "..."}`;
   const parsed = extractJSON<{ summary?: string; headline?: string }>(result.text);
   const summaryOut = parsed?.summary || "Summary optimization failed.";
   const headlineOut = parsed?.headline || "";
+
+  // Record provider health
+  const summaryDuration = Date.now() - startTime;
+  recordProviderSuccess(result.provider, summaryDuration, result.tokensEstimate ?? 0);
 
   globalEventBus.emit({
     agent: "SummaryAgent",
@@ -250,6 +275,9 @@ Return ONLY JSON: {"skills": [{"name": "...", "category": "..."}]}`;
 
   const parsed = extractJSON<{ skills?: { name: string; category: string }[] }>(result.text);
   const skills = parsed?.skills || existingSkills.map((s) => ({ name: s.name, category: s.category || "General" }));
+
+  // Record provider health
+  recordProviderSuccess(result.provider, Date.now() - startTime, result.tokensEstimate ?? 0);
 
   globalEventBus.emit({
     agent: "SkillsAgent",
@@ -305,6 +333,9 @@ Return ONLY JSON: {"experiences": [{"id": "exp_1", "bullets": ["...", "..."]}]}`
     id: e.id,
     bullets: e.bullets || [],
   })) || experiences.map((e) => ({ id: e.id, bullets: e.bullets }));
+
+  // Record provider health
+  recordProviderSuccess(result.provider, Date.now() - startTime, result.tokensEstimate ?? 0);
 
   globalEventBus.emit({
     agent: "ExperienceAgent",
