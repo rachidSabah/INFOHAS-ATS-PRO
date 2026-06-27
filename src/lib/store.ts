@@ -10,6 +10,7 @@ import type {
   AITask, AIWorkspacePatch, AIGitBranch, AIGitCommit, AIRollback,
   ResumeReviewReport, AIHealingIssue, AIHealingReport,
 } from "./types";
+import type { ResumeSnapshot } from "./resume-snapshot-engine";
 import type {
   PipelineProfile, AgentConfig, PromptVersion,
 } from "./pipeline-orchestration-types";
@@ -101,6 +102,8 @@ interface AppState {
   flags: FeatureFlags;
   optimizerDirective: OptimizerDirectiveConfig;
   aiDevSettings: AIDevAgentSettings;
+  /** Resume snapshots for rollback and diff comparison */
+  snapshots: ResumeSnapshot[];
   aiDevHistory: AIDevAgentHistory[];
   aiDevReports: AIDevReport[];
   // AI Workspace (Builder Agent)
@@ -452,6 +455,7 @@ export const useApp = create<AppState>()(
         } catch (syncErr) { console.warn("[store] AI Dev settings load failed:", syncErr instanceof Error ? syncErr.message : syncErr); }
         return SEED_AI_DEV_SETTINGS;
       })(),
+      snapshots: [],
       aiDevHistory: SEED_AI_DEV_HISTORY,
       aiDevReports: SEED_AI_DEV_REPORTS,
       aiTasks: SEED_AI_TASKS,
@@ -1340,6 +1344,36 @@ export const useApp = create<AppState>()(
         try { localStorage.setItem("resumeai-ai-dev-settings", JSON.stringify({ ...get().aiDevSettings, ...patch })); } catch {}
         cloudApiSafe(cloudApi.updateBranding as any)({ aiDevSettings: { ...get().aiDevSettings, ...patch } }).catch((e) => { console.warn("[store] Cloud sync failed:", e instanceof Error ? e.message : e); });
         useApp.getState().log({ actor: get().user?.email ?? "admin", action: "AI Dev Agent settings updated", category: "admin", details: Object.keys(patch).join(", "), severity: "info" });
+      },
+      addSnapshot: (snapshot) => {
+        set((s) => ({ snapshots: [...s.snapshots, snapshot] }));
+        try {
+          const existing = JSON.parse(localStorage.getItem("resumeai-snapshots") || "[]");
+          existing.push(snapshot);
+          if (existing.length > 50) existing.splice(0, existing.length - 50);
+          localStorage.setItem("resumeai-snapshots", JSON.stringify(existing));
+        } catch {}
+      },
+      restoreSnapshot: (snapshotId) => {
+        const snapshot = get().snapshots.find((s) => s.snapshotId === snapshotId);
+        if (!snapshot) return null;
+        return JSON.parse(JSON.stringify(snapshot.fullResume));
+      },
+      clearSnapshots: (resumeId) => {
+        set((s) => ({
+          snapshots: resumeId
+            ? s.snapshots.filter((sn) => sn.resumeId !== resumeId)
+            : [],
+        }));
+        try {
+          if (resumeId) {
+            const existing = JSON.parse(localStorage.getItem("resumeai-snapshots") || "[]");
+            localStorage.setItem("resumeai-snapshots",
+              JSON.stringify(existing.filter((s: ResumeSnapshot) => s.resumeId !== resumeId)));
+          } else {
+            localStorage.removeItem("resumeai-snapshots");
+          }
+        } catch {}
       },
       addAIDevHistory: (entry) => {
         const full: AIDevAgentHistory = {

@@ -33,6 +33,8 @@ import { extractBlueprint, type ResumeBlueprint } from "./resume-blueprint-agent
 import { extractTemplateBlueprint, type ResumeTemplateBlueprint, validateTemplatePreserved } from "./resume-template-blueprint-agent";
 import { runGuardianValidation, type GuardianVerdict } from "./resume-guardian-agent";
 import { createRetryEngine } from "./retry-engine";
+import { createSnapshot, compareSnapshots } from "./resume-snapshot-engine";
+import { globalEventBus } from "./agent-event-bus";
 
 export interface LockedPipelineResult {
   resume: ResumeData;
@@ -97,6 +99,18 @@ export async function runLockedPipeline(
   // Generate IDs for any experience/education entries that are missing them
   const idReadyResume = ensureExperienceIds(sourceResume);
   console.info(`[Locked Pipeline] ensureExperienceIds: ${sourceResume.experience.filter(e => !e.id).length} experiences + ${sourceResume.education.filter(e => !(e as any).id).length} education entries got IDs`);
+
+  // ========================================================================
+  // Create pre-optimization snapshot (for rollback + diff comparison)
+  // ========================================================================
+  const beforeSnapshot = createSnapshot(idReadyResume, "pre-optimization");
+  globalEventBus.emit({
+    agent: "LockedPipeline",
+    action: "snapshot_created",
+    resumeId: sourceResume.id,
+    success: true,
+    metadata: { snapshotId: beforeSnapshot.snapshotId },
+  });
 
   // Validate that every source experience has an ID
   for (let i = 0; i < idReadyResume.experience.length; i++) {
@@ -173,6 +187,15 @@ export async function runLockedPipeline(
       const assembleResult = assembleResume(idReadyResume, optimizerResult.output);
       warnings.push(...assembleResult.warnings);
       errors.push(...assembleResult.errors);
+
+      // Emit assembler event
+      globalEventBus.emit({
+        agent: "ResumeAssembler",
+        action: "assemble_complete",
+        resumeId: sourceResume.id,
+        success: true,
+        metadata: { matchedById: assembleResult.matchedById, unmatched: assembleResult.unmatched },
+      });
 
       // ========================================================================
       // Dynamic Page Balancing (A4 One-Page Fit)
@@ -354,7 +377,24 @@ export async function runLockedPipeline(
       persistDebugArtifacts(debugArtifacts);
 
       // ========================================================================
-      // Step 8: Return result
+      // Step 8: Compare snapshots for regression detection
+      // ========================================================================
+      const afterSnapshot = createSnapshot(assembleResult.resume, "post-optimization");
+      const snapshotDiff = compareSnapshots(beforeSnapshot, afterSnapshot);
+      if (snapshotDiff.hallucinations.length > 0) {
+        errors.push(...snapshotDiff.hallucinations);
+        globalEventBus.emit({
+          agent: "SnapshotEngine",
+          action: "hallucinations_detected",
+          resumeId: sourceResume.id,
+          success: false,
+          metadata: { count: snapshotDiff.hallucinations.length, details: snapshotDiff.hallucinations },
+        });
+      }
+      warnings.push(`Snapshot diff: ${snapshotDiff.summary}`);
+
+      // ========================================================================
+      // Step 9: Return result
       // ========================================================================
       const result: LockedPipelineResult = {
         resume: assembleResult.resume,
