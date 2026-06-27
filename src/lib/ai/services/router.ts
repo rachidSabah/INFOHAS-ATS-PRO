@@ -15,6 +15,8 @@ import type { ChatRequest, ChatResponse } from "../providers/interface";
 import { ProviderFactory, ProviderError } from "./factory";
 import { FallbackManager, toProviderConfig } from "./fallback";
 import { useApp, uid } from "../../store";
+import { modelRegistry } from "../../model-registry";
+import { rateLimitTracker } from "../../rate-limit-tracker";
 
 export interface RouterOptions {
   /** Override the default provider for this single call. */
@@ -23,6 +25,8 @@ export interface RouterOptions {
   singleProvider?: boolean;
   /** Mark this request as a "test" rather than "chat" in logs. */
   requestType?: AIProviderLog["requestType"];
+  /** Agent task for capability-weighted model selection (summary, skills, etc.) */
+  agentTask?: string;
 }
 
 export class ProviderRouter {
@@ -71,10 +75,20 @@ export class ProviderRouter {
 
     const errors: string[] = [];
     for (const provider of chain) {
+      // Skip rate-limited providers
+      if (rateLimitTracker.isRateLimited(provider.id)) {
+        const cooldownMs = rateLimitTracker.getCooldownRemainingMs(provider.id);
+        errors.push(`${provider.name}: rate-limited (${Math.ceil(cooldownMs / 1000)}s remaining)`);
+        continue;
+      }
       try {
         return await this.tryProvider(provider, req, settings, opts.requestType);
       } catch (e: any) {
         errors.push(`${provider.name}: ${e?.message ?? e}`);
+        // Mark 429 in rate-limit tracker for future calls
+        if (e?.statusCode === 429 || /429/.test(e?.message ?? "") || /rate.?limit/i.test(e?.message ?? "")) {
+          rateLimitTracker.record429(provider.id, provider.modelName ?? "default");
+        }
         // Continue to next provider in chain
       }
     }
@@ -98,6 +112,8 @@ export class ProviderRouter {
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
       try {
         const res = await adapter.chat(req, config);
+        // Record success in rate-limit tracker (resets consecutive 429 count)
+        rateLimitTracker.recordSuccess(provider.id, res.model || config.modelName || "default");
         // Log success
         this.log({
           providerId: provider.id,
