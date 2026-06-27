@@ -10,9 +10,10 @@ import { Textarea } from "@/components/ui/textarea";
 import { Badge, Icon } from "@/components/shared";
 import { useApp, uid } from "@/lib/store";
 import { TEMPLATES } from "@/lib/brand";
-import { A4Preview } from "@/components/resume/A4Preview";
-import { exportResumePDF, exportResumeDOCX, exportResumeTXT, exportResumeDOC } from "@/lib/exporter";
 import { blankResume, parseResumeFile } from "@/lib/parser";
+import { exportResumePDF, exportResumeDOCX, exportResumeTXT, exportResumeDOC } from "@/lib/exporter";
+import { A4Preview } from "@/components/resume/A4Preview";
+import { ATSMatchMeter } from "@/components/optimizer/ATSMatchMeter";
 import { toast } from "sonner";
 import type { ResumeData, ResumeExperience, ResumeEducation, ResumeSkill, ResumeTemplate } from "@/lib/types";
 
@@ -26,6 +27,7 @@ export function Builder() {
   const setActiveResume = useApp((s) => s.setActiveResume);
   const incUsage = useApp((s) => s.incUsage);
   const log = useApp((s) => s.log);
+  const jobDescriptions = useApp((s) => s.jobDescriptions);
 
   const resume = useMemo(() => resumes.find((r) => r.id === activeId) ?? resumes[0], [resumes, activeId]);
 
@@ -440,6 +442,11 @@ export function Builder() {
         {/* Preview */}
         <div className="lg:col-span-5">
           <div className="lg:sticky lg:top-20 space-y-3">
+            {/* ATS Match Meter — real-time keyword scoring */}
+            <ATSMatchMeter
+              resume={resume}
+              jd={jobDescriptions.length > 0 ? jobDescriptions[jobDescriptions.length - 1] : null}
+            />
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <Icon name="Eye" className="w-4 h-4 text-brand" />
