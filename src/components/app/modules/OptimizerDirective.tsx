@@ -12,6 +12,7 @@ import { useApp } from "@/lib/store";
 import { SEED_OPTIMIZER_DIRECTIVE } from "@/lib/mock-data";
 import { toast } from "sonner";
 import type { OptimizerDirectiveConfig, AgentDirectives } from "@/lib/types";
+import { BUILT_IN_PROFILES, applyProfileToConfig } from "@/lib/directive-profiles";
 
 export function OptimizerDirective() {
   const config = useApp((s) => s.optimizerDirective);
@@ -80,6 +81,42 @@ export function OptimizerDirective() {
           <span className="text-sm text-amber-800 dark:text-amber-200">You have unsaved changes. Click "Save directive" to apply them.</span>
         </div>
       )}
+
+      {/* DIRECTIVE PROFILE SELECTOR */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-lg flex items-center gap-2"><Icon name="Layers" className="w-4 h-4 text-brand" /> Directive Profile</CardTitle>
+          <CardDescription>
+            Select a pre-built directive profile to instantly configure all optimization parameters for a specific use case. 
+            This is the recommended way to tune optimization behavior — no manual settings required.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
+            {Object.values(BUILT_IN_PROFILES).map((profile) => (
+              <button
+                key={profile.id}
+                onClick={() => {
+                  const merged = applyProfileToConfig(draft, profile);
+                  if (merged) {
+                    setDraft(merged);
+                    setDirty(true);
+                    toast.info(`Profile "${profile.name}" applied — review and save changes.`);
+                  }
+                }}
+                className="relative flex flex-col items-start p-3 rounded-lg border border-input bg-background hover:bg-secondary/40 hover:border-brand/40 transition-all text-left"
+              >
+                <span className="text-sm font-semibold">{profile.name}</span>
+                <span className="text-[10px] text-muted-foreground mt-0.5">{profile.tags.join(", ")}</span>
+                <span className="text-xs text-muted-foreground mt-1 line-clamp-2">{profile.description}</span>
+              </button>
+            ))}
+          </div>
+          <p className="text-xs text-muted-foreground">
+            Selecting a profile modifies all applicable fields above. You can then fine-tune individual settings before saving.
+          </p>
+        </CardContent>
+      </Card>
 
       {/* PAGE FORMAT */}
       <Card>

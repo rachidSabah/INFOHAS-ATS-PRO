@@ -21,6 +21,7 @@ import { validateResumeContent } from "../ai-error-filter";
 import { detectLeaks, isClean } from "../leak-patterns";
 import { isForbiddenSection } from "../keyword-banks";
 import { exportResumePDF } from "../exporter";
+import { formatPolicyForPrompt, type OptimizationPolicy, checkPolicyCompliance } from "../directive-policy";
 
 // ============================================================================
 // Types
@@ -33,6 +34,8 @@ export interface QAResult extends PipelineResult {
   exportQuality?: ExportQualityResult;
   /** Professional tone check — detects analysis artifacts in resume content */
   professionalTone?: ProfessionalToneResult;
+  /** Directive compliance score — how well the output follows the OptimizationPolicy */
+  directiveCompliance?: DirectiveComplianceResult;
   /** Overall confidence score (0-100) — used by the Reflection Agent trigger */
   confidence: number;
   /** Whether the Reflection Agent should be triggered */
@@ -79,6 +82,12 @@ export interface ProfessionalToneResult {
   explanation: string;
 }
 
+export interface DirectiveComplianceResult {
+  complianceScore: number;
+  passed: boolean;
+  checks: { check: string; passed: boolean; detail?: string }[];
+}
+
 // ============================================================================
 // Main entry point
 // ============================================================================
@@ -97,7 +106,8 @@ export async function runQA(
   jd?: JobDescription | null,
   ji?: JobIntelligence | null,
   originalResume?: ResumeData | null,
-  options?: { checkExport?: boolean }
+  options?: { checkExport?: boolean },
+  optimizationPolicy?: OptimizationPolicy | null,
 ): Promise<QAResult> {
   // === Run the existing validation pipeline (7 checks) ===
   const basePipeline = runValidationPipeline(optimizedResume, jd ?? null, ji ?? null);
@@ -124,6 +134,17 @@ export async function runQA(
 
   // === Professional tone (new — wires in isProfessionalResume + leak detection) ===
   const professionalTone = checkProfessionalTone(optimizedResume);
+
+  // === Directive compliance (new — checks output against OptimizationPolicy) ===
+  const directiveCompliance: DirectiveComplianceResult | undefined = optimizationPolicy && originalResume
+    ? (() => {
+        const { complianceScore, checks } = checkPolicyCompliance(optimizedResume, originalResume, optimizationPolicy);
+        const passed = complianceScore >= 90;
+        console.info(`[QA] Directive compliance score: ${complianceScore}/100${passed ? "" : " (BELOW THRESHOLD)"}`);
+        if (!passed) console.warn("[QA] Policy violations:", checks.filter((c) => !c.passed).map((c) => `  - ${c.check}: ${c.detail ?? "failed"}`).join("\n"));
+        return { complianceScore, passed, checks };
+      })()
+    : undefined;
 
   // === Export quality (new — optional, slow because it renders a PDF) ===
   const exportQuality = options?.checkExport
@@ -173,6 +194,16 @@ export async function runQA(
     });
   }
 
+  if (directiveCompliance) {
+    checks.push({
+      name: "Directive Compliance",
+      passed: directiveCompliance.passed,
+      score: directiveCompliance.complianceScore,
+      details: `Compliance score: ${directiveCompliance.complianceScore}/100 (threshold: 90). ${directiveCompliance.checks.filter((c) => !c.passed).length} check(s) failed.`,
+      errors: directiveCompliance.checks.filter((c) => !c.passed).map((c) => c.detail ?? `${c.check} failed`),
+    });
+  }
+
   // === Compute overall confidence (0-100) ===
   // Confidence is the average of all check scores, weighted by importance
   const weights: Record<string, number> = {
@@ -186,6 +217,7 @@ export async function runQA(
     "Factual Consistency": 2.5,
     "Professional Tone": 2,
     "Export Quality": 1.5,
+    "Directive Compliance": 2.5,
   };
 
   let totalWeight = 0;
@@ -213,6 +245,7 @@ export async function runQA(
     factualConsistency,
     exportQuality,
     professionalTone,
+    directiveCompliance,
     confidence,
     shouldReflect,
   };

@@ -41,6 +41,7 @@ import { aviationOptimize, type AviationOptimizeResult } from "../ats-directives
 import type { AppSettings } from "../ats-directives";
 import { analyzeATS, type ATSAnalysisResult } from "./ats-analysis";
 import { runQA, type QAResult } from "./qa-agent";
+import { buildOptimizationPolicy, formatPolicyForPrompt, type OptimizationPolicy } from "../directive-policy";
 import { analyzeCompanyIntelligence, analyzeSkillGap, type CompanyIntelligence, type SkillGapIntelligence } from "./company-skill-agents";
 import { uid, useApp } from "../store";
 import type { ResumeSkill } from "../types";
@@ -819,8 +820,7 @@ async function _runOptimizationPipelineInner(input: PipelineInput, watchdog: Opt
     // Build policy from directive config — single source of truth for all agents
     let optimizationPolicy: string | null = null;
     try {
-      const { buildOptimizationPolicy, formatPolicyForPrompt } = await import("../directive-policy");
-      const policy = buildOptimizationPolicy(directiveConfig, resume);
+      const policy = buildOptimizationPolicy((directiveConfig as any) ?? null);
       optimizationPolicy = formatPolicyForPrompt(policy);
     } catch (policyErr) {
       console.warn("[Orchestrator] Failed to build optimization policy:", policyErr instanceof Error ? policyErr.message : policyErr);
@@ -1299,7 +1299,8 @@ Bridging Strategy: ${result.skillGap.bridgingStrategy}`);
       jd,
       result.jobIntelligence,
       resume, // original — for factual consistency check
-      { checkExport }
+      { checkExport },
+      null as import("../directive-policy").OptimizationPolicy | null,
     );
 
     step.completedAt = new Date().toISOString();
