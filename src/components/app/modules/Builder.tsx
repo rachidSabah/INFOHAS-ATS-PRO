@@ -11,6 +11,8 @@ import { Badge, Icon } from "@/components/shared";
 import { useApp, uid } from "@/lib/store";
 import { useAutoSave, useUndoRedo, useLiveATSScore } from "@/lib/builder-hooks";
 import { TEMPLATES } from "@/lib/brand";
+import { SmartTextarea } from "@/components/shared/SmartTextarea";
+import { useSmartSuggestions, useSpellCheck, useSectionCompleteness } from "@/lib/builder-extras";
 import { blankResume, parseResumeFile } from "@/lib/parser";
 import { exportResumePDF, exportResumeDOCX, exportResumeTXT, exportResumeDOC } from "@/lib/exporter";
 import { A4Preview } from "@/components/resume/A4Preview";
@@ -35,6 +37,7 @@ export function Builder() {
   const undoRedo = useUndoRedo(resume);
   const activeJD = jobDescriptions.find(j => j.id === useApp.getState().activeJobId);
   const atsScore = useLiveATSScore(resume, activeJD);
+  const sectionScores = useSectionCompleteness(resume);
 
   const patch = (p: Partial<ResumeData>) => updateResume(resume.id, p);
   const [tab, setTab] = useState<"basics" | "experience" | "education" | "skills" | "extra" | "design">("basics");
@@ -238,6 +241,17 @@ export function Builder() {
         {/* Editor */}
         <div className="lg:col-span-7 space-y-4">
           {/* Tab nav — horizontal scroll on mobile, full width on desktop */}
+          {/* Section Completeness Scores */}
+          <div className="flex gap-2 overflow-x-auto mb-1">
+            {sectionScores.map((s) => (
+              <div key={s.label} className="flex items-center gap-1.5 px-2 py-1 rounded-md bg-secondary/50 text-xs shrink-0" title={s.tips.join('
+')}>
+                <Icon name={s.icon} className="w-3 h-3 text-muted-foreground" />
+                <span className="font-medium">{s.label}</span>
+                <span className={s.score >= s.max ? "text-emerald-500" : s.score > 0 ? "text-amber-500" : "text-muted-foreground"}>{s.score}/{s.max}</span>
+              </div>
+            ))}
+          </div>
           <div className="flex gap-1 p-1 bg-secondary rounded-lg overflow-x-auto scrollbar-thin">
             {[
               ["basics", "Basics", "User"],
@@ -273,13 +287,16 @@ export function Builder() {
                     <Field label="GitHub"><Input value={resume.contact.github ?? ""} onChange={(e) => patch({ contact: { ...resume.contact, github: e.target.value } })} placeholder="github.com/..." /></Field>
                   </div>
                   <Field label="Professional summary">
-                    <Textarea
+                    <SmartTextarea
                       value={resume.summary ?? ""}
-                      onChange={(e) => patch({ summary: e.target.value })}
+                      onChange={(v) => patch({ summary: v })}
+                      section="summary"
+                      resume={resume}
+                      jobDescriptionText={activeJD?.rawText}
                       rows={4}
                       placeholder="2-3 lines highlighting years of experience, core expertise, and a measurable outcome."
                     />
-                    <p className="text-xs text-muted-foreground mt-1">{(resume.summary ?? "").length} chars — aim for under 500.</p>
+                    <p className="text-xs text-muted-foreground mt-1">{(resume.summary ?? "").length} chars | {((resume.summary ?? "").split(/\s+/).filter(Boolean).length)} words — aim for 80-120.</p>
                   </Field>
                 </div>
               )}
