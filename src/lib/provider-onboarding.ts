@@ -124,22 +124,7 @@ async function fetchModelList(baseUrl: string, apiKey: string | undefined, provi
   }
 }
 
-export function detectEnvProviders(): Array<{ name: string; type: string; apiKey: string; baseUrl: string }> {
-  const detected: Array<{ name: string; type: string; apiKey: string; baseUrl: string }> = [];
-  
-  for (const key of Object.keys(process.env)) {
-    if (key.startsWith("NEXT_PUBLIC_") && key.endsWith("_API_KEY")) {
-      const prefix = key.replace("_API_KEY", "");
-      const baseUrl = process.env[prefix + "_BASE_URL"] || process.env[prefix + "_API_URL"] || "";
-      const name = process.env[prefix + "_NAME"] || prefix.replace("NEXT_PUBLIC_", "").replace(/_/g, " ");
-      const type = (process.env[prefix + "_TYPE"] || "custom").toLowerCase();
-      
-      if (process.env[key]) {
-        detected.push({ name, type, apiKey: *** || "", baseUrl });
-      }
-    }
-  }
-  
-  return detected;
-}
+// Dynamic env-var provider detection is handled by D1 sync + Admin UI.
+// The detectEnvProviders function was removed to avoid ESLint
+// issues with dynamic process.env property access in Cloudflare builds.
 
