@@ -37,7 +37,7 @@ export function Builder() {
   const atsScore = useLiveATSScore(resume, activeJD);
 
   const patch = (p: Partial<ResumeData>) => updateResume(resume.id, p);
-  const [tab, setTab] = useState<\"basics\" | \"experience\" | \"education\" | \"skills\" | \"extra\" | \"design\">(\"basics\");
+  const [tab, setTab] = useState<"basics" | "experience" | "education" | "skills" | "extra" | "design">("basics");
   const [scale, setScale] = useState(0.6);
   const [exporting, setExporting] = useState(false);
   const [importing, setImporting] = useState(false);
