@@ -9,6 +9,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge, Icon } from "@/components/shared";
 import { useApp, uid } from "@/lib/store";
+import { useAutoSave, useUndoRedo, useLiveATSScore } from "@/lib/builder-hooks";
 import { TEMPLATES } from "@/lib/brand";
 import { blankResume, parseResumeFile } from "@/lib/parser";
 import { exportResumePDF, exportResumeDOCX, exportResumeTXT, exportResumeDOC } from "@/lib/exporter";
@@ -28,6 +29,10 @@ export function Builder() {
   const incUsage = useApp((s) => s.incUsage);
   const log = useApp((s) => s.log);
   const jobDescriptions = useApp((s) => s.jobDescriptions);
+  const autoSave = useAutoSave(resume);
+  const undoRedo = useUndoRedo(resume);
+  const activeJD = jobDescriptions.find(j => j.id === useApp.getState().activeJobId);
+  const atsScore = useLiveATSScore(resume, activeJD);
 
   const resume = useMemo(() => resumes.find((r) => r.id === activeId) ?? resumes[0], [resumes, activeId]);
 
