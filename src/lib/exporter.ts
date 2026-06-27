@@ -176,7 +176,7 @@ function buildResumeHtml(r: ResumeData, L: ResumeLayoutModel): string {
   }
 
   // Contact
-  const contactParts = [r.contact.email, r.contact.phone, r.contact.location, r.contact.linkedin, r.contact.github, r.contact.website].filter(Boolean);
+  const contactParts = [r.contact.email, r.contact.phone, r.contact.location, r.contact.linkedin, r.contact.github, r.contact.website].filter((x): x is string => !!x);
   if (contactParts.length) {
     lines.push(`<div class="contact">${contactParts.map(c => esc(c)).join("  |  ")}</div>`);
   }
@@ -285,46 +285,286 @@ export async function exportResumePDF(resume: ResumeData, opts: PDFOptions = {},
     return exportInfohasProPDF(resume, opts, L);
   }
 
-  // Build the HTML using the DOCX-matching HTML builder
-  const html = buildResumeHtml(resume, L);
-
   const doc = new jsPDF({ unit: "mm", format: "a4", orientation: "portrait" });
+  const pageH = A4.h;
 
-  // Content width = A4 width minus both margins (same as HTML builder)
-  const cw = 210 - L.marginLeftMm - L.marginRightMm;
+  const left = L.marginLeftMm;
+  const right = A4.w - L.marginRightMm;
+  const contentW = right - left;
+  const maxY = pageH - L.marginBottomMm;
 
-  try {
-    await doc.html(html, {
-      callback: () => {},
-      html2canvas: {
-        scale: 1.5,
-        useCORS: false,
-        letterRendering: true,
-        logging: false,
-      },
-      // 'slice' properly slices content at page boundaries
-      autoPaging: 'slice',
-      x: 0,
-      y: 0,
-      width: cw,
-      // Match viewport width to CSS body width in %px@96dpi
-      windowWidth: Math.round(cw / 25.4 * 96),
-    });
+  const nameRgb = hexToRgb(L.nameColor);
+  const bodyRgb = hexToRgb(L.bodyTextColor);
+  const sectionRgb = hexToRgb(L.sectionTitleColor);
 
-    const pages = doc.getNumberOfPages();
-    let result: { ok: boolean; pages: number; error?: string } = { ok: true, pages };
+  let y = L.marginTopMm;
 
-    if (opts.enforceOnePage !== false && pages > 1) {
-      result = { ok: true, pages, error: `Resume fits on ${pages} pages. Tightening spacing.` };
+  const textY = (sizePt: number) => y + ptToMm(sizePt) * 0.7;
+  const advanceLine = () => { y += L.lineHeightMm; };
+  const advanceMm = (mm: number) => { y += mm; };
+
+  // Section header
+  const sectionHeader = (title: string) => {
+    doc.setFont("times", "bold");
+    doc.setFontSize(L.sectionTitleSizePt);
+    doc.setTextColor(sectionRgb[0], sectionRgb[1], sectionRgb[2]);
+    doc.text(title.toUpperCase(), left, textY(L.sectionTitleSizePt));
+    advanceMm(ptToMm(L.sectionTitleSizePt) * 0.6 + 0.3);
+    // Underline
+    doc.setDrawColor(sectionRgb[0], sectionRgb[1], sectionRgb[2]);
+    doc.setLineWidth(0.15);
+    doc.line(left, y, right, y);
+    advanceMm(1.2);
+  };
+
+  // Bullet text with hanging indent
+  const drawBullet = (text: string, width: number) => {
+    const textIndent = L.bulletIndentMm;
+    const textWidth = width - textIndent;
+    const textLines = doc.splitTextToSize(text, textWidth);
+    for (let i = 0; i < textLines.length; i++) {
+      if (y > maxY - 10) break;
+      if (i === 0) {
+        doc.text("•", left, textY(L.bodyFontSizePt));
+      }
+      doc.text(textLines[i], left + textIndent, textY(L.bodyFontSizePt));
+      advanceLine();
     }
+  };
 
-    const fname = (resume.name || "resume").replace(/\s+/g, "_") + "_resume.pdf";
-    doc.save(fname);
-    return result;
-  } catch (err) {
-    console.error("[exporter] HTML-to-PDF rendering failed:", err);
-    return { ok: false, pages: 0, error: `PDF rendering error: ${err instanceof Error ? err.message : String(err)}` };
+  // Wrapped block of text (no bullet)
+  const drawWrapped = (text: string, width: number) => {
+    const lines = doc.splitTextToSize(text, width);
+    for (const line of lines) {
+      if (y > maxY - 10) break;
+      doc.text(line, left, textY(L.bodyFontSizePt));
+      advanceLine();
+    }
+  };
+
+  // ===== DATE FORMAT =====
+  const fmt = (s?: string) => {
+    if (!s) return "";
+    if (/present|ongoing/i.test(s)) return "Present";
+    const m = s.match(/^(\d{4})-(\d{2})$/);
+    if (m) return m[1];
+    if (/^\d{4}$/.test(s)) return s;
+    return s;
+  };
+
+  // ===== HEADER =====
+  // Name — bold, uppercase, section color
+  doc.setFont("times", "bold");
+  doc.setFontSize(L.nameSizePt);
+  doc.setTextColor(nameRgb[0], nameRgb[1], nameRgb[2]);
+  doc.text((resume.name || "YOUR NAME").toUpperCase(), left, textY(L.nameSizePt));
+  advanceMm(ptToMm(L.nameSizePt) * 0.8 + 0.8);
+
+  // Headline — body color
+  doc.setFont("times", "normal");
+  doc.setFontSize(L.bodyFontSizePt);
+  doc.setTextColor(bodyRgb[0], bodyRgb[1], bodyRgb[2]);
+  if (resume.headline) {
+    doc.text(resume.headline, left, textY(L.bodyFontSizePt));
+    advanceLine();
   }
+
+  // Contact — email | phone | location ...
+  const contactParts = [resume.contact.email, resume.contact.phone, resume.contact.location, resume.contact.linkedin, resume.contact.github, resume.contact.website].filter(Boolean);
+  if (contactParts.length) {
+    doc.setTextColor(100, 100, 100);
+    doc.text(contactParts.join("  |  "), left, textY(L.bodyFontSizePt));
+    advanceLine();
+  }
+
+  // Thin separator
+  advanceMm(0.3);
+  doc.setDrawColor(180, 180, 180);
+  doc.setLineWidth(0.15);
+  doc.line(left, y, right, y);
+  advanceMm(1.5);
+
+  // ===== PROFESSIONAL SUMMARY =====
+  if (resume.summary) {
+    sectionHeader("PROFESSIONAL SUMMARY");
+    doc.setFont("times", "normal");
+    doc.setTextColor(bodyRgb[0], bodyRgb[1], bodyRgb[2]);
+    drawWrapped(resume.summary, contentW);
+    advanceMm(1);
+  }
+
+  // ===== PROFESSIONAL EXPERIENCE =====
+  if (resume.experience.length) {
+    sectionHeader("PROFESSIONAL EXPERIENCE");
+    for (const e of resume.experience) {
+      if (y > maxY - 20) break;
+
+      const dateStr = e.startDate || e.endDate ? `${fmt(e.startDate)} \u2013 ${fmt(e.endDate)}` : "";
+      const dateWidth = dateStr ? doc.getTextWidth(dateStr) : 0;
+      const titleWidth = contentW - (dateWidth > 0 ? dateWidth + 3 : 0);
+      const leftSide = `${e.title}${e.company ? ` \u2014 ${e.company}` : ""}`;
+      const titleLines = doc.splitTextToSize(leftSide, titleWidth);
+
+      // Date right-aligned
+      doc.setFont("times", "bold");
+      doc.setFontSize(L.bodyFontSizePt);
+      doc.setTextColor(bodyRgb[0], bodyRgb[1], bodyRgb[2]);
+      if (dateStr) {
+        doc.setFont("times", "bold");
+        doc.text(dateStr, right, textY(L.bodyFontSizePt), { align: "right" });
+      }
+
+      // Title lines
+      doc.setFont("times", "bold");
+      for (let i = 0; i < titleLines.length; i++) {
+        doc.text(titleLines[i], left, textY(L.bodyFontSizePt));
+        advanceLine();
+      }
+
+      // Bullets
+      doc.setFont("times", "normal");
+      for (const b of e.bullets) {
+        if (y > maxY - 10) break;
+        drawBullet(b, contentW);
+      }
+      advanceMm(0.3);
+    }
+    advanceMm(0.5);
+  }
+
+  // ===== EDUCATION =====
+  if (resume.education.length) {
+    sectionHeader("EDUCATION");
+    for (const ed of resume.education) {
+      if (y > maxY - 20) break;
+
+      const dateStr = ed.startDate || ed.endDate ? `${fmt(ed.startDate)} \u2013 ${fmt(ed.endDate)}` : "";
+      const dateWidth = dateStr ? doc.getTextWidth(dateStr) : 0;
+      const eduWidth = contentW - (dateWidth > 0 ? dateWidth + 3 : 0);
+      const eduStr = `${ed.degree} ${ed.institution}${ed.location ? ` | ${ed.location}` : ""}`;
+      const eduLines = doc.splitTextToSize(eduStr, eduWidth);
+
+      doc.setFont("times", "bold");
+      doc.setFontSize(L.bodyFontSizePt);
+      doc.setTextColor(bodyRgb[0], bodyRgb[1], bodyRgb[2]);
+      if (dateStr) {
+        doc.text(dateStr, right, textY(L.bodyFontSizePt), { align: "right" });
+      }
+      for (const line of eduLines) {
+        doc.text(line, left, textY(L.bodyFontSizePt));
+        advanceLine();
+      }
+
+      // Field
+      if (ed.field) {
+        doc.setFont("times", "normal");
+        doc.setFontSize(L.bodyFontSizePt);
+        doc.setTextColor(bodyRgb[0], bodyRgb[1], bodyRgb[2]);
+        doc.text(ed.field, left, textY(L.bodyFontSizePt));
+        advanceLine();
+      }
+
+      // Education highlights
+      if (ed.highlights?.length) {
+        doc.setFont("times", "normal");
+        for (const h of ed.highlights) {
+          if (y > maxY - 10) break;
+          drawBullet(h, contentW);
+        }
+      }
+      advanceMm(0.2);
+    }
+    advanceMm(0.5);
+  }
+
+  // ===== CORE COMPETENCIES & SKILLS =====
+  if (resume.skills.length) {
+    sectionHeader("CORE COMPETENCIES & SKILLS");
+    doc.setFont("times", "normal");
+    doc.setFontSize(L.bodyFontSizePt);
+    doc.setTextColor(bodyRgb[0], bodyRgb[1], bodyRgb[2]);
+    const categorized = new Map<string, string[]>();
+    for (const s of resume.skills) {
+      const cat = s.category?.trim() || "General";
+      if (!categorized.has(cat)) categorized.set(cat, []);
+      categorized.get(cat)!.push(s.name);
+    }
+    for (const [cat, skills] of categorized) {
+      if (y > maxY - 10) break;
+      const line = `${cat}: ${skills.join(", ")}`;
+      const textWidth = contentW - L.bulletIndentMm;
+      const lines = doc.splitTextToSize(line, textWidth);
+      for (let i = 0; i < lines.length; i++) {
+        if (y > maxY - 10) break;
+        if (i === 0) {
+          doc.text(`${cat}:`, left, textY(L.bodyFontSizePt));
+          const catW = doc.getTextWidth(`${cat}: `);
+          doc.text(skills.join(", "), left + catW, textY(L.bodyFontSizePt));
+        } else {
+          doc.text(lines[i], left + L.bulletIndentMm, textY(L.bodyFontSizePt));
+        }
+        advanceLine();
+      }
+    }
+    advanceMm(0.5);
+  }
+
+  // ===== PROJECTS =====
+  if (resume.projects?.length) {
+    sectionHeader("PROJECTS");
+    doc.setFont("times", "bold");
+    doc.setFontSize(L.bodyFontSizePt);
+    doc.setTextColor(bodyRgb[0], bodyRgb[1], bodyRgb[2]);
+    for (const p of resume.projects.slice(0, 2)) {
+      if (y > maxY - 10) break;
+      doc.text(p.name, left, textY(L.bodyFontSizePt));
+      advanceLine();
+      if (p.description) {
+        doc.setFont("times", "normal");
+        drawWrapped(p.description, contentW);
+        doc.setFont("times", "bold");
+      }
+      advanceMm(0.3);
+    }
+    advanceMm(0.5);
+  }
+
+  // ===== CERTIFICATIONS =====
+  if (resume.certifications?.length) {
+    sectionHeader("CERTIFICATIONS");
+    doc.setFont("times", "normal");
+    doc.setFontSize(L.bodyFontSizePt);
+    doc.setTextColor(bodyRgb[0], bodyRgb[1], bodyRgb[2]);
+    for (const c of resume.certifications.slice(0, 4)) {
+      if (y > maxY - 10) break;
+      const cStr = `${c.name}${c.issuer ? ` \u2014 ${c.issuer}` : ""}${c.date ? ` (${fmt(c.date)})` : ""}`;
+      drawBullet(cStr, contentW);
+    }
+  }
+
+  // ===== LANGUAGES =====
+  if (resume.languages.length) {
+    sectionHeader("LANGUAGES");
+    doc.setFont("times", "normal");
+    doc.setFontSize(L.bodyFontSizePt);
+    doc.setTextColor(bodyRgb[0], bodyRgb[1], bodyRgb[2]);
+    for (const l of resume.languages) {
+      if (y > maxY - 10) break;
+      const note = (l as any).note ? ` (${(l as any).note})` : "";
+      doc.text(`${l.name}: ${l.proficiency}${note}`, left, textY(L.bodyFontSizePt));
+      advanceLine();
+    }
+  }
+
+  // ===== SAVE =====
+  const pages = doc.getNumberOfPages();
+  const fname = (resume.name || "resume").replace(/\s+/g, "_") + "_resume.pdf";
+  doc.save(fname);
+
+  if (pages > 1 && opts.enforceOnePage !== false) {
+    return { ok: false, pages, error: `Resume is ${pages} pages — content too long for one A4 page.` };
+  }
+  return { ok: true, pages };
 }
 
 // ============================================================================
