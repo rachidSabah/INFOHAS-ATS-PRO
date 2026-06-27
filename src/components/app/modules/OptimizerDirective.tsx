@@ -772,46 +772,17 @@ ${c.enforceOnePage ? `If content exceeds one page, apply IN THIS ORDER:
 4. Reduce spacing
 5. Reduce font size to MINIMUM ${c.minFontSizePt}pt
 6. Merge similar skills
-NEVER create page two. assert(pdf.pages === 1).` : "Multi-page output allowed if content exceeds one page."}`;
+NEVER create page two. assert(pdf.pages === 1).` : "Multi-page output allowed if content exceeds one page."}
+
 ${c.agentDirectives ? `
 ═══════════════════════════════════════════════════════════════
-AGENT RULES (MANDATORY — every agent must obey)
+AGENT RULES (MANDATORY)
 ═══════════════════════════════════════════════════════════════
-**Summary Agent:**
-- Write ${c.summaryMinWords}-${c.summaryMaxWords} words, single paragraph, no bullets
-- ATS aggressiveness: ${c.agentDirectives.summary.atsAggressiveness}/100
-- NEVER hallucinate facts, employers, locations, or education
-- NEVER use parentheses (they break ATS parsers)
-- NEVER duplicate sentences
-
-**Skills Agent:**
-- Maximum ${c.skillsMaxGroups} skill category groups
-- NEVER render "Targeted Keywords" as a skill section
-- NEVER insert company names as skills
-- NEVER insert location names as skills
-- ONLY use real professional skills
-- Format: "Category: skill1, skill2, skill3"
-
-**Experience Agent:**
-${c.agentDirectives.experience.rewriteBulletsOnly ? '- Rewrite bullets ONLY. NEVER modify job title, company, dates, or location' : ''}
-- Preserve ALL original entries in chronological order
-- Format: Role | Company | Date (on one line)
-- NEVER generate new companies, dates, or employers
-
-**Education Agent:**
-- Format: Diploma | School | Date (on one line)
-- NEVER remove school names or change dates
-- Format only — no additions or inferences
-
-**Languages Agent:**
-- Preserve ALL original languages
-- NEVER add or remove languages
-- Maximum ${c.languagesMaxEntries} entries
-
-**Guardian Rules:**
-- Minimum compliance score: ${c.agentDirectives.guardian.minimumScore}/100
-- VETO entity integrity: ${c.agentDirectives.guardian.enforceEntityIntegrity ? 'YES' : 'NO'}
-- VETO duplicate sentences: ${c.agentDirectives.guardian.enforceNoDuplicates ? 'YES' : 'NO'}
-- VETO summary quality: ${c.agentDirectives.guardian.enforceSummaryQuality ? 'YES' : 'NO'}
-` : ''}
+Summary: ${c.summaryMinWords}-${c.summaryMaxWords} words. ATS: ${c.agentDirectives.summary.atsAggressiveness}/100. No hallucinations. No parentheses.
+Skills: Max ${c.skillsMaxGroups} groups. Never Targeted Keywords. No company/location names as skills.
+Experience: ${c.agentDirectives.experience.rewriteBulletsOnly ? "Rewrite bullets ONLY." : ""} Role | Company | Date format. Preserve chronology.
+Education: Diploma | School | Date format. Never remove schools.
+Languages: Preserve all. Max ${c.languagesMaxEntries} entries.
+Guardian: Min score ${c.agentDirectives.guardian.minimumScore}. VETO: entities=${c.agentDirectives.guardian.enforceEntityIntegrity}, duplicates=${c.agentDirectives.guardian.enforceNoDuplicates}.
+` : ""}\`;
 }
