@@ -126,6 +126,7 @@ export function enforceLockedFields(optimized: ResumeData, original: ResumeData)
   const PLACEHOLDER_PATTERNS = [
     /projected\s*role/i,
     /previous\s*employer/i,
+    /^institution$/i,
     /institution\s*name/i,
     /company\s*name/i,
     /xxx/i,
@@ -997,6 +998,29 @@ Bridging Strategy: ${result.skillGap.bridgingStrategy}`);
             optimizeResult.resume = finalizeResume(optimizeResult.resume, resume);
           } catch (finErr: any) {
             console.warn("[finalizeResume] Standard path failed (non-fatal):", finErr?.message);
+          }
+
+          // === STANDARD PATH GUARDIAN ===
+          // The locked pipeline already has Guardian validation internally.
+          // The standard path (used when locked pipeline is disabled or source has no
+          // content) needs Guardian validation to catch education/language corruption,
+          // hallucinated company names, and other integrity failures.
+          // If Guardian BLOCKs, throw an error so the retry loop retries.
+          try {
+            const { runGuardianValidation } = await import("../resume-guardian-agent");
+            const guardianVerdict = await runGuardianValidation(optimizeResult.resume, resume, undefined);
+            if (guardianVerdict.status === "BLOCKED") {
+              const criticalFailures = guardianVerdict.checks
+                .filter(c => c.critical && !c.passed)
+                .map(c => `${c.name}: ${c.detail}`);
+              throw new Error(`Guardian BLOCKED (standard path): ${criticalFailures.join("; ")}`);
+            }
+          } catch (gErr: any) {
+            // Re-throw Guardian blocks; log non-fatal errors
+            if (gErr.message?.startsWith("Guardian BLOCKED")) {
+              throw gErr;
+            }
+            console.warn("[Standard Path Guardian] Non-fatal error:", gErr?.message);
           }
         }
 
