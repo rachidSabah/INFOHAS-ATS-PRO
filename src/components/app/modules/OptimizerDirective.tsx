@@ -784,5 +784,6 @@ Experience: ${c.agentDirectives.experience.rewriteBulletsOnly ? "Rewrite bullets
 Education: Diploma | School | Date format. Never remove schools.
 Languages: Preserve all. Max ${c.languagesMaxEntries} entries.
 Guardian: Min score ${c.agentDirectives.guardian.minimumScore}. VETO: entities=${c.agentDirectives.guardian.enforceEntityIntegrity}, duplicates=${c.agentDirectives.guardian.enforceNoDuplicates}.
-` : ""}\`;
+` : ""}
+`;
 }
