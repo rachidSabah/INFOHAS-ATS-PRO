@@ -422,8 +422,20 @@ export class PuterProvider implements OAuthAIProvider {
     temperature?: number;
     model?: string;
   }): Promise<{ text: string; provider: string; latencyMs: number }> {
-    // AUTH CHECK — no silent fallback
+    // AUTH CHECK — try authenticated first, then anonymous fallback
     if (!this.isAuthenticated()) {
+      // Try anonymous mode — Puter.js allows limited anonymous AI calls
+      // This is the last resort when all API providers are rate-limited
+      if (typeof window !== "undefined" && window.puter?.ai?.chat) {
+        console.info("[Puter] Not authenticated — trying anonymous AI call (limited usage)");
+        try {
+          const result = await this.callPuterAI(opts);
+          return { ...result, provider: "Puter.js (anonymous)" };
+        } catch (anonErr: any) {
+          console.warn("[Puter] Anonymous call failed:", anonErr?.message || anonErr);
+          // Fall through to auth error
+        }
+      }
       throw new ProviderAuthenticationError(
         "auth_required",
         "Puter authentication required. Please sign in from Provider Settings.",
@@ -439,6 +451,19 @@ export class PuterProvider implements OAuthAIProvider {
       );
     }
 
+    return this.callPuterAI(opts);
+  }
+
+  /**
+   * Call Puter AI — shared between authenticated and anonymous modes.
+   */
+  private async callPuterAI(opts: {
+    systemPrompt?: string;
+    userPrompt: string;
+    maxTokens?: number;
+    temperature?: number;
+    model?: string;
+  }): Promise<{ text: string; provider: string; latencyMs: number }> {
     let attempts = 0;
     while (attempts <= this.accounts.length) {
       const t0 = performance.now();

@@ -1989,6 +1989,42 @@ export async function callAI(opts: AICallOptions): Promise<AICallResult> {
     }
   }
 
+  // === ANONYMOUS PUTER FALLBACK ===
+  // If Puter is available but not authenticated, try anonymous mode.
+  // Puter.js allows limited anonymous AI calls — this is the last resort
+  // before falling to the local engine.
+  if (puter && !puterAuthenticated && typeof window !== "undefined" && (window as any).puter?.ai?.chat) {
+    console.log("[ROUTER]\nProvider selected: Puter (anonymous fallback — no auth required)");
+    try {
+      const { getPuterProvider } = await import("./providers/puter-provider");
+      const puterProvider = getPuterProvider();
+      const resp = await withTimeout(
+        puterProvider.generate({
+          systemPrompt: finalOpts.systemPrompt,
+          userPrompt: finalOpts.userPrompt,
+          maxTokens: finalOpts.maxTokens,
+          temperature: finalOpts.temperature,
+          model: puter.modelName,
+        }),
+        callTimeoutMs,
+        "Puter.generate (anonymous)"
+      );
+      const text = resp.text;
+      if (text && text.length > 0) {
+        assert(text !== "", "Provider response is empty");
+        return {
+          text,
+          provider: "Puter.js (anonymous)",
+          latencyMs: Math.round(performance.now() - t0),
+          tokensEstimate: estTokens(finalOpts.userPrompt + (finalOpts.systemPrompt ?? "")),
+        };
+      }
+    } catch (anonErr: any) {
+      providerErrors.push(`Puter (anonymous): ${anonErr?.message || anonErr}`);
+      console.warn(`[AI] Puter anonymous fallback failed: ${anonErr?.message || anonErr}`);
+    }
+  }
+
   // Try fallback providers using the USER-CONFIGURED fallback chain (excludes the primary that just failed + excluded ones)
   const excludeChainIds = [provider.id, ...(opts.excludeProviderIds || [])];
   const otherSecondary = getOrderedFallbackProviders(excludeChainIds);
