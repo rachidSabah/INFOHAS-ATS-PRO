@@ -1,246 +1,194 @@
-// ============================================================================
-// Circuit Breaker Service
-//
-// Automatically trips when a provider fails > 5 times in 60 seconds.
-// When tripped, the provider is skipped for a cooldown period.
-//
-// ProviderCircuitBreaker: tracks per-provider failure rates
-// PipelineCircuitBreaker: tracks overall pipeline failure rates
-// DatabaseCircuitBreaker: tracks D1 connection failures
-// RepairCircuitBreaker: tracks self-healing repair attempts
-// ============================================================================
+/**
+ * circuit-breaker.ts — Provider Circuit Breaker + State Machine
+ *
+ * State Machine: CONNECTED → HEALTHY → DEGRADED → UNHEALTHY → COOLDOWN → HEALTHY
+ *
+ * Rules:
+ * - 3 consecutive failures → mark UNHEALTHY, enter 15-min cooldown
+ * - After cooldown → mark HEALTHY on next success
+ * - Puter: always DEGRADED, never HEALTHY (emergency only)
+ * - Track: 429, timeouts, network failures, auth errors
+ */
 
-"use client";
+export type ProviderState = "connected" | "healthy" | "degraded" | "unhealthy" | "cooldown";
 
-interface CircuitState {
-  failureCount: number;
-  lastFailureTime: number;
-  tripped: boolean;
-  trippedAt: number | null;
-  cooldownMs: number;
+interface ProviderStatus {
+  state: ProviderState;
+  consecutiveFailures: number;
+  consecutiveSuccesses: number;
+  lastFailureAt: number;
+  lastSuccessAt: number;
+  cooldownUntil: number;
+  rateLimitCount: number;
+  timeoutCount: number;
+  authFailureCount: number;
+  totalCalls: number;
+  totalFailures: number;
 }
 
-const FAILURE_THRESHOLD = 5; // trip after 5 failures
-const WINDOW_MS = 60_000; // 60 seconds
-const DEFAULT_COOLDOWN_MS = 90_000; // 90 seconds
-
-// Per-provider circuit states
-const providerCircuits = new Map<string, CircuitState>();
-const pipelineCircuit: CircuitState = {
-  failureCount: 0,
-  lastFailureTime: 0,
-  tripped: false,
-  trippedAt: null,
-  cooldownMs: DEFAULT_COOLDOWN_MS,
-};
-const dbCircuit: CircuitState = {
-  failureCount: 0,
-  lastFailureTime: 0,
-  tripped: false,
-  trippedAt: null,
-  cooldownMs: 30_000, // 30s for DB
-};
-const repairCircuit: CircuitState = {
-  failureCount: 0,
-  lastFailureTime: 0,
-  tripped: false,
-  trippedAt: null,
-  cooldownMs: 60_000, // 60s for repairs
-};
+const COOLDOWN_MS = 15 * 60 * 1000; // 15 minutes
+const UNHEALTHY_THRESHOLD = 3;     // 3 consecutive failures → unhealthy
+const HEALTHY_RESET = 2;            // 2 consecutive successes → healthy
 
 /**
- * Check if a provider's circuit breaker is tripped.
- * If tripped and cooldown has elapsed, auto-resets.
+ * Providers that are emergency-only (Puter).
+ * These providers are NEVER selected normally; only used as absolute last resort.
  */
-export function isProviderTripped(providerName: string): boolean {
-  const state = providerCircuits.get(providerName);
-  if (!state || !state.tripped) return false;
+export const EMERGENCY_ONLY_PROVIDERS = new Set(["puter", "p_puter"]);
 
-  // Check if cooldown has elapsed
-  if (state.trippedAt && Date.now() - state.trippedAt > state.cooldownMs) {
-    // Auto-reset
-    state.tripped = false;
-    state.trippedAt = null;
-    state.failureCount = 0;
-    console.info(`[Circuit Breaker] Provider "${providerName}" auto-reset after cooldown`);
-    return false;
-  }
+/** In-memory circuit breaker state (resets on page reload) */
+const circuitState = new Map<string, ProviderStatus>();
 
-  return true;
-}
-
-/**
- * Record a provider failure. Trips the circuit if threshold is reached.
- */
-export function recordProviderCircuitFailure(providerName: string, cooldownMs?: number): void {
-  let state = providerCircuits.get(providerName);
-  if (!state) {
-    state = {
-      failureCount: 0,
-      lastFailureTime: 0,
-      tripped: false,
-      trippedAt: null,
-      cooldownMs: cooldownMs ?? DEFAULT_COOLDOWN_MS,
+function getOrCreate(providerId: string): ProviderStatus {
+  let status = circuitState.get(providerId);
+  if (!status) {
+    const isEmergency = EMERGENCY_ONLY_PROVIDERS.has(providerId) ||
+      EMERGENCY_ONLY_PROVIDERS.has(providerId.replace("p_", ""));
+    status = {
+      state: isEmergency ? "degraded" : "connected",
+      consecutiveFailures: 0,
+      consecutiveSuccesses: 0,
+      lastFailureAt: 0,
+      lastSuccessAt: 0,
+      cooldownUntil: 0,
+      rateLimitCount: 0,
+      timeoutCount: 0,
+      authFailureCount: 0,
+      totalCalls: 0,
+      totalFailures: 0,
     };
-    providerCircuits.set(providerName, state);
+    circuitState.set(providerId, status);
   }
+  return status;
+}
 
-  const now = Date.now();
+/**
+ * Record a successful call. Moves state toward HEALTHY.
+ */
+export function circuitBreakerSuccess(providerId: string, latencyMs?: number): void {
+  const status = getOrCreate(providerId);
+  status.totalCalls++;
+  status.consecutiveSuccesses++;
+  status.consecutiveFailures = 0;
+  status.lastSuccessAt = Date.now();
 
-  // Reset count if outside the window
-  if (now - state.lastFailureTime > WINDOW_MS) {
-    state.failureCount = 0;
-  }
-
-  state.failureCount++;
-  state.lastFailureTime = now;
-
-  if (state.failureCount >= FAILURE_THRESHOLD && !state.tripped) {
-    state.tripped = true;
-    state.trippedAt = now;
-    console.warn(
-      `[Circuit Breaker] Provider "${providerName}" TRIPPED — ` +
-      `${state.failureCount} failures in ${WINDOW_MS / 1000}s. ` +
-      `Cooldown: ${state.cooldownMs / 1000}s.`
-    );
+  // Reset cooldown if enough consecutive successes
+  if (status.consecutiveSuccesses >= HEALTHY_RESET) {
+    status.state = "healthy";
+    status.cooldownUntil = 0;
+  } else if (status.state === "cooldown") {
+    status.state = "degraded";
   }
 }
 
 /**
- * Reset a provider's circuit breaker (e.g., after successful call).
+ * Record a failure (429, timeout, network, auth).
+ * Moves state toward UNHEALTHY after threshold.
  */
-export function resetProviderCircuit(providerName: string): void {
-  const state = providerCircuits.get(providerName);
-  if (state) {
-    state.failureCount = 0;
-    state.tripped = false;
-    state.trippedAt = null;
+export function circuitBreakerFailure(providerId: string, reason: "rate_limit" | "timeout" | "network" | "auth"): void {
+  const status = getOrCreate(providerId);
+  status.totalCalls++;
+  status.totalFailures++;
+  status.consecutiveFailures++;
+  status.consecutiveSuccesses = 0;
+  status.lastFailureAt = Date.now();
+
+  switch (reason) {
+    case "rate_limit": status.rateLimitCount++; break;
+    case "timeout": status.timeoutCount++; break;
+    case "auth": status.authFailureCount++; break;
+  }
+
+  // Enter cooldown after threshold consecutive failures
+  if (status.consecutiveFailures >= UNHEALTHY_THRESHOLD) {
+    status.state = "unhealthy";
+    status.cooldownUntil = Date.now() + COOLDOWN_MS;
+    console.warn(`[CircuitBreaker] ${providerId} marked UNHEALTHY (${status.consecutiveFailures} consecutive failures). Cooldown until ${new Date(status.cooldownUntil).toISOString()}.`);
+  } else if (status.consecutiveFailures >= 2) {
+    status.state = "degraded";
   }
 }
 
 /**
- * Get all tripped providers (for UI display).
+ * Enter cooldown manually (e.g., after exhausting all retries).
  */
-export function getTrippedProviders(): string[] {
-  const tripped: string[] = [];
-  for (const [name, state] of providerCircuits.entries()) {
-    if (isProviderTripped(name)) {
-      tripped.push(name);
+export function circuitBreakerCooldown(providerId: string): void {
+  const status = getOrCreate(providerId);
+  status.state = "cooldown";
+  status.cooldownUntil = Date.now() + COOLDOWN_MS;
+}
+
+/**
+ * Check if a provider is available for use.
+ * Returns true if the provider is not in unhealthy/cooldown state.
+ */
+export function isProviderAvailable(providerId: string): boolean {
+  const status = circuitState.get(providerId);
+  if (!status) return true;
+
+  // Check cooldown expiry
+  if (status.state === "unhealthy" || status.state === "cooldown") {
+    if (Date.now() > status.cooldownUntil) {
+      status.state = "degraded";
+      status.consecutiveFailures = 0;
+      return true;
     }
-  }
-  return tripped;
-}
-
-// ============================================================================
-// Pipeline Circuit Breaker
-// ============================================================================
-
-export function isPipelineTripped(): boolean {
-  if (!pipelineCircuit.tripped) return false;
-  if (pipelineCircuit.trippedAt && Date.now() - pipelineCircuit.trippedAt > pipelineCircuit.cooldownMs) {
-    pipelineCircuit.tripped = false;
-    pipelineCircuit.trippedAt = null;
-    pipelineCircuit.failureCount = 0;
-    console.info("[Circuit Breaker] Pipeline auto-reset after cooldown");
     return false;
   }
+
   return true;
 }
 
-export function recordPipelineCircuitFailure(): void {
-  const now = Date.now();
-  if (now - pipelineCircuit.lastFailureTime > WINDOW_MS) {
-    pipelineCircuit.failureCount = 0;
+/**
+ * Check if a provider should be skipped for optimization.
+ * Emergency-only providers (Puter) return ALWAYS false here —
+ * they're only used when all other providers are exhausted.
+ */
+export function shouldSkipForOptimization(providerId: string): boolean {
+  if (EMERGENCY_ONLY_PROVIDERS.has(providerId) || EMERGENCY_ONLY_PROVIDERS.has(providerId.replace("p_", ""))) {
+    return true; // Skip for optimization, only for emergency
   }
-  pipelineCircuit.failureCount++;
-  pipelineCircuit.lastFailureTime = now;
-
-  if (pipelineCircuit.failureCount >= FAILURE_THRESHOLD && !pipelineCircuit.tripped) {
-    pipelineCircuit.tripped = true;
-    pipelineCircuit.trippedAt = now;
-    console.error(
-      `[Circuit Breaker] PIPELINE TRIPPED — ${pipelineCircuit.failureCount} failures in ${WINDOW_MS / 1000}s. ` +
-      `Cooldown: ${pipelineCircuit.cooldownMs / 1000}s.`
-    );
-  }
+  return !isProviderAvailable(providerId);
 }
 
-export function resetPipelineCircuit(): void {
-  pipelineCircuit.failureCount = 0;
-  pipelineCircuit.tripped = false;
-  pipelineCircuit.trippedAt = null;
+/**
+ * Get remaining cooldown time in seconds.
+ */
+export function getCooldownRemaining(providerId: string): number {
+  const status = circuitState.get(providerId);
+  if (!status || status.cooldownUntil <= Date.now()) return 0;
+  return Math.ceil((status.cooldownUntil - Date.now()) / 1000);
 }
 
-// ============================================================================
-// Database Circuit Breaker
-// ============================================================================
-
-export function isDatabaseTripped(): boolean {
-  if (!dbCircuit.tripped) return false;
-  if (dbCircuit.trippedAt && Date.now() - dbCircuit.trippedAt > dbCircuit.cooldownMs) {
-    dbCircuit.tripped = false;
-    dbCircuit.trippedAt = null;
-    dbCircuit.failureCount = 0;
-    console.info("[Circuit Breaker] Database auto-reset after cooldown");
-    return false;
-  }
-  return true;
+/**
+ * Get full provider status.
+ */
+export function getProviderStatus(providerId: string): ProviderStatus {
+  return getOrCreate(providerId);
 }
 
-export function recordDatabaseCircuitFailure(): void {
-  const now = Date.now();
-  if (now - dbCircuit.lastFailureTime > WINDOW_MS) {
-    dbCircuit.failureCount = 0;
-  }
-  dbCircuit.failureCount++;
-  dbCircuit.lastFailureTime = now;
-
-  if (dbCircuit.failureCount >= FAILURE_THRESHOLD && !dbCircuit.tripped) {
-    dbCircuit.tripped = true;
-    dbCircuit.trippedAt = now;
-    console.error(`[Circuit Breaker] DATABASE TRIPPED — ${dbCircuit.failureCount} failures. Cooldown: ${dbCircuit.cooldownMs / 1000}s.`);
-  }
+/**
+ * Reset circuit breaker for a provider.
+ */
+export function resetCircuitBreaker(providerId: string): void {
+  const isEmergency = EMERGENCY_ONLY_PROVIDERS.has(providerId) ||
+    EMERGENCY_ONLY_PROVIDERS.has(providerId.replace("p_", ""));
+  circuitState.set(providerId, {
+    state: isEmergency ? "degraded" : "connected",
+    consecutiveFailures: 0,
+    consecutiveSuccesses: 0,
+    lastFailureAt: 0,
+    lastSuccessAt: 0,
+    cooldownUntil: 0,
+    rateLimitCount: 0,
+    timeoutCount: 0,
+    authFailureCount: 0,
+    totalCalls: 0,
+    totalFailures: 0,
+  });
 }
 
-export function resetDatabaseCircuit(): void {
-  dbCircuit.failureCount = 0;
-  dbCircuit.tripped = false;
-  dbCircuit.trippedAt = null;
-}
-
-// ============================================================================
-// Repair Circuit Breaker (prevents infinite repair loops)
-// ============================================================================
-
-export function isRepairTripped(): boolean {
-  if (!repairCircuit.tripped) return false;
-  if (repairCircuit.trippedAt && Date.now() - repairCircuit.trippedAt > repairCircuit.cooldownMs) {
-    repairCircuit.tripped = false;
-    repairCircuit.trippedAt = null;
-    repairCircuit.failureCount = 0;
-    console.info("[Circuit Breaker] Repair auto-reset after cooldown");
-    return false;
-  }
-  return true;
-}
-
-export function recordRepairCircuitFailure(): void {
-  const now = Date.now();
-  if (now - repairCircuit.lastFailureTime > WINDOW_MS) {
-    repairCircuit.failureCount = 0;
-  }
-  repairCircuit.failureCount++;
-  repairCircuit.lastFailureTime = now;
-
-  if (repairCircuit.failureCount >= FAILURE_THRESHOLD && !repairCircuit.tripped) {
-    repairCircuit.tripped = true;
-    repairCircuit.trippedAt = now;
-    console.error(`[Circuit Breaker] REPAIR TRIPPED — ${repairCircuit.failureCount} repair failures. Pausing self-healing for ${repairCircuit.cooldownMs / 1000}s.`);
-  }
-}
-
-export function resetRepairCircuit(): void {
-  repairCircuit.failureCount = 0;
-  repairCircuit.tripped = false;
-  repairCircuit.trippedAt = null;
+/** Debug: dump all circuit breaker states */
+export function dumpCircuitBreaker(): ProviderStatus[] {
+  return Array.from(circuitState.values());
 }

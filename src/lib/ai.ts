@@ -29,6 +29,13 @@ export const checkPuterUsageStatus = _checkPuterUsageStatus;
 export const getPuterMonthlyUsage = _getPuterMonthlyUsage;
 export type { PuterMonthlyUsage };
 
+import {
+  circuitBreakerSuccess,
+  circuitBreakerFailure,
+  shouldSkipForOptimization,
+  EMERGENCY_ONLY_PROVIDERS,
+} from "./circuit-breaker";
+
 declare global {
   interface Window {
     puter?: any;
@@ -271,11 +278,16 @@ export async function selectProvider(excludeIds?: string[]): Promise<any> {
   };
 
   // 1. User-configured default API provider (FIRST priority — NOT Puter)
-  // Puter is a FALLBACK only, never the primary provider.
+  // Puter is EMERGENCY_ONLY, never the primary provider. Circuit breaker
+  // removes unhealthy providers from the chain automatically.
   const secondary = providers.filter((p: any) =>
     p.isActive &&
     p.type !== "puter" &&
     p.type !== "local" &&
+    !EMERGENCY_ONLY_PROVIDERS.has(p.id) &&
+    !EMERGENCY_ONLY_PROVIDERS.has(p.type) &&
+    !shouldSkipForOptimization(p.id) &&
+    !shouldSkipForOptimization(p.type) &&
     hasValidApiKey(p) &&
     !isProviderExcluded(p)
   );
@@ -2132,6 +2144,7 @@ export async function callAI(opts: AICallOptions): Promise<AICallResult> {
       );
       assert(text !== "", "Provider response is empty");
       if (!text || text.length === 0) throw new ProviderReturnedEmptyResponse();
+      circuitBreakerSuccess(primaryCooldownId, Math.round(performance.now() - t0));
       return {
         text,
         provider: provider.name,
@@ -2141,6 +2154,7 @@ export async function callAI(opts: AICallOptions): Promise<AICallResult> {
     } catch (e: any) {
       const eMsg = e?.message || String(e);
       if (e?.statusCode === 429 || /429/.test(eMsg) || /rate.?limit/i.test(eMsg) || /FreeUsageLimitError/i.test(eMsg)) {
+        circuitBreakerFailure(primaryCooldownId, "rate_limit");
         console.log("[PROVIDER]\nPrimary provider returned 429.");
         
         // Try alternate API keys before marking as rate-limited
@@ -2185,11 +2199,13 @@ export async function callAI(opts: AICallOptions): Promise<AICallResult> {
         
         markProvider429Cooldown(primaryCooldownId);
       } else if (e?.statusCode === 401 || /401/.test(eMsg) || /billing/i.test(eMsg) || /payment/i.test(eMsg) || /CreditsError/i.test(eMsg)) {
+        circuitBreakerFailure(primaryCooldownId, "auth");
         markProvider401Cooldown(primaryCooldownId);
       } else if (isTimeoutError(e)) {
-        // Short cooldown so the next pipeline step skips this slow provider
-        // instead of burning another full callTimeoutMs on the same endpoint.
+        circuitBreakerFailure(primaryCooldownId, "timeout");
         markProviderTimeoutCooldown(primaryCooldownId);
+      } else {
+        circuitBreakerFailure(primaryCooldownId, "network");
       }
       providerErrors.push(`${provider.name}: ${eMsg}`);
       console.warn(`[AI] Primary provider ${provider.name} failed: ${eMsg}. Trying fallbacks...`);

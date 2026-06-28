@@ -1,28 +1,25 @@
 /**
  * antigravity-provider.ts — Antigravity CLI OAuthAIProvider implementation
  *
- * Implements the OAuthAIProvider interface for Antigravity CLI.
- * Uses Device Authorization Flow for authentication.
- * Integrates with the existing SessionManager, FallbackEngine, and ProviderRouter.
+ * Uses Google OAuth 2.0 + PKCE via Cloudflare Worker callback.
+ * Integrates with SessionManager, FallbackEngine, and ProviderRouter.
  */
 
 import type { OAuthAIProvider, ProviderSession, ProviderAuthStatus } from "./interface";
 import { ProviderAuthenticationError, createEmptySession } from "./interface";
 import { saveSession, loadSession, clearSession } from "./session-manager";
 import {
-  initiateDeviceFlow,
-  pollForToken,
-  refreshAccessToken,
-  fetchAntigravityModels,
+  refreshAntigravityToken,
+  discoverAntigravityModels,
   generateAntigravity,
   AntigravityRateLimitError,
-  type DeviceCodeResponse,
+  buildAuthorizationURL,
+  exchangeAuthorizationCode,
 } from "./antigravity-auth";
 import { recordSuccess, recordFailure, recordRateLimit, resetHealth } from "./antigravity-health";
 
 const PROVIDER_ID = "antigravity" as const;
 
-export type { DeviceCodeResponse };
 export { AntigravityRateLimitError };
 
 export class AntigravityProvider implements OAuthAIProvider {
@@ -31,60 +28,56 @@ export class AntigravityProvider implements OAuthAIProvider {
 
   private session: ProviderSession = createEmptySession("antigravity");
 
-  constructor() {
-    // Session restored on app startup via restore()
+  /**
+   * Build the Google OAuth authorization URL.
+   * User will be redirected to Google login, then to the worker callback.
+   */
+  async buildAuthUrl(redirectUri: string): Promise<{ url: string; verifier: string; state: string }> {
+    return buildAuthorizationURL(redirectUri);
   }
 
   /**
-   * Initiate the Device Authorization Flow.
-   * Returns the device code data — caller must display user_code to user.
+   * Exchange an authorization code for tokens (called by the Worker callback).
    */
-  async initiateDeviceFlow(clientId?: string): Promise<DeviceCodeResponse> {
-    return initiateDeviceFlow(clientId);
-  }
-
-  /**
-   * Poll for token after the user authorizes via the device flow.
-   * On success, stores the encrypted session.
-   */
-  async pollForToken(
-    deviceCode: string,
-    interval?: number,
-    clientId?: string,
-  ): Promise<{ status: string; session?: ProviderSession; error?: string }> {
-    const result = await pollForToken(deviceCode, interval, clientId);
-
-    if (result.status === "authorized" && result.token) {
-      this.session = {
-        provider: "antigravity",
-        authenticated: true,
-        email: null,
-        userId: null,
-        accessToken: result.token.accessToken,
-        refreshToken: result.token.refreshToken || null,
-        expiresAt: result.token.expiresIn ? Date.now() + result.token.expiresIn * 1000 : null,
-        connectedAt: Date.now(),
-        models: [],
-        sharedAdminAccount: false,
-        authMethod: "api_key",
-        googleUserId: null,
-        googlePicture: null,
-      };
-
-      await saveSession(this.session);
-      try {
-        this.session.models = await fetchAntigravityModels(result.token.accessToken);
-      } catch (e) {
-        console.warn("[Antigravity] Model discovery failed after auth:", e);
-      }
-
-      return { status: "authorized", session: this.session };
+  async exchangeCode(
+    code: string,
+    state: string,
+    redirectUri: string,
+  ): Promise<{ type: "success" | "failed"; error?: string; session?: ProviderSession }> {
+    const result = await exchangeAuthorizationCode(code, state, redirectUri);
+    if (result.type === "failed") {
+      return { type: "failed", error: result.error };
     }
 
-    return { status: result.status, error: result.error };
+    this.session = {
+      provider: "antigravity",
+      authenticated: true,
+      email: result.email || null,
+      userId: null,
+      accessToken: result.accessToken || null,
+      refreshToken: result.refreshToken || null,
+      expiresAt: result.expiresIn ? Date.now() + result.expiresIn * 1000 : null,
+      connectedAt: Date.now(),
+      models: [],
+      sharedAdminAccount: false,
+      authMethod: "api_key",
+      googleUserId: null,
+      googlePicture: null,
+    };
+
+    await saveSession(this.session);
+
+    // Auto-discover models
+    try {
+      if (result.accessToken) {
+        this.session.models = await discoverAntigravityModels(result.accessToken);
+      }
+    } catch { /* non-fatal */ }
+
+    return { type: "success", session: this.session };
   }
 
-  // ===== OAuthAIProvider Interface =====
+  // === OAuthAIProvider Interface ===
 
   async login(providedKey?: string): Promise<ProviderSession> {
     if (providedKey) {
@@ -106,13 +99,8 @@ export class AntigravityProvider implements OAuthAIProvider {
       await saveSession(this.session);
       return this.session;
     }
-
-    const flowData = await this.initiateDeviceFlow();
-    const result = await this.pollForToken(flowData.deviceCode, flowData.interval);
-    if (result.status !== "authorized" || !result.session) {
-      throw new ProviderAuthenticationError("login_failed", result.error || "Antigravity authentication failed", "antigravity");
-    }
-    return result.session;
+    // OAuth flow: build URL and redirect — handled by worker/UI
+    throw new ProviderAuthenticationError("login_failed", "Use the 'Connect Antigravity' button in Settings to authenticate via Google OAuth.", "antigravity");
   }
 
   async refresh(): Promise<ProviderSession> {
@@ -123,10 +111,12 @@ export class AntigravityProvider implements OAuthAIProvider {
     }
 
     try {
-      const token = await refreshAccessToken(this.session.refreshToken);
-      this.session.accessToken = token.accessToken;
-      this.session.refreshToken = token.refreshToken || this.session.refreshToken;
-      this.session.expiresAt = token.expiresIn ? Date.now() + token.expiresIn * 1000 : null;
+      const result = await refreshAntigravityToken(this.session.refreshToken);
+      if (result.type === "failed") {
+        throw new Error(result.error || "Refresh failed");
+      }
+      this.session.accessToken = result.accessToken || null;
+      this.session.expiresAt = result.expiresIn ? Date.now() + result.expiresIn * 1000 : null;
       this.session.authenticated = true;
       await saveSession(this.session);
     } catch (e: any) {
@@ -134,7 +124,6 @@ export class AntigravityProvider implements OAuthAIProvider {
       this.session.authenticated = false;
       await clearSession("antigravity");
     }
-
     return this.session;
   }
 
@@ -167,7 +156,7 @@ export class AntigravityProvider implements OAuthAIProvider {
       throw new ProviderAuthenticationError("auth_required", "Antigravity not authenticated", "antigravity");
     }
     try {
-      const models = await fetchAntigravityModels(this.session.accessToken);
+      const models = await discoverAntigravityModels(this.session.accessToken);
       this.session.models = models;
       return models;
     } catch (e: any) {
@@ -187,7 +176,7 @@ export class AntigravityProvider implements OAuthAIProvider {
       throw new ProviderAuthenticationError("auth_required", "Antigravity not authenticated. Please connect Antigravity CLI.", "antigravity");
     }
 
-    const model = opts.model || this.session.models[0] || "claude-sonnet-4";
+    const model = opts.model || this.session.models[0] || "gemini-2.5-flash";
     try {
       const result = await generateAntigravity({
         accessToken: this.session.accessToken,
