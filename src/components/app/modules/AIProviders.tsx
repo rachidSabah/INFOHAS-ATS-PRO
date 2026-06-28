@@ -18,6 +18,7 @@ import { ProviderAnalytics } from "./ProviderAnalytics";
 import { ProviderLogsTable } from "./ProviderLogsTable";
 import { TestConnectionModal } from "./TestConnectionModal";
 import { PuterAuthCard } from "./PuterAuthCard";
+import { ConnectAntigravityDialog } from "./ConnectAntigravityDialog";
 import { getPuterProvider } from "@/lib/providers";
 import type { ProviderAuthStatus } from "@/lib/providers/interface";
 import {
@@ -42,6 +43,7 @@ const PROVIDER_TYPES: { type: AIProviderType; label: string; icon: string; defau
   { type: "azure-openai", label: "Azure OpenAI", icon: "Cloud", defaultUrl: "https://{resource}.openai.azure.com/openai/deployments/{deployment}", defaultModel: "gpt-4o", authType: "header" },
   { type: "bedrock", label: "AWS Bedrock", icon: "Cloud", defaultUrl: "https://bedrock-runtime.us-east-1.amazonaws.com", defaultModel: "anthropic.claude-3-5-sonnet-20241022-v1:0", authType: "bearer" },
   { type: "custom", label: "Custom / self-hosted LLM", icon: "Settings", defaultUrl: "", defaultModel: "", authType: "bearer" },
+  { type: "antigravity", label: "Antigravity CLI (Token)", icon: "Terminal", defaultUrl: "https://api.antigravity.io/v1", defaultModel: "claude-sonnet-4", authType: "bearer" },
 ];
 
 type Tab = "providers" | "auth" | "analytics" | "logs";
@@ -292,6 +294,8 @@ export function AIProviders() {
           <div className="grid gap-4 md:grid-cols-2">
             {/* Puter.js Auth (Multi-Account) */}
             <PuterAuthCard status={puterStatus} onRefreshStatus={refreshAuthStatus} />
+            {/* Antigravity CLI Auth (Device Flow) */}
+            <ConnectAntigravityDialog />
           </div>
 
           {/* Auth info box */}
