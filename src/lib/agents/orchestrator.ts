@@ -2152,8 +2152,8 @@ CONTENT REQUIREMENTS:
           ...(l.note ? { note: l.note } : {}),
         })) as any
       : resume.languages,
-    template: "infohas-pro",
-    accentColor: "#0563C1",
+    template: resume.template || "infohas-pro",
+    accentColor: resume.accentColor || "#0563C1",
     photoUrl: resume.photoUrl,
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
@@ -2524,8 +2524,8 @@ function mapAviationResultToResumeData(result: AviationOptimizeResult, original:
     // STRICT: languages are IMMUTABLE — ALWAYS use original, never trust AI output
     // (AI frequently corrupts languages: empty names, leading colons, proficiency as name)
     languages: original.languages.map((l) => ({ ...l })),
-    template: "infohas-pro",
-    accentColor: "#0563C1",
+    template: original.template || "infohas-pro",
+    accentColor: original.accentColor || "#0563C1",
     photoUrl: original.photoUrl,
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),

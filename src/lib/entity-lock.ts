@@ -681,7 +681,11 @@ export function verifyEntityIntegrity(
     const exp = optimized.experience[i];
     const origExp = locked.experiences[i];
 
-    if (isPlaceholderCompany(exp.company)) {
+    // Only flag as placeholder if the ORIGINAL company was NOT also a placeholder.
+    // If the original had "N/A" or was empty, the optimized "" is correct behavior
+    // (the restore function correctly replaces placeholders with "").
+    const origCompanyIsPlaceholder = origExp ? isPlaceholderCompany(origExp.company) : true;
+    if (isPlaceholderCompany(exp.company) && !origCompanyIsPlaceholder) {
       criticalFailures.push({
         type: "company_missing",
         message: `Experience #${i + 1} has placeholder company name: "${exp.company}". Original: "${origExp?.company || "N/A"}"`,
