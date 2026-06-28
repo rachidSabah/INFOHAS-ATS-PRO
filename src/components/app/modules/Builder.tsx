@@ -12,7 +12,7 @@ import { useApp, uid } from "@/lib/store";
 import { useAutoSave, useUndoRedo, useLiveATSScore } from "@/lib/builder-hooks";
 import { TEMPLATES } from "@/lib/brand";
 import { SmartTextarea } from "@/components/shared/SmartTextarea";
-import { useSmartSuggestions, useSpellCheck, useSectionCompleteness } from "@/lib/builder-extras";
+import { useSectionCompleteness } from "@/lib/builder-extras";
 import { blankResume, parseResumeFile } from "@/lib/parser";
 import { exportResumePDF, exportResumeDOCX, exportResumeTXT, exportResumeDOC } from "@/lib/exporter";
 import { A4Preview } from "@/components/resume/A4Preview";
@@ -196,10 +196,10 @@ export function Builder() {
             <Badge variant="outline" className="text-[10px] gap-1">
               <Icon name="Save" className="w-3 h-3" /> Auto-saved
             </Badge>
-            <button onClick={() => { const data = undoRedo.undo(); if (data) patch(data); }} disabled={!undoRedo.canUndo} className="text-[10px] text-muted-foreground hover:text-foreground disabled:opacity-30 p-1" title="Undo">
+            <button onClick={() => { const d = undoRedo.undo(); if (d) patch(d); }} disabled={!undoRedo.canUndo} className="text-[10px] text-muted-foreground hover:text-foreground disabled:opacity-30 p-1" title="Undo">
               <Icon name="Undo2" className="w-3 h-3" />
             </button>
-            <button onClick={() => { const data = undoRedo.redo(); if (data) patch(data); }} disabled={!undoRedo.canRedo} className="text-[10px] text-muted-foreground hover:text-foreground disabled:opacity-30 p-1" title="Redo">
+            <button onClick={() => { const d = undoRedo.redo(); if (d) patch(d); }} disabled={!undoRedo.canRedo} className="text-[10px] text-muted-foreground hover:text-foreground disabled:opacity-30 p-1" title="Redo">
               <Icon name="Redo2" className="w-3 h-3" />
             </button>
           </div>
@@ -241,14 +241,12 @@ export function Builder() {
         {/* Editor */}
         <div className="lg:col-span-7 space-y-4">
           {/* Tab nav — horizontal scroll on mobile, full width on desktop */}
-          {/* Section Completeness Scores */}
-          <div className="flex gap-2 overflow-x-auto mb-1">
+          <div className="flex gap-2 overflow-x-auto mb-2">
             {sectionScores.map((s) => (
-              <div key={s.label} className="flex items-center gap-1.5 px-2 py-1 rounded-md bg-secondary/50 text-xs shrink-0" title={s.tips.join('
-')}>
+              <div key={s.label} className="flex items-center gap-1.5 px-2 py-1 rounded-md bg-secondary/50 text-xs shrink-0" title={s.tips.join("; ")}>
                 <Icon name={s.icon} className="w-3 h-3 text-muted-foreground" />
                 <span className="font-medium">{s.label}</span>
-                <span className={s.score >= s.max ? "text-emerald-500" : s.score > 0 ? "text-amber-500" : "text-muted-foreground"}>{s.score}/{s.max}</span>
+                <span className={s.score >= s.max ? "text-emerald-500 font-bold" : s.score > 0 ? "text-amber-500" : "text-muted-foreground"}>{s.score}/{s.max}</span>
               </div>
             ))}
           </div>
@@ -296,7 +294,7 @@ export function Builder() {
                       rows={4}
                       placeholder="2-3 lines highlighting years of experience, core expertise, and a measurable outcome."
                     />
-                    <p className="text-xs text-muted-foreground mt-1">{(resume.summary ?? "").length} chars | {((resume.summary ?? "").split(/\s+/).filter(Boolean).length)} words — aim for 80-120.</p>
+                    <p className="text-xs text-muted-foreground mt-1">{((resume.summary ?? "").split(/\s+/).filter(Boolean).length)} words ({ (resume.summary ?? "").length} chars) — aim for 80-120.</p>
                   </Field>
                 </div>
               )}
