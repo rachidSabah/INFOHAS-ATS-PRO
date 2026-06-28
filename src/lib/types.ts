@@ -1081,3 +1081,93 @@ export interface AIHealingReport {
   buildStatus: "PASS" | "FAIL";
 }
 
+// ============================================================================
+// RenderDocument — SINGLE SOURCE OF TRUTH for all renderers (Preview, DOCX, PDF)
+// ============================================================================
+// Every renderer consumes this interface. No renderer may create its own
+// structure, section ordering, or formatting decisions.
+// ============================================================================
+
+export type RenderSectionType =
+  | "personalInformation"
+  | "professionalProfile"
+  | "professionalExperience"
+  | "education"
+  | "skills"
+  | "languages"
+  | "additionalInformation"
+  | "projects"
+  | "certifications";
+
+export interface RenderDocumentSection {
+  type: RenderSectionType;
+  title: string;
+  /** Ordered list of paragraph-like content items */
+  items: RenderContentItem[];
+}
+
+export type RenderContentItem =
+  | RenderTextLine
+  | RenderBulletList
+  | RenderNestedBulletList
+  | RenderTableRow;
+
+export interface RenderTextLine {
+  kind: "text";
+  text: string;
+  bold?: boolean;
+  italic?: boolean;
+  fontSizePt?: number;
+}
+
+export interface RenderBulletList {
+  kind: "bullets";
+  bullets: string[];
+  level?: number; // 0 = top-level, 1 = nested
+}
+
+export interface RenderNestedBulletList {
+  kind: "nested-bullets";
+  groups: { label: string; items: string[] }[];
+}
+
+export interface RenderTableRow {
+  kind: "table-row";
+  cells: { text: string; bold?: boolean; align?: "left" | "right" }[];
+}
+
+export interface RenderContactBlock {
+  name: string;
+  headline?: string;
+  phone?: string;
+  email?: string;
+  location?: string;
+  dateOfBirth?: string;
+}
+
+export interface RenderDocument {
+  /** Metadata */
+  template: ResumeTemplate;
+  layout: ResumeLayoutModel;
+  /** Contact block — rendered once at the top */
+  contact: RenderContactBlock;
+  /** Canonical section order — renderers iterate this array */
+  sections: RenderDocumentSection[];
+  /** Total estimated character count for one-page enforcement */
+  totalChars: number;
+  /** Whether additionalInfo was present in source */
+  hasAdditionalInfo: boolean;
+}
+
+/** Canonical section order blueprint */
+export const CANONICAL_SECTION_ORDER: RenderSectionType[] = [
+  "professionalProfile",
+  "professionalExperience",
+  "education",
+  "skills",
+  "languages",
+  "additionalInformation",
+  "projects",
+  "certifications",
+];
+

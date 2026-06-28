@@ -1220,202 +1220,25 @@ export function exportHtmlAsDOC(htmlContent: string, filename: string, template:
 // ---------- DOCX ----------
 
 export async function exportResumeDOCX(resume: ResumeData, layout?: ResumeLayoutModel) {
-  const L = layout ?? getDefaultResumeLayout();
-  const nameHex = L.nameColor.replace("#", "");
-  const accentHex = L.sectionTitleColor.replace("#", "");
-  const bodyHex = L.bodyTextColor.replace("#", "");
-  const contactHex = L.contactColor.replace("#", "");
-
-  const children: Paragraph[] = [];
-
-  // Name — bold, uppercase, section-title color
-  children.push(new Paragraph({
-    alignment: AlignmentType.LEFT,
-    spacing: { after: 40 },
-    children: [new TextRun({ text: (resume.name || "YOUR NAME").toUpperCase(), bold: true, size: L.nameSizePt * 2, font: L.fontFamily, color: nameHex })],
-  }));
-
-  // Headline
-  if (resume.headline) {
-    children.push(new Paragraph({
-      spacing: { after: 60 },
-      children: [new TextRun({ text: resume.headline, size: L.bodyFontSizePt * 2, font: L.fontFamily, color: bodyHex })],
-    }));
-  }
-
-  // Contact line
-  const contactParts = [resume.contact.location, resume.contact.phone, resume.contact.email].filter(Boolean);
-  if (contactParts.length) {
-    children.push(new Paragraph({
-      spacing: { after: 80 },
-      children: [new TextRun({ text: contactParts.join(" | "), size: L.bodyFontSizePt * 2, font: L.fontFamily, color: contactHex })],
-    }));
-  }
-
-  // Date of birth
-  if (resume.dateOfBirth) {
-    children.push(new Paragraph({
-      spacing: { after: 80 },
-      children: [new TextRun({ text: `Date Of Birth : ${resume.dateOfBirth}`, size: L.bodyFontSizePt * 2, font: L.fontFamily, color: bodyHex })],
-    }));
-  }
-
-  // ===== Section helper =====
-  const addSection = (title: string) => {
-    children.push(new Paragraph({
-      spacing: { before: 200, after: 60 },
-      children: [new TextRun({ text: title, bold: true, size: L.sectionTitleSizePt * 2, font: L.fontFamily, color: accentHex })],
-    }));
-  };
-
-  // ===== PROFESSIONAL SUMMARY =====
-  if (resume.summary) {
-    addSection("PROFESSIONAL SUMMARY");
-    const paragraphs = resume.summary.split(/\n{2,}/);
-    for (const p of paragraphs) {
-      children.push(new Paragraph({
-        alignment: AlignmentType.JUSTIFIED,
-        spacing: { after: 80 },
-        children: [new TextRun({ text: p.trim(), size: L.bodyFontSizePt * 2, font: L.fontFamily, color: bodyHex })],
-      }));
-    }
-  }
-
-  // ===== CORE COMPETENCIES & SKILLS =====
-  if (resume.skills.length > 0) {
-    addSection("CORE COMPETENCIES & SKILLS");
-    // Group skills by category if available, otherwise render as a flat list
-    const categorized = new Map<string, string[]>();
-    for (const s of resume.skills) {
-      const cat = s.category?.trim() || "General";
-      if (!categorized.has(cat)) categorized.set(cat, []);
-      categorized.get(cat)?.push(s.name);
-    }
-    for (const [category, skills] of categorized) {
-      children.push(new Paragraph({
-        bullet: { level: 0 },
-        spacing: { after: 30 },
-        children: [
-          new TextRun({ text: `${category}: `, bold: true, size: L.bodyFontSizePt * 2, font: L.fontFamily, color: bodyHex }),
-          new TextRun({ text: skills.join(", "), size: L.bodyFontSizePt * 2, font: L.fontFamily, color: bodyHex }),
-        ],
-      }));
-    }
-  }
-
-  // Helper for right tab position
-  const marginTwip = (mm: number) => convertInchesToTwip(mm / 25.4);
-  const rightTabPosition = marginTwip(210 - L.marginLeftMm - L.marginRightMm);
-  const docxTabStops = [{ type: TabStopType.RIGHT, position: rightTabPosition }];
-
-  // ===== PROFESSIONAL EXPERIENCE =====
-  if (resume.experience.length) {
-    addSection("PROFESSIONAL EXPERIENCE");
-    for (const e of resume.experience) {
-      // Title Company | Location
-      const leftSide = `${e.title} ${e.company}${e.location ? ` | ${e.location}` : ""}`;
-      const dateStr = e.startDate || e.endDate ? `${fmtInfohasDate(e.startDate)} – ${fmtInfohasDate(e.endDate)}` : "";
-
-      children.push(new Paragraph({
-        tabStops: docxTabStops,
-        spacing: { after: 20 },
-        children: [
-          new TextRun({ text: leftSide, bold: true, size: L.bodyFontSizePt * 2, font: L.fontFamily, color: bodyHex }),
-          new TextRun({ text: dateStr ? "\t" + dateStr : "", bold: true, size: L.bodyFontSizePt * 2, font: L.fontFamily, color: bodyHex }),
-        ],
-      }));
-      // Bullets
-      for (const b of e.bullets) {
-        children.push(new Paragraph({
-          bullet: { level: 0 },
-          alignment: AlignmentType.JUSTIFIED,
-          spacing: { after: 30 },
-          children: [new TextRun({ text: b, size: L.bodyFontSizePt * 2, font: L.fontFamily, color: bodyHex })],
-        }));
-      }
-    }
-  }
-
-  // ===== EDUCATION =====
-  if (resume.education.length) {
-    addSection("EDUCATION");
-    for (const ed of resume.education) {
-      const leftSide = `${ed.degree}${ed.field ? ` in ${ed.field}` : ""}${ed.institution ? ` | ${ed.institution}` : ""}${ed.location ? ` | ${ed.location}` : ""}`;
-      const dateStr = ed.startDate || ed.endDate ? `${fmtInfohasDate(ed.startDate)} – ${fmtInfohasDate(ed.endDate)}` : "";
-
-      children.push(new Paragraph({
-        tabStops: docxTabStops,
-        spacing: { after: 20 },
-        children: [
-          new TextRun({ text: leftSide, bold: true, size: L.bodyFontSizePt * 2, font: L.fontFamily, color: bodyHex }),
-          new TextRun({ text: dateStr ? "\t" + dateStr : "", bold: true, size: L.bodyFontSizePt * 2, font: L.fontFamily, color: bodyHex }),
-        ],
-      }));
-      // Education highlights
-      if (ed.highlights?.length) {
-        for (const h of ed.highlights) {
-          children.push(new Paragraph({
-            spacing: { after: 20 },
-            children: [new TextRun({ text: h, size: L.bodyFontSizePt * 2, font: L.fontFamily, color: bodyHex })],
-          }));
-        }
-      }
-    }
-  }
-
-  // ===== SKILLS (only if not already rendered as CORE COMPETENCIES above) =====
-  // NOTE: We always render skills above in the CORE COMPETENCIES section.
-  // This section is a fallback for resumes that have skills but no summary
-  // and the CORE COMPETENCIES section already rendered them. We skip this
-  // to avoid double-rendering skills in the DOCX output.
-  // If you want a separate "SKILLS" section without the categorization,
-  // remove the CORE COMPETENCIES section above and use this instead.
-
-  // ===== LANGUAGES =====
-  if (resume.languages.length) {
-    addSection("LANGUAGES");
-    for (const l of resume.languages) {
-      const note = (l as any).note ? ` (${(l as any).note})` : "";
-      children.push(new Paragraph({
-        spacing: { after: 40 },
-        children: [new TextRun({ text: `${l.name}: ${l.proficiency}${note}`, size: L.bodyFontSizePt * 2, font: L.fontFamily, color: bodyHex })],
-      }));
-    }
-  }
-
-  // ===== ADDITIONAL INFORMATION =====
-  if (resume.additionalInfo) {
-    addSection("ADDITIONAL INFORMATION");
-    const infoLines = resume.additionalInfo.split("\n").map(l => l.trim()).filter(Boolean);
-    for (const line of infoLines) {
-      children.push(new Paragraph({
-        spacing: { after: 40 },
-        children: [new TextRun({ text: line, size: L.bodyFontSizePt * 2, font: L.fontFamily, color: bodyHex })],
-      }));
-    }
-  }
-
-  const doc = new Document({
-    styles: { default: { document: { run: { font: L.fontFamily, size: L.bodyFontSizePt * 2 } } } },
-    sections: [{
-      properties: {
-        page: {
-          margin: {
-            top: marginTwip(L.marginTopMm),
-            bottom: marginTwip(L.marginBottomMm),
-            left: marginTwip(L.marginLeftMm),
-            right: marginTwip(L.marginRightMm),
-          },
-        },
-      },
-      children,
-    }],
-  });
-
-  const blob = await Packer.toBlob(doc);
-  saveAs(blob, (resume.name || "resume").replace(/\s+/g, "_") + "_resume.docx");
+  // NEW PATH: Convert to RenderDocument (single source of truth) and use the
+  // unified DOCX renderer. This ensures section order, contact rendering,
+  // skills categories, languages, education highlights, and additional info
+  // are all consistent with the Preview.
+  const { toRenderDocument } = await import("./render-document");
+  const { exportResumeDOCXRenderDoc } = await import("./export-docx-render");
+  const rd = toRenderDocument(resume, layout);
+  const blob = await exportResumeDOCXRenderDoc(rd);
+  // Download the blob
+  // For browser: create download link
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = (resume.name || "resume").replace(/\s+/g, "_") + "_resume.docx";
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
 }
-
 // NOTE: The docxBullet function was previously a no-op (empty body).
 // Skills are now rendered directly as Paragraph elements with bullet properties
 // in the CORE COMPETENCIES section above. This function is removed to prevent
