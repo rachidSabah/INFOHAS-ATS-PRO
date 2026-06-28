@@ -11,12 +11,12 @@
 "use client";
 
 import { withTimeout, OptimizationProviderExhaustedError, AI_CALL_TIMEOUT_MS, OPTIMIZER_CALL_TIMEOUT_MS, PROVIDER_TIMEOUT_COOLDOWN_MS } from "./pipeline-watchdog";
-export { OptimizationProviderExhaustedError, OPTIMIZER_CALL_TIMEOUT_MS } from "./pipeline-watchdog";
+export { OptimizationProviderExhaustedError, OPTIMIZER_CALL_TIMEOUT_MS };
 
 import { useApp } from "./store";
 import { startAICall, truncatePromptToTokenLimit, checkTokenLimit, MAX_INPUT_TOKENS } from "./ai-diagnostics";
 import { getRequestQueue, withRateLimitRetry, isRateLimitError, getRateLimitErrorMessage, getRecommendedFallbacks, isOpenCodeZenFree, startOptimizationTracking, stopOptimizationTracking } from "./provider-capabilities";
-import type { AIProvider, FallbackChainConfig } from "./types";
+import type { AIProvider, FallbackChainConfig, OptimizerDirectiveConfig } from "./types";
 import {
   checkPuterUsageStatus as _checkPuterUsageStatus,
   getPuterMonthlyUsage as _getPuterMonthlyUsage,
@@ -1055,9 +1055,6 @@ nothing. Return ONLY clean, professional resume content.`;
   return directive;
 }
 
-// Import the type for the directive config (imported here to avoid circular deps
-// at the top of the file — useApp is already imported)
-import type { OptimizerDirectiveConfig } from "./types";
 
 
 export interface AICallOptions {
