@@ -283,7 +283,7 @@ export function assembleResume(
   const languages: ResumeLanguage[] = sourceResume.languages.map((l) => ({ ...l }));
 
   // Extract Languages skill group and move to languages array
-  const langSkillIdx = skills.findIndex(s => /^languages?$/i.test(s.category || s.name));
+  const langSkillIdx = skills.findIndex(s => /^languages?(?:\s*:)?$/i.test(s.category || s.name) || /^languages?\s*:/i.test((s.category || s.name)?.replace(/[,;].*/, "")));
   if (langSkillIdx >= 0) {
     const langEntry = skills[langSkillIdx];
     const langNames = langEntry.name.split(/[,;]/).map(l => l.trim()).filter(Boolean);
