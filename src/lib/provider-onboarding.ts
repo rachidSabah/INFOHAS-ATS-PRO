@@ -7,8 +7,8 @@
 // No code changes required to add a new provider.
 // ============================================================================
 
-import type { AIProvider } from "../types";
-import { modelRegistry } from "../model-registry";
+import type { AIProvider } from "./types";
+import { modelRegistry } from "./model-registry";
 
 /** Known base URLs for common provider types (no hardcoded API keys) */
 const PROVIDER_BASE_URLS: Record<string, string> = {

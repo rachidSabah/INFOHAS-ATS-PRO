@@ -35,7 +35,7 @@ export function Builder() {
   const resume = useMemo(() => resumes.find((r) => r.id === activeId) ?? resumes[0], [resumes, activeId]);
   const autoSave = useAutoSave(resume);
   const undoRedo = useUndoRedo(resume);
-  const activeJD = jobDescriptions.find(j => j.id === useApp.getState().activeJobId);
+  const activeJD = jobDescriptions.find(j => j.id === useApp.getState().activeJdId);
   const atsScore = useLiveATSScore(resume, activeJD);
   const sectionScores = useSectionCompleteness(resume);
 
@@ -189,7 +189,7 @@ export function Builder() {
           <p className="text-sm text-muted-foreground mt-1 hidden sm:block">Edit on the left, see the live A4 preview on the right. Always one page.</p>
           <div className="flex items-center gap-2 mt-1.5 flex-wrap">
             {atsScore && (
-              <Badge variant={atsScore.overall >= 60 ? "default" : atsScore.overall >= 30 ? "secondary" : "destructive"} className="text-[10px] gap-1">
+              <Badge variant={atsScore.overall >= 60 ? "default" : atsScore.overall >= 30 ? "default" : "danger"} className="text-[10px] gap-1">
                 <Icon name="Target" className="w-3 h-3" /> ATS: {atsScore.overall}%
               </Badge>
             )}

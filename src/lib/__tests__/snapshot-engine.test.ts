@@ -16,7 +16,7 @@ const MOCK_RESUME: ResumeData = {
     { id: "ed_1", institution: "MIT", degree: "BS CS", startDate: "2016", endDate: "2020" }
   ],
   skills: [{ id: "s1", name: "TypeScript", category: "Languages" }],
-  languages: [{ name: "English", proficiency: "Fluent" }],
+  languages: [{ id: "l1", name: "English", proficiency: "fluent" }],
   certifications: [],
   projects: [],
   template: "ats-professional",

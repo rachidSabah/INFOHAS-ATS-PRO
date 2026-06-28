@@ -204,8 +204,8 @@ export function ProviderEditor({ provider, onClose, onSave }: {
             </Field>
             <Field label="Alternate API keys (one per line — rotated when primary is rate-limited)">
               <textarea
-                value={(form.alternateApiKeys || []).join("\n")}
-                onChange={(e) => setForm({ ...form, alternateApiKeys: e.target.value.split("\n").map(k => k.trim()).filter(Boolean) })}
+                value={((form as any).alternateApiKeys || []).join("\n")}
+                onChange={(e) => setForm({ ...form, alternateApiKeys: e.target.value.split("\n").map((k: string) => k.trim()).filter(Boolean) } as any)}
                 placeholder={isPuter ? "(not required for Puter)" : "sk-...\nsk-..."}
                 disabled={isPuter}
                 className="w-full h-16 px-3 py-2 rounded-md border border-input bg-background text-sm font-mono resize-y"

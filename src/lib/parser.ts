@@ -281,7 +281,7 @@ export async function parseResumeFile(file: File): Promise<ResumeData> {
       return blankResume(file.name.replace(/\.[^/.]+$/, ""));
     }
 
-    const primaryResult = safeCall(extractResumeFromText, [rawText, file.name], null);
+    const primaryResult = safeCall(extractResumeFromText, [rawText, file.name], null as any);
     if (!primaryResult) {
       console.warn("[parser] extractResumeFromText failed. Returning blank resume.");
       return blankResume(file.name.replace(/\.[^/.]+$/, ""));
@@ -292,7 +292,7 @@ export async function parseResumeFile(file: File): Promise<ResumeData> {
 
     if (!isValid) {
       console.warn(`[parser] Primary parser incomplete (valid: ${isValid}, confidence: ${primaryConfidence}). Running RepairParser...`);
-      const repaired = safeCall(RepairParser, [rawText, file.name], null);
+      const repaired = safeCall(RepairParser, [rawText, file.name], null as any);
       if (repaired) return repaired;
       console.warn("[parser] RepairParser also failed. Returning primary result as-is.");
     }
@@ -311,7 +311,7 @@ export async function parseResumeText(text: string): Promise<ResumeData> {
       return blankResume("Pasted Resume");
     }
 
-    const primaryResult = safeCall(extractResumeFromText, [text, "Pasted Resume"], null);
+    const primaryResult = safeCall(extractResumeFromText, [text, "Pasted Resume"], null as any);
     if (!primaryResult) {
       console.warn("[parser] extractResumeFromText failed for pasted text. Returning blank resume.");
       return blankResume("Pasted Resume");
@@ -322,7 +322,7 @@ export async function parseResumeText(text: string): Promise<ResumeData> {
 
     if (!isValid) {
       console.warn(`[parser] Primary parser incomplete for pasted text (valid: ${isValid}, confidence: ${primaryConfidence}). Running RepairParser...`);
-      const repaired = safeCall(RepairParser, [text, "Pasted Resume"], null);
+      const repaired = safeCall(RepairParser, [text, "Pasted Resume"], null as any);
       if (repaired) return repaired;
       console.warn("[parser] RepairParser also failed for pasted text. Returning primary result as-is.");
     }

@@ -38,11 +38,9 @@ function makeResume(overrides: Partial<ResumeData> = {}): ResumeData {
   return {
     id: "test",
     name: "Test User",
-    email: "test@example.com",
-    phone: "+1234567890",
-    location: "Test City",
+    contact: { email: "test@example.com", phone: "+1234567890", location: "Test City" },
     summary: "Experienced professional with a strong background in software engineering and team leadership across multiple high-impact projects delivering measurable results.",
-    skills: [{ name: "React", category: "Frontend" }, { name: "TypeScript", category: "Languages" }],
+    skills: [{ id: "s1", name: "React", category: "Frontend" }, { id: "s2", name: "TypeScript", category: "Languages" }],
     experience: [
       { id: "e1", title: "Senior Engineer", company: "TechCorp", startDate: "2020-01", endDate: "2023-06", bullets: ["Built scalable systems", "Led team of 5"] },
       { id: "e2", title: "Engineer", company: "StartupInc", startDate: "2018-03", endDate: "2019-12", bullets: ["Developed MVP", "Reduced latency by 40%"] },
@@ -54,6 +52,11 @@ function makeResume(overrides: Partial<ResumeData> = {}): ResumeData {
     languages: [{ id: "l1", name: "English", proficiency: "fluent" }],
     certifications: [],
     projects: [],
+    template: "ats-professional",
+    accentColor: "#1154A3",
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    source: "upload",
     ...overrides,
   };
 }
@@ -91,7 +94,7 @@ describe("DirectiveComplianceService", () => {
     const original = makeResume();
     const optimized = makeResume({
       skills: [
-        { name: "A", category: "1" }, { name: "B", category: "2" }, { name: "C", category: "3" },
+        { id: "sa", name: "A", category: "1" }, { id: "sb", name: "B", category: "2" }, { id: "sc", name: "C", category: "3" },
       ],
     });
     const result = verifyDirectiveCompliance(original, optimized, config);

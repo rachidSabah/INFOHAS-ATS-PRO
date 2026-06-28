@@ -1161,7 +1161,7 @@ function SettingsTab() {
                       <td className="py-2.5 px-3 font-medium">{p.name}</td>
                       <td className="py-2.5 px-3 font-mono text-xs">{p.type}</td>
                       <td className="py-2.5 px-3">
-                        <Badge variant={p.isActive ? "success" : "secondary"}>
+                        <Badge variant={p.isActive ? "success" : "default"}>
                           {p.isActive ? "Active" : "Inactive"}
                         </Badge>
                       </td>
@@ -1178,7 +1178,7 @@ function SettingsTab() {
                         </span>
                       </td>
                       <td className="py-2.5 px-3">
-                        <Badge variant={positionIdx >= 0 ? "outline" : "secondary"}>
+                        <Badge variant={positionIdx >= 0 ? "outline" : "default"}>
                           {fallbackPos}
                         </Badge>
                       </td>

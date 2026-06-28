@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useCallback, useEffect, useMemo } from "react";
-import type { ResumeData, JobDescription } from "../types";
+import type { ResumeData, JobDescription } from "./types";
 
 export interface ContentTip { text: string; type: "keyword" | "metric" | "action" | "length"; icon: string; }
 
@@ -59,7 +59,7 @@ export function useSectionCompleteness(resume: ResumeData | undefined): SectionS
   return useMemo(() => {
     if (!resume) return [];
     return [
-      { label: "Contact", score:(resume.name?1:0)+(resume.email?1:0)+(resume.phone?1:0), max:3, icon:"User", tips:!resume.email?["Add email"]:[] },
+      { label: "Contact", score:(resume.name?1:0)+((resume as any).contact?.email?1:0)+((resume as any).contact?.phone?1:0), max:3, icon:"User", tips:!(resume as any).contact?.email?["Add email"]:[] },
       { label: "Summary", score:((resume.summary||"").split(/\s+/).filter(Boolean).length>40?3:0), max:3, icon:"FileText", tips:!resume.summary?["Write summary"]:[] },
       { label: "Experience", score:Math.min((resume.experience||[]).length,3), max:3, icon:"Briefcase", tips:[] },
       { label: "Education", score:Math.min((resume.education||[]).length,2), max:2, icon:"GraduationCap", tips:[] },

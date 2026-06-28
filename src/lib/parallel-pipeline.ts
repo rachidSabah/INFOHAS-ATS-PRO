@@ -163,7 +163,7 @@ export async function runParallelOptimizer(
   }).length;
 
   const keywordsAdded = jdKeywords.filter((k) =>
-    assembleResult.resume.summary.toLowerCase().includes(k.toLowerCase())
+    (assembleResult.resume.summary || "").toLowerCase().includes(k.toLowerCase())
   ).length;
 
   const result: ParallelOptimizerResult = {

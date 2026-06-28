@@ -45,6 +45,7 @@ const ATS_CONSERVATIVE: DirectiveProfile = {
       experience: { rewriteBulletsOnly: true, rewriteTitle: false, rewriteCompany: false, rewriteDates: false, rewriteLocation: false, maxExpansionPercent: 20 },
       education: { formatOnly: true },
       languages: { formatOnly: true },
+      guardian: { enforceEntityIntegrity: true, enforcePageUtilization: true, enforceContentLength: true, enforceNoDuplicates: true, enforceSummaryQuality: true, minimumScore: 80 },
     },
   },
 };
@@ -66,6 +67,7 @@ const ATS_AGGRESSIVE: DirectiveProfile = {
       experience: { rewriteBulletsOnly: true, rewriteTitle: false, rewriteCompany: false, rewriteDates: false, rewriteLocation: false, maxExpansionPercent: 40 },
       education: { formatOnly: true },
       languages: { formatOnly: true },
+      guardian: { enforceEntityIntegrity: true, enforcePageUtilization: true, enforceContentLength: true, enforceNoDuplicates: true, enforceSummaryQuality: true, minimumScore: 80 },
     },
   },
 };
@@ -87,6 +89,7 @@ const CABIN_CREW: DirectiveProfile = {
       experience: { rewriteBulletsOnly: true, rewriteTitle: false, rewriteCompany: false, rewriteDates: false, rewriteLocation: false, maxExpansionPercent: 30 },
       education: { formatOnly: true },
       languages: { formatOnly: true },
+      guardian: { enforceEntityIntegrity: true, enforcePageUtilization: true, enforceContentLength: true, enforceNoDuplicates: true, enforceSummaryQuality: true, minimumScore: 80 },
     },
   },
 };
@@ -108,6 +111,7 @@ const RETAIL: DirectiveProfile = {
       experience: { rewriteBulletsOnly: true, rewriteTitle: false, rewriteCompany: false, rewriteDates: false, rewriteLocation: false, maxExpansionPercent: 25 },
       education: { formatOnly: true },
       languages: { formatOnly: true },
+      guardian: { enforceEntityIntegrity: true, enforcePageUtilization: true, enforceContentLength: true, enforceNoDuplicates: true, enforceSummaryQuality: true, minimumScore: 80 },
     },
   },
 };
@@ -129,6 +133,7 @@ const HOSPITALITY: DirectiveProfile = {
       experience: { rewriteBulletsOnly: true, rewriteTitle: false, rewriteCompany: false, rewriteDates: false, rewriteLocation: false, maxExpansionPercent: 25 },
       education: { formatOnly: true },
       languages: { formatOnly: true },
+      guardian: { enforceEntityIntegrity: true, enforcePageUtilization: true, enforceContentLength: true, enforceNoDuplicates: true, enforceSummaryQuality: true, minimumScore: 80 },
     },
   },
 };
@@ -150,6 +155,7 @@ const EXECUTIVE: DirectiveProfile = {
       experience: { rewriteBulletsOnly: true, rewriteTitle: false, rewriteCompany: false, rewriteDates: false, rewriteLocation: false, maxExpansionPercent: 35 },
       education: { formatOnly: true },
       languages: { formatOnly: true },
+      guardian: { enforceEntityIntegrity: true, enforcePageUtilization: true, enforceContentLength: true, enforceNoDuplicates: true, enforceSummaryQuality: true, minimumScore: 80 },
     },
   },
 };

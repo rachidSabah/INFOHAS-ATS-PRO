@@ -81,7 +81,7 @@ export default function PublicResumePage() {
       {/* Resume preview */}
       <div className="max-w-[210mm] mx-auto py-8 px-4">
         <div className="bg-white shadow-xl rounded-sm">
-          <A4Preview resume={resume} showControls={false} />
+          <A4Preview resume={resume} />
         </div>
       </div>
 
