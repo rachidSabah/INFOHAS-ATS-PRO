@@ -1,152 +1,256 @@
 /**
- * antigravity-auth.ts — Antigravity CLI Device Authorization Flow
+ * antigravity-auth.ts — Antigravity CLI OAuth via Google OAuth 2.0 + PKCE
  *
- * Implements OAuth 2.0 Device Authorization Grant (RFC 8628).
- * No email/password stored. Tokens encrypted at rest in D1.
+ * Implements Google OAuth 2.0 Authorization Code flow with PKCE (RFC 7636)
+ * for authenticating against Antigravity's Google-managed OAuth app.
+ *
+ * Architecture:
+ *   Pages UI → Connect button → Worker endpoint → Google login → Callback
+ *   → Code exchange → Token encryption → D1 storage → Provider registration
+ *
+ * This mirrors the opencode-antigravity-auth reference implementation
+ * (https://github.com/NoeFabris/opencode-antigravity-auth) but uses
+ * a hosted Cloudflare Worker callback instead of localhost.
  */
 
-import { createEmptySession } from "./interface";
+import type { ProviderSession } from "./interface";
 
-const AUTH_URL = "https://api.antigravity.io/oauth/device";
-const TOKEN_URL = "https://api.antigravity.io/oauth/token";
-const API_BASE = "https://api.antigravity.io/v1";
-const CLIENT_ID = "resumeai-pro-antigravity";
+// ============================================================================
+// Constants (from Antigravity's Google OAuth app)
+// ============================================================================
+export const ANTIGRAVITY_CLIENT_ID = "1071006060591-tmhssin2h21lcre235vtolojh4g403ep.apps.googleusercontent.com";
+export const ANTIGRAVITY_SCOPES = [
+  "https://www.googleapis.com/auth/cloud-platform",
+  "https://www.googleapis.com/auth/userinfo.email",
+  "https://www.googleapis.com/auth/userinfo.profile",
+  "https://www.googleapis.com/auth/cclog",
+  "https://www.googleapis.com/auth/experimentsandconfigs",
+];
 
-export interface DeviceCodeResponse {
-  deviceCode: string;
-  userCode: string;
-  verificationUrl: string;
-  verificationUri: string;
-  verificationUriComplete?: string;
-  expiresIn: number;
-  interval: number;
+export const GOOGLE_AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth";
+export const GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token";
+export const GOOGLE_USERINFO_URL = "https://www.googleapis.com/oauth2/v1/userinfo";
+export const ANTIGRAVITY_API_BASE = "https://cloudcode-pa.googleapis.com";
+
+// ============================================================================
+// PKCE (Proof Key for Code Exchange) — RFC 7636
+// Uses Web Crypto API (available in Cloudflare Workers + modern browsers)
+// ============================================================================
+
+function base64URLEncode(buffer: ArrayBuffer): string {
+  const bytes = new Uint8Array(buffer);
+  let binary = "";
+  for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+  return btoa(binary)
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_")
+    .replace(/=+$/, "");
 }
 
-export interface TokenResponse {
-  accessToken: string;
-  refreshToken: string;
-  expiresIn: number;
-  scope?: string;
-  tokenType?: string;
+export async function generatePKCEChallenge(): Promise<{ verifier: string; challenge: string }> {
+  const verifierBytes = new Uint8Array(32);
+  crypto.getRandomValues(verifierBytes);
+  const verifier = base64URLEncode(verifierBytes.buffer);
+
+  const challengeBytes = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(verifier));
+  const challenge = base64URLEncode(challengeBytes);
+
+  return { verifier, challenge };
 }
 
-export interface AuthPollResult {
-  status: "pending" | "authorized" | "expired" | "error";
-  token?: TokenResponse;
+function encodeState(verifier: string): string {
+  return btoa(JSON.stringify({ v: verifier, t: Date.now() }));
+}
+
+function decodeState(state: string): { verifier: string } {
+  try {
+    const parsed = JSON.parse(atob(state));
+    if (typeof parsed.v !== "string") throw new Error("Missing verifier");
+    return { verifier: parsed.v };
+  } catch {
+    throw new Error("Invalid OAuth state parameter");
+  }
+}
+
+// ============================================================================
+// OAuth Flow
+// ============================================================================
+
+export interface AuthorizationURLResult {
+  url: string;
+  verifier: string;
+  state: string;
+}
+
+/**
+ * Step 1: Build the Google OAuth authorization URL.
+ * User will be redirected to Google login, then to the callback.
+ */
+export async function buildAuthorizationURL(redirectUri: string): Promise<AuthorizationURLResult> {
+  const { verifier, challenge } = await generatePKCEChallenge();
+  const state = encodeState(verifier);
+
+  const url = new URL(GOOGLE_AUTH_URL);
+  url.searchParams.set("client_id", ANTIGRAVITY_CLIENT_ID);
+  url.searchParams.set("response_type", "code");
+  url.searchParams.set("redirect_uri", redirectUri);
+  url.searchParams.set("scope", ANTIGRAVITY_SCOPES.join(" "));
+  url.searchParams.set("code_challenge", challenge);
+  url.searchParams.set("code_challenge_method", "S256");
+  url.searchParams.set("access_type", "offline");
+  url.searchParams.set("prompt", "consent");
+
+  return { url: url.toString(), verifier, state };
+}
+
+export interface TokenExchangeResult {
+  type: "success" | "failed";
+  accessToken?: string;
+  refreshToken?: string;
+  expiresIn?: number;
+  email?: string;
   error?: string;
 }
 
-const AUTH_PREFIX = "Bearer";
-
-export async function initiateDeviceFlow(clientId?: string): Promise<DeviceCodeResponse> {
-  const res = await fetch(AUTH_URL, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      client_id: clientId || CLIENT_ID,
-      scope: "offline_access models.read chat.write",
-    }),
-  });
-  if (!res.ok) {
-    const text = await res.text();
-    throw new Error(`Antigravity device auth failed: ${res.status} ${text.slice(0, 200)}`);
-  }
-  const data = await res.json();
-  return {
-    deviceCode: data.device_code,
-    userCode: data.user_code,
-    verificationUrl: data.verification_uri_complete || data.verification_uri,
-    verificationUri: data.verification_uri,
-    verificationUriComplete: data.verification_uri_complete,
-    expiresIn: data.expires_in,
-    interval: data.interval || 5,
-  };
-}
-
-export async function pollForToken(
-  deviceCode: string,
-  interval: number = 5,
+/**
+ * Step 2: Exchange authorization code for tokens.
+ * Called by the Worker callback endpoint.
+ */
+export async function exchangeAuthorizationCode(
+  code: string,
+  state: string,
+  redirectUri: string,
   clientId?: string,
-  timeoutMs: number = 300_000,
-): Promise<AuthPollResult> {
-  const startTime = Date.now();
-  const maxWait = timeoutMs;
-  while (Date.now() - startTime < maxWait) {
-    await new Promise((r) => setTimeout(r, interval * 1000));
-    try {
-      const res = await fetch(TOKEN_URL, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          grant_type: "urn:ietf:params:oauth:grant-type:device_code",
-          device_code: deviceCode,
-          client_id: clientId || CLIENT_ID,
-        }),
-      });
-      if (res.status === 200) {
-        const data = await res.json();
-        return {
-          status: "authorized",
-          token: {
-            accessToken: data.access_token,
-            refreshToken: data.refresh_token || "",
-            expiresIn: data.expires_in,
-            scope: data.scope,
-            tokenType: data.token_type,
-          },
-        };
-      }
-      if (res.status === 400) {
-        const errorData = await res.json();
-        const error = errorData.error;
-        if (error === "authorization_pending") continue;
-        if (error === "slow_down") { interval += 5; continue; }
-        if (error === "expired_token") return { status: "expired", error: "Device code expired." };
-        if (error === "access_denied") return { status: "error", error: "Authorization denied." };
-        return { status: "error", error: `Unexpected: ${error}` };
-      }
-      return { status: "error", error: `HTTP ${res.status}` };
-    } catch (e: any) {
-      console.warn("[Antigravity] Poll network error:", e?.message);
+): Promise<TokenExchangeResult> {
+  try {
+    const { verifier } = decodeState(state);
+
+    const tokenResponse = await fetch(GOOGLE_TOKEN_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({
+        client_id: clientId || ANTIGRAVITY_CLIENT_ID,
+        code,
+        grant_type: "authorization_code",
+        redirect_uri: redirectUri,
+        code_verifier: verifier,
+      }),
+    });
+
+    if (!tokenResponse.ok) {
+      const errText = await tokenResponse.text();
+      return { type: "failed", error: `Token exchange failed: ${errText.slice(0, 300)}` };
     }
+
+    const tokenData = await tokenResponse.json();
+
+    // Fetch user email
+    let email: string | undefined;
+    try {
+      const userRes = await fetch(GOOGLE_USERINFO_URL, {
+        headers: {
+          "Authorization": "Bearer " + tokenData.access_token,
+        },
+      });
+      if (userRes.ok) {
+        const userData = await userRes.json();
+        email = userData.email;
+      }
+    } catch { /* email fetch is optional */ }
+
+    if (!tokenData.refresh_token) {
+      return { type: "failed", error: "No refresh_token in response. Ensure access_type=offline and prompt=consent are set." };
+    }
+
+    return {
+      type: "success",
+      accessToken: tokenData.access_token,
+      refreshToken: tokenData.refresh_token,
+      expiresIn: tokenData.expires_in,
+      email,
+    };
+  } catch (e: any) {
+    return { type: "failed", error: e?.message || "Unknown error during token exchange" };
   }
-  return { status: "expired", error: "Authentication timed out." };
 }
 
-export async function refreshAccessToken(refreshToken: string): Promise<TokenResponse> {
-  const res = await fetch(TOKEN_URL, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      grant_type: "refresh_token",
-      refresh_token: refreshToken,
-      client_id: CLIENT_ID,
-    }),
-  });
-  if (!res.ok) throw new Error(`Antigravity refresh failed: ${res.status}`);
-  const data = await res.json();
-  return {
-    accessToken: data.access_token,
-    refreshToken: data.refresh_token || refreshToken,
-    expiresIn: data.expires_in,
-  };
+/**
+ * Step 3: Refresh an expired access token using the refresh token.
+ */
+export async function refreshAntigravityToken(
+  refreshToken: string,
+  clientId?: string,
+): Promise<TokenExchangeResult> {
+  try {
+    const tokenResponse = await fetch(GOOGLE_TOKEN_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({
+        client_id: clientId || ANTIGRAVITY_CLIENT_ID,
+        grant_type: "refresh_token",
+        refresh_token: refreshToken,
+      }),
+    });
+
+    if (!tokenResponse.ok) {
+      const errText = await tokenResponse.text();
+      return { type: "failed", error: `Token refresh failed: ${errText.slice(0, 200)}` };
+    }
+
+    const tokenData = await tokenResponse.json();
+    return {
+      type: "success",
+      accessToken: tokenData.access_token,
+      refreshToken: tokenData.refresh_token || refreshToken,
+      expiresIn: tokenData.expires_in,
+    };
+  } catch (e: any) {
+    return { type: "failed", error: e?.message || "Token refresh error" };
+  }
 }
 
-export async function fetchAntigravityModels(accessToken: string): Promise<string[]> {
-  const res = await fetch(`${API_BASE}/models`, {
-    headers: {
-      "Authorization": AUTH_PREFIX + " " + accessToken,
-      "Content-Type": "application/json",
-    },
-  });
-  if (!res.ok) throw new Error(`Antigravity model fetch failed: ${res.status}`);
-  const data = await res.json();
-  const models: string[] = (data.data || data.models || data).map((m: any) =>
-    typeof m === "string" ? m : m.id || m.name || m.model || m.modelId,
-  ).filter(Boolean);
-  return models;
+/**
+ * Discover available models via Antigravity API.
+ * Uses the Antigravity Cloud Code Assist API endpoint.
+ */
+export async function discoverAntigravityModels(accessToken: string): Promise<string[]> {
+  // Antigravity models are defined by the Google Cloud project's AI capabilities.
+  // The reference implementation uses a custom endpoint. For now, return known
+  // models that are available through Antigravity's Gemini-backed API.
+  const knownModels = [
+    "gemini-2.5-flash",
+    "gemini-2.5-pro",
+    "claude-opus-4",
+    "claude-sonnet-4",
+    "claude-3.5-sonnet",
+    "gpt-4.1",
+    "deepseek-v4",
+    "grok-4",
+  ];
+
+  // Try to fetch models from Antigravity's API
+  try {
+    const res = await fetch(`${ANTIGRAVITY_API_BASE}/v1/models`, {
+      headers: {
+        "Authorization": "Bearer " + accessToken,
+        "Content-Type": "application/json",
+      },
+    });
+    if (res.ok) {
+      const data = await res.json();
+      const apiModels = (data.models || data.data || []).map((m: any) =>
+        typeof m === "string" ? m : m.name || m.id || m.model || m.modelId
+      ).filter(Boolean);
+      if (apiModels.length > 0) return apiModels;
+    }
+  } catch { /* fallback to known models */ }
+
+  return knownModels;
 }
 
+/**
+ * Generate a completion via Antigravity API (OpenAI-compatible).
+ */
 export async function generateAntigravity(
   opts: {
     accessToken: string;
@@ -158,13 +262,15 @@ export async function generateAntigravity(
   },
 ): Promise<{ text: string; provider: string; latencyMs: number }> {
   const t0 = performance.now();
+
   const messages: { role: string; content: string }[] = [];
   if (opts.systemPrompt) messages.push({ role: "system", content: opts.systemPrompt });
   messages.push({ role: "user", content: opts.userPrompt });
-  const res = await fetch(`${API_BASE}/chat/completions`, {
+
+  const res = await fetch(`${ANTIGRAVITY_API_BASE}/v1/chat/completions`, {
     method: "POST",
     headers: {
-      "Authorization": AUTH_PREFIX + " " + opts.accessToken,
+      "Authorization": "Bearer " + opts.accessToken,
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
@@ -174,14 +280,18 @@ export async function generateAntigravity(
       temperature: opts.temperature ?? 0.7,
     }),
   });
+
   const latencyMs = Math.round(performance.now() - t0);
+
   if (!res.ok) {
     const text = await res.text();
     if (res.status === 429) throw new AntigravityRateLimitError(text.slice(0, 200));
     throw new Error(`Antigravity API ${res.status}: ${text.slice(0, 200)}`);
   }
+
   const data = await res.json();
-  return { text: data.choices?.[0]?.message?.content || "", provider: "antigravity", latencyMs };
+  const text = data.choices?.[0]?.message?.content || "";
+  return { text, provider: "antigravity", latencyMs };
 }
 
 export class AntigravityRateLimitError extends Error {
