@@ -54,9 +54,14 @@ const SECTION_TITLES: Record<RenderSectionType, string> = {
 };
 
 function buildContactBlock(resume: ResumeData): RenderDocument["contact"] {
+  // Sanitize headline: if it contains contact info (PHONE:, Email:, @, | ) clear it
+  const rawHeadline = resume.headline || "";
+  const hasContactPattern = /PHONE:|Email:|@|^\s*\+?\d{8,}|\s*\|\s*/.test(rawHeadline);
+  const headline = hasContactPattern ? "" : rawHeadline;
+
   return {
     name: resume.name || "",
-    headline: resume.headline,
+    headline,
     phone: resume.contact.phone,
     email: resume.contact.email,
     location: resume.contact.location,
@@ -139,10 +144,23 @@ function buildSkillsSection(resume: ResumeData): RenderDocumentSection | null {
   // Group by category
   const categorized = new Map<string, string[]>();
   for (const s of resume.skills) {
-    const cat = s.category?.trim() || "General";
+    let cat = s.category?.trim();
+    let name = s.name;
+    // Fallback: if no explicit category, detect "Category: skill" pattern in name
+    if (!cat) {
+      const colonIdx = name.indexOf(":");
+      if (colonIdx > 0 && colonIdx < 35) {
+        cat = name.slice(0, colonIdx).trim();
+        name = name.slice(colonIdx + 1).trim();
+      } else {
+        cat = "General";
+      }
+    }
     if (!categorized.has(cat)) categorized.set(cat, []);
-    categorized.get(cat)!.push(s.name);
+    categorized.get(cat)!.push(name);
   }
+  // Rename "General" category to the first non-General category if it only has one item
+  // and that item looks like a category header
   const groups: { label: string; items: string[] }[] = [];
   for (const [category, skillNames] of categorized) {
     groups.push({ label: category, items: skillNames });
