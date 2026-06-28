@@ -601,6 +601,26 @@ export function restoreLockedEntities(optimized: ResumeData, original: ResumeDat
     }
   }
 
+  // Restore skill categories from source (optimizer frequently drops them)
+  if (original.skills && original.skills.length > 0 && result.skills) {
+    const srcCatMap = new Map<string, string>();
+    for (const src of original.skills) {
+      const key = src.name.toLowerCase().trim();
+      if (!srcCatMap.has(key) && src.category) srcCatMap.set(key, src.category);
+    }
+    let restoredCatCount = 0;
+    for (const skill of result.skills) {
+      if (!skill.category || skill.category === "General") {
+        const srcKey = skill.name.toLowerCase().trim();
+        const srcCat = srcCatMap.get(srcKey);
+        if (srcCat) { skill.category = srcCat; restoredCatCount++; }
+      }
+    }
+    if (restoredCatCount > 0) {
+      allRestored.push(`Restored categories for ${restoredCatCount} skill(s) from source (optimizer dropped them).`);
+    }
+  }
+
   if (allRestored.length > 0) {
     console.info(`[restoreLockedEntities] Restored ${allRestored.length} field(s):`, allRestored);
   }

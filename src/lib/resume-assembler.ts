@@ -274,6 +274,30 @@ export function assembleResume(
       warnings.push(`Removed ${removed.length} forbidden skill(s): ${removed.join(", ")}`);
     }
     skills = filtered;
+    // === SKILL CATEGORY RESTORATION ===
+    // The optimizer often drops or mis-assigns categories (puts everything under
+    // "General" except the first item per category). Merge source categories back.
+    const sourceCategoryMap = new Map<string, string>();
+    for (const src of sourceResume.skills) {
+      const key = src.name.toLowerCase().trim();
+      if (!sourceCategoryMap.has(key) && src.category) {
+        sourceCategoryMap.set(key, src.category);
+      }
+    }
+    let categoryRestoreCount = 0;
+    for (const skill of skills) {
+      if (!skill.category || skill.category === "General") {
+        const srcKey = skill.name.toLowerCase().trim();
+        const srcCat = sourceCategoryMap.get(srcKey);
+        if (srcCat) {
+          skill.category = srcCat;
+          categoryRestoreCount++;
+        }
+      }
+    }
+    if (categoryRestoreCount > 0) {
+      warnings.push(`Restored categories for ${categoryRestoreCount} skill(s) from source (optimizer dropped them).`);
+    }
   }
 
   // ========================================================================
