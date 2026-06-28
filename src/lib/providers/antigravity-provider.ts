@@ -18,6 +18,7 @@ import {
   AntigravityRateLimitError,
   type DeviceCodeResponse,
 } from "./antigravity-auth";
+import { recordSuccess, recordFailure, recordRateLimit, resetHealth } from "./antigravity-health";
 
 const PROVIDER_ID = "antigravity" as const;
 
@@ -187,14 +188,25 @@ export class AntigravityProvider implements OAuthAIProvider {
     }
 
     const model = opts.model || this.session.models[0] || "claude-sonnet-4";
-    return generateAntigravity({
-      accessToken: this.session.accessToken,
-      model,
-      systemPrompt: opts.systemPrompt,
-      userPrompt: opts.userPrompt,
-      maxTokens: opts.maxTokens,
-      temperature: opts.temperature,
-    });
+    try {
+      const result = await generateAntigravity({
+        accessToken: this.session.accessToken,
+        model,
+        systemPrompt: opts.systemPrompt,
+        userPrompt: opts.userPrompt,
+        maxTokens: opts.maxTokens,
+        temperature: opts.temperature,
+      });
+      recordSuccess(model, result.latencyMs);
+      return result;
+    } catch (e: any) {
+      if (e instanceof AntigravityRateLimitError) {
+        recordRateLimit(model);
+      } else {
+        recordFailure(model);
+      }
+      throw e;
+    }
   }
 
   getStatus(): ProviderAuthStatus {
