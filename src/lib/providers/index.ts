@@ -2,12 +2,14 @@
 // Unified access to the OAuth provider system.
 
 import { getPuterProvider, type PuterProvider } from "./puter-provider";
+import { getAntigravityProvider, type AntigravityProvider } from "./antigravity-provider";
 export type { OAuthAIProvider, ProviderSession, ProviderAuthStatus, ProviderAuthError } from "./interface";
 export { ProviderAuthenticationError, createEmptySession } from "./interface";
 export { isGoogleOAuthConfigured, getGoogleClientId, signInWithGoogle } from "./google-oauth";
 export type { GoogleUserInfo, GoogleOAuthResult } from "./google-oauth";
 export { saveSession, loadSession, clearSession, isSessionExpired, isSessionExpiringSoon, getAllSessions } from "./session-manager";
 export { getPuterProvider, PuterProvider };
+export { getAntigravityProvider, AntigravityProvider };
 
 import type { ProviderSession } from "./interface";
 
@@ -26,6 +28,15 @@ export async function restoreAllProviderSessions(): Promise<ProviderSession[]> {
     if (puterSession) sessions.push(puterSession);
   } catch (e: any) {
     console.warn("[Provider Auth] Puter session restore failed:", e?.message);
+  }
+
+  // Restore Antigravity session
+  try {
+    const antigravityProvider = getAntigravityProvider();
+    const antigravitySession = await antigravityProvider.restore();
+    if (antigravitySession) sessions.push(antigravitySession);
+  } catch (e: any) {
+    console.warn("[Provider Auth] Antigravity session restore failed:", e?.message);
   }
 
   return sessions;
@@ -57,11 +68,17 @@ export function isAnyProviderAuthenticatedSync(): boolean {
  * or null if none are authenticated.
  * Uses tryRefresh() to handle expired sessions.
  */
-export async function getAuthenticatedProvider(): Promise<{ provider: "puter"; generate: (opts: any) => Promise<{ text: string; provider: string; latencyMs: number }> } | null> {
-  // Then check Puter (browser-auth — works but may need popup)
+export async function getAuthenticatedProvider(): Promise<{ provider: "puter" | "antigravity"; generate: (opts: any) => Promise<{ text: string; provider: string; latencyMs: number }> } | null> {
+  // Check Puter first
   const puterProvider = getPuterProvider();
   if (await puterProvider.tryRefresh()) {
     return { provider: "puter", generate: (opts) => puterProvider.generate(opts) };
+  }
+
+  // Then check Antigravity
+  const antigravityProvider = getAntigravityProvider();
+  if (await antigravityProvider.tryRefresh()) {
+    return { provider: "antigravity", generate: (opts) => antigravityProvider.generate(opts) };
   }
 
   return null;

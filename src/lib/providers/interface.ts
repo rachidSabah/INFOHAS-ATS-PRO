@@ -4,7 +4,7 @@
 // making future additions (OpenCode Auth, Claude Web, etc.) trivial.
 
 export interface ProviderSession {
-  provider: "puter";
+  provider: "puter" | "antigravity";
   authenticated: boolean;
   email: string | null;
   userId: string | null;
@@ -58,7 +58,7 @@ export interface ProviderAuthError {
  */
 export interface OAuthAIProvider {
   /** Unique provider identifier */
-  readonly id: "puter";
+  readonly id: "puter" | "antigravity";
   /** Human-readable provider name */
   readonly name: string;
 
