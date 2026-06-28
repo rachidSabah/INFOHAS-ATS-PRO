@@ -1,0 +1,30 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "model": "opencode/deepseek-v4-flash-free",
+  "small_model": "opencode/deepseek-v4-flash-free",
+  "provider": {
+    "opencode": {
+      "options": {
+        "apiKey": "{env:NEXT_PUBLIC_OPENCODE_API_KEY}"
+      }
+    }
+  },
+  "mcp": {
+    "context7": {
+      "type": "remote",
+      "url": "https://mcp.context7.com/mcp",
+      "enabled": false
+    },
+    "gh_grep": {
+      "type": "remote",
+      "url": "https://mcp.grep.app",
+      "enabled": false
+    }
+  },
+  "instructions": [
+    "README.md",
+    "DIRECTIVE_FLOW.md",
+    "DIRECTIVE_ARCHITECTURE_AUDIT.md"
+  ],
+  "shell": "pwsh"
+}

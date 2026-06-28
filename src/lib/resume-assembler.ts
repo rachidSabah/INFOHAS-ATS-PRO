@@ -348,6 +348,7 @@ export function assembleResume(
     headline, // mutable (but protected)
     contact, // immutable
     dateOfBirth: sourceResume.dateOfBirth, // immutable
+    additionalInfo: (optimizerOutput as any).additionalInfo || sourceResume.additionalInfo,
     summary, // mutable
     experience: finalExperience, // merged
     education, // immutable

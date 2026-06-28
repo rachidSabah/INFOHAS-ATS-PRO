@@ -106,6 +106,7 @@ export interface ResumeData {
   accentColor?: string;
   photoUrl?: string; // optional profile photo for templates with image frame (infohas-pro)
   dateOfBirth?: string; // optional DOB line shown under contact (infohas-pro)
+  additionalInfo?: string; // optional free-text section at end (e.g., "Willing to reallocate, Height 1m,72")
   createdAt: string;
   updatedAt: string;
   source?: "upload" | "manual" | "ai-optimized" | "ai-optimized-aviation" | "template";

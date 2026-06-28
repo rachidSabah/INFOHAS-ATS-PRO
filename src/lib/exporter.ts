@@ -262,6 +262,14 @@ function buildResumeHtml(r: ResumeData, L: ResumeLayoutModel): string {
     }
   }
 
+  // ADDITIONAL INFORMATION
+  if (r.additionalInfo) {
+    lines.push(`<div class="section-title">ADDITIONAL INFORMATION</div>`);
+    for (const line of r.additionalInfo.split("\n").map(l => l.trim()).filter(Boolean)) {
+      lines.push(`<p>${esc(line)}</p>`);
+    }
+  }
+
   lines.push(`</body></html>`);
   return lines.join("\n");
 }
@@ -1371,6 +1379,18 @@ export async function exportResumeDOCX(resume: ResumeData, layout?: ResumeLayout
       children.push(new Paragraph({
         spacing: { after: 40 },
         children: [new TextRun({ text: `${l.name}: ${l.proficiency}${note}`, size: L.bodyFontSizePt * 2, font: L.fontFamily, color: bodyHex })],
+      }));
+    }
+  }
+
+  // ===== ADDITIONAL INFORMATION =====
+  if (resume.additionalInfo) {
+    addSection("ADDITIONAL INFORMATION");
+    const infoLines = resume.additionalInfo.split("\n").map(l => l.trim()).filter(Boolean);
+    for (const line of infoLines) {
+      children.push(new Paragraph({
+        spacing: { after: 40 },
+        children: [new TextRun({ text: line, size: L.bodyFontSizePt * 2, font: L.fontFamily, color: bodyHex })],
       }));
     }
   }
