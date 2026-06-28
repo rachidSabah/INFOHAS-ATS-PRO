@@ -256,23 +256,8 @@ export function EditableA4Preview({ resume, onChange, scale = 0.7, className }: 
             {/* SUMMARY */}
             {resume.summary && (
               <EditableBlock isEditing={editing === "summary"} onEdit={() => setEditing("summary")} label="Edit summary" isTouch={isTouch}>
-                <InfohasSection title="PROFESSIONAL SUMMARY">
+                <InfohasSection title="PROFESSIONAL PROFILE">
                   <p style={{ margin: 0, textAlign: "justify", color: BLACK, lineHeight: 1.2 }}>{safeRender(resume.summary)}</p>
-                </InfohasSection>
-              </EditableBlock>
-            )}
-
-            {/* SKILLS */}
-            {resume.skills.length > 0 && (
-              <EditableBlock isEditing={editing === "skills"} onEdit={() => setEditing("skills")} label="Edit skills" isTouch={isTouch}>
-                <InfohasSection title="CORE COMPETENCIES & SKILLS">
-                  <ul style={{ margin: 0, paddingLeft: `${L.bulletIndentMm}mm`, listStyleType: "•", lineHeight: 1.2 }}>
-                    {groupSkillsByCategory(resume.skills).slice(0, 4).map((g, i) => (
-                      <li key={i} style={{ marginBottom: 0, color: BLACK, lineHeight: 1.2, textAlign: "justify" }}>
-                        <span style={{ fontWeight: 700 }}>{safeRender(g.category)}:</span> <span>{g.items.map((item: any) => safeRender(item)).join(", ")}.</span>
-                      </li>
-                    ))}
-                  </ul>
                 </InfohasSection>
               </EditableBlock>
             )}
@@ -347,18 +332,29 @@ export function EditableA4Preview({ resume, onChange, scale = 0.7, className }: 
               </>
             )}
 
-            {/* LANGUAGES */}
+            {/* KEY COMPETENCIES (moved after Education to match target format) */}
+            {resume.skills.length > 0 && (
+              <EditableBlock isEditing={editing === "skills"} onEdit={() => setEditing("skills")} label="Edit skills" isTouch={isTouch}>
+                <InfohasSection title="KEY COMPETENCIES">
+                  <ul style={{ margin: 0, paddingLeft: `${L.bulletIndentMm}mm`, listStyleType: "•", lineHeight: 1.2 }}>
+                    {groupSkillsByCategory(resume.skills).slice(0, 4).map((g, i) => (
+                      <li key={i} style={{ marginBottom: 0, color: BLACK, lineHeight: 1.2, textAlign: "justify" }}>
+                        <span style={{ fontWeight: 700 }}>{safeRender(g.category)}:</span> <span>{g.items.map((item: any) => safeRender(item)).join(", ")}.</span>
+                      </li>
+                    ))}
+                  </ul>
+                </InfohasSection>
+              </EditableBlock>
+            )}
+
+            {/* LANGUAGES — single line format */}
             {resume.languages.length > 0 && (
               <EditableBlock isEditing={editing === "languages"} onEdit={() => setEditing("languages")} label="Edit languages" isTouch={isTouch}>
-                <div style={{ display: "flex", flexDirection: "column", gap: 0, lineHeight: 1.2 }}>
-                  {resume.languages.map((l) => (
-                    <div key={l.id} style={{ color: BLACK, lineHeight: 1.2 }}>
-                      <span style={{ fontWeight: 700 }}>{safeRender(l.name)}:</span>{" "}
-                      <span style={{ textTransform: "capitalize" }}>{safeRender(l.proficiency)}</span>
-                      {(l as any).note ? <span> ({(l as any).note})</span> : null}
-                    </div>
-                  ))}
-                </div>
+                <InfohasSection title="LANGUAGES">
+                  <div style={{ color: BLACK, lineHeight: 1.2 }}>
+                    • {resume.languages.map((l) => safeRender(l.name)).join(", ")}
+                  </div>
+                </InfohasSection>
               </EditableBlock>
             )}
           </div>

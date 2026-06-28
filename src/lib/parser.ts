@@ -61,6 +61,8 @@ export function secondaryParser(text: string, fileName: string): ResumeData {
   const expRegex = new RegExp('(?:^|\\n)\\s*(?:PROFESSIONAL EXPERIENCE|WORK EXPERIENCE|\\bEXPERIENCE\\b|\\bEXPERIENCES\\b|EMPLOYMENT HISTORY|HISTORY)\\b\\s*:?\\s*\\n([\\s\\S]*?)' + headerLookahead, 'i');
   const eduRegex = new RegExp('(?:^|\\n)\\s*(?:EDUCATION|ACADEMIC BACKGROUND|ACADEMIC)\\b\\s*:?\\s*\\n([\\s\\S]*?)' + headerLookahead, 'i');
   const langRegex = new RegExp('(?:^|\\n)\\s*(?:LANGUAGES|LANGUAGE)\\b\\s*:?\\s*\\n([\\s\\S]*?)' + headerLookahead, 'i');
+  // Also try inline format: "Languages: English, French, Arabic" (all on one line)
+  const langInlineRegex = /(?:^|\n)\s*(?:LANGUAGES|LANGUAGE)\s*:\s*(.+?)(?=\n|$)/i;
   const skillsRegex = new RegExp('(?:^|\\n)\\s*(?:SKILLS|TECHNICAL SKILLS|CORE SKILLS|CORE COMPETENCIES|CORE COMPETENCIES & SKILLS|COMPETENCIES)\\b\\s*:?\\s*\\n([\\s\\S]*?)' + headerLookahead, 'i');
   const certsRegex = new RegExp('(?:^|\\n)\\s*(?:CERTIFICATIONS|CERTIFICATES|LICENSES)\\b\\s*:?\\s*\\n([\\s\\S]*?)' + headerLookahead, 'i');
   const projRegex = new RegExp('(?:^|\\n)\\s*(?:PROJECTS|PERSONAL PROJECTS|SIDE PROJECTS)\\b\\s*:?\\s*\\n([\\s\\S]*?)' + headerLookahead, 'i');
@@ -69,6 +71,13 @@ export function secondaryParser(text: string, fileName: string): ResumeData {
   const expMatch = normalizedText.match(expRegex);
   const eduMatch = normalizedText.match(eduRegex);
   const langMatch = normalizedText.match(langRegex);
+  // Fallback: try inline format "Languages: English, French, Arabic"
+  const langInlineMatch = !langMatch ? normalizedText.match(langInlineRegex) : null;
+  const langLines = langMatch
+    ? langMatch[1].split("\n").map(l => l.trim()).filter(Boolean)
+    : langInlineMatch
+      ? langInlineMatch[1].split(/[,;]/).map(l => l.trim()).filter(Boolean)
+      : [];
   const skillsMatch = normalizedText.match(skillsRegex);
   const certsMatch = normalizedText.match(certsRegex);
   const projMatch = normalizedText.match(projRegex);
@@ -76,7 +85,6 @@ export function secondaryParser(text: string, fileName: string): ResumeData {
 
   const expLines = expMatch ? expMatch[1].split("\n").map(l => l.trim()).filter(Boolean) : [];
   const eduLines = eduMatch ? eduMatch[1].split("\n").map(l => l.trim()).filter(Boolean) : [];
-  const langLines = langMatch ? langMatch[1].split("\n").map(l => l.trim()).filter(Boolean) : [];
   const skillsLines = skillsMatch ? skillsMatch[1].split("\n").map(l => l.trim()).filter(Boolean) : [];
   const certsLines = certsMatch ? certsMatch[1].split("\n").map(l => l.trim()).filter(Boolean) : [];
   const projLines = projMatch ? projMatch[1].split("\n").map(l => l.trim()).filter(Boolean) : [];
