@@ -2263,78 +2263,12 @@ export async function callAI(opts: AICallOptions): Promise<AICallResult> {
     }
   }
 
-  // === THEN: Try Puter (authenticated) as a true last resort ===
-  const puterId = puter ? (puter.id || puter.name || puter.type) : "puter";
-  if (puter && puterAuthenticated && !isExcluded(puterId)) {
-    console.log("[ROUTER]\nProvider selected: Puter (fallback — last resort)");
-    try {
-      const { getPuterProvider } = await import("./providers/puter-provider");
-      const puterProvider = getPuterProvider();
-      const resp = await withTimeout(
-        puterProvider.generate({
-          systemPrompt: finalOpts.systemPrompt,
-          userPrompt: finalOpts.userPrompt,
-          maxTokens: finalOpts.maxTokens,
-          temperature: finalOpts.temperature,
-          model: puter.modelName,
-        }),
-        callTimeoutMs,
-        "Puter.generate (fallback)"
-      );
-      const text = resp.text;
-      assert(text !== "", "Provider response is empty");
-      if (!text || text.length === 0) throw new ProviderReturnedEmptyResponse();
-      return {
-        text,
-        provider: "Puter.js",
-        latencyMs: Math.round(performance.now() - t0),
-        tokensEstimate: estTokens(finalOpts.userPrompt + (finalOpts.systemPrompt ?? "")),
-      };
-    } catch (puterErr: any) {
-      providerErrors.push(`Puter (fallback): ${puterErr?.message || puterErr}`);
-      console.warn(`[AI] Puter fallback failed: ${puterErr?.message || puterErr}`);
-    }
-  }
-
-  // === ANONYMOUS PUTER FALLBACK (last resort before local engine) ===
-  if (puter && !puterAuthenticated && typeof window !== "undefined" && (window as any).puter?.ai?.chat) {
-    console.log("[ROUTER]\nProvider selected: Puter (anonymous fallback — no auth required)");
-    try {
-      const { getPuterProvider } = await import("./providers/puter-provider");
-      const puterProvider = getPuterProvider();
-      const resp = await withTimeout(
-        puterProvider.generate({
-          systemPrompt: finalOpts.systemPrompt,
-          userPrompt: finalOpts.userPrompt,
-          maxTokens: finalOpts.maxTokens,
-          temperature: finalOpts.temperature,
-          model: puter.modelName,
-        }),
-        callTimeoutMs,
-        "Puter.generate (anonymous)"
-      );
-      const text = resp.text;
-      if (text && text.length > 0) {
-        assert(text !== "", "Provider response is empty");
-        return {
-          text,
-          provider: "Puter.js (anonymous)",
-          latencyMs: Math.round(performance.now() - t0),
-          tokensEstimate: estTokens(finalOpts.userPrompt + (finalOpts.systemPrompt ?? "")),
-        };
-      }
-    } catch (anonErr: any) {
-      providerErrors.push(`Puter (anonymous): ${anonErr?.message || anonErr}`);
-      console.warn(`[AI] Puter anonymous fallback failed: ${anonErr?.message || anonErr}`);
-    }
-  }
-
-  // ULTIMATE FALLBACK: All real providers exhausted — return local engine output
-  console.warn("[AI] All real providers failed. Falling back to local engine.");
-  const text = localGenerate(finalOpts);
-  if (text) {
+  // === ALL API PROVIDERS EXHAUSTED — fall back to local engine ===
+  console.warn("[AI] All API providers failed. Falling back to local engine.");
+  const localText = localGenerate(finalOpts);
+  if (localText) {
     return {
-      text,
+      text: localText,
       provider: "Local Engine (fallback)",
       latencyMs: Math.round(performance.now() - t0),
       tokensEstimate: estTokens(finalOpts.userPrompt + (finalOpts.systemPrompt ?? "")),
