@@ -48,8 +48,15 @@ export function ConnectAntigravityDialog() {
     setErrorMsg("");
 
     try {
-      // Open OAuth popup
-      const authUrl = "/api/providers/antigravity/auth";
+      // Step 1: POST /start to get auth URL (authenticated — uses frontend session)
+      const startRes = await fetch("/api/providers/antigravity/start", { method: "POST" });
+      if (!startRes.ok) {
+        const errData = await startRes.json().catch(() => ({}));
+        throw new Error(errData.error || `Start auth failed (${startRes.status})`);
+      }
+      const { authUrl } = await startRes.json();
+
+      // Step 2: Open Google OAuth in popup
       const popup = window.open(authUrl, "antigravity-auth", "width=600,height=700");
       if (!popup) {
         // Popup blocked — redirect directly
