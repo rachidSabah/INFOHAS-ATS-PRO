@@ -22,6 +22,16 @@ import type { ResumeData } from "./types";
 import { cleanupResumeGrammar, stripMarkdown, repairMalformedJSON, filterForbiddenSkills, isForbiddenSkill } from "./ai-response-processor";
 import { extractJSON } from "./ai";
 import { extractLockedFacts, computeFactDiff, computeFactualIntegrityScore } from "./locked-facts";
+import {
+  findMatchingSourceEducation,
+  findMatchingSourceLanguage,
+  computeEducationFingerprint,
+  computeLanguageFingerprint,
+  validateEducationFingerprints,
+  validateLanguageFingerprints,
+  logEducationPipeline,
+  logLanguagePipeline,
+} from "./education-language-fingerprint";
 import { computeExperienceFingerprint } from "./experience-fingerprint";
 
 export interface UnifiedPipelineResult {
@@ -310,6 +320,8 @@ export function restoreEducation(optimized: ResumeData, sourceResume: ResumeData
   const result = JSON.parse(JSON.stringify(optimized)) as ResumeData;
   const restored: string[] = [];
 
+  logEducationPipeline("optimized", result.education || []);
+
   if (!sourceResume.education || sourceResume.education.length === 0) {
     return { resume: result, restored };
   }
@@ -321,13 +333,28 @@ export function restoreEducation(optimized: ResumeData, sourceResume: ResumeData
   if (ai.length === 0) {
     result.education = source.map((e) => ({ ...e }));
     restored.push(`Restored ALL education (${source.length} entries) — AI had removed it`);
+    logEducationPipeline("restored", result.education);
     return { resume: result, restored };
   }
 
-  // For each AI entry, restore locked fields from source by index
+  // For each AI entry, find matching source entry by ID/fingerprint (NOT index)
+  const usedSourceIds = new Set<string>();
   const restoredEdu = ai.slice(0, source.length).map((entry, i) => {
-    const orig = source[i];
-    if (!orig) return entry;
+    // Use ID-based matching to find the correct source entry
+    const matchResult = findMatchingSourceEducation(entry, sourceResume, i);
+    const orig = matchResult.match;
+
+    if (!orig) {
+      restored.push(`Education[${i}]: no source match found — keeping AI entry`);
+      return entry;
+    }
+
+    if (matchResult.method !== "id") {
+      restored.push(`Education[${i}]: matched by ${matchResult.method} — ${matchResult.warning || ""}`);
+    }
+
+    // Track which source entries we've used (for restoring dropped entries)
+    usedSourceIds.add(orig.id);
 
     if (entry.institution !== orig.institution && orig.institution) {
       restored.push(`Education[${i}]: institution "${entry.institution}" → "${orig.institution}"`);
@@ -335,13 +362,14 @@ export function restoreEducation(optimized: ResumeData, sourceResume: ResumeData
 
     return {
       ...entry,
-      // STRICT LOCK: institution is ALWAYS from source.
-      // If source.institution is empty, use "" — NEVER fall back to AI's polluted institution
-      // (which may have dates appended like "INFOHAS 2023 – 2025").
+      // STRICT LOCK: ID is ALWAYS from source (immutable)
+      id: orig.id,
+      // STRICT LOCK: institution (school) is ALWAYS from source.
       institution: orig.institution || "",
-      // degree: prefer source, fall back to AI (AI may have improved formatting)
+      // degree: prefer source, fall back to AI
       degree: orig.degree || entry.degree || "",
       location: orig.location || entry.location || "",
+      // STRICT: dates ALWAYS from source
       startDate: orig.startDate || "",
       endDate: orig.endDate || "",
       // Keep AI's highlights (the optimization)
@@ -349,32 +377,24 @@ export function restoreEducation(optimized: ResumeData, sourceResume: ResumeData
     };
   });
 
-  // Add back dropped entries
-  for (let i = ai.length; i < source.length; i++) {
-    restoredEdu.push({ ...source[i] });
-    restored.push(`Restored dropped education[${i}]: ${source[i].degree} at ${source[i].institution}`);
+  // Add back dropped entries (source entries that weren't matched)
+  for (const srcEdu of source) {
+    if (!usedSourceIds.has(srcEdu.id)) {
+      restoredEdu.push({ ...srcEdu });
+      restored.push(`Restored dropped education: ${srcEdu.degree} at ${srcEdu.institution}`);
+    }
   }
 
   result.education = restoredEdu;
 
-  // FINAL GUARD: force every education entry's institution from source.
-  // Index matching can fail if AI reorders entries. This brute-force
-  // approach iterates every restored entry and looks up the source
-  // entry with a matching degree to restore the real institution.
-  for (let i = 0; i < result.education.length; i++) {
-    const edu = result.education[i];
-    // Find source entry with same degree
-    const srcMatch = source.find(s => s.degree === edu.degree) || source[i];
-    if (srcMatch && srcMatch.institution && edu.institution !== srcMatch.institution) {
-      restored.push(`Education[${i}]: FORCE institution "${edu.institution || "empty"}" → "${srcMatch.institution}"`);
-      edu.institution = srcMatch.institution;
-    }
-    // Also force dates from source
-    if (srcMatch) {
-      edu.startDate = srcMatch.startDate || edu.startDate || "";
-      edu.endDate = srcMatch.endDate || edu.endDate || "";
-    }
+  // Validate fingerprints
+  const fpValidation = validateEducationFingerprints(result, sourceResume);
+  if (!fpValidation.valid) {
+    restored.push(`WARNING: Education fingerprint validation: ${fpValidation.violations.length} violation(s)`);
+    console.warn("[restoreEducation] Fingerprint violations:", fpValidation.violations);
   }
+
+  logEducationPipeline("restored", result.education);
 
   if (restored.length > 0) {
     console.info(`[restoreEducation] Restored ${restored.length} field(s)`, restored);
@@ -396,6 +416,8 @@ export function restoreLanguages(optimized: ResumeData, sourceResume: ResumeData
   const result = JSON.parse(JSON.stringify(optimized)) as ResumeData;
   const restored: string[] = [];
 
+  logLanguagePipeline("optimized", result.languages || []);
+
   if (!sourceResume.languages || sourceResume.languages.length === 0) {
     return { resume: result, restored };
   }
@@ -406,6 +428,15 @@ export function restoreLanguages(optimized: ResumeData, sourceResume: ResumeData
   const aiLangCount = result.languages?.length || 0;
   result.languages = sourceResume.languages.map((l) => ({ ...l }));
   restored.push(`Restored languages (${sourceResume.languages.length} entries) — using original set (AI had ${aiLangCount})`);
+
+  // Validate fingerprints
+  const fpValidation = validateLanguageFingerprints(result, sourceResume);
+  if (!fpValidation.valid) {
+    restored.push(`WARNING: Language fingerprint validation: ${fpValidation.violations.length} violation(s)`);
+    console.warn("[restoreLanguages] Fingerprint violations:", fpValidation.violations);
+  }
+
+  logLanguagePipeline("restored", result.languages);
 
   if (restored.length > 0) {
     console.info(`[restoreLanguages] Restored ${restored.length} field(s)`, restored);

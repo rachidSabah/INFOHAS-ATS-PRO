@@ -234,6 +234,15 @@ export function runStructureGuardian(resume: ResumeData, sourceResume: ResumeDat
       if (edu.degree && /specialized modules include/i.test(edu.degree)) {
         warnings.push(`Education[${i}]: degree contains "Specialized modules include" (should be in highlights)`);
       }
+      // CRITICAL: Check for missing school name (institution)
+      const srcEdu = sourceResume.education[i];
+      if (srcEdu && srcEdu.institution && srcEdu.institution.trim() && (!edu.institution || !edu.institution.trim())) {
+        criticalIssues.push(`Education[${i}]: school name missing — source had "${srcEdu.institution}"`);
+      }
+      // Check if school name changed (not allowed — immutable)
+      if (srcEdu && srcEdu.institution && edu.institution && srcEdu.institution !== edu.institution) {
+        criticalIssues.push(`Education[${i}]: school name changed "${srcEdu.institution}" → "${edu.institution}"`);
+      }
     }
   }
 

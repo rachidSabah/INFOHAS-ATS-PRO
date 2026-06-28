@@ -35,6 +35,7 @@
 import type { ResumeData, ResumeExperience, ResumeSkill, ResumeLanguage } from "./types";
 import { cleanupGrammar, cleanupResumeGrammar, filterForbiddenSkills, isForbiddenSkill } from "./ai-response-processor";
 import { findMatchingSourceExperience, validateExperienceFingerprints, computeExperienceFingerprint } from "./experience-fingerprint";
+import { uid } from "./store";
 
 /**
  * The optimizer output contract.
@@ -275,6 +276,12 @@ export function assembleResume(
     skills = filtered;
   }
 
+  // ========================================================================
+  // EXTRACT LANGUAGES FROM SKILLS (must be before skills section)
+  // ========================================================================
+  // Initialize languages from source FIRST (immutable baseline)
+  const languages: ResumeLanguage[] = sourceResume.languages.map((l) => ({ ...l }));
+
   // Extract Languages skill group and move to languages array
   const langSkillIdx = skills.findIndex(s => /^languages?$/i.test(s.category || s.name));
   if (langSkillIdx >= 0) {
@@ -314,11 +321,9 @@ export function assembleResume(
   }
 
   // ========================================================================
-  // 6. LANGUAGES — ALWAYS from source (immutable)
+  // 6. LANGUAGES — HARD GUARD (languages already initialized above from source)
   // ========================================================================
-  const languages: ResumeLanguage[] = sourceResume.languages.map((l) => ({ ...l }));
-  // HARD GUARD: if source has languages but assembler produce empty, force restore
-  // This covers the case where the pipeline drops languages between stages
+  // HARD GUARD: if source has languages but assembler produced empty, force restore
   if (sourceResume.languages.length > 0 && languages.length === 0) {
     warnings.push('Languages were dropped — forcing restore from source.');
     languages.push(...sourceResume.languages.map((l) => ({ ...l })));
