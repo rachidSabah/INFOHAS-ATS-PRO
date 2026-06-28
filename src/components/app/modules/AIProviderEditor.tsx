@@ -12,6 +12,7 @@ import { toast } from "sonner";
 import type { AIProvider, AIProviderType } from "@/lib/types";
 
 const PROVIDER_TYPES: { type: AIProviderType; label: string; icon: string; defaultUrl?: string; defaultModel?: string; authType?: "bearer" | "header" | "query" | "none" }[] = [
+  { type: "antigravity", label: "Antigravity CLI (Token)", icon: "Terminal", defaultUrl: "https://api.antigravity.io/v1", defaultModel: "claude-sonnet-4", authType: "bearer" },
   { type: "puter", label: "Puter.js (Free)", icon: "Sparkles", defaultUrl: "https://api.puter.com", defaultModel: "claude-sonnet-4", authType: "none" },
   { type: "opencode", label: "OpenCode Zen (Free models)", icon: "Gift", defaultUrl: "https://opencode.ai/zen/v1", defaultModel: "deepseek-v4-flash-free", authType: "bearer" },
   { type: "opencode-zen", label: "OpenCode Zen (Free)", icon: "Gift", defaultUrl: "https://opencode.ai/zen/v1", defaultModel: "deepseek-v4-flash-free", authType: "bearer" },

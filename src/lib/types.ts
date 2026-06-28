@@ -332,6 +332,7 @@ export interface ResumeReviewReport {
 }
 
 export type AIProviderType =
+  | "antigravity"
   | "puter"
   | "openai"
   | "gemini"
