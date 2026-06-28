@@ -16,6 +16,15 @@ export function ConnectAntigravityDialog() {
   const handleMessage = useCallback((event: MessageEvent) => {
     if (event.data?.type === "antigravity-auth") {
       if (event.data.status === "success") {
+        // Save tokens via the provider
+        try {
+          const provider = getAntigravityProvider();
+          await provider.login(event.data.accessToken);
+          if (event.data.refreshToken) {
+            // Store refresh token for later use
+            await provider.saveRefreshToken(event.data.refreshToken, event.data.expiresIn || 3600);
+          }
+        } catch { /* session save may fail — token still stored in memory */ }
         setState("authorized");
         toast.success("Antigravity connected successfully!");
         // Auto-sync models

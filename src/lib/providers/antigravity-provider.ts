@@ -103,6 +103,12 @@ export class AntigravityProvider implements OAuthAIProvider {
     throw new ProviderAuthenticationError("login_failed", "Use the 'Connect Antigravity' button in Settings to authenticate via Google OAuth.", "antigravity");
   }
 
+  async saveRefreshToken(refreshToken: string, expiresInSeconds: number): Promise<void> {
+    this.session.refreshToken = refreshToken;
+    this.session.expiresAt = Date.now() + expiresInSeconds * 1000;
+    await saveSession(this.session);
+  }
+
   async refresh(): Promise<ProviderSession> {
     if (!this.session.refreshToken) {
       this.session.authenticated = false;
