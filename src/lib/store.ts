@@ -1445,11 +1445,13 @@ export const useApp = create<AppState>()(
       clearLogs: () => set({ logs: [] }),
 
       incUsage: (k) =>
-        set((s) =>
-          s.user
-            ? { user: { ...s.user, usage: { ...s.user.usage, [k]: s.user.usage[k] + 1 } } }
-            : s
-        ),
+        set((s) => {
+          if (!s.user) return s;
+          // Defensive: usage may be undefined if user was created without it
+          const currentUsage = s.user.usage || { resumesGenerated: 0, atsChecks: 0, coverLetters: 0, interviewPreps: 0, downloads: 0 };
+          const currentValue = (currentUsage as any)[k] || 0;
+          return { user: { ...s.user, usage: { ...currentUsage, [k]: currentValue + 1 } } };
+        }),
     })
 );
 
