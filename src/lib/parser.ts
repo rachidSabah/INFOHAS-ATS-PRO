@@ -93,10 +93,23 @@ export function secondaryParser(text: string, fileName: string): ResumeData {
   const experience = safeCall(parseExperiences, [expLines], []) as ResumeData["experience"];
   const education = safeCall(parseEducation, [eduLines], []) as ResumeData["education"];
   const skills = skillsLines
-    .flatMap((l) => l.split(new RegExp("[,;•|]")))
-    .map((s) => s.trim())
-    .filter((s) => s.length > 0 && s.length < 40 && !isForbiddenSkill(s))
-    .map((s) => ({ id: uid("s"), name: s }));
+    .flatMap((l) => {
+      // Detect "Category: item1, item2, item3" format — extract category + items
+      const colonIdx = l.indexOf(":");
+      if (colonIdx > 0 && colonIdx < 35) {
+        const category = l.slice(0, colonIdx).trim();
+        const rest = l.slice(colonIdx + 1);
+        return rest.split(new RegExp("[,;•|]"))
+          .map((s) => s.trim())
+          .filter((s) => s.length > 0 && s.length < 40 && !isForbiddenSkill(s))
+          .map((name) => ({ id: uid("s"), name, category }));
+      }
+      // Fallback: flat comma-separated skill names
+      return l.split(new RegExp("[,;•|]"))
+        .map((s) => s.trim())
+        .filter((s) => s.length > 0 && s.length < 40 && !isForbiddenSkill(s))
+        .map((s) => ({ id: uid("s"), name: s }));
+    })
   const projects = parseProjects(projLines);
   const certifications = certsLines.map((c) => ({ id: uid("c"), name: c }));
   const languages: ResumeData["languages"] = [];
@@ -205,10 +218,23 @@ export function heuristicParser(text: string, fileName: string): ResumeData {
   const experience = parseExperiences(sectionLines.experience);
   const education = parseEducation(sectionLines.education);
   const skills = sectionLines.skills
-    .flatMap((l) => l.split(new RegExp("[,;•|]")))
-    .map((s) => s.trim())
-    .filter((s) => s.length > 0 && s.length < 40 && !isForbiddenSkill(s))
-    .map((s) => ({ id: uid("s"), name: s }));
+    .flatMap((l) => {
+      // Detect "Category: item1, item2, item3" format — extract category + items
+      const colonIdx = l.indexOf(":");
+      if (colonIdx > 0 && colonIdx < 35) {
+        const category = l.slice(0, colonIdx).trim();
+        const rest = l.slice(colonIdx + 1);
+        return rest.split(new RegExp("[,;•|]"))
+          .map((s) => s.trim())
+          .filter((s) => s.length > 0 && s.length < 40 && !isForbiddenSkill(s))
+          .map((name) => ({ id: uid("s"), name, category }));
+      }
+      // Fallback: flat comma-separated skill names
+      return l.split(new RegExp("[,;•|]"))
+        .map((s) => s.trim())
+        .filter((s) => s.length > 0 && s.length < 40 && !isForbiddenSkill(s))
+        .map((s) => ({ id: uid("s"), name: s }));
+    })
   const projects = parseProjects(sectionLines.projects);
   const certifications = sectionLines.certifications.map((c) => ({ id: uid("c"), name: c }));
   const languages: ResumeData["languages"] = [];

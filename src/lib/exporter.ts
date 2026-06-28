@@ -1343,6 +1343,15 @@ export async function exportResumeDOCX(resume: ResumeData, layout?: ResumeLayout
           new TextRun({ text: dateStr ? "\t" + dateStr : "", bold: true, size: L.bodyFontSizePt * 2, font: L.fontFamily, color: bodyHex }),
         ],
       }));
+      // Education highlights
+      if (ed.highlights?.length) {
+        for (const h of ed.highlights) {
+          children.push(new Paragraph({
+            spacing: { after: 20 },
+            children: [new TextRun({ text: h, size: L.bodyFontSizePt * 2, font: L.fontFamily, color: bodyHex })],
+          }));
+        }
+      }
     }
   }
 
