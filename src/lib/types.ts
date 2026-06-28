@@ -1198,3 +1198,15 @@ export const CANONICAL_SECTION_ORDER: RenderSectionType[] = [
   "certifications",
 ];
 
+/**
+ * Optimization pipeline stages — used by Session Checkpoint & Recovery system.
+ */
+export type OptimizationStage =
+  | "parsing"
+  | "summary"
+  | "experience"
+  | "education"
+  | "skills"
+  | "languages"
+  | "assembly";
+
