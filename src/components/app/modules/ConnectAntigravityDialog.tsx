@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge, Icon } from "@/components/shared";
@@ -13,6 +13,31 @@ export function ConnectAntigravityDialog() {
   const [state, setState] = useState<ConnectState>("idle");
   const [token, setToken] = useState("");
   const [errorMsg, setErrorMsg] = useState("");
+
+  // Restore saved session on mount
+  useEffect(() => {
+    (async () => {
+      try {
+        const { getAntigravityProvider } = await import("@/lib/providers/antigravity-provider");
+        const provider = getAntigravityProvider();
+        const session = await provider.restore();
+        if (session?.authenticated) {
+          setState("authorized");
+          // Activate the Antigravity provider in the Zustand store
+          try {
+            const { useApp } = await import("@/lib/store");
+            const storeProvider = useApp.getState().providers.find((p: any) => p.id === "p_antigravity");
+            if (storeProvider && !storeProvider.isActive) {
+              useApp.getState().updateProvider("p_antigravity", {
+                isActive: true,
+                apiKey: ***                status: "healthy",
+              });
+            }
+          } catch {}
+        }
+      } catch {}
+    })();
+  }, []);
 
   const handlePasteToken = async () => {
     const trimmed = token.trim();
@@ -32,10 +57,15 @@ export function ConnectAntigravityDialog() {
       await provider.login(trimmed);
       setState("authorized");
       toast.success("Antigravity connected successfully!");
-      // Auto-sync models
-      fetch("/api/providers/antigravity/models/sync", { method: "POST" })
-        .then(() => toast.success("Models synced."))
-        .catch(() => {});
+      // Activate the Antigravity provider in the Zustand store so the AI router can use it
+      try {
+        const { useApp } = await import("@/lib/store");
+        useApp.getState().updateProvider("p_antigravity", {
+          isActive: true,
+          apiKey: trimmed,
+          status: "healthy",
+        });
+      } catch {}
     } catch (e: any) {
       setState("error");
       setErrorMsg(e?.message || "Failed to connect with the provided token.");
@@ -47,6 +77,14 @@ export function ConnectAntigravityDialog() {
       const { getAntigravityProvider } = await import("@/lib/providers/antigravity-provider");
       const provider = getAntigravityProvider();
       await provider.logout();
+      // Deactivate the Antigravity provider in the Zustand store
+      try {
+        const { useApp } = await import("@/lib/store");
+        useApp.getState().updateProvider("p_antigravity", {
+          isActive: false,
+          apiKey: "",
+        });
+      } catch {}
     } catch {}
     setState("idle");
     setToken("");
@@ -114,10 +152,21 @@ export function ConnectAntigravityDialog() {
         {/* Connected state */}
         {state === "authorized" && (
           <div className="flex gap-2">
-            <Button variant="outline" onClick={() => {
-              fetch("/api/providers/antigravity/models/sync", { method: "POST" })
-                .then(() => toast.success("Models synced"))
-                .catch(() => toast.error("Model sync failed"));
+            <Button variant="outline" onClick={async () => {
+              try {
+                const { getAntigravityProvider } = await import("@/lib/providers/antigravity-provider");
+                const models = await getAntigravityProvider().listModels();
+                // Also update the store provider's enabledModels
+                try {
+                  const { useApp } = await import("@/lib/store");
+                  useApp.getState().updateProvider("p_antigravity", {
+                    enabledModels: models,
+                  });
+                } catch {}
+                toast.success(`Models synced: ${models.length} model(s)`);
+              } catch {
+                toast.error("Model sync failed — provider not authenticated");
+              }
             }} className="gap-2">
               <Icon name="Refresh" className="w-4 h-4" /> Sync Models
             </Button>

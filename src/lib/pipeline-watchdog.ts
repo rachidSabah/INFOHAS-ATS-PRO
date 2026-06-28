@@ -16,13 +16,13 @@
 /**
  * Total pipeline hard-timeout.
  *
- * Bumped from 120s → 300s (5 min) so the 6-step pipeline has enough headroom
- * when the Resume Optimizer step legitimately needs 90–120s on slower free-tier
- * providers (e.g. OpenCode free models with an ~22k-char directive + 8k output
- * tokens). The previous 120s cap was being hit whenever ONE provider timed out
- * at 60s and the next step then re-tried the same provider, blowing the budget.
+ * Bumped from 120s → 300s (5 min) → 600s (10 min) to handle the 6-step
+ * pipeline with free-tier providers. Even after the 120s → 300s bump,
+ * the budget was still too tight: 3 steps at 90–120s each (Job Intel,
+ * Company+Skill, ATS Before) consume the entire 300s, leaving no time
+ * for the Resume Optimizer (120s), QA (90s), or Reflection (90s).
  */
-export const PIPELINE_TIMEOUT_MS = 300_000;
+export const PIPELINE_TIMEOUT_MS = 600_000;
 
 /** Per-step stall threshold — if a step is "running" for longer than this, it's stalled. */
 export const STEP_STALL_MS = 240_000;

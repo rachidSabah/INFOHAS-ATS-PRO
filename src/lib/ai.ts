@@ -2286,7 +2286,32 @@ export async function callAI(opts: AICallOptions): Promise<AICallResult> {
     providerErrors.push(`${provider.name}: in cooldown (rate-limited or auth-failed)`);
   }
 
-  // === FALLBACK LOGIC: Try all secondary providers FIRST, then Puter as true last resort ===
+  // === FALLBACK LOGIC: Try secondary providers, then local engine ===
+  //
+  // BUDGET GUARD: If the primary already consumed its full callTimeout budget,
+  // skip ALL secondary fallback providers and jump directly to local engine.
+  // This prevents the pipeline from burning 300s+ on fallback attempts that
+  // are unlikely to succeed when the primary also timed out.
+  const elapsedMs = Math.round(performance.now() - t0);
+  const budgetExhausted = elapsedMs >= callTimeoutMs;
+
+  if (budgetExhausted) {
+    console.warn(`[AI] Budget exhausted (${elapsedMs}ms ≥ ${callTimeoutMs}ms call timeout). Skipping secondary providers → local engine.`);
+    const localText = localGenerate(finalOpts);
+    if (localText) {
+      return {
+        text: localText,
+        provider: "Local Engine (fallback)",
+        latencyMs: elapsedMs,
+        tokensEstimate: estTokens(finalOpts.userPrompt + (finalOpts.systemPrompt ?? "")),
+        isLocalEngine: true,
+      };
+    }
+    throw new OptimizationProviderExhaustedError(
+      `All AI providers failed for this optimization request.\n${providerErrors.map((e, i) => `  ${i + 1}. ${e}`).join("\n")}`
+    );
+  }
+
   const state = useApp.getState();
   const allProviders = state.providers || [];
   const puter = allProviders.find((p: any) => p.type === "puter" && p.isActive);

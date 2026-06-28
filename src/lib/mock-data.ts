@@ -452,8 +452,54 @@ const MISTRAL_PROVIDER: AIProvider = {
   health: { consecutiveFailures: 0, consecutiveSuccesses: 0 },
 };
 
-// Insert NVIDIA + Mistral into the providers list
-SEED_PROVIDERS.push(NVIDIA_PROVIDER, MISTRAL_PROVIDER);
+// === Antigravity CLI (token-based auth) ===
+// Activated automatically when the user pastes a valid Antigravity access token.
+const ANTIGRAVITY_SEED: AIProvider = {
+  id: "p_antigravity",
+  name: "Antigravity CLI",
+  type: "antigravity",
+  providerCategory: "api",
+  supportsServerSide: true,
+  supportsClientSide: true,
+  supportsStreaming: true,
+  supportsFunctionCalling: true,
+  supportsJsonMode: true,
+  requiresBrowserAuth: false,
+  requiresApiKey: true,
+  apiUrl: "https://api.antigravity.io/v1",
+  baseUrl: "https://api.antigravity.io/v1",
+  priority: 4,
+  isActive: false,  // Activated when the user pastes a valid token via ConnectAntigravityDialog
+  isDefault: false,
+  isBuiltIn: true,
+  allowedForRegularUsers: true,
+  timeout: 60000,
+  maxTokens: 8192,
+  temperature: 0.7,
+  retryAttempts: 2,
+  rateLimitPerMinute: 30,
+  modelName: "claude-sonnet-4",
+  enabledModels: [
+    "gemini-2.5-flash",
+    "gemini-2.5-pro",
+    "claude-opus-4",
+    "claude-sonnet-4",
+    "claude-3.5-sonnet",
+    "gpt-4.1",
+    "deepseek-v4",
+    "grok-4",
+  ],
+  streamingEnabled: true,
+  authType: "bearer",
+  costPerInputToken: 0,
+  costPerOutputToken: 0,
+  status: "untested",
+  usage: { requests: 0, tokens: 0, errors: 0, avgLatencyMs: 0, cost: 0 },
+  health: { consecutiveFailures: 0, consecutiveSuccesses: 0 },
+};
+
+// Insert NVIDIA + Mistral + Antigravity into the providers list
+SEED_PROVIDERS.push(NVIDIA_PROVIDER, MISTRAL_PROVIDER, ANTIGRAVITY_SEED);
 
 export const SEED_PROVIDER_LOGS: AIProviderLog[] = [
   {
