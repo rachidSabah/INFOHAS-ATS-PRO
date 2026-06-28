@@ -275,6 +275,30 @@ export function assembleResume(
     skills = filtered;
   }
 
+  // Extract Languages skill group and move to languages array
+  const langSkillIdx = skills.findIndex(s => /^languages?$/i.test(s.category || s.name));
+  if (langSkillIdx >= 0) {
+    const langEntry = skills[langSkillIdx];
+    const langNames = langEntry.name.split(/[,;]/).map(l => l.trim()).filter(Boolean);
+    for (const name of langNames) {
+      if (!languages.some(l => l.name.toLowerCase() === name.toLowerCase())) {
+        languages.push({ id: uid("l"), name, proficiency: "fluent" });
+      }
+    }
+    skills.splice(langSkillIdx, 1);
+    warnings.push("Extracted languages from skills: " + langNames.join(", "));
+  }
+
+  // Recover languages from source skills if parser missed them
+  const sourceLangSkill = sourceResume.skills?.find(s => /^languages?$/i.test(s.category || s.name));
+  if (sourceLangSkill && languages.length === 0) {
+    const langNames = sourceLangSkill.name.split(/[,;]/).map(l => l.trim()).filter(Boolean);
+    for (const name of langNames) {
+      languages.push({ id: uid("l"), name, proficiency: "fluent" });
+    }
+    warnings.push("Recovered languages from source skills: " + langNames.join(", "));
+  }
+
   // ========================================================================
   // 5. EDUCATION — ALWAYS from source (immutable)
   // ========================================================================
