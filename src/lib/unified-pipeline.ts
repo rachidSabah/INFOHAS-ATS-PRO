@@ -357,6 +357,25 @@ export function restoreEducation(optimized: ResumeData, sourceResume: ResumeData
 
   result.education = restoredEdu;
 
+  // FINAL GUARD: force every education entry's institution from source.
+  // Index matching can fail if AI reorders entries. This brute-force
+  // approach iterates every restored entry and looks up the source
+  // entry with a matching degree to restore the real institution.
+  for (let i = 0; i < result.education.length; i++) {
+    const edu = result.education[i];
+    // Find source entry with same degree
+    const srcMatch = source.find(s => s.degree === edu.degree) || source[i];
+    if (srcMatch && srcMatch.institution && edu.institution !== srcMatch.institution) {
+      restored.push(`Education[${i}]: FORCE institution "${edu.institution || "empty"}" → "${srcMatch.institution}"`);
+      edu.institution = srcMatch.institution;
+    }
+    // Also force dates from source
+    if (srcMatch) {
+      edu.startDate = srcMatch.startDate || edu.startDate || "";
+      edu.endDate = srcMatch.endDate || edu.endDate || "";
+    }
+  }
+
   if (restored.length > 0) {
     console.info(`[restoreEducation] Restored ${restored.length} field(s)`, restored);
   }

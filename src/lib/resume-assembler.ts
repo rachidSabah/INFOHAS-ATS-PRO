@@ -293,6 +293,12 @@ export function assembleResume(
   // 6. LANGUAGES — ALWAYS from source (immutable)
   // ========================================================================
   const languages: ResumeLanguage[] = sourceResume.languages.map((l) => ({ ...l }));
+  // HARD GUARD: if source has languages but assembler produce empty, force restore
+  // This covers the case where the pipeline drops languages between stages
+  if (sourceResume.languages.length > 0 && languages.length === 0) {
+    warnings.push('Languages were dropped — forcing restore from source.');
+    languages.push(...sourceResume.languages.map((l) => ({ ...l })));
+  }
 
   // ========================================================================
   // 7. CERTIFICATIONS — ALWAYS from source (immutable)
