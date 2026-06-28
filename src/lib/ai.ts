@@ -263,42 +263,63 @@ export function getOrderedFallbackProviders(excludeProviderIdOrIds?: string | st
   return result;
 }
 
-export async function selectProvider(excludeIds?: string[]): Promise<any> {
-  const state: any = useApp.getState();
-  const providers: any[] = state?.providers || [];
-  const settings = state?.providerSettings || {};
+/**
+ * Tier categories based on provider.priority (lower = better).
+ * These match the D1 seed data:
+ *   Tier 1: priority < 35   (Antigravity 10, OpenCode 20, ZenCode 30)
+ *   Tier 2: priority 35-65  (Gemini 40, Nvidia 50, Groq 60)
+ *   Tier 3: priority 66-200 (OpenRouter 70, Mistral 80)
+ *   Tier 4: priority > 200  (Puter 999 — emergency only)
+ */
+const TIER_PRIORITY_MAX = [35, 65, 200, Infinity];
 
-  const isProviderExcluded = (p: any) => {
-    if (!excludeIds || excludeIds.length === 0) return false;
-    const pid = p.id || p.name || p.type;
-    return (p.id && excludeIds.includes(p.id)) ||
-           (p.name && excludeIds.includes(p.name)) ||
-           (p.type && excludeIds.includes(p.type)) ||
-           (pid && excludeIds.includes(pid));
-  };
+function getProviderTier(p: any): number {
+  const pri = p.priority ?? 50;
+  if (pri <= TIER_PRIORITY_MAX[0]) return 1;
+  if (pri <= TIER_PRIORITY_MAX[1]) return 2;
+  if (pri <= TIER_PRIORITY_MAX[2]) return 3;
+  return 4;
+}
 
-  // 1. User-configured default API provider (FIRST priority — NOT Puter)
-  // Puter is EMERGENCY_ONLY, never the primary provider. Circuit breaker
-  // removes unhealthy providers from the chain automatically.
-  const secondary = providers.filter((p: any) =>
+/**
+ * Common filter: active, non-emergency, healthy, with valid API key, not excluded.
+ */
+function isAvailableForSelection(p: any, excludeIds?: string[]): boolean {
+  const pid = p.id || p.name || p.type;
+  const excluded = excludeIds?.some((eid) =>
+    pid === eid || p.id === eid || p.name === eid || p.type === eid
+  );
+  return (
     p.isActive &&
-    p.type !== "puter" &&
     p.type !== "local" &&
     !EMERGENCY_ONLY_PROVIDERS.has(p.id) &&
     !EMERGENCY_ONLY_PROVIDERS.has(p.type) &&
     !shouldSkipForOptimization(p.id) &&
     !shouldSkipForOptimization(p.type) &&
     hasValidApiKey(p) &&
-    !isProviderExcluded(p)
+    !excluded
   );
-  if (secondary.length > 0) {
+}
+
+export async function selectProvider(excludeIds?: string[]): Promise<any> {
+  const state: any = useApp.getState();
+  const providers: any[] = state?.providers || [];
+  const settings = state?.providerSettings || {};
+
+  // Filter + sort by priority (lowest = highest priority)
+  const available = providers
+    .filter((p: any) => isAvailableForSelection(p, excludeIds))
+    .sort((a: any, b: any) => (a.priority ?? 50) - (b.priority ?? 50));
+
+  // 1. User-configured default (if available and tier-appropriate)
+  if (available.length > 0) {
     const defaultId = settings.defaultProviderId;
-    const defaultSec = secondary.find((p) => p.id === defaultId && !isProviderExcluded(p));
-    if (defaultSec) return defaultSec;
-    return secondary[0];
+    const defaultProv = defaultId ? available.find((p) => p.id === defaultId) : null;
+    if (defaultProv) return defaultProv;
+    return available[0]; // highest priority available
   }
 
-  // No real provider available — log diagnostics
+  // No provider available — log diagnostics
   const activeProviders = providers.filter((p: any) => p.isActive && p.type !== "puter" && p.type !== "local");
   const withKeys = activeProviders.filter((p: any) => hasValidApiKey(p));
   console.warn(
@@ -310,6 +331,56 @@ export async function selectProvider(excludeIds?: string[]): Promise<any> {
 
   // 3. Offline Engine
   return { id: "local-engine", name: "Local Engine (offline mode)", type: "local" };
+}
+
+/**
+ * Agent-aware provider selection.
+ * Assigns different tier providers based on the agent's role:
+ *
+ *   Agent type        | Tiers  | Purpose
+ *   ------------------|--------|----------------------------------------------
+ *   "optimizer"       | 1-2    | Main optimization — highest quality needed
+ *   "supervisor"      | 2-3    | Validation — reasonable quality, cost-efficient
+ *   "guardian"        | 2-3    | Secret scanning — fast, cost-efficient
+ *   "assembler"       | 2-3    | Final formatting — decent output
+ *   "emergency"       | 4      | Last resort — only Puter
+ *
+ * Falls back to selectProvider() if no tier-matching provider found.
+ */
+export async function selectProviderForAgent(
+  agentType: "optimizer" | "supervisor" | "guardian" | "assembler" | "emergency",
+  excludeIds?: string[]
+): Promise<any> {
+  // Emergency = only Tier 4 (Puter, etc.)
+  if (agentType === "emergency") {
+    const state: any = useApp.getState();
+    const providers: any[] = state?.providers || [];
+    const emergency = providers.find(
+      (p: any) => EMERGENCY_ONLY_PROVIDERS.has(p.id) || EMERGENCY_ONLY_PROVIDERS.has(p.type)
+    );
+    if (emergency && isAvailableForSelection(emergency, excludeIds)) return emergency;
+  }
+
+  // Map agent type to max allowed tier
+  const tierMax: Record<string, number> = {
+    optimizer: 2,
+    supervisor: 3,
+    guardian: 3,
+    assembler: 3,
+  };
+  const maxTier = tierMax[agentType] ?? 3;
+
+  const state: any = useApp.getState();
+  const providers: any[] = state?.providers || [];
+
+  const eligible = providers
+    .filter((p: any) => isAvailableForSelection(p, excludeIds) && getProviderTier(p) <= maxTier)
+    .sort((a: any, b: any) => (a.priority ?? 50) - (b.priority ?? 50));
+
+  if (eligible.length > 0) return eligible[0];
+
+  // Fallback to general selection
+  return selectProvider(excludeIds);
 }
 
 function assert(condition: boolean, message?: string) {
