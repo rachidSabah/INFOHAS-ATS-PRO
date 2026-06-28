@@ -1311,7 +1311,7 @@ function parseEducation(lines: string[]): ResumeData["education"] {
           if (fieldMatch) {
             field = fieldMatch[1].trim();
             institution = afterKw.slice(fieldMatch[0].length).trim();
-          } else {
+          } else if (!institution) {
             institution = afterKw.trim();
           }
         } else {
@@ -1388,6 +1388,15 @@ function parseEducation(lines: string[]): ResumeData["education"] {
         return c && l !== degree && !degreePattern.test(c) && !yearRangePattern.test(c) && !new RegExp("^[•\\-\\*·▪◦]").test(l.trim());
       });
       institution = fallbackInst?.replace(new RegExp("^[•\\-\\*·▪◦\\s|]+"), "").trim() || "";
+    }
+
+    // Final cleanup: strip trailing year range that leaked into institution
+    // from pipe parsing (e.g., "INFOHAS 2023 – 2025" → "INFOHAS")
+    if (institution) {
+      const trailingYearRange = institution.match(/^(.+?)\s+\d{4}\s*$/);
+      if (trailingYearRange) {
+        institution = trailingYearRange[1].trim();
+      }
     }
 
     return {
