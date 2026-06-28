@@ -1135,6 +1135,7 @@ Return ONLY valid JSON with this exact shape:
   "languages": [
     { "name": "English", "proficiency": "Fluent", "note": "" | "optional note" }
   ],
+  "additionalInfo": "Additional information (Willing to reallocate, Height, Date of Birth, etc.)" | "",
   "missingKeywordsAdded": ["keyword1", "keyword2", ...],
   "bulletsRewritten": 5
 }
