@@ -608,6 +608,18 @@ export interface OptimizerDirectiveConfig {
   // Use for advanced fine-tuning that the structured fields above can't express.
   customDirectiveOverride: string;
 
+  // === COMPLIANCE ENFORCEMENT ENGINE ===
+  // Controls how strictly agents must obey the directive.
+  // When complianceScore < complianceThreshold, the output is REJECTED and
+  // the non-compliant agent(s) are retried with the directive force-reinjected.
+  complianceThreshold: number;           // 0-100, default 100. Min score to pass
+  complianceRules: ComplianceRuleToggles; // Per-rule on/off
+  enforceComplianceOnAllAgents: boolean;  // When true, EVERY agent must pass compliance
+  forceDirectiveOnRetry: boolean;         // When true, re-inject directive as SYSTEM POLICY on retry
+  directiveVersion: number;               // Auto-incrementing version number
+  directiveHash: string;                  // SHA-256 hash of current directive config
+  strictAgentLock: boolean;               // When true, agents CANNOT deviate from directive rules
+
   // === PER-AGENT DIRECTIVES ===
   // Configurable directives for each agent in the multi-agent pipeline.
   // These control what each agent is allowed to do, with what aggressiveness,
@@ -718,18 +730,32 @@ export interface LanguagesAgentDirective {
  * Configure which checks trigger VETO (block export) vs warning (allow with notice).
  */
 export interface GuardianAgentDirective {
-  /** If true, block export on any company/school/language mismatch */
+  /** VETO on any entity integrity violation */
   enforceEntityIntegrity: boolean;
-  /** If true, block export when page utilization is below threshold */
+  /** VETO when page usage below threshold */
   enforcePageUtilization: boolean;
-  /** If true, block export when content length is below minimum */
+  /** VETO when content length below minimum */
   enforceContentLength: boolean;
-  /** If true, block export on duplicate sentences */
+  /** VETO on duplicate sentences */
   enforceNoDuplicates: boolean;
-  /** If true, reject generic/unoptimized summaries */
+  /** VETO when summary too short/generic */
   enforceSummaryQuality: boolean;
-  /** Minimum Guardian score required to pass (0-100, default 80) */
+  /** Minimum score to pass (0-100) */
   minimumScore: number;
+}
+
+/** Per-rule compliance toggles — each can be independently disabled */
+export interface ComplianceRuleToggles {
+  entityPreservation: boolean;    // Check entities match original
+  sectionOrder: boolean;           // Check section order follows blueprint
+  immutableFields: boolean;        // Check name/phone/email/schools unchanged
+  hallucinationCheck: boolean;     // Check no fabricated content
+  summaryLength: boolean;          // Check summary within word count
+  skillGrouping: boolean;          // Check skills grouped by category
+  chronology: boolean;             // Check dates in correct order
+  pageCount: boolean;              // Check single page
+  bulletCount: boolean;            // Check bullets preserved per entry
+  languageSeparation: boolean;     // Check languages not merged into skills
 }
 
 /**

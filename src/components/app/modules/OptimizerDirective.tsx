@@ -684,6 +684,144 @@ function AgentDirectivesSection({ draft, patch }: { draft: OptimizerDirectiveCon
           />
         </CardContent>
       </Card>
+
+      {/* ===== COMPLIANCE ENFORCEMENT ENGINE ===== */}
+      <Card className="border-rose-200 dark:border-rose-900">
+        <CardHeader>
+          <CardTitle className="text-lg flex items-center gap-2">
+            <Icon name="ShieldAlert" className="w-4 h-4 text-rose-500" /> Compliance Enforcement Engine
+          </CardTitle>
+          <CardDescription>
+            Forces ALL agents to obey the directive. When enabled, outputs below the compliance threshold are rejected and retried. 
+            Only disable specific rules if you understand the consequences.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          {/* Directive version + hash */}
+          <div className="grid grid-cols-2 gap-4 mb-4">
+            <div className="p-3 rounded-lg bg-muted/30 border border-border">
+              <Label className="text-xs text-muted-foreground">DIRECTIVE VERSION</Label>
+              <p className="text-lg font-bold font-mono mt-1">{draft.directiveVersion || 1}</p>
+            </div>
+            <div className="p-3 rounded-lg bg-muted/30 border border-border">
+              <Label className="text-xs text-muted-foreground">DIRECTIVE HASH</Label>
+              <p className="text-xs font-mono mt-1 truncate text-muted-foreground">
+                {draft.directiveHash || "Auto-generated on save"}
+              </p>
+            </div>
+          </div>
+
+          {/* Global compliance threshold */}
+          <div>
+            <Label htmlFor="complianceThreshold">
+              Compliance Threshold: <span className="font-bold">{draft.complianceThreshold ?? 100}%</span>
+            </Label>
+            <p className="text-xs text-muted-foreground mb-2">
+              Minimum compliance score required to accept an agent's output. Set to 100% for strict enforcement.
+            </p>
+            <input
+              id="complianceThreshold"
+              type="range"
+              min={50}
+              max={100}
+              step={5}
+              value={draft.complianceThreshold ?? 100}
+              onChange={(e) => patch({ complianceThreshold: parseInt(e.target.value) })}
+              className="w-full"
+            />
+          </div>
+
+          {/* Global enforcement toggles */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <SwitchRow
+              label="Enforce on ALL Agents"
+              description="When ON, every agent (Summary, Skills, Experience, Education, Languages, QA, Guardian) must pass compliance individually. When OFF, only Supervisor checks."
+              checked={draft.enforceComplianceOnAllAgents ?? true}
+              onChange={(v) => patch({ enforceComplianceOnAllAgents: v })}
+            />
+            <SwitchRow
+              label="Force Directive on Retry"
+              description="When ON, failed agents receive the directive re-injected as 'SYSTEM POLICY — UPPER CASE, NO EXCEPTIONS' at the very top of their prompt on retry."
+              checked={draft.forceDirectiveOnRetry ?? true}
+              onChange={(v) => patch({ forceDirectiveOnRetry: v })}
+            />
+            <SwitchRow
+              label="Strict Agent Lock"
+              description="When ON, agents CANNOT deviate from directive rules under any circumstances. No creative interpretation allowed."
+              checked={draft.strictAgentLock ?? true}
+              onChange={(v) => patch({ strictAgentLock: v })}
+            />
+          </div>
+
+          {/* Per-rule compliance toggles */}
+          <div>
+            <Label className="text-sm font-semibold mb-2 block">Per-Rule Compliance Checks</Label>
+            <p className="text-xs text-muted-foreground mb-3">
+              Toggle individual compliance rules on/off. Disabling a rule means it won't be checked during optimization.
+            </p>
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-2">
+              {([
+                ["entityPreservation", "Entity Pres.", "✓ entities match original"],
+                ["sectionOrder", "Section Order", "✓ order follows blueprint"],
+                ["immutableFields", "Immutable Fields", "✓ name/phone/email/schools"],
+                ["hallucinationCheck", "No Hallucination", "✓ no fabricated content"],
+                ["summaryLength", "Summary Length", "✓ within word count"],
+                ["skillGrouping", "Skill Grouping", "✓ grouped by category"],
+                ["chronology", "Chronology", "✓ dates in correct order"],
+                ["pageCount", "Single Page", "✓ one page only"],
+                ["bulletCount", "Bullet Count", "✓ bullets preserved"],
+                ["languageSeparation", "Lang. Separate", "✓ not in skills"],
+              ] as const).map(([key, label, desc]) => {
+                const k = key as keyof typeof draft.complianceRules;
+                return (
+                  <div
+                    key={key}
+                    className={`relative flex flex-col gap-1 p-2.5 rounded-lg border transition-all cursor-pointer ${
+                      draft.complianceRules?.[k]
+                        ? "border-brand/40 bg-brand/5"
+                        : "border-border bg-background opacity-60"
+                    }`}
+                    onClick={() => {
+                      const rules = { ...draft.complianceRules, [k]: !draft.complianceRules?.[k] };
+                      patch({ complianceRules: rules as typeof draft.complianceRules });
+                    }}
+                  >
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-semibold">{label}</span>
+                      <div className={`w-2 h-2 rounded-full ${draft.complianceRules?.[k] ? "bg-green-500" : "bg-muted-foreground"}`} />
+                    </div>
+                    <span className="text-[10px] text-muted-foreground">{desc}</span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Force Directive button */}
+          <div className="flex items-center justify-between p-3 rounded-lg bg-rose-50 dark:bg-rose-950/30 border border-rose-200 dark:border-rose-800">
+            <div>
+              <Label className="text-sm font-semibold text-rose-700 dark:text-rose-300">Force Directive Reset</Label>
+              <p className="text-xs text-muted-foreground">
+                Immediately re-injects the current directive into ALL active agent sessions, overriding any cached or stale directives.
+              </p>
+            </div>
+            <Button
+              variant="outline"
+              className="border-rose-300 text-rose-700 hover:bg-rose-100 dark:hover:bg-rose-900 gap-2"
+              onClick={async () => {
+                const newVersion = (draft.directiveVersion || 0) + 1;
+                const hashStr = Array.from(
+                  new TextEncoder().encode(JSON.stringify(draft))
+                ).map(b => b.toString(16).padStart(2, "0")).join("").slice(0, 16);
+                patch({ directiveVersion: newVersion, directiveHash: hashStr });
+                toast.success("Directive forced — version bumped to v" + newVersion);
+              }}
+            >
+              <Icon name="AlertTriangle" className="w-4 h-4" /> Force Directive
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
     </>
   );
 }

@@ -757,6 +757,26 @@ export const SEED_OPTIMIZER_DIRECTIVE: OptimizerDirectiveConfig = {
   // === CUSTOM DIRECTIVE (ADVANCED) ===
   customDirectiveOverride: "", // empty = use generated directive
 
+  // === COMPLIANCE ENFORCEMENT ENGINE ===
+  complianceThreshold: 100,
+  complianceRules: {
+    entityPreservation: true,
+    sectionOrder: true,
+    immutableFields: true,
+    hallucinationCheck: true,
+    summaryLength: true,
+    skillGrouping: true,
+    chronology: true,
+    pageCount: true,
+    bulletCount: true,
+    languageSeparation: true,
+  },
+  enforceComplianceOnAllAgents: true,
+  forceDirectiveOnRetry: true,
+  directiveVersion: 1,
+  directiveHash: "",
+  strictAgentLock: true,
+
   // === PER-AGENT DIRECTIVES ===
   // Default values for each agent's behavior knobs.
   // Users can override these in the Optimizer Directive → Agent Directives tab.
