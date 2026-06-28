@@ -1,10 +1,11 @@
 // ResumeAI Pro — client-side AI bridge.
 // Strategy:
-//   0. User-configured default provider (from AI Providers settings) — FIRST priority.
+//   0. User-configured default API provider (from AI Providers settings) — FIRST priority.
 //      Honors the user's chosen model, API key, base URL, and auth type.
-//   1. Puter.js (free, user authenticates with Google/GitHub/etc via Puter). Loaded from layout.
-//   2. Server-side provider fallback (OpenCode, DeepSeek, Groq, etc.) — used when Puter is unavailable.
-//   3. Local rule-based fallback (deterministic, always works as offline mode).
+//   1. Server-side provider fallback (OpenCode, ZenCode, DeepSeek, Groq, etc.) — used when primary fails.
+//   2. Puter.js (free, browser-auth) — FALLBACK ONLY, never the primary provider.
+//   3. Puter.js (anonymous mode) — last resort before local engine.
+//   4. Local rule-based fallback (deterministic, always works as offline mode).
 //
 // All AI calls are wrapped in failover with try/catch + provider rotation.
 
@@ -269,23 +270,8 @@ export async function selectProvider(excludeIds?: string[]): Promise<any> {
            (pid && excludeIds.includes(pid));
   };
 
-  // 1. Puter (if authenticated)
-  const puter = providers.find((p: any) => p.type === "puter");
-  let puterAuthenticated = false;
-  if (puter && puter.isActive && !isProviderExcluded(puter)) {
-    try {
-      const { getPuterProvider } = await import("./providers/puter-provider");
-      const puterProvider = getPuterProvider();
-      puterAuthenticated = await puterProvider.tryRefresh();
-    } catch {
-      puterAuthenticated = false;
-    }
-  }
-
-  if (puter && puter.isActive && puterAuthenticated && !isProviderExcluded(puter)) {
-    return puter;
-  }
-
+  // 1. User-configured default API provider (FIRST priority — NOT Puter)
+  // Puter is a FALLBACK only, never the primary provider.
   const secondary = providers.filter((p: any) =>
     p.isActive &&
     p.type !== "puter" &&

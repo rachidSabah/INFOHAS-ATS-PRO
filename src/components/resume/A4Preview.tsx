@@ -189,24 +189,10 @@ function InfohasProTemplate({ resume, accent }: { resume: ResumeData; accent: st
 
       {/* ============ BODY ============ */}
       <div style={{ marginTop: "3mm" }}>
-        {/* PROFESSIONAL SUMMARY */}
+        {/* PROFESSIONAL PROFILE (matching target format) */}
         {resume.summary && (
-          <InfohasSection title="PROFESSIONAL SUMMARY" titleColor={L.sectionTitleColor} titleSize={`${L.sectionTitleSizePt}pt`} gap={`${L.sectionGapMm}mm`}>
+          <InfohasSection title="PROFESSIONAL PROFILE" titleColor={L.sectionTitleColor} titleSize={`${L.sectionTitleSizePt}pt`} gap={`${L.sectionGapMm}mm`}>
             <p style={{ margin: 0, textAlign: "justify", color: BLACK }}>{resume.summary}</p>
-          </InfohasSection>
-        )}
-
-        {/* CORE COMPETENCIES & SKILLS */}
-        {resume.skills.length > 0 && (
-          <InfohasSection title="CORE COMPETENCIES & SKILLS" titleColor={L.sectionTitleColor} titleSize={`${L.sectionTitleSizePt}pt`} gap={`${L.sectionGapMm}mm`}>
-            <ul style={{ margin: 0, paddingLeft: `${L.bulletIndentMm}mm`, listStyleType: "•" }}>
-              {groupSkillsByCategory(resume.skills).map((g, i) => (
-                <li key={i} style={{ marginBottom: "1mm", color: BLACK }}>
-                  <span style={{ fontWeight: 700 }}>{g.category}:</span>{" "}
-                  <span>{g.items.join(", ")}.</span>
-                </li>
-              ))}
-            </ul>
           </InfohasSection>
         )}
 
@@ -266,17 +252,25 @@ function InfohasProTemplate({ resume, accent }: { resume: ResumeData; accent: st
           </InfohasSection>
         )}
 
+        {/* KEY COMPETENCIES (moved after Education to match target format) */}
+        {resume.skills.length > 0 && (
+          <InfohasSection title="KEY COMPETENCIES" titleColor={L.sectionTitleColor} titleSize={`${L.sectionTitleSizePt}pt`} gap={`${L.sectionGapMm}mm`}>
+            <ul style={{ margin: 0, paddingLeft: `${L.bulletIndentMm}mm`, listStyleType: "•" }}>
+              {groupSkillsByCategory(resume.skills).map((g, i) => (
+                <li key={i} style={{ marginBottom: "1mm", color: BLACK }}>
+                  <span style={{ fontWeight: 700 }}>{g.category}:</span>{" "}
+                  <span>{g.items.join(", ")}.</span>
+                </li>
+              ))}
+            </ul>
+          </InfohasSection>
+        )}
+
         {/* LANGUAGES */}
         {resume.languages.length > 0 && (
           <InfohasSection title="LANGUAGES" titleColor={L.sectionTitleColor} titleSize={`${L.sectionTitleSizePt}pt`} gap={`${L.sectionGapMm}mm`}>
-            <div style={{ display: "flex", flexDirection: "column", gap: "0.5mm" }}>
-              {resume.languages.map((l) => (
-                <div key={l.id} style={{ color: BLACK }}>
-                  <span style={{ fontWeight: 700 }}>{l.name}:</span>{" "}
-                  <span style={{ textTransform: "capitalize" }}>{l.proficiency}</span>
-                  {(l as any).note ? <span> ({(l as any).note})</span> : null}
-                </div>
-              ))}
+            <div style={{ color: BLACK }}>
+              • {resume.languages.map((l) => l.name).join(", ")}
             </div>
           </InfohasSection>
         )}
