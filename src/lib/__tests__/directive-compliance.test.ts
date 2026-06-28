@@ -21,6 +21,17 @@ function makeConfig(overrides: Partial<OptimizerDirectiveConfig> = {}): Optimize
       total: { min: 2500, max: 3500 },
     },
     customDirectiveOverride: "",
+    complianceThreshold: 100,
+    complianceRules: {
+      entityPreservation: true, sectionOrder: true, immutableFields: true, hallucinationCheck: true,
+      summaryLength: true, skillGrouping: true, chronology: true, pageCount: true,
+      bulletCount: true, languageSeparation: true,
+    },
+    enforceComplianceOnAllAgents: true,
+    forceDirectiveOnRetry: true,
+    directiveVersion: 1,
+    directiveHash: "",
+    strictAgentLock: true,
     agentDirectives: {
       supervisor: { strictMode: true, enableRetries: true, enableProviderSwitch: true, enforceImmutableEntities: true, enableDebugLogs: false, enableDiffViewer: false },
       summary: { atsAggressiveness: 60, preserveFacts: true, minCharacters: 400, maxCharacters: 600 },

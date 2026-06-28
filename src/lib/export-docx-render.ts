@@ -22,6 +22,8 @@ import type {
 } from "./types";
 import { getDefaultResumeLayout } from "./exporter";
 
+type DocxTabStop = { type: typeof TabStopType; position: number };
+
 /**
  * Export resume as DOCX using RenderDocument as single source of truth.
  */
@@ -119,7 +121,7 @@ function renderContentItem(
   children: Paragraph[],
   L: ResumeLayoutModel,
   bodyHex: string,
-  docxTabStops: Parameters<Paragraph["constructor"]>[0]["tabStops"],
+  docxTabStops: any,
 ): void {
   switch (item.kind) {
     case "text":

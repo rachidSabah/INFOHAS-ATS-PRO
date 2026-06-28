@@ -110,7 +110,7 @@ export function ConnectAntigravityDialog() {
       <CardContent className="space-y-4">
         {/* Status badge */}
         <div className="flex items-center gap-2">
-          <Badge variant={state === "authorized" ? "success" : state === "error" ? "destructive" : state === "waiting" ? "warning" : "secondary"}>
+          <Badge variant={state === "authorized" ? "success" : state === "error" ? "danger" : state === "waiting" ? "warning" : "default"}>
             {state === "idle" && "Not connected"}
             {state === "generating" && "Generating code..."}
             {state === "waiting" && "Awaiting authorization"}
