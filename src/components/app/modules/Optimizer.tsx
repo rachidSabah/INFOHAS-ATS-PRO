@@ -1052,15 +1052,32 @@ export function Optimizer() {
                       }
                     }} className="bg-brand hover:bg-brand-dark text-white gap-2"><Icon name="Download" className="w-4 h-4" /> optimized_resume.pdf</Button>
                     <Button variant="outline" onClick={() => {
-                      exportResumeDOC(optimizedResume);
+                      const exportCheck = validateResumeForExport(optimizedResume);
+                      const r = exportCheck.cleanedResume || optimizedResume;
+                      exportResumeDOC(r);
                       incUsage("downloads");
                       log({ actor: "you", action: "Exported resume (DOC)", category: "export", details: `Times New Roman 12pt · @page A4 · ${pipelineResult?.charCount ?? "?"} chars`, severity: "info" });
                       toast.success("DOC exported — strict A4 one-page layout.");
+                      if (exportCheck.cleanedResume) toast.warning("Cleaned error leaks from resume before export.");
                     }} className="gap-2" title="Strict A4 one-page Word document (Times New Roman 12pt, @page A4)">
                       <Icon name="FileText" className="w-4 h-4" /> .doc
                     </Button>
-                    <Button variant="outline" onClick={() => { exportResumeDOCX(optimizedResume); incUsage("downloads"); toast.success("DOCX exported."); }} className="gap-2"><Icon name="FileType" className="w-4 h-4" /> .docx</Button>
-                    <Button variant="outline" onClick={() => { exportResumeTXT(optimizedResume); incUsage("downloads"); toast.success("TXT exported."); }} className="gap-2"><Icon name="FileText" className="w-4 h-4" /> .txt</Button>
+                    <Button variant="outline" onClick={async () => {
+                      const exportCheck = validateResumeForExport(optimizedResume);
+                      const r = exportCheck.cleanedResume || optimizedResume;
+                      await exportResumeDOCX(r);
+                      incUsage("downloads");
+                      toast.success("DOCX exported.");
+                      if (exportCheck.cleanedResume) toast.warning("Cleaned error leaks from resume before export.");
+                    }} className="gap-2"><Icon name="FileType" className="w-4 h-4" /> .docx</Button>
+                    <Button variant="outline" onClick={() => {
+                      const exportCheck = validateResumeForExport(optimizedResume);
+                      const r = exportCheck.cleanedResume || optimizedResume;
+                      exportResumeTXT(r);
+                      incUsage("downloads");
+                      toast.success("TXT exported.");
+                      if (exportCheck.cleanedResume) toast.warning("Cleaned error leaks from resume before export.");
+                    }} className="gap-2"><Icon name="FileText" className="w-4 h-4" /> .txt</Button>
                   </div>
                   <div className="mt-4 rounded-lg bg-secondary p-3 text-xs">
                     <div className="font-semibold mb-1">Files generated:</div>

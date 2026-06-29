@@ -603,6 +603,8 @@ export function validateResumeForExport(resume: ResumeData): {
     ...resume.skills.map((s) => s.name),
     ...resume.education.flatMap((ed) => [ed.degree, ed.institution, ...(ed.highlights || [])]),
     ...resume.languages.map((l) => `${l.name} ${l.proficiency}`),
+    resume.additionalInfo,
+    ...(resume.dynamicSections || []).flatMap((ds) => [ds.title, ds.content, ...(ds.bullets || [])]),
   ].filter(Boolean).join(" ");
 
   const leaks = detectLeaks(allText);
@@ -656,6 +658,13 @@ function stripLeaksFromResume(resume: ResumeData): ResumeData | null {
       highlights: ed.highlights?.map(clean).filter((h) => h.length > 0),
     })),
     languages: resume.languages.filter((l) => detectLeaks(`${l.name} ${l.proficiency}`).length === 0),
+    additionalInfo: resume.additionalInfo ? clean(resume.additionalInfo) : undefined,
+    dynamicSections: (resume.dynamicSections || []).map((ds) => ({
+      ...ds,
+      title: clean(ds.title),
+      content: ds.content ? clean(ds.content) : undefined,
+      bullets: ds.bullets ? ds.bullets.map(clean).filter((b) => b.length > 0) : [],
+    })).filter((ds) => ds.title.length > 0 && (ds.content || ds.bullets.length > 0)),
   };
 
   // If summary is too short after cleaning, the resume is unsalvageable

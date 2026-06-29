@@ -949,6 +949,28 @@ export function exportResumeTXT(resume: ResumeData) {
     for (const c of resume.certifications) lines.push(`• ${c.name}${c.issuer ? " — " + c.issuer : ""}`);
     lines.push("");
   }
+
+  if (resume.languages.length) {
+    lines.push("LANGUAGES");
+    for (const l of resume.languages) lines.push(`• ${l.name}: ${l.proficiency}`);
+    lines.push("");
+  }
+
+  if (resume.dynamicSections && resume.dynamicSections.length > 0) {
+    for (const ds of resume.dynamicSections) {
+      lines.push(ds.title.toUpperCase());
+      if (ds.content) lines.push(ds.content);
+      for (const b of ds.bullets) lines.push(`• ${b}`);
+      lines.push("");
+    }
+  }
+
+  if (resume.additionalInfo) {
+    lines.push("ADDITIONAL INFORMATION");
+    lines.push(resume.additionalInfo);
+    lines.push("");
+  }
+
   const blob = new Blob([lines.join("\n")], { type: "text/plain;charset=utf-8" });
   saveAs(blob, (resume.name || "resume").replace(/\s+/g, "_") + "_resume.txt");
 }
