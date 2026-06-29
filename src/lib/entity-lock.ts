@@ -226,11 +226,17 @@ export function extractLockedEntities(resume: ResumeData): LockedEntities {
     highlights: [...(ed.highlights || [])],
   }));
 
-  const languages: ResumeLanguage[] = resume.languages.map((l) => ({
-    ...l,
-    name: l.name || "",
-    proficiency: l.proficiency || "fluent",
-  }));
+  const languages: ResumeLanguage[] = resume.languages.map((l) => {
+    // Only preserve proficiency if source explicitly had one
+    const lang: ResumeLanguage = {
+      ...l,
+      name: l.name || "",
+    };
+    if (l.proficiency) {
+      lang.proficiency = l.proficiency;
+    }
+    return lang;
+  });
 
   const certifications: ResumeCertification[] = resume.certifications.map((c) => ({
     ...c,

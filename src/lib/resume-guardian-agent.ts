@@ -674,7 +674,62 @@ function checkPersonalDetailsPreserved(optimized: ResumeData, source: ResumeData
   };
 }
 
-// ── Check 16: No Hallucinated Proficiency Levels (critical) ──────────────────
+// ── Check 16: Education Structure Clean (critical) ──────────────────────────
+
+/**
+ * Ensures education entries don't contain skill-section keywords that would
+ * corrupt DOCX rendering (e.g., "High School Degree | KEY COMPETENCIES").
+ * Also verifies education highlights don't contain skill-category text.
+ */
+function checkEducationStructureClean(optimized: ResumeData): GuardianCheck {
+  const education = optimized.education || [];
+  const SKILL_KEYWORDS = [
+    "key competencies", "core competencies", "professional skills", "technical skills",
+    "soft skills", "skills &", "skills and", "areas of expertise", "areas of strength",
+    "professional summary", "professional profile", "career overview", "qualifications"
+  ];
+  const issues: string[] = [];
+  for (let i = 0; i < education.length; i++) {
+    const ed = education[i];
+    if (ed.degree) {
+      const lower = ed.degree.toLowerCase();
+      for (const kw of SKILL_KEYWORDS) {
+        if (lower.includes(kw)) {
+          issues.push(`Education[${i}] degree contains skill keyword "${kw}": "${ed.degree}"`);
+          break;
+        }
+      }
+      const pipeIdx = ed.degree.indexOf("|");
+      if (pipeIdx >= 0) {
+        const afterPipe = ed.degree.substring(pipeIdx + 1).trim().toLowerCase();
+        if (SKILL_KEYWORDS.some(kw => afterPipe.includes(kw))) {
+          issues.push(`Education[${i}] degree has pipe-delineated skill section header`);
+        }
+      }
+    }
+    if (ed.highlights) {
+      for (let j = 0; j < ed.highlights.length; j++) {
+        const h = ed.highlights[j];
+        const lowerH = h.toLowerCase().trim();
+        if (SKILL_KEYWORDS.includes(lowerH)) {
+          issues.push(`Education[${i}] highlight[${j}] is a skill section header: "${h}"`);
+        } else if (h.length < 50 && /^(guest service|professional presence|operational efficiency|teamwork|communication|customer service|leadership|management|technical|analytical|interpersonal)/i.test(h) && !h.includes(":")) {
+          issues.push(`Education[${i}] highlight[${j}] looks like a skill category: "${h}"`);
+        }
+      }
+    }
+  }
+  return {
+    name: "Education Structure",
+    detail: issues.length > 0
+      ? `Education structure corruption detected: ${issues.join("; ")}`
+      : "All education entries have clean structure",
+    passed: issues.length === 0,
+    critical: true,
+  };
+}
+
+// ── Check 17: No Hallucinated Proficiency Levels (critical) ──────────────────
 
 /**
  * Detects when the LLM adds proficiency levels (e.g., "(fluent)", "(expert)",
@@ -777,6 +832,7 @@ export async function runGuardianValidation(
   checks.push(checkSkillCategoriesPreserved(optimized, source));
   checks.push(checkPersonalDetailsPreserved(optimized, source));
   checks.push(checkNoProficiencyHallucination(optimized, source));
+  checks.push(checkEducationStructureClean(optimized));
   checks.push(checkAtsImprovement(optimized, source));
   checks.push(checkOnePageValidation(optimized));
   checks.push(checkDirectiveCompliance(optimized, source, policy));

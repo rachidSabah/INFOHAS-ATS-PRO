@@ -126,8 +126,11 @@ export function assembleResume(
         .map((b) => cleanupGrammar(b))
         .filter((b) => b && b.length > 0);
 
-      // Use optimizer's bullets if they're non-empty, otherwise keep source bullets
-      const bullets = cleanedBullets.length > 0 ? cleanedBullets : srcExp.bullets;
+      // Use optimizer's bullets if they're non-empty AND preserve bullet count from source.
+      // This prevents the LLM from silently dropping bullet points.
+      const bullets = (cleanedBullets.length > 0 && cleanedBullets.length >= srcExp.bullets.length)
+        ? cleanedBullets
+        : srcExp.bullets;
 
       return {
         ...srcExp, // ALL immutable fields from source
@@ -151,7 +154,9 @@ export function assembleResume(
       const cleanedBullets = fuzzyMatch.bullets
         .map((b) => cleanupGrammar(b))
         .filter((b) => b && b.length > 0);
-      const bullets = cleanedBullets.length > 0 ? cleanedBullets : srcExp.bullets;
+      const bullets = (cleanedBullets.length > 0 && cleanedBullets.length >= srcExp.bullets.length)
+        ? cleanedBullets
+        : srcExp.bullets;
       return {
         ...srcExp,
         bullets,
@@ -274,6 +279,24 @@ export function assembleResume(
       warnings.push(`Removed ${removed.length} forbidden skill(s): ${removed.join(", ")}`);
     }
     skills = filtered;
+    // === SKILL PRESERVATION ===
+    // CRITICAL: If optimizer returns fewer skills than source, merge source skills back in.
+    // This prevents the LLM from silently dropping entire skill entries.
+    if (filtered.length < (sourceResume.skills?.length || 0)) {
+      warnings.push(
+        `Optimizer returned ${filtered.length} skills vs ${sourceResume.skills?.length || 0} in source. ` +
+        `Merging source skills to prevent data loss.`
+      );
+      // Start with optimizer skills, then add any source skills not already present
+      const existingNames = new Set(filtered.map(s => s.name?.toLowerCase().trim()).filter(Boolean));
+      for (const srcSkill of sourceResume.skills || []) {
+        const key = srcSkill.name?.toLowerCase().trim();
+        if (key && !existingNames.has(key)) {
+          skills.push({ ...srcSkill });
+          existingNames.add(key);
+        }
+      }
+    }
     // === SKILL CATEGORY RESTORATION ===
     // The optimizer often drops or mis-assigns categories (puts everything under
     // "General" except the first item per category). Merge source categories back.
@@ -313,7 +336,7 @@ export function assembleResume(
     const langNames = langEntry.name.split(/[,;]/).map(l => l.trim()).filter(Boolean);
     for (const name of langNames) {
       if (!languages.some(l => l.name.toLowerCase() === name.toLowerCase())) {
-        languages.push({ id: uid("l"), name, proficiency: "fluent" });
+        languages.push({ id: uid("l"), name } as ResumeLanguage);
       }
     }
     skills.splice(langSkillIdx, 1);
@@ -325,7 +348,7 @@ export function assembleResume(
   if (sourceLangSkill && languages.length === 0) {
     const langNames = sourceLangSkill.name.split(/[,;]/).map(l => l.trim()).filter(Boolean);
     for (const name of langNames) {
-      languages.push({ id: uid("l"), name, proficiency: "fluent" });
+      languages.push({ id: uid("l"), name } as ResumeLanguage);
     }
     warnings.push("Recovered languages from source skills: " + langNames.join(", "));
   }
@@ -342,6 +365,64 @@ export function assembleResume(
       `Education immutable guard: optimizer returned ${optEducation.length} education entries. ` +
       `Using source education as-is (education is immutable).`
     );
+  }
+  // === EDUCATION STRUCTURAL CLEANUP ===
+  // CRITICAL: The PDF parser may merge skill-section content (e.g. "KEY COMPETENCIES",
+  // "SKILLS", "PROFESSIONAL EXPERIENCE") into education entries' degree/field/highlights.
+  // Strip any such contamination to prevent DOCX rendering corruption.
+  const EDUCATION_SKILL_KEYWORDS = [
+    "key competencies", "core competencies", "professional skills", "technical skills",
+    "soft skills", "skills &", "skills and", "areas of expertise", "areas of strength",
+    "professional summary", "professional profile", "career overview", "qualifications"
+  ];
+  for (const ed of education) {
+    // Check degree for contamination
+    if (ed.degree) {
+      const lowerDegree = ed.degree.toLowerCase();
+      for (const kw of EDUCATION_SKILL_KEYWORDS) {
+        const idx = lowerDegree.indexOf(kw);
+        if (idx >= 0) {
+          ed.degree = ed.degree.substring(0, idx).trim();
+          warnings.push(`Education cleanup: removed "${kw}" from degree "${ed.degree}"`);
+          break;
+        }
+      }
+      // Also strip pipe-delimited section headers (e.g. "High School Degree | KEY COMPETENCIES")
+      const pipeIdx = ed.degree.indexOf("|");
+      if (pipeIdx >= 0) {
+        const afterPipe = ed.degree.substring(pipeIdx + 1).trim().toLowerCase();
+        const isSectionHeader = EDUCATION_SKILL_KEYWORDS.some(kw => afterPipe.includes(kw));
+        if (isSectionHeader) {
+          ed.degree = ed.degree.substring(0, pipeIdx).trim();
+          warnings.push(`Education cleanup: stripped pipe-section header from degree`);
+        }
+      }
+    }
+    // Check field of study for contamination
+    if (ed.field) {
+      const lowerField = ed.field.toLowerCase();
+      for (const kw of EDUCATION_SKILL_KEYWORDS) {
+        if (lowerField.includes(kw)) {
+          ed.field = "";
+          warnings.push(`Education cleanup: removed "${kw}" from field of study`);
+          break;
+        }
+      }
+    }
+    // Check highlights for contamination — remove items that look like skill categories
+    if (ed.highlights && ed.highlights.length > 0) {
+      ed.highlights = ed.highlights.filter(h => {
+        const lowerH = h.toLowerCase();
+        // Remove if it exactly matches a section header keyword
+        if (EDUCATION_SKILL_KEYWORDS.includes(lowerH.trim())) return false;
+        // Remove if it's a single short heading that matches a competency pattern
+        if (h.length < 50 && /^(guest service|professional presence|operational efficiency|teamwork|communication|customer service|leadership|management|technical|analytical|interpersonal)/i.test(h.trim()) && !h.includes(":")) {
+          warnings.push(`Education cleanup: removed highlight that looks like a skill category: "${h}"`);
+          return false;
+        }
+        return true;
+      });
+    }
   }
 
   // ========================================================================

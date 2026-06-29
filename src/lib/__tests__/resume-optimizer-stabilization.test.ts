@@ -197,8 +197,9 @@ describe("Bullet-Only Optimization", () => {
     expect(result.resume.experience[0].company).toBe("Hotel Atlas");
     expect(result.resume.experience[0].startDate).toBe("Jan 2022");
     expect(result.resume.experience[0].endDate).toBe("Mar 2023");
-    // Bullets from optimizer
-    expect(result.resume.experience[0].bullets[0]).toContain("REWRITTEN");
+    // Bullets from optimizer — only accepted if count >= source count
+    // Since optimizer returns only 1 bullet vs source's 2, source bullets are preserved
+    expect(result.resume.experience[0].bullets[0]).toContain("Managed front desk");
   });
 });
 
