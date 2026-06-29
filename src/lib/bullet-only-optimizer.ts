@@ -145,18 +145,20 @@ CRITICAL RULES:
    - WEAVE keywords naturally into context.
    - Each keyword should appear ONCE, embedded in a relevant sentence.
 
-4. ACTION-ORIENTED BULLETS:
+4. ACTION-ORIENTED BULLETS with PRESERVED COUNT:
    - Start EVERY bullet with a strong action verb: Spearheaded, Orchestrated, Streamlined, Facilitated, Coordinated, Delivered, Executed, Managed.
    - Keep sentences under 20 words. Be concise and impactful.
    - NEVER use double periods (..).
    - NEVER repeat filler phrases like "demonstrating strong attention to detail" or "committed to excellence."
    - Each bullet must be a unique, specific achievement or responsibility.
    - NEVER use "within <JobTitle>" or "at <JobTitle>" — these are hallucinations where the AI confuses the job title with a company name.
+   - CRITICAL: You MUST preserve the EXACT SAME NUMBER of bullets per experience entry as the source resume. If the source has 6 bullets for an entry, your output MUST have exactly 6 bullets for that entry. NEVER drop, merge, or truncate bullet points.
 
-5. SKILLS:
+5. SKILLS (PRESERVE CATEGORIES):
    - Add transferable skills that bridge gaps between the candidate's experience and the JD.
    - Do NOT include company names, airport names, or locations as skills.
    - Do NOT include "Qatar Duty Free", "Qatar Airways", "Hamad International Airport", "Doha", "Qatar", etc. as skills.
+   - CRITICAL: You MUST preserve ALL skill categories from the source resume. If the source has 4 categories (e.g., "Guest Service Excellence", "Professional Presence & Communication"), your output MUST include those exact categories. NEVER drop categories or merge them. You may add new skills within existing categories, but never remove a category.
 
 6. HEADLINE:
    - Rewrite to target the JD role.

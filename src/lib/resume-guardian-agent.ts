@@ -510,6 +510,240 @@ function checkDirectiveCompliance(
   };
 }
 
+// ── Check 13: Bullet Count Preservation (critical) ──────────────────────────
+
+/**
+ * Verifies that EVERY experience entry has the EXACT SAME number of bullets
+ * as the corresponding entry in the source resume. This prevents the LLM
+ * from dropping, merging, or truncating bullet points during optimization.
+ */
+function checkBulletsPreserved(optimized: ResumeData, source: ResumeData): GuardianCheck {
+  const failures: string[] = [];
+
+  for (const optExp of optimized.experience) {
+    const srcExp = source.experience.find(
+      (s) =>
+        s.company?.toLowerCase() === optExp.company?.toLowerCase() ||
+        s.title?.toLowerCase() === optExp.title?.toLowerCase()
+    );
+    if (!srcExp) continue; // Check 1 already catches new/removed entries
+
+    const srcBullets = srcExp.bullets || [];
+    const optBullets = optExp.bullets || [];
+    const srcCount = srcBullets.length;
+    const optCount = optBullets.length;
+
+    if (optCount < srcCount) {
+      failures.push(
+        `"${optExp.title} @ ${optExp.company}": ${srcCount} bullets → ${optCount} (${srcCount - optCount} missing)`
+      );
+    } else if (optCount > srcCount) {
+      // More bullets than source is suspicious (hallucination)
+      failures.push(
+        `"${optExp.title} @ ${optExp.company}": ${srcCount} bullets → ${optCount} (${optCount - srcCount} extra — potential hallucination)`
+      );
+    }
+  }
+
+  if (failures.length === 0) {
+    return {
+      name: "bullets_preserved",
+      passed: true,
+      critical: true,
+      detail: "All experience entries have the exact same number of bullets as the source",
+    };
+  }
+
+  return {
+    name: "bullets_preserved",
+    passed: false,
+    critical: true,
+    detail: `Bullet count mismatch: ${failures.join("; ")}`,
+  };
+}
+
+// ── Check 14: Skill Categories Preserved (critical) ──────────────────────────
+
+/**
+ * Verifies that ALL skill categories from the source resume are present in the
+ * optimized output. This prevents the LLM from dropping entire competency
+ * categories during skills optimization.
+ */
+function checkSkillCategoriesPreserved(optimized: ResumeData, source: ResumeData): GuardianCheck {
+  if (source.skills.length === 0) {
+    return {
+      name: "skill_categories_preserved",
+      passed: true,
+      critical: true,
+      detail: "No source skill categories to check",
+    };
+  }
+
+  // Extract source categories (handle both .category field and skills with no category)
+  const srcCategories = new Set<string>();
+  for (const s of source.skills) {
+    if (s.category?.trim()) {
+      srcCategories.add(s.category.trim().toLowerCase());
+    }
+  }
+
+  // If source has no categories, skip this check
+  if (srcCategories.size === 0) {
+    return {
+      name: "skill_categories_preserved",
+      passed: true,
+      critical: true,
+      detail: "Source skills have no categories — skipping category check",
+    };
+  }
+
+  // Extract optimized categories
+  const optCategories = new Set<string>();
+  for (const s of optimized.skills) {
+    if (s.category?.trim()) {
+      optCategories.add(s.category.trim().toLowerCase());
+    }
+  }
+
+  const missing: string[] = [];
+  Array.from(srcCategories).forEach((srcCat) => {
+    if (!optCategories.has(srcCat)) {
+      missing.push(srcCat);
+    }
+  });
+
+  if (missing.length === 0) {
+    return {
+      name: "skill_categories_preserved",
+      passed: true,
+      critical: true,
+      detail: `All ${srcCategories.size} source skill categories preserved in optimized output`,
+    };
+  }
+
+  return {
+    name: "skill_categories_preserved",
+    passed: false,
+    critical: true,
+    detail: `Missing ${missing.length}/${srcCategories.size} skill categories: "${missing.join('", "')}"`,
+  };
+}
+
+// ── Check 15: Personal Details Preserved (critical) ──────────────────────────
+
+/**
+ * Verifies that personal details from the source resume (date of birth,
+ * location, etc.) are preserved in the optimized output. Prevents the LLM
+ * from silently dropping contact/personal information.
+ */
+function checkPersonalDetailsPreserved(optimized: ResumeData, source: ResumeData): GuardianCheck {
+  const failures: string[] = [];
+
+  // Check date of birth
+  const srcDob = (source as any).dateOfBirth;
+  if (srcDob && typeof srcDob === "string" && srcDob.trim()) {
+    const optDob = (optimized as any).dateOfBirth;
+    if (!optDob || !optDob.toString().trim()) {
+      failures.push(`dateOfBirth ("${srcDob.trim()}") missing from output`);
+    }
+  }
+
+  // Check location (stored in contact.location)
+  const srcLoc = source.contact?.location || (source as any).city;
+  if (srcLoc && typeof srcLoc === "string" && srcLoc.trim()) {
+    const optLoc = optimized.contact?.location || (optimized as any).city;
+    if (!optLoc || !optLoc.toString().trim()) {
+      failures.push(`location ("${srcLoc.trim()}") missing from output`);
+    }
+  }
+
+  if (failures.length === 0) {
+    return {
+      name: "personal_details_preserved",
+      passed: true,
+      critical: true,
+      detail: "All source personal details (DOB, location) preserved in output",
+    };
+  }
+
+  return {
+    name: "personal_details_preserved",
+    passed: false,
+    critical: true,
+    detail: `Missing personal details: ${failures.join("; ")}`,
+  };
+}
+
+// ── Check 16: No Hallucinated Proficiency Levels (critical) ──────────────────
+
+/**
+ * Detects when the LLM adds proficiency levels (e.g., "(fluent)", "(expert)",
+ * "(native)") to language entries when they were NOT present in the source.
+ * This is a common hallucination pattern where the LLM "improves" the resume
+ * by inventing proficiency claims.
+ */
+function checkNoProficiencyHallucination(optimized: ResumeData, source: ResumeData): GuardianCheck {
+  const srcLanguages = source.languages || [];
+  const optLanguages = optimized.languages || [];
+
+  // Build source text for each language (lowercase, whitespace-normalized)
+  const srcLangTexts = srcLanguages.map((l) => {
+    const name = l.name.toLowerCase().trim();
+    const proficiency = l.proficiency?.toLowerCase().trim() || "";
+    return { name, proficiency };
+  });
+
+  const optLangTexts = optLanguages.map((l) => {
+    // The optimized output might embed proficiency in the language name string
+    const nameRaw = l.name.toLowerCase().trim();
+    const proficiency = l.proficiency?.toLowerCase().trim() || "";
+    return { raw: nameRaw, proficiency };
+  });
+
+  const knownLevels = ["fluent", "native", "expert", "advanced", "intermediate", "beginner", "bilingual", "c2", "c1", "b2", "b1", "a2", "a1"];
+  const addedProficiencies: string[] = [];
+
+  for (const opt of optLangTexts) {
+    // Check if the language name itself contains a proficiency level (e.g., "English (fluent)")
+    const embeddedLevel = knownLevels.find((lvl) => opt.raw.includes(`(${lvl})`));
+    // Check the proficiency field
+    const fieldLevel = opt.proficiency && knownLevels.includes(opt.proficiency) ? opt.proficiency : null;
+
+    if (embeddedLevel || fieldLevel) {
+      // Find the matching source language
+      const baseName = embeddedLevel
+        ? opt.raw.replace(/\([^)]+\)/g, "").trim()
+        : opt.raw;
+      const srcMatch = srcLangTexts.find(
+        (s) => s.name === baseName || s.name.includes(baseName) || baseName.includes(s.name)
+      );
+
+      if (srcMatch && !srcMatch.proficiency) {
+        // Source had no proficiency but output has one — hallucination
+        addedProficiencies.push(`${opt.raw} → added "${embeddedLevel || fieldLevel}" (not in source)`);
+      } else if (!srcMatch) {
+        // New language — could be hallucination but check 4 (languages_preserved) handles this
+      }
+    }
+  }
+
+  if (addedProficiencies.length === 0) {
+    return {
+      name: "no_proficiency_hallucination",
+      passed: true,
+      critical: true,
+      detail: "No hallucinated proficiency levels detected in language entries",
+    };
+  }
+
+  return {
+    name: "no_proficiency_hallucination",
+    passed: false,
+    critical: true,
+    detail: `Added proficiency levels not in source: ${addedProficiencies.join("; ")}`,
+  };
+}
+
 // ============================================================================
 // Main Validation Runner
 // ============================================================================
@@ -529,7 +763,7 @@ export async function runGuardianValidation(
 ): Promise<GuardianVerdict> {
   const checks: GuardianCheck[] = [];
 
-  // Run all 12 checks
+  // Run all 16 checks
   checks.push(checkCompaniesPreserved(optimized, source));
   checks.push(checkDatesPreserved(optimized, source));
   checks.push(checkEducationPreserved(optimized, source));
@@ -539,6 +773,10 @@ export async function runGuardianValidation(
   checks.push(checkLayoutPreserved(optimized, source));
   checks.push(checkNoHallucinations(optimized, source));
   checks.push(checkNoDuplicateSentences(optimized, source));
+  checks.push(checkBulletsPreserved(optimized, source));
+  checks.push(checkSkillCategoriesPreserved(optimized, source));
+  checks.push(checkPersonalDetailsPreserved(optimized, source));
+  checks.push(checkNoProficiencyHallucination(optimized, source));
   checks.push(checkAtsImprovement(optimized, source));
   checks.push(checkOnePageValidation(optimized));
   checks.push(checkDirectiveCompliance(optimized, source, policy));

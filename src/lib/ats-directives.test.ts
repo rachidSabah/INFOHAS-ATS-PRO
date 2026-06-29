@@ -248,7 +248,7 @@ describe("getAviationOptimizerDirective", () => {
     // The base directive (from getOptimizerDirective) should reflect these values
     expect(d).toContain("80");
     expect(d).toContain("120");
-    expect(d).toContain("7 bullets");
+    expect(d).toContain("PRESERVE THE EXACT SAME NUMBER OF BULLETS");
   });
 
   it("adapts tone instruction based on strictness setting", () => {

@@ -1147,7 +1147,7 @@ SECTION ORDER (MANDATORY — in this exact order)
 ═══════════════════════════════════════════════════════════════
 1. PROFESSIONAL SUMMARY — ${c.summaryMinWords}-${c.summaryMaxWords} words, single paragraph, no bullets
 2. CORE COMPETENCIES & SKILLS — max ${c.skillsMaxGroups} groups, bullet format
-3. PROFESSIONAL EXPERIENCE — PRESERVE ALL original entries, target ${c.experienceBulletsPerEntry} bullets per entry
+3. PROFESSIONAL EXPERIENCE — PRESERVE ALL original entries, PRESERVE THE EXACT SAME NUMBER OF BULLETS as the source resume for each entry. Never drop bullets.
 4. EDUCATION — PRESERVE ALL original entries
 5. LANGUAGES — max ${c.languagesMaxEntries} entries, one line per language
 
@@ -1171,7 +1171,7 @@ SECTION CHARACTER LIMITS (MANDATORY — stay within these ranges)
 ${c.sectionLimits ? `- HEADER (name + contact): ${c.sectionLimits.header.min}-${c.sectionLimits.header.max} characters
 - PROFESSIONAL SUMMARY: ${c.sectionLimits.summary.min}-${c.sectionLimits.summary.max} characters (${c.summaryMinWords}-${c.summaryMaxWords} words)
 - CORE COMPETENCIES & SKILLS: ${c.sectionLimits.skills.min}-${c.sectionLimits.skills.max} characters (${c.skillsMaxGroups} groups max)
-- PROFESSIONAL EXPERIENCE: ${c.sectionLimits.experience.min}-${c.sectionLimits.experience.max} characters (${c.experienceBulletsPerEntry} bullets per entry)
+- PROFESSIONAL EXPERIENCE: ${c.sectionLimits.experience.min}-${c.sectionLimits.experience.max} characters (preserve ALL source bullets)
 - EDUCATION: ${c.sectionLimits.education.min}-${c.sectionLimits.education.max} characters
 - LANGUAGES: ${c.sectionLimits.languages.min}-${c.sectionLimits.languages.max} characters
 - TOTAL RESUME: ${c.sectionLimits.total.min}-${c.sectionLimits.total.max} characters
