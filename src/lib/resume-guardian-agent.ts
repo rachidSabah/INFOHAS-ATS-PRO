@@ -20,6 +20,7 @@ import { runStructureGuardian } from "./structure-guardian";
 import { validateLayout } from "./layout-validator";
 import type { OptimizationPolicy } from "./directive-policy";
 import { checkPolicyCompliance } from "./directive-policy";
+import { checkSectionPreservation, extractSectionsFromResume } from "./dynamic-section-engine";
 
 // ============================================================================
 // Types
@@ -817,6 +818,46 @@ function checkNoProficiencyHallucination(optimized: ResumeData, source: ResumeDa
 // Main Validation Runner
 // ============================================================================
 
+// ── Check N: Dynamic Section Preservation (critical) ─────────────────────
+
+/**
+ * Verifies that ALL sections from the original resume are present in the
+ * optimized output. Uses fingerprint-based matching.
+ *
+ * This is the final guarantee against section loss.
+ */
+function checkDynamicSectionsPreserved(optimized: ResumeData, source: ResumeData): GuardianCheck {
+  const sourceSections = extractSectionsFromResume(source);
+  const optimizedSections = extractSectionsFromResume(optimized);
+
+  if (sourceSections.length === 0) {
+    return {
+      name: "dynamic_sections_preserved",
+      passed: true,
+      critical: true,
+      detail: "No sections in source to compare — skipping",
+    };
+  }
+
+  const preservation = checkSectionPreservation(sourceSections, optimized);
+
+  if (preservation.missing.length === 0) {
+    return {
+      name: "dynamic_sections_preserved",
+      passed: true,
+      critical: true,
+      detail: `All ${sourceSections.length} sections preserved: [${preservation.preservedSections.join(", ")}]`,
+    };
+  }
+
+  return {
+    name: "dynamic_sections_preserved",
+    passed: false,
+    critical: true,
+    detail: `Missing ${preservation.missing.length}/${sourceSections.length} sections: [${preservation.missing.map((s) => s.title).join(", ")}]. Source had: [${sourceSections.map((s) => s.title).join(", ")}]`,
+  };
+}
+
 /**
  * Run ALL guardian checks and produce a GuardianVerdict with VETO enforcement.
  *
@@ -862,6 +903,9 @@ export async function runGuardianValidation(
       detail: `Source had ${sourceDynSections.length} dynamic sections, optimized has ${optDynSections.length}`,
     });
   }
+
+  // Check N: Dynamic Section Preservation
+  checks.push(checkDynamicSectionsPreserved(optimized, source));
 
   // Compute score (weighted: critical 2x, non-critical 1x)
   let weightedPassed = 0;

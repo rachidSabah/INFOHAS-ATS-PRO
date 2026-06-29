@@ -1165,7 +1165,7 @@ ${c.enforceOnePage
 3. Reduce spacing (tighten line height)
 4. Reduce font size to MINIMUM ${c.minFontSizePt}pt (never below ${c.minFontSizePt}pt)
 5. Merge similar skills (combine categories)
-WARNING: NEVER remove bullets, experience entries, education entries, or languages. NEVER change dates.
+WARNING: NEVER remove bullets, experience entries, education entries, languages, or custom sections. NEVER change dates.
 NEVER create page two. assert(pdf.pages === 1).`
   : "Multi-page output allowed if content exceeds one page."}
 

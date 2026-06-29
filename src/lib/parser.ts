@@ -5,6 +5,7 @@ import type { ResumeData } from "./types";
 import { uid } from "./store";
 import { isForbiddenSkill } from "./entity-lock";
 import { detectSectionBoundaries } from "./section-boundary-parser";
+import { extractSectionsFromResume } from "./dynamic-section-engine";
 
 function safeCall<T extends (...args: any[]) => any>(fn: T, args: Parameters<T>, fallback: ReturnType<T>): ReturnType<T> {
   try { return typeof fn === 'function' ? fn(...args) : fallback; } catch { return fallback; }
@@ -152,7 +153,7 @@ export function secondaryParser(text: string, fileName: string): ResumeData {
   const name = extractNameFromLines(normalizedText.split("\n"));
 
   const now = new Date().toISOString();
-  return {
+  const baseResume: ResumeData = {
     id: uid("r"),
     name,
     contact: { email: emailMatch?.[1], phone: phoneMatch?.[1]?.trim(), location, website, linkedin, github },
@@ -163,12 +164,21 @@ export function secondaryParser(text: string, fileName: string): ResumeData {
     projects,
     certifications,
     languages,
-    template: "ats-professional",
+    template: "ats-professional" as const,
     accentColor: "#1154A3",
     createdAt: now,
     updatedAt: now,
     source: "upload",
     fileName,
+  };
+
+  // Populate dynamicSections from the engine to capture any
+  // non-standard sections parsed from the source resume
+  const dynamicSections = extractSectionsFromResume(baseResume);
+
+  return {
+    ...baseResume,
+    dynamicSections,
   };
 }
 
@@ -274,7 +284,7 @@ export function heuristicParser(text: string, fileName: string): ResumeData {
   const name = extractNameFromLines(sectionLines.header);
 
   const now = new Date().toISOString();
-  return {
+  const baseHeuristicResume: ResumeData = {
     id: uid("r"),
     name,
     contact: { email: emailMatch?.[1], phone: phoneMatch?.[1]?.trim(), location, website, linkedin, github },
@@ -285,12 +295,21 @@ export function heuristicParser(text: string, fileName: string): ResumeData {
     projects,
     certifications,
     languages,
-    template: "ats-professional",
+    template: "ats-professional" as const,
     accentColor: "#1154A3",
     createdAt: now,
     updatedAt: now,
     source: "upload",
     fileName,
+  };
+
+  // Populate dynamicSections from the engine to capture any
+  // non-standard sections parsed from the source resume
+  const heuristicDynamicSections = extractSectionsFromResume(baseHeuristicResume);
+
+  return {
+    ...baseHeuristicResume,
+    dynamicSections: heuristicDynamicSections,
   };
 }
 

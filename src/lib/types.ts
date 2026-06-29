@@ -89,15 +89,41 @@ export interface ResumeLanguage {
   proficiency: "basic" | "conversational" | "fluent" | "native";
 }
 
+/**
+ * DynamicSection — a resume section that exists in the original resume but is NOT
+ * explicitly defined in the optimization directives (summary, experience, education,
+ * skills, languages, additionalInfo).
+ *
+ * Examples: Certifications, Awards, Projects, Volunteer Experience, Internships,
+ * Interests, Publications, Training, Memberships, References, Achievements,
+ * Conferences, Licenses, Technical Skills, Personal Profile, Objective,
+ * Professional Affiliations, Hobbies, Courses, Accomplishments, Extra-Curricular
+ * Activities, Military Service, Community Involvement, or any custom section.
+ *
+ * These sections MUST be preserved through optimization — they may be enhanced
+ * (grammar, ATS keywords, professional wording) but never removed.
+ */
 export interface DynamicSection {
+  /** Unique fingerprint ID derived from normalizedTitle + content via SHA-256 */
   id: string;
+  /** Section title (e.g., "Volunteer Experience", "Certifications") */
   title: string;
+  /** Lowercased, trimmed, whitespace-collapsed version of title */
   normalizedTitle: string;
+  /** Raw content string (the full text of the section, newline-separated) */
   content: string;
+  /** Individual bullet points or lines within this section */
   bullets: string[];
+  /** Position within the resume (0-based) */
   order: number;
-  source: 'parsed';
+  /** Source marker — always 'parsed' for dynamic sections */
+  source: "parsed";
+  /** Immutable marker — dynamic sections are never removed */
   immutable: true;
+  /** Optional enhanced version of the content (after optimization) */
+  enhanced?: string;
+  /** Optional enhanced version of bullets (after optimization) */
+  enhancedBullets?: string[];
 }
 
 export interface ResumeData {
@@ -113,12 +139,17 @@ export interface ResumeData {
   certifications: ResumeCertification[];
   languages: ResumeLanguage[];
   achievements?: string[];
+  /**
+   * Dynamic sections — any section parsed from the original resume that is NOT
+   * one of the directive-defined sections. These MUST be preserved through
+   * optimization and MUST appear in the final output.
+   */
   dynamicSections?: DynamicSection[];
   template: ResumeTemplate;
   accentColor?: string;
-  photoUrl?: string; // optional profile photo for templates with image frame (infohas-pro)
-  dateOfBirth?: string; // optional DOB line shown under contact (infohas-pro)
-  additionalInfo?: string; // optional free-text section at end (e.g., "Willing to reallocate, Height 1m,72")
+  photoUrl?: string;
+  dateOfBirth?: string;
+  additionalInfo?: string;
   createdAt: string;
   updatedAt: string;
   source?: "upload" | "manual" | "ai-optimized" | "ai-optimized-aviation" | "template";
@@ -1152,7 +1183,8 @@ export type RenderSectionType =
   | "languages"
   | "additionalInformation"
   | "projects"
-  | "certifications";
+  | "certifications"
+  | "dynamicSections";
 
 export interface RenderDocumentSection {
   type: RenderSectionType;

@@ -51,6 +51,7 @@ const SECTION_TITLES: Record<RenderSectionType, string> = {
   additionalInformation: "ADDITIONAL INFORMATION",
   projects: "PROJECTS",
   certifications: "CERTIFICATIONS",
+  dynamicSections: "",
 };
 
 function buildContactBlock(resume: ResumeData): RenderDocument["contact"] {
@@ -204,8 +205,39 @@ function buildAdditionalInfoSection(resume: ResumeData): RenderDocumentSection |
   if (!paragraphs.length) return null;
   return {
     type: "additionalInformation",
-    title: SECTION_TITLES.additionalInformation,
-    items: paragraphs.map(p => ({ kind: "text" as const, text: p })),
+    title: "Additional Information",
+    items: paragraphs.map((p) => ({ kind: "text" as const, text: p })),
+  };
+}
+
+/**
+ * Build a RenderDocumentSection from dynamic sections that were preserved
+ * or restored by the Dynamic Section Preservation Engine.
+ */
+function buildDynamicSections(resume: ResumeData): RenderDocumentSection | null {
+  const dynamicSections = resume.dynamicSections;
+  if (!dynamicSections || dynamicSections.length === 0) return null;
+
+  const items: RenderContentItem[] = [];
+  for (const ds of dynamicSections) {
+    items.push({ kind: "text" as const, text: ds.title, bold: true });
+
+    if (ds.bullets.length === 1 && ds.bullets[0].length > 60) {
+      // Single long paragraph — render as text
+      items.push({ kind: "text" as const, text: ds.bullets[0] });
+    } else {
+      // Multiple bullets — render as bullet list
+      const bulletItems = ds.bullets.filter(b => b.trim().length > 0);
+      if (bulletItems.length > 0) {
+        items.push({ kind: "bullets" as const, bullets: bulletItems });
+      }
+    }
+  }
+
+  return {
+    type: "dynamicSections",
+    title: "",
+    items,
   };
 }
 

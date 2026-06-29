@@ -37,6 +37,7 @@ import { createSnapshot, compareSnapshots } from "./resume-snapshot-engine";
 import { globalEventBus } from "./agent-event-bus";
 import { getCachedOptimization, setCachedOptimization } from "./semantic-cache";
 import { recordProviderSuccess, recordProviderFailure } from "./provider-health-monitor";
+import { runDynamicSectionPipeline } from "./dynamic-section-engine";
 
 export interface LockedPipelineResult {
   resume: ResumeData;
@@ -251,6 +252,30 @@ export async function runLockedPipeline(
         console.warn("[Locked Pipeline Page Balancer] Failed (non-fatal):", pbErr);
       }
       assembleResult.resume = balancedResume;
+
+      // ========================================================================
+      // Step 3b: Dynamic Section Preservation & Enhancement
+      // ========================================================================
+      try {
+        const dynamicResult = runDynamicSectionPipeline(idReadyResume, assembleResult.resume, jd);
+        for (const logLine of dynamicResult.logs) {
+          warnings.push(logLine.replace(/^\[Dynamic Section Engine\] /, ""));
+        }
+        assembleResult.resume = dynamicResult.mergedResume ?? assembleResult.resume;
+
+        // Check if dynamic sections were lost — if so, it's a content violation
+        if (!dynamicResult.preservation.preserved && dynamicResult.preservation.missing.length > 0) {
+          warnings.push(
+            `Dynamic sections restored: ${dynamicResult.preservation.missing.map((s) => s.title).join(", ")}`
+          );
+        }
+        console.log(
+          `[Locked Pipeline] Dynamic Section Engine: ${dynamicResult.preservation.preservedSections.length}/${dynamicResult.originalSections.length} preserved`
+        );
+      } catch (dseErr) {
+        console.warn("[Locked Pipeline Dynamic Section Engine] Failed (non-fatal):", dseErr);
+        warnings.push("Dynamic section preservation check encountered an error — continuing with best-effort.");
+      }
 
       // ========================================================================
       // Layout Validation (A4 One-Page Check)

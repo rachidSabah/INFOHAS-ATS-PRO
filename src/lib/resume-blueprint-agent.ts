@@ -32,6 +32,7 @@
 
 import type { ResumeData, ResumeExperience, ResumeEducation, DynamicSection } from "./types";
 import { computeExperienceFingerprint } from "./experience-fingerprint";
+import { extractSectionsFromResume } from "./dynamic-section-engine";
 
 // ============================================================================
 // Types
@@ -91,7 +92,11 @@ export interface ResumeBlueprint {
   }>;
   /** Additional information — certifications, projects, achievements, etc. */
   additionalInformation: Record<string, any>;
-  /** Dynamic sections — preserved from original resume */
+  /**
+   * Dynamic sections — any section parsed from the original resume that is NOT
+   * one of the directive-defined sections. These MUST be preserved through
+   * optimization.
+   */
   dynamicSections: DynamicSection[];
 }
 
@@ -268,6 +273,9 @@ export function extractBlueprint(resume: ResumeData): ResumeBlueprint {
     additionalInformation.dateOfBirth = resume.dateOfBirth;
   }
 
+  // Extract dynamic sections
+  const dynamicSections = extractSectionsFromResume(resume);
+
   return {
     header,
     summary: resume.summary || "",
@@ -276,7 +284,7 @@ export function extractBlueprint(resume: ResumeData): ResumeBlueprint {
     skills,
     languages,
     additionalInformation,
-    dynamicSections: [...(resume.dynamicSections || [])],
+    dynamicSections,
   };
 }
 
