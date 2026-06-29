@@ -238,6 +238,20 @@ export function toRenderDocument(
     () => buildSkillsSection(resume),
     () => buildLanguagesSection(resume),
     () => buildAdditionalInfoSection(resume),
+    ...((resume.dynamicSections || []).map((ds) => () => {
+      const items: RenderContentItem[] = [];
+      if (ds.bullets && ds.bullets.length > 0) {
+        items.push({ kind: "bullets", bullets: ds.bullets, level: 0 });
+      } else if (ds.content) {
+        items.push({ kind: "text", text: ds.content });
+      }
+      if (items.length === 0) return null;
+      return {
+        type: "skills" as RenderSectionType, // fallback type
+        title: ds.title.toUpperCase(),
+        items,
+      };
+    })),
   ];
 
   const sections: RenderDocumentSection[] = [];

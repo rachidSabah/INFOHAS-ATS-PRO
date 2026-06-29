@@ -43,6 +43,8 @@ import { computeExperienceFingerprint } from "./experience-fingerprint";
  * All fields are extracted from the ResumeData input and frozen.
  * No downstream agent may modify any field in this structure.
  */
+import type { ResumeData, ResumeExperience, ResumeEducation, DynamicSection } from "./types";
+
 export interface ResumeBlueprint {
   /** Contact header — NEVER changes */
   header: {
@@ -90,6 +92,8 @@ export interface ResumeBlueprint {
   }>;
   /** Additional information — certifications, projects, achievements, etc. */
   additionalInformation: Record<string, any>;
+  /** Dynamic sections — preserved from original resume */
+  dynamicSections: DynamicSection[];
 }
 
 /**
@@ -263,6 +267,7 @@ export function extractBlueprint(resume: ResumeData): ResumeBlueprint {
     skills,
     languages,
     additionalInformation,
+    dynamicSections: [...(resume.dynamicSections || [])],
   };
 }
 

@@ -487,6 +487,7 @@ export function assembleResume(
     languages, // immutable
     certifications, // immutable
     projects: sourceResume.projects, // immutable
+    dynamicSections: [...(sourceResume.dynamicSections || [])],
     updatedAt: new Date().toISOString(),
     source: "ai-optimized",
   };

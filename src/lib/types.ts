@@ -89,6 +89,17 @@ export interface ResumeLanguage {
   proficiency: "basic" | "conversational" | "fluent" | "native";
 }
 
+export interface DynamicSection {
+  id: string;
+  title: string;
+  normalizedTitle: string;
+  content: string;
+  bullets: string[];
+  order: number;
+  source: 'parsed';
+  immutable: true;
+}
+
 export interface ResumeData {
   id: string;
   name: string;
@@ -102,6 +113,7 @@ export interface ResumeData {
   certifications: ResumeCertification[];
   languages: ResumeLanguage[];
   achievements?: string[];
+  dynamicSections?: DynamicSection[];
   template: ResumeTemplate;
   accentColor?: string;
   photoUrl?: string; // optional profile photo for templates with image frame (infohas-pro)

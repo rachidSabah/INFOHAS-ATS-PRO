@@ -587,22 +587,45 @@ export function extractResumeFromText(text: string, fileName: string): ResumeDat
   const location = locationLine?.match(/\b([A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+){0,2},\s?[A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+)?)\b/)?.[1];
 
   // Sections — match common headers
+  const KNOWN_LABELS = {
+    experience: ["experience", "work experience", "professional experience", "employment"],
+    education: ["education", "academic background"],
+    skills: ["skills", "technical skills", "core skills", "core competencies", "competencies"],
+    projects: ["projects", "side projects", "personal projects"],
+    certifications: ["certifications", "certificates", "licenses"],
+    languages: ["languages"],
+    achievements: ["achievements", "key achievements", "awards", "honors", "awards & honors"],
+    summary: ["summary", "professional summary", "profile", "objective", "career objective", "career profile", "professional profile", "about me"],
+    personal: ["personal informations", "personal information", "personal info", "personal details", "nationality"]
+  };
+
   const sectionIndex = (labels: string[]) =>
     lines.findIndex((l) => labels.some((lbl) => new RegExp(`^\\s*${lbl}\\s*:?$`, "i").test(l)));
 
-  const expStart = sectionIndex(["experience", "work experience", "professional experience", "employment"]);
-  const eduStart = sectionIndex(["education", "academic background"]);
-  const skillsStart = sectionIndex(["skills", "technical skills", "core skills", "core competencies", "competencies"]);
-  const projStart = sectionIndex(["projects", "side projects", "personal projects"]);
-  const certStart = sectionIndex(["certifications", "certificates", "licenses"]);
-  const langStart = sectionIndex(["languages"]);
-  const achStart = sectionIndex(["achievements", "key achievements", "awards", "honors", "awards & honors"]);
-  const summaryStart = sectionIndex(["summary", "professional summary", "profile", "objective", "career objective", "career profile", "professional profile", "about me"]);
-  const personalStart = sectionIndex(["personal informations", "personal information", "personal info", "personal details", "nationality"]);
+  const expStart = sectionIndex(KNOWN_LABELS.experience);
+  const eduStart = sectionIndex(KNOWN_LABELS.education);
+  const skillsStart = sectionIndex(KNOWN_LABELS.skills);
+  const projStart = sectionIndex(KNOWN_LABELS.projects);
+  const certStart = sectionIndex(KNOWN_LABELS.certifications);
+  const langStart = sectionIndex(KNOWN_LABELS.languages);
+  const achStart = sectionIndex(KNOWN_LABELS.achievements);
+  const summaryStart = sectionIndex(KNOWN_LABELS.summary);
+  const personalStart = sectionIndex(KNOWN_LABELS.personal);
+
+  const ALL_KNOWN_STARTS = [expStart, eduStart, skillsStart, projStart, certStart, langStart, achStart, summaryStart, personalStart];
+
+  // Detect all potential section headers (lines that look like headers)
+  const allPotentialHeaders = lines.map((line, index) => {
+    // A header is typically short (under 50 chars), uppercase or capitalized, and maybe ends with a colon
+    const isHeaderCandidate = line.length > 0 && line.length < 50 && 
+      (line === line.toUpperCase() || /^[A-Z][a-z]+(\s+[A-Z][a-z]+)*:?$/.test(line));
+    return isHeaderCandidate ? index : -1;
+  }).filter(idx => idx !== -1);
 
   const nextSectionStart = (start: number) => {
     if (start < 0) return lines.length;
-    const candidates = [expStart, eduStart, skillsStart, projStart, certStart, langStart, achStart, summaryStart, personalStart]
+    // Next section is either a known section or any other header candidate
+    const candidates = [...ALL_KNOWN_STARTS, ...allPotentialHeaders]
       .filter((i) => i > start);
     return candidates.length ? Math.min(...candidates) : lines.length;
   };
@@ -739,6 +762,25 @@ export function extractResumeFromText(text: string, fileName: string): ResumeDat
     certifications,
     languages,
     achievements: achievements.map((a) => a.title),
+    dynamicSections: allPotentialHeaders
+      .filter(idx => !ALL_KNOWN_STARTS.includes(idx))
+      .map((idx, order) => {
+        const title = lines[idx].replace(/:$/, "").trim();
+        const contentLines = lines.slice(idx + 1, nextSectionStart(idx));
+        const content = contentLines.join("\n");
+        const bullets = contentLines.filter(l => l.startsWith("•") || l.startsWith("-") || l.startsWith("*")).map(l => l.replace(/^[•\-*]\s*/, "").trim());
+        
+        return {
+          id: uid("ds"),
+          title,
+          normalizedTitle: title.toLowerCase(),
+          content,
+          bullets,
+          order,
+          source: 'parsed' as const,
+          immutable: true as const
+        };
+      }),
     template: "ats-professional",
     accentColor: "#1154A3",
     createdAt: now,

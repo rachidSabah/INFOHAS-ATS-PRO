@@ -850,6 +850,7 @@ export async function runGuardianValidation(
   checks.push(checkAtsImprovement(optimized, source));
   checks.push(checkOnePageValidation(optimized));
   checks.push(checkDirectiveCompliance(optimized, source, policy));
+  checks.push(checkDynamicSectionsPreserved(optimized, source));
 
   // Compute score (weighted: critical 2x, non-critical 1x)
   let weightedPassed = 0;
