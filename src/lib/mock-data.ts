@@ -469,7 +469,7 @@ const ANTIGRAVITY_SEED: AIProvider = {
   apiUrl: "https://api.antigravity.io/v1",
   baseUrl: "https://api.antigravity.io/v1",
   priority: 4,
-  isActive: false,  // Activated when the user pastes a valid token via ConnectAntigravityDialog
+  isActive: true,  // Activated when the user pastes a valid token via ConnectAntigravityDialog
   isDefault: false,
   isBuiltIn: true,
   allowedForRegularUsers: true,
