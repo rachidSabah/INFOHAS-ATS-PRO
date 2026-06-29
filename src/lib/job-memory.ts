@@ -25,7 +25,7 @@ export interface JobMemory {
  * Extract JobMemory from a raw Job Description.
  */
 export function extractJobMemory(jd: JobDescription | string): JobMemory {
-  const text = typeof jd === 'string' ? jd : `${jd.title} ${jd.company || ''} ${jd.description || ''}`;
+  const text = typeof jd === 'string' ? jd : `${jd.title} ${jd.company || ''} ${(jd as any).description || (jd as any).rawText || ''}`;
   const lowerText = text.toLowerCase();
 
   // 1. Extract Keywords (Common ATS keywords)

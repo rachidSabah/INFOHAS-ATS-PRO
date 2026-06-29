@@ -13,7 +13,12 @@
 "use client";
 
 import type { AIProvider } from "./types";
-import { isProviderTripped, recordProviderCircuitFailure, resetProviderCircuit } from "./circuit-breaker";
+import { circuitBreakerSuccess, circuitBreakerFailure, circuitBreakerCooldown, isProviderAvailable, resetCircuitBreaker } from "./circuit-breaker";
+
+// Compatibility wrappers — these functions were renamed during circuit-breaker refactoring
+const isProviderTripped = (id: string) => !isProviderAvailable(id);
+const recordProviderCircuitFailure = (id: string, reason: any) => circuitBreakerFailure(id, reason || "network");
+const resetProviderCircuit = (id: string) => resetCircuitBreaker(id);
 import { recordProviderFailure } from "./telemetry";
 
 export interface FailoverResult {
@@ -137,7 +142,7 @@ export function shouldFailover(
   }
 
   // Unknown error → failover
-  recordProviderCircuitFailure(providerName);
+  recordProviderCircuitFailure(providerName, "network");
   recordProviderFailure({
     providerName,
     errorType: "unknown",

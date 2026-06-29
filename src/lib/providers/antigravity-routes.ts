@@ -15,7 +15,7 @@
  */
 
 interface Env {
-  DB: D1Database;
+  DB: any; // D1Database — typed loosely for cross-environment compatibility
   ANTIGRAVITY_ENCRYPTION_KEY?: string;
   ANTIGRAVITY_REDIRECT_URI?: string;
   ANTIGRAVITY_CLIENT_ID?: string;

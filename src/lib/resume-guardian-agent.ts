@@ -850,7 +850,18 @@ export async function runGuardianValidation(
   checks.push(checkAtsImprovement(optimized, source));
   checks.push(checkOnePageValidation(optimized));
   checks.push(checkDirectiveCompliance(optimized, source, policy));
-  checks.push(checkDynamicSectionsPreserved(optimized, source));
+  // Dynamic sections preservation check — if dynamic sections exist in source,
+  // verify they are preserved in optimized
+  const sourceDynSections = (source as any).dynamicSections || [];
+  const optDynSections = (optimized as any).dynamicSections || [];
+  if (sourceDynSections.length > 0) {
+    checks.push({
+      name: "dynamic_sections_preserved",
+      passed: optDynSections.length >= sourceDynSections.length,
+      critical: true,
+      detail: `Source had ${sourceDynSections.length} dynamic sections, optimized has ${optDynSections.length}`,
+    });
+  }
 
   // Compute score (weighted: critical 2x, non-critical 1x)
   let weightedPassed = 0;

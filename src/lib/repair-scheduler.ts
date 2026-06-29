@@ -16,7 +16,11 @@
 
 import { runHealthCheck } from "./health-monitor";
 import { validateProviderState, reconcileProviderState } from "./provider-sync";
-import { isRepairTripped, recordRepairCircuitFailure } from "./circuit-breaker";
+import { isProviderAvailable, circuitBreakerFailure, resetCircuitBreaker } from "./circuit-breaker";
+
+// Compatibility wrappers
+const isRepairTripped = (id: string) => !isProviderAvailable(id);
+const recordRepairCircuitFailure = (id: string, reason: any) => circuitBreakerFailure(id, reason || "network");
 import { createIncident } from "./incident-service";
 import { recordRepair } from "./telemetry";
 
@@ -45,7 +49,7 @@ let isStarted = false;
  */
 export async function scanProviders(): Promise<void> {
   if (scanState.providers) return;
-  if (isRepairTripped()) {
+  if (isRepairTripped("repair")) {
     console.info("[Repair Scheduler] Skipping provider scan — repair circuit tripped");
     return;
   }
@@ -88,12 +92,12 @@ export async function scanProviders(): Promise<void> {
           rollbackRequired: false,
           resolved: false,
         });
-        recordRepairCircuitFailure();
+        recordRepairCircuitFailure("repair", "network");
       }
     }
   } catch (e: any) {
     console.warn("[Repair Scheduler] Provider scan failed:", e?.message);
-    recordRepairCircuitFailure();
+    recordRepairCircuitFailure("repair", "network");
   } finally {
     scanState.providers = false;
   }
@@ -105,7 +109,7 @@ export async function scanProviders(): Promise<void> {
  */
 export async function scanPipelines(): Promise<void> {
   if (scanState.pipelines) return;
-  if (isRepairTripped()) return;
+  if (isRepairTripped("repair")) return;
 
   scanState.pipelines = true;
   const startTime = Date.now();

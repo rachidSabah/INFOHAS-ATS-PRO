@@ -662,7 +662,7 @@ function stripLeaksFromResume(resume: ResumeData): ResumeData | null {
     dynamicSections: (resume.dynamicSections || []).map((ds) => ({
       ...ds,
       title: clean(ds.title),
-      content: ds.content ? clean(ds.content) : undefined,
+      content: ds.content ? clean(ds.content) : "",
       bullets: ds.bullets ? ds.bullets.map(clean).filter((b) => b.length > 0) : [],
     })).filter((ds) => ds.title.length > 0 && (ds.content || ds.bullets.length > 0)),
   };
