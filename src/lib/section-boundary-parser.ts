@@ -97,6 +97,7 @@ const SECTION_SYNONYMS: Record<string, SectionType> = {
   "academic background": "education",
   "academic": "education",
   "qualifications": "education",
+  "education and training": "education",
 
   // Skills
   "skills": "skills",
@@ -107,6 +108,7 @@ const SECTION_SYNONYMS: Record<string, SectionType> = {
   "competencies": "skills",
   "key competencies": "skills",
   "key skills": "skills",
+  "digital skills": "skills",
 
   // Languages
   "languages": "languages",
@@ -118,6 +120,8 @@ const SECTION_SYNONYMS: Record<string, SectionType> = {
   "certifications": "certifications",
   "certificates": "certifications",
   "licenses": "certifications",
+  "licenses and certifications": "certifications",
+  "licences": "certifications",
 
   // Projects
   "projects": "projects",
@@ -193,10 +197,11 @@ export function detectSectionBoundaries(lines: string[]): SectionBoundary[] {
       !/\d{4}/.test(line) && // Not a year
       !looksLikeLanguageContent && // NOT a language name or proficiency word
       (
-        // All uppercase (e.g., "PROFESSIONAL EXPERIENCE", "CORE COMPETENCIES")
-        (line === line.toUpperCase() && /[A-Z]/.test(line) && !/[a-z]/.test(line.replace(/[^a-zA-Z]/g, ""))) ||
+        // All uppercase with at least 2 letters (e.g., "PROFESSIONAL EXPERIENCE")
+        // This is the primary signal for section headers
+        (line === line.toUpperCase() && /[A-Z]{2,}/.test(line) && !/[a-z]/.test(line.replace(/[^a-zA-Z]/g, ""))) ||
         // Title case ending with colon (e.g., "Languages:")
-        /^[A-Z][a-z]+(\s+[A-Z][a-z]+)*:?$/.test(line)
+        (/^[A-Z][a-z]+(\s+[A-Z][a-z]+)*:?$/.test(line) && line.endsWith(":"))
       )
     ) {
       // Check if it matches any synonym after normalization
