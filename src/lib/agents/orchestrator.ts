@@ -65,6 +65,7 @@ import {
 } from "../entity-lock";
 import { processAIResponseHardened } from "../orchestrator-hardening";
 import { computeExperienceFingerprint } from "../experience-fingerprint";
+import { extractJobMemory } from "../job-memory";
 
 // ============================================================================
 // AI response normalization helpers
@@ -827,6 +828,21 @@ async function _runOptimizationPipelineInner(input: PipelineInput, watchdog: Opt
       console.warn("[Orchestrator] Failed to build optimization policy:", policyErr instanceof Error ? policyErr.message : policyErr);
     }
 
+    // === JOB MEMORY INTEGRATION (Architecture Elite) ===
+    // Extract deep intelligence from JD before starting any optimization agent.
+    // This "Memory" ensures all agents (Experience, Skills, Summary) are aligned.
+    let jobMemory: any = null;
+    try {
+      jobMemory = extractJobMemory(jd);
+      console.info("[JobMemory] Extracted context:", {
+        industry: jobMemory.industry,
+        keywords: jobMemory.keywords.length,
+        terminology: jobMemory.terminology.length
+      });
+    } catch (memErr) {
+      console.warn("[JobMemory] Extraction failed (non-fatal):", memErr);
+    }
+
     while (optimizeAttempt < maxOptimizeAttempts) {
       optimizeAttempt++;
       const optHandle = watchdog.startStep(`Resume Optimizer (attempt ${optimizeAttempt})`);
@@ -890,6 +906,18 @@ Bridging Strategy: ${result.skillGap.bridgingStrategy}`);
           const resumeText = JSON.stringify(resume).toLowerCase();
           const missingKeywords = jdKeywords.filter((k) => !resumeText.includes(k.toLowerCase()));
           intelligenceBlocks.push(`MISSING JD KEYWORDS TO EMBED NATURALLY (semantic optimization, NOT stuffing): ${missingKeywords.join(", ") || "(none — focus on rewriting for impact)"}`);
+
+          // Inject JobMemory into the intelligence context
+          if (jobMemory) {
+            intelligenceBlocks.push(`JOB MEMORY TERMINOLOGY (Must use these terms naturally):
+${jobMemory.terminology.join(", ")}
+
+TARGET COMPETENCIES:
+${jobMemory.competencies.join(", ")}
+
+INDUSTRY CONTEXT:
+${jobMemory.industry}`);
+          }
 
           const intelligenceContext = intelligenceBlocks.join("\n\n");
 
