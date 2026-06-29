@@ -274,6 +274,31 @@ function InfohasProTemplate({ resume, accent }: { resume: ResumeData; accent: st
             </div>
           </InfohasSection>
         )}
+
+        {/* DYNAMIC SECTIONS */}
+        {(resume.dynamicSections || []).map((ds) => (
+          <InfohasSection key={ds.id} title={ds.title} titleColor={L.sectionTitleColor} titleSize={`${L.sectionTitleSizePt}pt`} gap={`${L.sectionGapMm}mm`}>
+            <div style={{ color: BLACK }}>
+              {ds.content && <p style={{ margin: "0 0 1mm 0", textAlign: "justify" }}>{ds.content}</p>}
+              {ds.bullets && ds.bullets.length > 0 && (
+                <ul style={{ margin: 0, paddingLeft: `${L.bulletIndentMm}mm`, listStyleType: "•" }}>
+                  {ds.bullets.map((b, i) => (
+                    <li key={i} style={{ marginBottom: "0.5mm", textAlign: "justify" }}>{b}</li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          </InfohasSection>
+        ))}
+
+        {/* ADDITIONAL INFORMATION */}
+        {resume.additionalInfo && (
+          <InfohasSection title="ADDITIONAL INFORMATION" titleColor={L.sectionTitleColor} titleSize={`${L.sectionTitleSizePt}pt`} gap={`${L.sectionGapMm}mm`}>
+            <div style={{ color: BLACK, whiteSpace: "pre-wrap", textAlign: "justify" }}>
+              {resume.additionalInfo}
+            </div>
+          </InfohasSection>
+        )}
       </div>
     </div>
   );

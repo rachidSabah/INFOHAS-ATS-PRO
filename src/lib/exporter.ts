@@ -262,6 +262,19 @@ function buildResumeHtml(r: ResumeData, L: ResumeLayoutModel): string {
     }
   }
 
+  // DYNAMIC SECTIONS
+  if (r.dynamicSections && r.dynamicSections.length > 0) {
+    for (const ds of r.dynamicSections) {
+      lines.push(`<div class="section-title">${esc(ds.title.toUpperCase())}</div>`);
+      if (ds.content) {
+        lines.push(`<p>${esc(ds.content)}</p>`);
+      }
+      if (ds.bullets && ds.bullets.length > 0) {
+        lines.push(`<ul>${ds.bullets.map(b => `<li>${esc(b)}</li>`).join("")}</ul>`);
+      }
+    }
+  }
+
   // ADDITIONAL INFORMATION
   if (r.additionalInfo) {
     lines.push(`<div class="section-title">ADDITIONAL INFORMATION</div>`);
@@ -499,6 +512,54 @@ function exportInfohasProPDF(resume: ResumeData, opts: PDFOptions = {}, layout?:
       const note = (l as any).note ? ` (${(l as any).note})` : "";
       doc.text(`${l.name}: ${l.proficiency}${note}`, left, textY(L.bodyFontSizePt));
       advanceLine();
+    }
+    y += L.sectionGapMm;
+  }
+
+  // ===== DYNAMIC SECTIONS =====
+  if (resume.dynamicSections && resume.dynamicSections.length > 0) {
+    for (const ds of resume.dynamicSections) {
+      if (y > pageH - L.marginBottomMm - 20) break;
+      sectionHeader(ds.title.toUpperCase());
+      doc.setFont("times", "normal");
+      doc.setTextColor(bodyRgb[0], bodyRgb[1], bodyRgb[2]);
+      
+      if (ds.content) {
+        const lines = doc.splitTextToSize(ds.content, contentW);
+        for (let i = 0; i < lines.length; i++) {
+          if (y > pageH - L.marginBottomMm - 5) break;
+          const isLastLine = i === lines.length - 1;
+          if (isLastLine) {
+            doc.text(lines[i], left, textY(L.bodyFontSizePt));
+          } else {
+            doc.text(lines[i], left, textY(L.bodyFontSizePt), { align: "justify", maxWidth: contentW });
+          }
+          advanceLine();
+        }
+      }
+      
+      if (ds.bullets && ds.bullets.length > 0) {
+        for (const b of ds.bullets) {
+          if (y > pageH - L.marginBottomMm - 5) break;
+          drawBullet(b, contentW);
+        }
+      }
+      y += L.sectionGapMm;
+    }
+  }
+
+  // ===== ADDITIONAL INFORMATION =====
+  if (resume.additionalInfo) {
+    if (y < pageH - L.marginBottomMm - 20) {
+      sectionHeader("ADDITIONAL INFORMATION");
+      doc.setFont("times", "normal");
+      doc.setTextColor(bodyRgb[0], bodyRgb[1], bodyRgb[2]);
+      const lines = doc.splitTextToSize(resume.additionalInfo, contentW);
+      for (const line of lines) {
+        if (y > pageH - L.marginBottomMm - 5) break;
+        doc.text(line, left, textY(L.bodyFontSizePt));
+        advanceLine();
+      }
     }
   }
 
