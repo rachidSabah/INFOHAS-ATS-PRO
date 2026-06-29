@@ -14,7 +14,7 @@ const ALLOWED_PROVIDER_HOSTS = new Set([
   "openrouter.ai", "api.opencode.com", "opencode.ai",
   "api.perplexity.ai", "api.mistral.ai", "api.cohere.com",
   "api.together.xyz", "api.z.ai", "api.aimlapi.com", "api.azure.com",
-  "api-inference.huggingface.co", "api.puter.com", "api.cohere.ai",
+  "api-inference.huggingface.co", "api.puter.com", "api.antigravity.io", "api.cohere.ai",
   "bedrock-runtime.us-east-1.amazonaws.com", "bedrock-runtime.us-west-2.amazonaws.com",
 ]);
 

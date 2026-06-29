@@ -27,6 +27,7 @@ const ALLOWED_PROVIDER_HOSTS = new Set([
   "api.azure.com",
   "api-inference.huggingface.co",
   "api.puter.com",
+  "api.antigravity.io",
   "api.cohere.ai",
   "bedrock-runtime.us-east-1.amazonaws.com",
   "bedrock-runtime.us-west-2.amazonaws.com",
