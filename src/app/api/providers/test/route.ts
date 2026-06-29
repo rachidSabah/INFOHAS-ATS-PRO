@@ -183,6 +183,14 @@ export async function POST(req: NextRequest) {
         });
       }
 
+      if (res.status === 525) {
+        return NextResponse.json({
+          ok: false,
+          latencyMs,
+          message: `HTTP 525 (SSL Handshake Failed) — the provider's API server (${new URL(baseUrl).hostname}) has a TLS/SSL issue. This is a server-side problem; the API may be temporarily down or misconfigured.`,
+        });
+      }
+
       return NextResponse.json({
         ok: false,
         latencyMs,

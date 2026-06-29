@@ -839,7 +839,7 @@ function SettingsTab() {
         if (r.status === "fulfilled") {
           const { provider, result } = r.value;
           if (result.models.length > 0) {
-            // Update the provider's enabledModels and health status in store/D1
+            // Update the provider's enabledModels — use "degraded" if source is not live API
             useApp.getState().updateProvider(provider.id, {
               enabledModels: result.models.map((m) => m.id),
               status: result.source === "api" ? "healthy" : "degraded",
@@ -859,7 +859,7 @@ function SettingsTab() {
       }
 
       toast.success(
-        `Discovered models across ${successCount}/${activeProviders.length} active providers (${apiSourceCount} via live APIs).`
+        `Discovered models across ${successCount}/${activeProviders.length} active providers (${apiSourceCount} via live APIs). ${activeProviders.length - apiSourceCount - (activeProviders.length - successCount)} providers using saved config.`
       );
 
       // Auto-select primary model name if missing
