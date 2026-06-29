@@ -640,6 +640,7 @@ export interface AgentDirectives {
   education: EducationAgentDirective;
   languages: LanguagesAgentDirective;
   guardian: GuardianAgentDirective;
+  additionalInfo: AdditionalInfoAgentDirective;
 }
 
 /**
@@ -716,6 +717,9 @@ export interface ExperienceAgentDirective {
 export interface EducationAgentDirective {
   /** If true, only format education (never add/infer entries) */
   formatOnly: boolean;
+  /** If true, strip section-header keywords (e.g., "KEY COMPETENCIES", "SKILLS")
+   * from education degree/institution/field/highlights fields */
+  stripSectionHeaders: boolean;
 }
 
 /**
@@ -724,6 +728,18 @@ export interface EducationAgentDirective {
 export interface LanguagesAgentDirective {
   /** If true, only format languages (never add/infer entries) */
   formatOnly: boolean;
+}
+
+/**
+ * Additional Information Agent Directive — preserve + improve.
+ */
+export interface AdditionalInfoAgentDirective {
+  /** If true, preserve additional info section (never remove or replace) */
+  preserveSection: boolean;
+  /** If true, improve wording and formatting while preserving facts */
+  improveWording: boolean;
+  /** If true, strip section-header text that leaked from other sections */
+  stripSectionHeaders: boolean;
 }
 
 /**

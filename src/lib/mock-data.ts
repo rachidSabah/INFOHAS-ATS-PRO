@@ -857,6 +857,7 @@ export const SEED_OPTIMIZER_DIRECTIVE: OptimizerDirectiveConfig = {
     },
     education: {
       formatOnly: true,
+      stripSectionHeaders: true,
     },
     languages: {
       formatOnly: true,
@@ -868,6 +869,11 @@ export const SEED_OPTIMIZER_DIRECTIVE: OptimizerDirectiveConfig = {
       enforceNoDuplicates: true,
       enforceSummaryQuality: false,   // false = skip summary quality check
       minimumScore: 80,
+    },
+    additionalInfo: {
+      preserveSection: true,
+      improveWording: true,
+      stripSectionHeaders: true,
     },
   },
 };

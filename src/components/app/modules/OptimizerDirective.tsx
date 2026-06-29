@@ -607,12 +607,18 @@ function AgentDirectivesSection({ draft, patch }: { draft: OptimizerDirectiveCon
           </CardTitle>
           <CardDescription>Formatting only — no inference or additions.</CardDescription>
         </CardHeader>
-        <CardContent>
+        <CardContent className="space-y-3">
           <SwitchRow
             label="Format Only"
             description="Only format education entries. Never add, remove, or infer education."
             checked={draft.agentDirectives.education.formatOnly}
             onChange={(v) => updateAgent("education", { formatOnly: v })}
+          />
+          <SwitchRow
+            label="Strip Section Headers"
+            description="Remove section-header keywords (e.g. KEY COMPETENCIES, SKILLS) from education degree, institution, field, and highlights fields."
+            checked={draft.agentDirectives.education.stripSectionHeaders}
+            onChange={(v) => updateAgent("education", { stripSectionHeaders: v })}
           />
         </CardContent>
       </Card>
@@ -631,6 +637,36 @@ function AgentDirectivesSection({ draft, patch }: { draft: OptimizerDirectiveCon
             description="Only format language entries. Never add, remove, or infer languages."
             checked={draft.agentDirectives.languages.formatOnly}
             onChange={(v) => updateAgent("languages", { formatOnly: v })}
+          />
+        </CardContent>
+      </Card>
+
+      {/* Additional Information Agent Directive */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-lg flex items-center gap-2">
+            <Icon name="FileText" className="w-4 h-4 text-brand" /> Additional Information Agent
+          </CardTitle>
+          <CardDescription>Preserve and improve the Additional Information section.</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <SwitchRow
+            label="Preserve Section"
+            description="Keep the Additional Information section intact. Never remove or replace it."
+            checked={draft.agentDirectives.additionalInfo.preserveSection}
+            onChange={(v) => updateAgent("additionalInfo", { preserveSection: v })}
+          />
+          <SwitchRow
+            label="Improve Wording"
+            description="Improve wording and formatting while preserving all original facts."
+            checked={draft.agentDirectives.additionalInfo.improveWording}
+            onChange={(v) => updateAgent("additionalInfo", { improveWording: v })}
+          />
+          <SwitchRow
+            label="Strip Section Headers"
+            description="Remove section-header keywords (e.g. KEY COMPETENCIES, SKILLS) that leaked into the Additional Information section."
+            checked={draft.agentDirectives.additionalInfo.stripSectionHeaders}
+            onChange={(v) => updateAgent("additionalInfo", { stripSectionHeaders: v })}
           />
         </CardContent>
       </Card>
