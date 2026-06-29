@@ -488,6 +488,13 @@ export function validateImmutableEntities(optimized: ResumeData, sourceResume: R
     violations.push(`Languages dropped: ${sourceResume.languages.length} → ${optimized.languages.length}`);
   }
 
+  // Check dynamic sections
+  const srcDynCount = sourceResume.dynamicSections?.length || 0;
+  const optDynCount = optimized.dynamicSections?.length || 0;
+  if (srcDynCount > 0 && optDynCount < srcDynCount) {
+    violations.push(`Dynamic sections dropped: ${srcDynCount} → ${optDynCount}`);
+  }
+
   return {
     valid: violations.length === 0,
     violations,
@@ -833,6 +840,15 @@ export function finalizeResume(optimizedResume: ResumeData, sourceResume: Resume
 
   if (entities.length > 0 || duplicatesRemoved > 0) {
     console.info(`[finalizeResume] Complete — ${entities.length} entities restored, ${duplicatesRemoved} duplicates removed`);
+  }
+
+  // === GUARDIAN VALIDATION (Dynamic Section Preservation) ===
+  // Reject or alert if section counts don't match original blueprint
+  const finalValidation = validateImmutableEntities(result, sourceResume);
+  if (!finalValidation.valid) {
+    console.error("[Guardian] Final validation failed after all restoration attempts!", finalValidation.violations);
+    // In a strict production environment, we might throw an error here.
+    // For now, we log it clearly for the observability system.
   }
 
   return result;

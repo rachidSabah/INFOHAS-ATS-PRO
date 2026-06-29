@@ -136,6 +136,16 @@ export interface BlueprintDiff {
     optimized: string;
     issue: string;
   }>;
+  /** Dynamic sections that were removed or corrupted */
+  corruptedDynamicSections: Array<{
+    title: string;
+    issue: string;
+  }>;
+  /** Missing metadata or additional info */
+  missingMetadata: Array<{
+    field: string;
+    issue: string;
+  }>;
   /** True if ANY change was detected */
   hasChanges: boolean;
 }
@@ -336,6 +346,8 @@ export function compareBlueprint(
   const missingDates: BlueprintDiff["missingDates"] = [];
   const corruptedEducation: BlueprintDiff["corruptedEducation"] = [];
   const corruptedLanguages: BlueprintDiff["corruptedLanguages"] = [];
+  const corruptedDynamicSections: BlueprintDiff["corruptedDynamicSections"] = [];
+  const missingMetadata: BlueprintDiff["missingMetadata"] = [];
 
   // ========================================================================
   // 1. Experience: Hallucinated Employers & Missing Companies
@@ -526,6 +538,34 @@ export function compareBlueprint(
   }
 
   // ========================================================================
+  // 4. Dynamic Sections: Removed or Corrupted
+  // ========================================================================
+
+  const optimizedDynamicSectionTitles = new Set(
+    (optimized.dynamicSections || []).map((s) => normalizeStr(s.title)),
+  );
+
+  for (const origSec of original.dynamicSections) {
+    if (!optimizedDynamicSectionTitles.has(normalizeStr(origSec.title))) {
+      corruptedDynamicSections.push({
+        title: origSec.title,
+        issue: `Dynamic section "${origSec.title}" present in original blueprint but missing from optimized resume`,
+      });
+    }
+  }
+
+  // ========================================================================
+  // 5. Metadata & Additional Info
+  // ========================================================================
+
+  if (original.additionalInformation.dateOfBirth && !optimized.dateOfBirth) {
+    missingMetadata.push({
+      field: "dateOfBirth",
+      issue: "Date of Birth present in original blueprint but missing from optimized resume",
+    });
+  }
+
+  // ========================================================================
   // Result
   // ========================================================================
 
@@ -535,7 +575,9 @@ export function compareBlueprint(
     missingCompanies.length > 0 ||
     missingDates.length > 0 ||
     corruptedEducation.length > 0 ||
-    corruptedLanguages.length > 0;
+    corruptedLanguages.length > 0 ||
+    corruptedDynamicSections.length > 0 ||
+    missingMetadata.length > 0;
 
   return {
     hallucinatedEmployers,
@@ -544,6 +586,8 @@ export function compareBlueprint(
     missingDates,
     corruptedEducation,
     corruptedLanguages,
+    corruptedDynamicSections,
+    missingMetadata,
     hasChanges,
   };
 }
