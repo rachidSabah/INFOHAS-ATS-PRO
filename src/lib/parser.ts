@@ -593,7 +593,7 @@ export function extractResumeFromText(text: string, fileName: string): ResumeDat
     skills: ["skills", "technical skills", "core skills", "core competencies", "competencies"],
     projects: ["projects", "side projects", "personal projects"],
     certifications: ["certifications", "certificates", "licenses"],
-    languages: ["languages"],
+    languages: ["languages", "language skills", "linguistic skills"],
     achievements: ["achievements", "key achievements", "awards", "honors", "awards & honors"],
     summary: ["summary", "professional summary", "profile", "objective", "career objective", "career profile", "professional profile", "about me"],
     personal: ["personal informations", "personal information", "personal info", "personal details", "nationality"]

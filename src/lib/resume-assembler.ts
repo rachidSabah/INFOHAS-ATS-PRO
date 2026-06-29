@@ -356,7 +356,11 @@ export function assembleResume(
   // ========================================================================
   // 5. EDUCATION — ALWAYS from source (immutable)
   // ========================================================================
-  const education = sourceResume.education.map((ed) => ({ ...ed }));
+  // CRITICAL FIX: Ensure education is NEVER dropped.
+  // If the source has education, we MUST use it.
+  const education = (sourceResume.education && sourceResume.education.length > 0)
+    ? sourceResume.education.map((ed) => ({ ...ed }))
+    : [];
   // Warn if optimizer attempted to modify education (it shouldn't per interface,
   // but check via any cast for defensive debugging)
   const optEducation = (optimizerOutput as any).education;
@@ -452,11 +456,12 @@ export function assembleResume(
   }
 
   // ========================================================================
-  // 6. LANGUAGES — HARD GUARD (languages already initialized above from source)
+  // 6. LANGUAGES — HARD GUARD
   // ========================================================================
-  // HARD GUARD: if source has languages but assembler produced empty, force restore
-  if (sourceResume.languages.length > 0 && languages.length === 0) {
-    warnings.push('Languages were dropped — forcing restore from source.');
+  // Initialize languages from source FIRST (immutable baseline)
+  // CRITICAL FIX: Ensure languages are NEVER dropped.
+  if (sourceResume.languages && sourceResume.languages.length > 0 && languages.length === 0) {
+    warnings.push('Languages were dropped or missing — restoring from source.');
     languages.push(...sourceResume.languages.map((l) => ({ ...l })));
   }
 
