@@ -718,6 +718,20 @@ function checkEducationStructureClean(optimized: ResumeData): GuardianCheck {
         }
       }
     }
+    // NEW: Check institution for contamination (e.g., parser sets institution="KEY COMPETENCIES")
+    if (ed.institution) {
+      const lowerInst = ed.institution.toLowerCase().trim();
+      if (SKILL_KEYWORDS.includes(lowerInst)) {
+        issues.push(`Education[${i}] institution is a section header: "${ed.institution}"`);
+      } else {
+        for (const kw of SKILL_KEYWORDS) {
+          if (lowerInst.includes(kw)) {
+            issues.push(`Education[${i}] institution contains skill keyword "${kw}": "${ed.institution}"`);
+            break;
+          }
+        }
+      }
+    }
   }
   return {
     name: "Education Structure",

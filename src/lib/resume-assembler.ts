@@ -409,6 +409,32 @@ export function assembleResume(
         }
       }
     }
+    // NEW: Check institution for contamination (e.g., parser sets institution="KEY COMPETENCIES"
+    // from DOCX pipe "High School Degree | KEY COMPETENCIES  2022 – 2023")
+    if (ed.institution) {
+      const lowerInst = ed.institution.toLowerCase();
+      // Check if entire institution is a section header keyword
+      if (EDUCATION_SKILL_KEYWORDS.includes(lowerInst.trim())) {
+        warnings.push(`Education cleanup: cleared institution "${ed.institution}" (section header)`);
+        ed.institution = "";
+      } else {
+        // Check if institution contains a section header keyword embedded
+        for (const kw of EDUCATION_SKILL_KEYWORDS) {
+          const idx = lowerInst.indexOf(kw);
+          if (idx >= 0) {
+            const before = ed.institution.substring(0, idx).trim();
+            if (before) {
+              ed.institution = before;
+              warnings.push(`Education cleanup: removed "${kw}" from institution "${ed.institution}"`);
+            } else {
+              warnings.push(`Education cleanup: cleared institution (contained "${kw}")`);
+              ed.institution = "";
+            }
+            break;
+          }
+        }
+      }
+    }
     // Check highlights for contamination — remove items that look like skill categories
     if (ed.highlights && ed.highlights.length > 0) {
       ed.highlights = ed.highlights.filter(h => {
