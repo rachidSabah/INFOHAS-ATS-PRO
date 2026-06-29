@@ -778,22 +778,42 @@ function SettingsTab() {
   const activeProviders = providers.filter((p) => p.isActive);
 
   const selectedProvider = providers.find((p) => p.id === draft.providerId) || activeProviders[0];
+  const fallbackProvider = providers.find((p) => p.id === draft.fallbackProviderId);
 
   useEffect(() => {
     if (selectedProvider) {
-      const fallback = selectedProvider.enabledModels || [];
-      if (fallback.length > 0) {
-        setDetectedModels(fallback.map((id) => ({ id, name: id, supportsStreaming: true })));
-        setDetectionSource("configured");
-      } else {
-        setDetectedModels([]);
-        setDetectionSource("");
-      }
+      const fetchModels = async () => {
+        try {
+          const result = await fetchProviderModels(selectedProvider);
+          if (result.models.length > 0) {
+            setDetectedModels(result.models);
+            setDetectionSource(result.source);
+            // Update the store with fresh models
+            useApp.getState().updateProvider(selectedProvider.id, {
+              enabledModels: result.models.map((m) => m.id),
+              status: result.source === "api" ? "healthy" : "degraded",
+            });
+            return;
+          }
+        } catch {
+          // fall through to configured models
+        }
+        // Fallback: use configured enabledModels
+        const fallback = selectedProvider.enabledModels || [];
+        if (fallback.length > 0) {
+          setDetectedModels(fallback.map((id) => ({ id, name: id, supportsStreaming: true })));
+          setDetectionSource("configured");
+        } else {
+          setDetectedModels([]);
+          setDetectionSource("");
+        }
+      };
+      fetchModels();
     } else {
       setDetectedModels([]);
       setDetectionSource("");
     }
-  }, [draft.providerId, selectedProvider]);
+  }, [draft.providerId]);
 
   // === Model Detection ===
   const detectModels = async () => {
@@ -898,8 +918,8 @@ function SettingsTab() {
                 className="w-full h-9 px-3 rounded-md border border-input bg-background text-sm mt-1"
               >
                 <option value="">Auto-select (DeepSeek first)</option>
-                {activeProviders.map((p) => (
-                  <option key={p.id} value={p.id}>{p.name} ({p.type})</option>
+                {providers.map((p) => (
+                  <option key={p.id} value={p.id}>{p.name} ({p.type}){!p.isActive ? " (inactive)" : ""}</option>
                 ))}
               </select>
             </div>
@@ -999,8 +1019,10 @@ function SettingsTab() {
                 className="w-full h-9 px-3 rounded-md border border-input bg-background text-sm mt-1"
               >
                 <option value="">None</option>
-                {activeProviders.map((p) => (
-                  <option key={p.id} value={p.id}>{p.name} ({p.type})</option>
+                {providers.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.name} ({p.type}){!p.isActive ? " (inactive)" : ""}
+                  </option>
                 ))}
               </select>
             </div>
@@ -1008,17 +1030,19 @@ function SettingsTab() {
               <Label>Fallback Model</Label>
               <div className="flex gap-2 mt-1">
                 <Input value={draft.fallbackModel} onChange={(e) => patch({ fallbackModel: e.target.value })} className="font-mono text-sm flex-1" placeholder="gpt-4o-mini" />
-                {detectedModels.length > 0 && (
+                {fallbackProvider && fallbackProvider.enabledModels && fallbackProvider.enabledModels.length > 0 && (
                   <select
                     value={draft.fallbackModel}
                     onChange={(e) => patch({ fallbackModel: e.target.value })}
                     className="h-9 px-2 rounded-md border border-input bg-background text-xs"
-                    title="Select fallback from detected models"
+                    title="Select fallback from fallback provider's models"
                   >
                     <option value="">(detected)</option>
-                    {detectedModels.filter((m) => m.id !== draft.modelName).map((m) => (
-                      <option key={m.id} value={m.id}>{m.id}</option>
-                    ))}
+                    {fallbackProvider.enabledModels
+                      .filter((id) => id !== draft.modelName)
+                      .map((id) => (
+                        <option key={id} value={id}>{id}</option>
+                      ))}
                   </select>
                 )}
               </div>
