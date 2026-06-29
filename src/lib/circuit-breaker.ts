@@ -192,3 +192,16 @@ export function resetCircuitBreaker(providerId: string): void {
 export function dumpCircuitBreaker(): ProviderStatus[] {
   return Array.from(circuitState.values());
 }
+
+/**
+ * Get IDs of all providers that are currently in unhealthy or cooldown state.
+ */
+export function getTrippedProviders(): string[] {
+  const tripped: string[] = [];
+  for (const [id, status] of circuitState.entries()) {
+    if (status.state === "unhealthy" || status.state === "cooldown") {
+      tripped.push(id);
+    }
+  }
+  return tripped;
+}
