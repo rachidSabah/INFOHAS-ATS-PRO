@@ -199,6 +199,28 @@ export class ProviderManager {
         ],
       };
     }
+
+    // === ANTIGRAVITY: add common models to fallback list if API fetch fails ===
+    // Antigravity often has SSL 525 issues on some networks/workers,
+    // so providing a base list helps the user.
+    if (provider.baseUrl?.includes("antigravity.io")) {
+      const result = await this.fetchModelsForConfig(provider);
+      if (!result.ok || result.models.length === 0) {
+        return {
+          ok: true,
+          models: [
+            "claude-3-5-sonnet-20241022",
+            "claude-3-5-sonnet",
+            "claude-3-opus",
+            "gpt-4o",
+            "gpt-4o-mini",
+            "deepseek-chat",
+            "deepseek-coder",
+          ],
+        };
+      }
+      return result;
+    }
     return this.fetchModelsForConfig(provider);
   }
 

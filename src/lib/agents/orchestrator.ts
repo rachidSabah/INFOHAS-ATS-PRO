@@ -1869,9 +1869,18 @@ CONTENT REQUIREMENTS:
     customDirective = state?.optimizerDirective?.customDirectiveOverride?.trim() || undefined;
   } catch {}
 
-  let systemPromptText = antiHallucinationPreamble + split.system;
-  if (customDirective && !systemPromptText.includes(customDirective)) {
-    systemPromptText += `\n\n[CUSTOM DIRECTIVE OVERRIDE]\n${customDirective}`;
+  // If customDirective exists, it ALREADY includes the anti-hallucination preamble 
+  // and everything else via getOptimizerDirective() if called correctly, 
+  // but here orchestrator uses 'split.system'. 
+  // We want to ensure that if a user provided an override, it is the CORE of the system prompt.
+  let systemPromptText = customDirective 
+    ? customDirective 
+    : (antiHallucinationPreamble + split.system);
+  
+  // If it's an override, we still want to prepend the anti-hallucination preamble 
+  // unless the override already has it.
+  if (customDirective && !systemPromptText.includes("ANTI-HALLUCINATION")) {
+    systemPromptText = antiHallucinationPreamble + "\n\n" + systemPromptText;
   }
 
   const userPromptText = (split.user ? split.user + "\n\n---\n\n" : "") + `SOURCE RESUME (be truthful to this — never invent employers, dates, or metrics):\n${JSON.stringify({
@@ -1987,10 +1996,16 @@ CONTENT REQUIREMENTS:
     // === RETRY with a simpler prompt but STILL includes the directive ===
     if (responseLength < 200) {
       const retrySplit = splitOptimizationDirective(directive);
-      let retrySystem = retrySplit.system + "\n\nThe previous attempt produced an invalid or empty response. Return ONLY a valid JSON object matching the ResumeData schema. No prose, no markdown fences.\n";
       
-      if (customDirective && !retrySystem.includes(customDirective)) {
-        retrySystem += `\n\n[CUSTOM DIRECTIVE OVERRIDE]\n${customDirective}`;
+      // Use customDirective as base for retry if it exists
+      let retrySystem = customDirective 
+        ? customDirective 
+        : retrySplit.system;
+
+      retrySystem += "\n\nThe previous attempt produced an invalid or empty response. Return ONLY a valid JSON object matching the ResumeData schema. No prose, no markdown fences.\n";
+      
+      if (customDirective && !retrySystem.includes("ANTI-HALLUCINATION")) {
+        retrySystem = antiHallucinationPreamble + "\n\n" + retrySystem;
       }
 
       console.group("[Optimizer Prompt — Retry]");

@@ -173,11 +173,11 @@ CRITICAL RULES:
 
 ${agentDirectives ? buildAgentDirectiveSection(agentDirectives) : ""}
 
-${directiveConfig ? `═══════════════════════════════════════════════════════════════
-LAYOUT & CONFIGURATION DIRECTIVES (UI Configured)
-═══════════════════════════════════════════════════════════════
-${cleanDirectiveForBulletOnly(getOptimizerDirective(), !!directiveConfig.customDirectiveOverride?.trim())}
-` : ""}
+  ${directiveConfig ? `═══════════════════════════════════════════════════════════════
+	${directiveConfig.customDirectiveOverride?.trim() ? 'CUSTOM DIRECTIVE OVERRIDE (MANDATORY)' : 'LAYOUT & CONFIGURATION DIRECTIVES (UI Configured)'}
+	═══════════════════════════════════════════════════════════════
+	${cleanDirectiveForBulletOnly(getOptimizerDirective(), !!directiveConfig.customDirectiveOverride?.trim())}
+	` : ""}
 
 Return ONLY valid JSON. No prose, no markdown fences, no HTML.`;
 
@@ -437,6 +437,8 @@ function buildAgentDirectiveSection(d: AgentDirectives): string {
  * directive so that the bullet-only optimizer is not confused into outputting the full resume.
  */
 function cleanDirectiveForBulletOnly(directive: string, isCustom: boolean): string {
+  // If it's a custom override, we DON'T clean it. We want the LLM to see 
+  // exactly what the user wrote, as it's a "robust override".
   if (isCustom) return directive;
 
   const delimiter = "═══════════════════════════════════════════════════════════════";

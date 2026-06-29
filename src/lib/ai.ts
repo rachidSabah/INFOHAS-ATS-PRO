@@ -1385,11 +1385,13 @@ nothing. Return ONLY clean, professional resume content.`;
     console.warn("[getOptimizerDirective] Error resolving config:", err);
   }
 
+  // CRITICAL: If customDirective is present, it is the ABSOLUTE OVERRIDE.
+  // We do not append generated directives or defaults to it.
   const directive = customDirective ?? generatedDirective ?? defaults;
 
   console.log(
-    'Optimizer Directive Applied',
-    directive
+    `[getOptimizerDirective] Applied (${customDirective ? 'CUSTOM OVERRIDE' : 'GENERATED'})`,
+    { length: directive.length, isOverride: !!customDirective }
   );
 
   return directive;

@@ -184,10 +184,11 @@ export async function POST(req: NextRequest) {
       }
 
       if (res.status === 525) {
+        const isAntigravity = baseUrl.includes("antigravity.io");
         return NextResponse.json({
           ok: false,
           latencyMs,
-          message: `HTTP 525 (SSL Handshake Failed) — the provider's API server (${new URL(baseUrl).hostname}) has a TLS/SSL issue. This is a server-side problem; the API may be temporarily down or misconfigured.`,
+          message: `HTTP 525 (SSL Handshake Failed) — the provider's API server (${new URL(baseUrl).hostname}) has a TLS/SSL issue.${isAntigravity ? ' Antigravity API often requires specific TLS 1.3 or SNI configurations.' : ''} This is a server-side problem; the API may be temporarily down or misconfigured.`,
         });
       }
 

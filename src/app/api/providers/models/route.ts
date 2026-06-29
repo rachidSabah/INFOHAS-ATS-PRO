@@ -91,7 +91,7 @@ export async function POST(req: NextRequest) {
       const errText = await res.text().catch(() => "");
       const isCloudflare525 = res.status === 525;
       const explanation = isCloudflare525
-        ? "HTTP 525 (SSL Handshake Failed) — the provider's API server has a TLS/SSL issue. This is a server-side problem, not a configuration issue."
+        ? `HTTP 525 (SSL Handshake Failed) — the provider's API server (${new URL(baseUrl).hostname}) has a TLS/SSL issue. This is a server-side problem, not a configuration issue.`
         : `${res.status} ${res.statusText}: ${errText.slice(0, 200)}`;
       return NextResponse.json({ error: explanation }, { status: res.status });
     }
