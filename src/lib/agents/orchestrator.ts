@@ -869,11 +869,17 @@ async function _runOptimizationPipelineInner(input: PipelineInput, watchdog: Opt
           log("Resume Optimizer", `Source resume has no content — using legacy path instead of locked pipeline.`);
         }
         if (useLockedPipelineEffective) {
-          log("Resume Optimizer", `Locked Pipeline (bullet-only optimizer + assembler) — attempt ${optimizeAttempt}/${maxOptimizeAttempts}.`);
+          log("Resume Optimizer", `Locked Pipeline (bullet-only optimizer + assembler)${aviationMode ? ` [Industry ATS: ${aviationMode.airlineProfile}]` : ""} — attempt ${optimizeAttempt}/${maxOptimizeAttempts}.`);
           emitProgress(3, `Running locked pipeline: bullet-only optimizer → assembler → structure guardian…`);
 
           // Build the intelligence context (same as standard path)
+          // Include aviation-specific intelligence if aviation mode is active
           const intelligenceBlocks: string[] = [];
+          if (aviationMode) {
+            intelligenceBlocks.push(`INDUSTRY ATS MODE: ${aviationMode.airlineProfile}
+This is an industry-specific optimization. Apply the aviation/airport duty free keyword bank and writing guidance.
+Target airline/employer: ${aviationMode.airlineProfile}`);
+          }
           if (result.jobIntelligence) {
             intelligenceBlocks.push(`JOB INTELLIGENCE:
 Industry: ${result.jobIntelligence.industry}

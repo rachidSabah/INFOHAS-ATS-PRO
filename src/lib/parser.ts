@@ -4,6 +4,7 @@
 import type { ResumeData } from "./types";
 import { uid } from "./store";
 import { isForbiddenSkill } from "./entity-lock";
+import { detectSectionBoundaries } from "./section-boundary-parser";
 
 function safeCall<T extends (...args: any[]) => any>(fn: T, args: Parameters<T>, fallback: ReturnType<T>): ReturnType<T> {
   try { return typeof fn === 'function' ? fn(...args) : fallback; } catch { return fallback; }
@@ -61,8 +62,8 @@ export function secondaryParser(text: string, fileName: string): ResumeData {
   const expRegex = new RegExp('(?:^|\\n)\\s*(?:PROFESSIONAL EXPERIENCE|WORK EXPERIENCE|\\bEXPERIENCE\\b|\\bEXPERIENCES\\b|EMPLOYMENT HISTORY|HISTORY)\\b\\s*:?\\s*\\n([\\s\\S]*?)' + headerLookahead, 'i');
   const eduRegex = new RegExp('(?:^|\\n)\\s*(?:EDUCATION|ACADEMIC BACKGROUND|ACADEMIC)\\b\\s*:?\\s*\\n([\\s\\S]*?)' + headerLookahead, 'i');
   const langRegex = new RegExp('(?:^|\\n)\\s*(?:LANGUAGES|LANGUAGE)\\b\\s*:?\\s*\\n([\\s\\S]*?)' + headerLookahead, 'i');
-  // Also try inline format: "Languages: English, French, Arabic" (all on one line)
-  const langInlineRegex = /(?:^|\n)\s*(?:LANGUAGES|LANGUAGE)\s*:\s*(.+?)(?=\n|$)/i;
+  // Also try inline format: "Languages: English, French, Arabic" (all on one line, no newline after colon)
+  const langInlineRegex = /(?:^|\n)\s*(?:LANGUAGES|LANGUAGE)\s*:\s*([^\n]+)/i;
   const skillsRegex = new RegExp('(?:^|\\n)\\s*(?:SKILLS|TECHNICAL SKILLS|CORE SKILLS|CORE COMPETENCIES|CORE COMPETENCIES & SKILLS|COMPETENCIES)\\b\\s*:?\\s*\\n([\\s\\S]*?)' + headerLookahead, 'i');
   const certsRegex = new RegExp('(?:^|\\n)\\s*(?:CERTIFICATIONS|CERTIFICATES|LICENSES)\\b\\s*:?\\s*\\n([\\s\\S]*?)' + headerLookahead, 'i');
   const projRegex = new RegExp('(?:^|\\n)\\s*(?:PROJECTS|PERSONAL PROJECTS|SIDE PROJECTS)\\b\\s*:?\\s*\\n([\\s\\S]*?)' + headerLookahead, 'i');
@@ -71,13 +72,18 @@ export function secondaryParser(text: string, fileName: string): ResumeData {
   const expMatch = normalizedText.match(expRegex);
   const eduMatch = normalizedText.match(eduRegex);
   const langMatch = normalizedText.match(langRegex);
-  // Fallback: try inline format "Languages: English, French, Arabic"
-  const langInlineMatch = !langMatch ? normalizedText.match(langInlineRegex) : null;
+  // Fallback: try "LANGUAGES" header to end of text (when languages is the last section)
+  const langEndRegex = /(?:^|\n)\s*(?:LANGUAGES|LANGUAGE)\s*:?\s*\n([\s\S]+)$/i;
+  const langEndMatch = !langMatch ? normalizedText.match(langEndRegex) : null;
+  // Fallback 2: try inline format "Languages: English, French, Arabic" (all on one line)
+  const langInlineMatch = !langMatch && !langEndMatch ? normalizedText.match(langInlineRegex) : null;
   const langLines = langMatch
     ? langMatch[1].split("\n").map(l => l.trim()).filter(Boolean)
-    : langInlineMatch
-      ? langInlineMatch[1].split(/[,;]/).map(l => l.trim()).filter(Boolean)
-      : [];
+    : langEndMatch
+      ? langEndMatch[1].split("\n").map(l => l.trim()).filter(Boolean)
+      : langInlineMatch
+        ? langInlineMatch[1].split(/[,;]/).map(l => l.trim()).filter(Boolean)
+        : [];
   const skillsMatch = normalizedText.match(skillsRegex);
   const certsMatch = normalizedText.match(certsRegex);
   const projMatch = normalizedText.match(projRegex);
@@ -327,7 +333,22 @@ export async function parseResumeFile(file: File): Promise<ResumeData> {
     if (!isValid) {
       console.warn(`[parser] Primary parser incomplete (valid: ${isValid}, confidence: ${primaryConfidence}). Running RepairParser...`);
       const repaired = safeCall(RepairParser, [rawText, file.name], null as any);
-      if (repaired) return repaired;
+      if (repaired) {
+        // MERGE: if primary had languages/experience/education that the repair lost, restore them
+        if (primaryResult.languages?.length > 0 && (!repaired.languages || repaired.languages.length === 0)) {
+          repaired.languages = primaryResult.languages;
+        }
+        if (primaryResult.experience?.length > 0 && (!repaired.experience || repaired.experience.length === 0)) {
+          repaired.experience = primaryResult.experience;
+        }
+        if (primaryResult.education?.length > 0 && (!repaired.education || repaired.education.length === 0)) {
+          repaired.education = primaryResult.education;
+        }
+        if (primaryResult.skills?.length > 0 && (!repaired.skills || repaired.skills.length === 0)) {
+          repaired.skills = primaryResult.skills;
+        }
+        return repaired;
+      }
       console.warn("[parser] RepairParser also failed. Returning primary result as-is.");
     }
 
@@ -357,7 +378,22 @@ export async function parseResumeText(text: string): Promise<ResumeData> {
     if (!isValid) {
       console.warn(`[parser] Primary parser incomplete for pasted text (valid: ${isValid}, confidence: ${primaryConfidence}). Running RepairParser...`);
       const repaired = safeCall(RepairParser, [text, "Pasted Resume"], null as any);
-      if (repaired) return repaired;
+      if (repaired) {
+        // MERGE: if primary had languages/experience/education that the repair lost, restore them
+        if (primaryResult.languages?.length > 0 && (!repaired.languages || repaired.languages.length === 0)) {
+          repaired.languages = primaryResult.languages;
+        }
+        if (primaryResult.experience?.length > 0 && (!repaired.experience || repaired.experience.length === 0)) {
+          repaired.experience = primaryResult.experience;
+        }
+        if (primaryResult.education?.length > 0 && (!repaired.education || repaired.education.length === 0)) {
+          repaired.education = primaryResult.education;
+        }
+        if (primaryResult.skills?.length > 0 && (!repaired.skills || repaired.skills.length === 0)) {
+          repaired.skills = primaryResult.skills;
+        }
+        return repaired;
+      }
       console.warn("[parser] RepairParser also failed for pasted text. Returning primary result as-is.");
     }
 
@@ -571,6 +607,19 @@ export function extractResumeFromText(text: string, fileName: string): ResumeDat
   const lines = text.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
   const joined = lines.join("\n");
 
+  // === SECTION BOUNDARY PARSER ===
+  // Use the new boundary-based parser for reliable section extraction.
+  // This replaces the fragile sliceSection/allPotentialHeaders approach
+  // that broke when content lines looked like section headers.
+  const boundaries = detectSectionBoundaries(text.split(/\r?\n/));
+  const sectionMap = new Map<string, string[]>();
+  for (const b of boundaries) {
+    if (b.type !== "unknown") {
+      const existing = sectionMap.get(b.type) || [];
+      sectionMap.set(b.type, [...existing, ...b.contentLines]);
+    }
+  }
+
   const name = extractNameFromLines(lines);
 
   const emailMatch = joined.match(EMAIL_RE);
@@ -687,35 +736,43 @@ export function extractResumeFromText(text: string, fileName: string): ResumeDat
 
   // --- End Professional Summary Formatting ---
   
-  const rawSummary = summaryStart >= 0 ? sliceSection(summaryStart).join("\n") : "";
-  const summary = summaryStart >= 0 ? formatProfessionalSummary(rawSummary) : undefined;
+  // === USE SECTION BOUNDARY RESULTS ===
+  // Extract all section content using the reliable boundary-based parser
+  const langLines = sectionMap.get("languages") || [];
+  const skillsLines = sectionMap.get("skills") || [];
+  const certLines = sectionMap.get("certifications") || [];
+  const projLines = sectionMap.get("projects") || [];
+  const summaryLines = sectionMap.get("summary") || [];
+  const achLines = sectionMap.get("achievements") || [];
+  const personalLines = sectionMap.get("personal") || [];
+
+  // Summary — use boundary-based extraction
+  const rawSummary = summaryLines.length > 0 ? summaryLines.join("\n") : "";
+  const summary = summaryLines.length > 0 ? formatProfessionalSummary(rawSummary) : undefined;
 
   // Experience: parse blocks separated by blank lines or company/title patterns
+  // Still use sliceSection for experience (it has complex parsing needs)
   const expLines = sliceSection(expStart);
   const experience = parseExperiences(expLines);
 
-  // Education
+  // Education — still use sliceSection (has complex date parsing)
   const eduLines = sliceSection(eduStart);
   const education = parseEducation(eduLines);
 
-  // Skills
-  const skillLines = sliceSection(skillsStart);
-  const skills = skillLines
+  // Skills — use boundary-based extraction (overrides sliceSection)
+  const skills = skillsLines
     .flatMap((l) => l.split(new RegExp("[,;•|]")))
     .map((s) => s.trim())
     .filter((s) => s.length > 0 && s.length < 40 && !isForbiddenSkill(s))
     .map((s) => ({ id: uid("s"), name: s }));
 
-  // Projects — split by blank lines or "•"/"-" prefixed entries to support multiple projects
-  const projLines = sliceSection(projStart);
+  // Projects — use boundary-based extraction
   const projects = parseProjects(projLines);
 
-  // Certifications
-  const certLines = sliceSection(certStart);
+  // Certifications — use boundary-based extraction
   const certifications = certLines.map((c) => ({ id: uid("c"), name: c }));
 
-  // Languages — try to detect proficiency from common patterns like "English (Fluent)" or "French: Native"
-  const langLines = sliceSection(langStart);
+  // Languages — use boundary-based extraction
   const languages: ResumeData["languages"] = [];
   const seenLangs = new Set<string>();
   for (const line of langLines) {
@@ -734,7 +791,7 @@ export function extractResumeFromText(text: string, fileName: string): ResumeDat
   }
 
   // Achievements (new — extracted as an array of { title, description })
-  const achLines = sliceSection(achStart);
+  // Achievements — use boundary-based extraction
   const achievements = achLines.map((line) => ({
     id: uid("a"),
     title: line.length > 60 ? line.slice(0, 57) + "…" : line,

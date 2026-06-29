@@ -30,7 +30,7 @@
 //   }
 // ============================================================================
 
-import type { ResumeData, ResumeExperience, ResumeEducation } from "./types";
+import type { ResumeData, ResumeExperience, ResumeEducation, DynamicSection } from "./types";
 import { computeExperienceFingerprint } from "./experience-fingerprint";
 
 // ============================================================================
@@ -43,7 +43,6 @@ import { computeExperienceFingerprint } from "./experience-fingerprint";
  * All fields are extracted from the ResumeData input and frozen.
  * No downstream agent may modify any field in this structure.
  */
-import type { ResumeData, ResumeExperience, ResumeEducation, DynamicSection } from "./types";
 
 export interface ResumeBlueprint {
   /** Contact header — NEVER changes */
