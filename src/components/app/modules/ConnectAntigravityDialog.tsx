@@ -30,7 +30,8 @@ export function ConnectAntigravityDialog() {
             if (storeProvider && !storeProvider.isActive) {
               useApp.getState().updateProvider("p_antigravity", {
                 isActive: true,
-                apiKey: ***                status: "healthy",
+                apiKey: session.accessToken,
+                status: "healthy",
               });
             }
           } catch {}
