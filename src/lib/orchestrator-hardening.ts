@@ -533,6 +533,8 @@ function mapAIResponseToResumeData(data: any, original: ResumeData): ResumeData 
     certifications: certifications.length > 0 ? certifications : [...original.certifications],
     projects: data.projects || original.projects || [],
     dateOfBirth: data.dateOfBirth || original.dateOfBirth,
+    additionalInfo: data.additionalInfo || original.additionalInfo,
+    dynamicSections: data.dynamicSections || original.dynamicSections || [],
     template: original.template || "infohas-pro",
     accentColor: original.accentColor || "#0563C1",
     photoUrl: original.photoUrl,

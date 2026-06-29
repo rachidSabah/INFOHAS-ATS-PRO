@@ -559,6 +559,18 @@ export function restoreLockedEntities(optimized: ResumeData, locked: LockedEntit
     restored.certifications = locked.certifications.map((c) => ({ ...c }));
   }
 
+  // === PRESERVE OPTIONAL FIELDS (IMMUTABLE) ===
+  // These fields are parsed from the original resume and must NEVER be lost
+  if (optimized.dateOfBirth) {
+    restored.dateOfBirth = optimized.dateOfBirth;
+  }
+  if (optimized.additionalInfo) {
+    restored.additionalInfo = optimized.additionalInfo;
+  }
+  if (optimized.dynamicSections && optimized.dynamicSections.length > 0) {
+    restored.dynamicSections = optimized.dynamicSections.map((s) => ({ ...s }));
+  }
+
   return restored;
 }
 

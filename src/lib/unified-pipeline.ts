@@ -518,6 +518,18 @@ export function restoreLockedEntities(optimized: ResumeData, original: ResumeDat
     };
   }
 
+  // === PRESERVE OPTIONAL FIELDS (IMMUTABLE) ===
+  // These fields are parsed from the original resume and must NEVER be lost
+  if (original.dateOfBirth) {
+    result.dateOfBirth = original.dateOfBirth;
+  }
+  if (original.additionalInfo) {
+    result.additionalInfo = original.additionalInfo;
+  }
+  if (original.dynamicSections && original.dynamicSections.length > 0) {
+    result.dynamicSections = original.dynamicSections.map((s) => ({ ...s }));
+  }
+
   // === Lock headline — STRICT PROTECTION ===
   // The AI frequently replaces the original headline with the JD job title + JD company
   // (e.g., "Till Assistant | Qatar Duty Free" when the candidate never worked there).
