@@ -218,14 +218,14 @@ export async function discoverAntigravityModels(accessToken: string): Promise<st
   // The reference implementation uses a custom endpoint. For now, return known
   // models that are available through Antigravity's Gemini-backed API.
   const knownModels = [
-    "gemini-2.5-flash",
-    "gemini-2.5-pro",
-    "claude-opus-4",
-    "claude-sonnet-4",
-    "claude-3.5-sonnet",
-    "gpt-4.1",
-    "deepseek-v4",
-    "grok-4",
+    "gemini-1.5-flash",
+    "gemini-1.5-pro",
+    "claude-3-opus",
+    "claude-3-sonnet",
+    "claude-3-5-sonnet",
+    "gpt-4o",
+    "gpt-4-turbo",
+    "deepseek-chat",
   ];
 
   // Try to fetch models from Antigravity's API
@@ -237,13 +237,22 @@ export async function discoverAntigravityModels(accessToken: string): Promise<st
       },
     });
     if (res.ok) {
-      const data = await res.json();
-      const apiModels = (data.models || data.data || []).map((m: any) =>
-        typeof m === "string" ? m : m.name || m.id || m.model || m.modelId
-      ).filter(Boolean);
-      if (apiModels.length > 0) return apiModels;
+      const text = await res.text();
+      try {
+        const data = JSON.parse(text);
+        const apiModels = (data.models || data.data || []).map((m: any) =>
+          typeof m === "string" ? m : m.name || m.id || m.model || m.modelId
+        ).filter(Boolean);
+        if (apiModels.length > 0) return apiModels;
+      } catch (parseErr) {
+        console.warn("[Antigravity] Failed to parse models JSON:", parseErr);
+      }
+    } else {
+      console.warn(`[Antigravity] Models API returned ${res.status}`);
     }
-  } catch { /* fallback to known models */ }
+  } catch (e) {
+    console.warn("[Antigravity] Models fetch error:", e);
+  }
 
   return knownModels;
 }

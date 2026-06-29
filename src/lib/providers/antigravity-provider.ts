@@ -182,7 +182,7 @@ export class AntigravityProvider implements OAuthAIProvider {
       throw new ProviderAuthenticationError("auth_required", "Antigravity not authenticated. Please connect Antigravity CLI.", "antigravity");
     }
 
-    const model = opts.model || this.session.models[0] || "gemini-2.5-flash";
+    const model = opts.model || this.session.models[0] || "gemini-1.5-flash";
     try {
       const result = await generateAntigravity({
         accessToken: this.session.accessToken,
