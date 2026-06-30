@@ -2,48 +2,55 @@
 // Enterprise AI Runtime — Barrel Exports
 // ============================================================================
 
-// Types
+// Core types
 export type {
   AIProvider,
   ProviderConfig,
-  ProviderRegistration,
   ProviderHealth,
-  ProviderId,
-  ModelId,
   ModelInfo,
   ModelCapabilities,
   CapabilityRequirement,
-  ExecutionPlan,
-  ExecutionResult,
-  FailoverLevel,
   ChatRequest,
   ChatResponse,
-  ChatMessage,
-  ToolDefinition,
   StreamHandler,
-  AuthCredentials,
-  AuthStatus,
+  ExecutionPlan,
+  ExecutionResult,
   EmbeddingRequest,
   EmbeddingResponse,
   VisionRequest,
   VisionResponse,
   ReasoningRequest,
   ReasoningResponse,
+  AuthCredentials,
+  AuthStatus,
   CostEstimate,
   LatencyEstimate,
   QualityEstimate,
-  RuntimeConfig,
   TelemetryEntry,
-  StreamEvent,
+  FailoverLevel,
+  RuntimeConfig,
 } from "./types";
-export { FAILOVER_LEVELS } from "./types";
 
-// Components
+// Runtime modules
+export { EnterpriseAIRuntime } from "./runtime";
 export { ProviderRegistry } from "./provider-registry";
 export { CapabilityEngine } from "./capability-engine";
 export { AuthManager } from "./auth-manager";
 export { HealthMonitor } from "./health-monitor";
 export { RetryManager } from "./retry-manager";
 export { FailoverEngine } from "./failover-engine";
-export { EnterpriseAIRuntime } from "./runtime";
 export { LocalEngineProvider } from "./local-engine";
+
+// Bridge and adapters
+export {
+  getRuntime,
+  resetRuntime,
+  runtimeCallAI,
+  registerProviderWithRuntime,
+  StoreProviderAdapter,
+} from "./agent-bridge";
+
+export {
+  createProvidersFromStore,
+  registerStoreProvidersWithRuntime,
+} from "./provider-adapter-factory";

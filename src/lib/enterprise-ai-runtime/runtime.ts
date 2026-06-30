@@ -32,6 +32,9 @@ import { HealthMonitor } from "./health-monitor";
 import { RetryManager } from "./retry-manager";
 import { FailoverEngine } from "./failover-engine";
 
+// Imported lazily at runtime to avoid circular dependencies
+let _createFromStore: any = null;
+
 export class EnterpriseAIRuntime {
   readonly registry: ProviderRegistry;
   readonly capabilities: CapabilityEngine;
@@ -104,6 +107,58 @@ export class EnterpriseAIRuntime {
       this.failover.setLocalProvider(provider);
     }
     await this.registry.register(provider, config);
+  }
+
+  /**
+   * Initialize the runtime from the Zustand store's provider configs.
+   * Creates StoreProviderAdapter instances for each active non-emergency provider
+   * and registers them with the runtime. Call this once after the store is ready.
+   *
+   * This is the recommended initialization for the Phase 4 migration.
+   */
+  async initializeFromStore(): Promise<void> {
+    if (this.initialized) return;
+    try {
+      const { useApp } = await import("../store");
+      const state: any = useApp.getState();
+      const storeProviders: any[] = state?.providers || [];
+      const { createProvidersFromStore, registerStoreProvidersWithRuntime } =
+        await import("./provider-adapter-factory");
+
+      const adapters = createProvidersFromStore(storeProviders);
+      for (const adapter of adapters) {
+        await this.registerProvider(adapter, {
+          id: adapter.id,
+          name: adapter.name,
+          type: (storeProviders.find((sp: any) => (sp.id || sp.type) === adapter.id)?.type) || "generic",
+          auth: { type: "api-key", apiKey: "" },
+          timeout: 30000,
+          maxRetries: 3,
+          rateLimitPerMinute: 60,
+        });
+      }
+
+      // Set up auth manager from store
+      const configs = adapters.map((a: any) => ({
+        id: a.id,
+        name: a.name,
+        type: "generic",
+        auth: { type: "none" as const, apiKey: undefined },
+        timeout: 30000,
+        maxRetries: 3,
+        rateLimitPerMinute: 60,
+      }));
+      this.auth.initializeFromConfig(configs);
+
+      if (this.config.enableCircuitBreaker) {
+        this.health.startPeriodicChecks();
+      }
+
+      this.initialized = true;
+      console.info(`[EnterpriseAIRuntime] Initialized with ${adapters.length} providers from store`);
+    } catch (err) {
+      console.warn("[EnterpriseAIRuntime] Failed to initialize from store, continuing uninitialized:", err);
+    }
   }
 
   /**
