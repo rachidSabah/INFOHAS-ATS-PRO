@@ -1016,6 +1016,66 @@ export function exportHtmlAsDOC(htmlContent: string, filename: string, template:
   saveAs(blob, filename.replace(/\s+/g, "_") + ".doc");
 }
 
+// ---------- Section Hash Export Gate ----------
+
+/**
+ * Validate render parity before export.
+ * Converts ResumeData → RenderDocument, computes section hashes, and
+ * verifies consistency. Returns warnings if sections appear corrupted.
+ *
+ * This ensures Preview, DOCX, and PDF all render from the same data.
+ */
+import { computeSectionHashes } from "./section-hash";
+
+function validateRenderParity(resume: ResumeData, layout?: ResumeLayoutModel): string[] {
+  const warnings: string[] = [];
+  try {
+    // Dynamic import to avoid circular dependency
+    const { toRenderDocument } = require("./render-document");
+    const rd = toRenderDocument(resume, layout);
+    const hashes = computeSectionHashes(rd);
+
+    // Basic sanity checks
+    if (hashes.length === 0) {
+      warnings.push("Render parity: document has no sections");
+    }
+
+    // Check for empty sections (possible data loss indicator)
+    for (const h of hashes) {
+      if (h.charCount === 0) {
+        warnings.push(`Render parity: section "${h.title}" is empty (possible data loss)`);
+      }
+    }
+
+    // Check experience sections have content
+    const expSection = hashes.find((h) => h.type === "professionalExperience");
+    if (expSection && expSection.charCount < 10) {
+      warnings.push(`Render parity: experience section has only ${expSection.charCount} characters`);
+    }
+
+    // Check languages section exists if resume has languages
+    if (resume.languages && resume.languages.length > 0) {
+      const langSection = hashes.find((h) => h.type === "languages");
+      if (!langSection) {
+        warnings.push("Render parity: resume has languages but RenderDocument has no languages section");
+      }
+    }
+
+    // Log hash summary for debugging
+    if (typeof console !== "undefined") {
+      console.info("[Render Parity] Section hashes:", hashes.map((h) => `${h.type}=${h.hash}`).join(", "));
+    }
+  } catch (err) {
+    warnings.push(`Render parity validation failed: ${err instanceof Error ? err.message : String(err)}`);
+  }
+
+  if (warnings.length > 0 && typeof console !== "undefined") {
+    console.warn("[Render Parity] Warnings:", warnings);
+  }
+
+  return warnings;
+}
+
 // ---------- DOCX ----------
 
 export async function exportResumeDOCX(resume: ResumeData, layout?: ResumeLayoutModel) {

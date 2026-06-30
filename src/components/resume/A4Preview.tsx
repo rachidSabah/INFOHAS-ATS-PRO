@@ -1,13 +1,20 @@
 "use client";
 
-import { forwardRef } from "react";
-import type { ResumeData } from "@/lib/types";
+import { forwardRef, useMemo } from "react";
+import type { ResumeData, RenderDocument } from "@/lib/types";
 import { useApp } from "@/lib/store";
+import { RenderDocumentPreview } from "./RenderDocumentPreview";
 
 interface A4PreviewProps {
   resume: ResumeData;
   scale?: number;
   className?: string;
+  /**
+   * When true, uses RenderDocument (SSOT) pipeline — same data as DOCX/PDF export.
+   * When false (default), uses legacy per-template rendering.
+   * Set true everywhere for consistent output across all renderers.
+   */
+  useRenderDocument?: boolean;
 }
 
 /**
@@ -25,7 +32,7 @@ interface A4PreviewProps {
  * the wrapper exactly. This way the parent layout sees a correctly-sized box.
  */
 export const A4Preview = forwardRef<HTMLDivElement, A4PreviewProps>(function A4Preview(
-  { resume, scale = 1, className },
+  { resume, scale = 1, className, useRenderDocument = false },
   ref
 ) {
   const accent = resume.accentColor || "#1154A3";
@@ -35,6 +42,12 @@ export const A4Preview = forwardRef<HTMLDivElement, A4PreviewProps>(function A4P
   // layout space (prevents horizontal overflow on mobile).
   const scaledWidthMm = 210 * scale;
   const scaledHeightMm = 297 * scale;
+
+  // When useRenderDocument is true, convert to RenderDocument (SSOT) and render
+  // from it — matching the exact same pipeline as DOCX/PDF export.
+  if (useRenderDocument) {
+    return <RenderDocumentA4Preview resume={resume} scale={scale} className={className} ref={ref} />;
+  }
 
   return (
     <div
@@ -60,6 +73,24 @@ export const A4Preview = forwardRef<HTMLDivElement, A4PreviewProps>(function A4P
       >
         <Template resume={resume} accent={accent} />
       </div>
+    </div>
+  );
+});
+
+/**
+ * Inner A4Preview that converts ResumeData → RenderDocument and delegates
+ * to RenderDocumentPreview. This uses the exact same data pipeline as
+ * DOCX and PDF exports, guaranteeing consistent output.
+ */
+const RenderDocumentA4Preview = forwardRef<HTMLDivElement, A4PreviewProps>(function RenderDocumentA4Preview(
+  { resume, scale, className },
+  ref
+) {
+  const { toRenderDocument } = require("@/lib/render-document");
+  const rd: RenderDocument = useMemo(() => toRenderDocument(resume), [resume]);
+  return (
+    <div ref={ref}>
+      <RenderDocumentPreview rd={rd} scale={scale} className={className} />
     </div>
   );
 });
