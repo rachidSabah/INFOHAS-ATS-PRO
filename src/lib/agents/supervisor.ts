@@ -26,6 +26,7 @@
 import type { ResumeData, JobDescription } from "../types";
 import { useApp } from "../store";
 import { runOptimizationPipeline, type PipelineResult, type PipelineProgress } from "./orchestrator";
+import { createPlan } from "./pipeline-planner";
 import { analyzeCompanyIntelligence, analyzeSkillGap } from "./company-skill-agents";
 import { callAI, extractJSON } from "../ai";
 import {
@@ -806,17 +807,28 @@ export async function handleOptimizationRequested(
 
   let result: PipelineResult | null = null;
   try {
-    // === Run the existing 6-agent pipeline (V2) ===
-    // The Supervisor delegates to runOptimizationPipeline — the existing
-    // production-tested orchestrator. This preserves 100% backward compat.
-    updateAgent("supervisor", { status: "running", startedAt: new Date().toISOString(), log: "Delegating to 6-agent optimization pipeline…" });
+    // === PLAN: analyze inputs and decide which steps to run ===
+    const resumeText = `${resume.name} ${resume.headline ?? ""} ${resume.summary ?? ""} ${
+      resume.experience?.map((e) => e.company + " " + e.title).join(" ")
+    }`;
+    const plan = await createPlan({ resumeText, jd });
+    const planAviationMode = plan.aviationMode ?? aviationMode;
+    const planReflection = plan.enableReflection && enableReflection;
+    const planTimeout = plan.timeoutMs;
+
+    updateAgent("planner", {
+      status: "completed",
+      completedAt: new Date().toISOString(),
+      log: `Plan: ${plan.summary}`,
+    });
+    updateAgent("supervisor", { status: "running", startedAt: new Date().toISOString(), log: `Running pipeline (${plan.summary})…` });
 
     result = await runOptimizationPipeline({
       resume,
       jd,
-      userDirectives,
-      aviationMode,
-      enableReflection,
+      userDirectives: plan.userDirectives ?? userDirectives,
+      aviationMode: planAviationMode,
+      enableReflection: planReflection,
       checkExport: false,
       onProgress,
     });
