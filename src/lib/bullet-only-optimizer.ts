@@ -32,6 +32,7 @@ import type { ResumeData, ResumeSkill, JobDescription, AgentDirectives, Optimize
 import { callAI, extractJSON, OPTIMIZER_CALL_TIMEOUT_MS, getOptimizerDirective } from "./ai";
 import { cleanupGrammar, repairMalformedJSON, stripMarkdown } from "./ai-response-processor";
 import type { OptimizerOutput } from "./resume-assembler";
+import { validateOptimizerPatch } from "./optimizer-patch";
 
 export interface BulletOnlyOptimizerResult {
   output: OptimizerOutput;
@@ -289,25 +290,9 @@ export function parseOptimizerOutput(rawResponse: string): { output: OptimizerOu
     bulletsRewritten: typeof parsed.bulletsRewritten === "number" ? parsed.bulletsRewritten : undefined,
   };
 
-  // Warn if LLM returned forbidden fields (which we're ignoring)
-  const forbiddenFields = ["name", "email", "phone", "location", "dateOfBirth", "education", "languages", "certifications"];
-  for (const field of forbiddenFields) {
-    if (parsed[field] !== undefined) {
-      warnings.push(`LLM returned forbidden field "${field}" — ignoring (application-owned)`);
-    }
-  }
-  // Check experience entries for forbidden fields
-  if (parsed.experiences || parsed.experience) {
-    const expArray = parsed.experiences || parsed.experience;
-    for (const exp of expArray) {
-      const expForbidden = ["title", "company", "location", "startDate", "endDate"];
-      for (const field of expForbidden) {
-        if (exp[field] !== undefined) {
-          warnings.push(`LLM returned forbidden field "experiences[].${field}" — ignoring (application-owned)`);
-        }
-      }
-    }
-  }
+  // Use OptimizerPatch validator to detect & strip ALL forbidden fields at every level
+  const validationWarnings = validateOptimizerPatch(parsed);
+  warnings.push(...validationWarnings);
 
   return { output, warnings };
 }
