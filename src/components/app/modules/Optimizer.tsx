@@ -17,7 +17,8 @@ import { validateResumeForExport } from "@/lib/ai-response-processor";
 import { exportResumePDF, exportResumeDOCX, exportResumeTXT, exportResumeDOC } from "@/lib/exporter";
 import { EditableA4Preview } from "@/components/resume/EditableA4Preview";
 import { AIRLINE_ATS_PROFILES, AIRLINE_OPTIONS, DEFAULT_APP_SETTINGS, type AppSettings } from "@/lib/ats-directives";
-import { INDUSTRY_PROFILES, INDUSTRY_OPTIONS, detectIndustry, type IndustryAtsProfile } from "@/lib/industry-ats";
+import { INDUSTRY_PROFILES, INDUSTRY_OPTIONS, type IndustryAtsProfile } from "@/lib/industry-ats";
+import { mapToIndustryMode } from "@/lib/industry-mapper";
 import { runOptimizationPipeline, type PipelineResult as AgentPipelineResult, type PipelineProgress } from "@/lib/agents";
 import { clearAllProviderCooldowns } from "@/lib/ai";
 import { PipelineProgressView } from "@/components/optimizer/PipelineProgressView";
@@ -278,15 +279,15 @@ export function Optimizer() {
     // === Auto-detect industry from JD + resume ===
     const jdText = safeJd.rawText || safeJd.keywords.join(" ");
     const resumeText = `${resume.name} ${resume.headline ?? ""} ${resume.summary ?? ""} ${resume.experience.map((e) => e.title + " " + e.company).join(" ")}`;
-    const detection = detectIndustry(jdText, resumeText);
-    setIndustryDetection(detection);
-    setIndustryId(detection.industryId);
+    const mapperResult = mapToIndustryMode(jdText, resumeText);
+    setIndustryDetection(mapperResult.detection);
+    setIndustryId(mapperResult.detection.industryId);
+    setIndustrySettings(mapperResult.suggestedSettings);
+    // Auto-enable industry mode only for aviation-adjacent industries
+    // (all others use the standard optimizer path with Job Intelligence)
+    setIndustryMode(mapperResult.aviationMode !== undefined);
     // Auto-populate employer from JD company
     if (safeJd.company) setEmployer(safeJd.company);
-    // Auto-enable industry mode if confidence is high enough
-    if (detection.confidence >= 20) {
-      setIndustryMode(true);
-    }
 
     setStep("optimize");
   };

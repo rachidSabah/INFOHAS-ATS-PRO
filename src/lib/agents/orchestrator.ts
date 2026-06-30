@@ -40,6 +40,7 @@ import {
 import { aviationOptimize, type AviationOptimizeResult } from "../ats-directives";
 import type { AppSettings } from "../ats-directives";
 import { analyzeATS, type ATSAnalysisResult } from "./ats-analysis";
+import { INDUSTRY_PROFILES } from "../industry-ats";
 import { runQA, type QAResult } from "./qa-agent";
 import { buildOptimizationPolicy, formatPolicyForPrompt, type OptimizationPolicy } from "../directive-policy";
 import { analyzeCompanyIntelligence, analyzeSkillGap, type CompanyIntelligence, type SkillGapIntelligence } from "./company-skill-agents";
@@ -876,9 +877,14 @@ async function _runOptimizationPipelineInner(input: PipelineInput, watchdog: Opt
           // Include aviation-specific intelligence if aviation mode is active
           const intelligenceBlocks: string[] = [];
           if (aviationMode) {
-            intelligenceBlocks.push(`INDUSTRY ATS MODE: ${aviationMode.airlineProfile}
-This is an industry-specific optimization. Apply the aviation/airport duty free keyword bank and writing guidance.
-Target airline/employer: ${aviationMode.airlineProfile}`);
+            const profile = INDUSTRY_PROFILES[aviationMode.airlineProfile] ?? INDUSTRY_PROFILES.generic!;
+            intelligenceBlocks.push(`INDUSTRY ATS MODE — ${profile.label}
+Profile: ${profile.description}
+Keyword Bank: ${profile.keywordBank}
+Priority Keywords: ${profile.priorityKeywords.join(", ")}
+Writing Guidance: ${profile.writingGuidance}
+Section Priorities (in order): ${profile.sectionPriorities.join(" → ")}
+Target employer: ${aviationMode.airlineProfile}`);
           }
           if (result.jobIntelligence) {
             intelligenceBlocks.push(`JOB INTELLIGENCE:
