@@ -67,6 +67,7 @@ function buildContactBlock(resume: ResumeData): RenderDocument["contact"] {
     email: resume.contact.email,
     location: resume.contact.location,
     dateOfBirth: resume.dateOfBirth,
+    personalDetails: resume.contact.personalDetails,
   };
 }
 
@@ -200,13 +201,34 @@ function buildLanguagesSection(resume: ResumeData): RenderDocumentSection | null
 }
 
 function buildAdditionalInfoSection(resume: ResumeData): RenderDocumentSection | null {
-  if (!resume.additionalInfo) return null;
-  const paragraphs = resume.additionalInfo.split("\n").map(l => l.trim()).filter(Boolean);
-  if (!paragraphs.length) return null;
+  const items: RenderContentItem[] = [];
+
+  // Render structured personal details as label: value lines
+  const pd = resume.contact?.personalDetails;
+  if (pd && Object.keys(pd).length > 0) {
+    for (const [label, value] of Object.entries(pd)) {
+      if (value?.trim()) {
+        items.push({
+          kind: "text" as const,
+          text: `${label.charAt(0).toUpperCase() + label.slice(1)} : ${value}`,
+        });
+      }
+    }
+  }
+
+  // Render free-text additionalInfo as paragraphs
+  if (resume.additionalInfo) {
+    const paragraphs = resume.additionalInfo.split("\n").map(l => l.trim()).filter(Boolean);
+    for (const p of paragraphs) {
+      items.push({ kind: "text" as const, text: p });
+    }
+  }
+
+  if (items.length === 0) return null;
   return {
     type: "additionalInformation",
     title: "Additional Information",
-    items: paragraphs.map((p) => ({ kind: "text" as const, text: p })),
+    items,
   };
 }
 

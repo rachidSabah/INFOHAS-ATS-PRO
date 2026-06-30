@@ -181,6 +181,24 @@ function buildResumeHtml(r: ResumeData, L: ResumeLayoutModel): string {
     lines.push(`<div class="contact">${contactParts.map(c => esc(c)).join("  |  ")}</div>`);
   }
 
+  // Structured personal details from contact.personalDetails
+  const pd = r.contact?.personalDetails;
+  if (pd && Object.keys(pd).length > 0) {
+    const detailLines: string[] = [];
+    for (const [label, value] of Object.entries(pd)) {
+      if (value?.trim()) {
+        detailLines.push(`${label.charAt(0).toUpperCase() + label.slice(1)} : ${esc(value)}`);
+      }
+    }
+    if (detailLines.length > 0) {
+      lines.push(`<div class="contact">${detailLines.join("  |  ")}</div>`);
+    }
+  }
+
+  if (r.dateOfBirth) {
+    lines.push(`<div class="contact">Date Of Birth : ${esc(r.dateOfBirth)}</div>`);
+  }
+
   // Thin separator
   lines.push(`<div style="height:0.3px;background:#999;margin:0.8mm 0 0.5mm 0"></div>`);
 

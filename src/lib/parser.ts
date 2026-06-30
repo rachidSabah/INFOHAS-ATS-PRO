@@ -692,9 +692,16 @@ export function extractResumeFromText(text: string, fileName: string): ResumeDat
 
   const nextSectionStart = (start: number) => {
     if (start < 0) return lines.length;
-    // Next section is either a known section or any other header candidate
-    const candidates = [...ALL_KNOWN_STARTS, ...allPotentialHeaders]
-      .filter((i) => i > start);
+    // Find the nearest known section first
+    const knownCandidates = ALL_KNOWN_STARTS.filter((i) => i > start && i >= 0);
+    const nearestKnown = knownCandidates.length ? Math.min(...knownCandidates) : Infinity;
+    // Only include header candidates that fall AFTER the nearest known section
+    // This prevents education content lines (e.g. "Diploma", "School Degree", years)
+    // from being mistaken as the next section boundary.
+    const headerCandidates = allPotentialHeaders.filter(
+      (i) => i > start && i >= nearestKnown
+    );
+    const candidates = [...knownCandidates, ...headerCandidates];
     return candidates.length ? Math.min(...candidates) : lines.length;
   };
 

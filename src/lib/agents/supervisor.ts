@@ -866,13 +866,18 @@ export async function handleOptimizationRequested(
     }
     setCached(cacheK, result);
 
-    // === ZERO DATA LOSS VALIDATION ===
-    // Compare original vs optimized section counts. If any section lost entries, REJECT.
+    // === ZERO DATA LOSS VALIDATION (Comprehensive) ===
+    // Compare original vs optimized for ALL data types. If any section lost entries,
+    // REJECT the violation and RESTORE missing data from source.
+    // Covers: experience, education, languages, skills, certifications, projects,
+    // dynamic sections, additional info, bullet counts, highlight counts.
     if (result.optimizedResume && resume) {
       const violations: string[] = [];
+      const warnings: string[] = [];
       const orig = resume;
       const opt = result.optimizedResume;
 
+      // --- Count-based checks (section-level) ---
       if (opt.experience.length < orig.experience.length) {
         violations.push(`Experience: ${orig.experience.length} → ${opt.experience.length}`);
       }
@@ -882,16 +887,74 @@ export async function handleOptimizationRequested(
       if (opt.languages.length < orig.languages.length) {
         violations.push(`Languages: ${orig.languages.length} → ${opt.languages.length}`);
       }
+      if (opt.skills.length < orig.skills.length) {
+        violations.push(`Skills: ${orig.skills.length} → ${opt.skills.length}`);
+      }
       if ((orig.certifications?.length ?? 0) > 0 && (opt.certifications?.length ?? 0) < (orig.certifications?.length ?? 0)) {
         violations.push(`Certifications: ${orig.certifications!.length} → ${opt.certifications?.length ?? 0}`);
       }
       if ((orig.projects?.length ?? 0) > 0 && (opt.projects?.length ?? 0) < (orig.projects?.length ?? 0)) {
         violations.push(`Projects: ${orig.projects!.length} → ${opt.projects?.length ?? 0}`);
       }
+      // Dynamic sections — MUST be preserved; any count drop is a violation
+      const origDynCount = (orig.dynamicSections?.length ?? 0);
+      const optDynCount = (opt.dynamicSections?.length ?? 0);
+      if (origDynCount > 0 && optDynCount < origDynCount) {
+        violations.push(`Dynamic sections: ${origDynCount} → ${optDynCount}`);
+      }
+      // Additional info — MUST preserve content (if source has it and optimized dropped it)
+      const origInfoLen = (orig.additionalInfo || "").trim().length;
+      const optInfoLen = (opt.additionalInfo || "").trim().length;
+      if (origInfoLen > 0 && optInfoLen < 1) {
+        violations.push(`Additional information: ${origInfoLen} chars → 0`);
+      } else if (origInfoLen > 0 && optInfoLen < origInfoLen * 0.5) {
+        warnings.push(`Additional information truncated: ${origInfoLen} chars → ${optInfoLen} (${Math.round(optInfoLen / origInfoLen * 100)}%)`);
+      }
 
-      if (violations.length > 0) {
-        console.error(`[Supervisor] ZERO DATA LOSS VIOLATION: ${violations.join(", ")}`);
-        // Restore missing entries from source
+      // --- Per-entry bullet/highlight count checks (warnings, not block) ---
+      // Experience bullets per entry — warn if any entry lost bullets
+      for (const origExp of orig.experience) {
+        const optExp = opt.experience.find(e => e.id === origExp.id);
+        if (optExp && optExp.bullets.length < origExp.bullets.length) {
+          warnings.push(`Experience[${origExp.id}]: bullets ${origExp.bullets.length} → ${optExp.bullets.length}`);
+        }
+      }
+      // Education highlights per entry
+      for (const origEdu of orig.education) {
+        const optEdu = opt.education.find(e => e.id === origEdu.id);
+        const origHL = origEdu.highlights?.length ?? 0;
+        const optHL = optEdu?.highlights?.length ?? 0;
+        if (origHL > 0 && optHL < origHL) {
+          warnings.push(`Education[${origEdu.id}]: highlights ${origHL} → ${optHL}`);
+        }
+      }
+      // Project bullet count per entry
+      for (const origProj of (orig.projects ?? [])) {
+        const optProj = (opt.projects ?? []).find(p => p.id === origProj.id);
+        const origPB = origProj.bullets.length;
+        const optPB = optProj?.bullets.length ?? 0;
+        if (origPB > 0 && optPB < origPB) {
+          warnings.push(`Project[${origProj.id}]: bullets ${origPB} → ${optPB}`);
+        }
+      }
+      // Certification content — check name/issuer preservation
+      for (const origCert of (orig.certifications ?? [])) {
+        const optCert = (opt.certifications ?? []).find(c => c.id === origCert.id || c.name === origCert.name);
+        if (!optCert) {
+          violations.push(`Certification dropped: "${origCert.name}"`);
+        }
+      }
+
+      // --- RESTORE missing entries from source ---
+      if (violations.length > 0 || warnings.length > 0) {
+        if (violations.length > 0) {
+          console.error(`[Supervisor] ZERO DATA LOSS VIOLATION: ${violations.join(", ")}`);
+        }
+        if (warnings.length > 0) {
+          console.warn(`[Supervisor] Content preservation warnings: ${warnings.join(", ")}`);
+        }
+
+        // Restore missing experience entries
         if (opt.experience.length < orig.experience.length) {
           const optIds = new Set(opt.experience.map(e => e.id));
           for (const srcExp of orig.experience) {
@@ -900,6 +963,7 @@ export async function handleOptimizationRequested(
             }
           }
         }
+        // Restore missing education entries
         if (opt.education.length < orig.education.length) {
           const optEduIds = new Set(opt.education.map(e => e.id));
           for (const srcEdu of orig.education) {
@@ -908,10 +972,62 @@ export async function handleOptimizationRequested(
             }
           }
         }
+        // Restore missing languages
         if (opt.languages.length < orig.languages.length) {
-          opt.languages = orig.languages.map(l => ({ ...l }));
+          const optLangNames = new Set(opt.languages.map(l => l.name.toLowerCase()));
+          for (const srcLang of orig.languages) {
+            if (!optLangNames.has(srcLang.name.toLowerCase())) {
+              opt.languages.push({ ...srcLang });
+            }
+          }
         }
-        console.info(`[Supervisor] Restored missing entries from source — Zero Data Loss enforced`);
+        // Restore missing skills
+        if (opt.skills.length < orig.skills.length) {
+          const optSkillIds = new Set(opt.skills.map(s => s.id));
+          for (const srcSkill of orig.skills) {
+            if (!optSkillIds.has(srcSkill.id)) {
+              opt.skills.push({ ...srcSkill });
+            }
+          }
+        }
+        // Restore missing projects
+        if ((opt.projects?.length ?? 0) < (orig.projects?.length ?? 0)) {
+          const optProjIds = new Set((opt.projects ?? []).map(p => p.id));
+          for (const srcProj of (orig.projects ?? [])) {
+            if (!optProjIds.has(srcProj.id)) {
+              if (!opt.projects) opt.projects = [];
+              opt.projects.push({ ...srcProj });
+            }
+          }
+        }
+        // Restore missing certifications
+        if ((opt.certifications?.length ?? 0) < (orig.certifications?.length ?? 0)) {
+          const optCertNames = new Set((opt.certifications ?? []).map(c => c.name.toLowerCase()));
+          for (const srcCert of (orig.certifications ?? [])) {
+            if (!optCertNames.has(srcCert.name.toLowerCase())) {
+              if (!opt.certifications) opt.certifications = [];
+              opt.certifications.push({ ...srcCert });
+            }
+          }
+        }
+        // Restore missing dynamic sections by fingerprint/title
+        if (optDynCount < origDynCount) {
+          const optDynTitles = new Set((opt.dynamicSections ?? []).map(d => d.normalizedTitle));
+          for (const srcDyn of (orig.dynamicSections ?? [])) {
+            if (!optDynTitles.has(srcDyn.normalizedTitle)) {
+              if (!opt.dynamicSections) opt.dynamicSections = [];
+              opt.dynamicSections.push({ ...srcDyn });
+            }
+          }
+        }
+        // Restore additional info if dropped entirely
+        if (origInfoLen > 0 && optInfoLen < 1) {
+          opt.additionalInfo = orig.additionalInfo;
+        }
+
+        const totalWarnings = warnings.length;
+        const totalViolations = violations.length;
+        console.info(`[Supervisor] Zero Data Loss enforced — ${totalViolations} violations restored, ${totalWarnings} warnings issued`);
       }
     }
 

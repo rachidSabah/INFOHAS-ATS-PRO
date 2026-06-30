@@ -35,6 +35,10 @@ export interface ContactInfo {
   linkedin?: string;
   github?: string;
   twitter?: string;
+  /** Structured personal details — map of label → value for additional info fields
+   *  (e.g. nationality, driving licence, passport, visa, address, marital status, availability).
+   *  Stored alongside the free-text additionalInfo field for structured rendering. */
+  personalDetails?: Record<string, string>;
 }
 
 export interface ResumeExperience {
@@ -1230,6 +1234,8 @@ export interface RenderContactBlock {
   email?: string;
   location?: string;
   dateOfBirth?: string;
+  /** Structured personal details rendered as label-value pairs */
+  personalDetails?: Record<string, string>;
 }
 
 export interface RenderDocument {

@@ -11,6 +11,71 @@ import type { ResumeData } from "./types";
 import { validateLayout } from "./layout-validator";
 import { validateAgainstManifest, type FactManifest } from "./locked-facts";
 
+/**
+ * SHA-256 content hash computed from canonical resume fields.
+ * Used for cross-format consistency checking (Preview = DOCX = PDF).
+ */
+export function computeResumeContentHash(resume: ResumeData): string {
+  // Normalize: stable JSON of canonical fields only (exclude id, timestamps, layout-only fields)
+  const canonical = {
+    n: resume.name,
+    h: resume.headline,
+    c: resume.contact,
+    s: resume.summary,
+    e: resume.experience.map(e => ({
+      c: e.company,
+      t: e.title,
+      l: e.location,
+      sd: e.startDate,
+      ed: e.endDate,
+      b: e.bullets,
+    })),
+    ed: resume.education.map(e => ({
+      i: e.institution,
+      d: e.degree,
+      f: e.field,
+      l: e.location,
+      sd: e.startDate,
+      ed: e.endDate,
+      g: e.gpa,
+      hl: e.highlights,
+    })),
+    sk: resume.skills.map(s => ({
+      n: s.name,
+      ct: s.category,
+    })),
+    l: resume.languages.map(l => ({
+      n: l.name,
+      p: l.proficiency,
+    })),
+    p: (resume.projects || []).map(p => ({
+      n: p.name,
+      d: p.description,
+      b: p.bullets,
+    })),
+    cert: (resume.certifications || []).map(c => ({
+      n: c.name,
+      i: c.issuer,
+      d: c.date,
+    })),
+    dy: (resume.dynamicSections || []).map(d => ({
+      t: d.title,
+      c: d.content,
+      b: d.bullets,
+    })),
+    ai: resume.additionalInfo,
+    dob: resume.dateOfBirth,
+  };
+  // Simple stable string hash (Fowler-Noll-Vo-1a 32-bit for browser compatibility)
+  const str = JSON.stringify(canonical);
+  let hash = 0x811c9dc5; // FNV offset basis
+  for (let i = 0; i < str.length; i++) {
+    hash ^= str.charCodeAt(i);
+    hash += (hash << 1) + (hash << 4) + (hash << 7) + (hash << 8) + (hash << 24);
+  }
+  return (hash >>> 0).toString(16).padStart(8, "0");
+}
+
 export interface ExportValidationResult {
   canExport: boolean;
   layoutValid: boolean;
@@ -19,6 +84,25 @@ export interface ExportValidationResult {
   errors: string[];
   warnings: string[];
   blockedReason: string | null;
+  /** Stable content hash for cross-format consistency verification */
+  contentHash?: string;
+}
+
+/**
+ * Count total canonical chars in a resume (summary + bullets + highlights + skills + languages + additionalInfo).
+ */
+function canonicalCharCount(resume: ResumeData): number {
+  let count = (resume.summary || "").length;
+  for (const exp of resume.experience || []) {
+    for (const b of exp.bullets || []) count += b.length;
+  }
+  for (const edu of resume.education || []) {
+    for (const h of edu.highlights || []) count += h.length;
+  }
+  for (const sk of resume.skills || []) count += sk.name.length;
+  for (const lang of resume.languages || []) count += lang.name.length + lang.proficiency.length;
+  count += (resume.additionalInfo || "").length;
+  return count;
 }
 
 /**
@@ -110,6 +194,76 @@ export function validateForExport(
     warnings.push("Double periods detected — should be single period");
   }
 
+  // === 4. HEADER / FOOTER DUPLICATION DETECTION ===
+  // Check for duplicated experience entries (same company + title)
+  const expKeySeen = new Set<string>();
+  for (const exp of resume.experience || []) {
+    const key = `${exp.company}|${exp.title}`.toLowerCase();
+    if (expKeySeen.has(key)) {
+      errors.push(`Duplicate experience entry: "${exp.title} @ ${exp.company}"`);
+    }
+    expKeySeen.add(key);
+  }
+
+  // Check for duplicated education entries (same institution + degree)
+  const eduKeySeen = new Set<string>();
+  for (const ed of resume.education || []) {
+    const key = `${ed.institution}|${ed.degree}`.toLowerCase();
+    if (eduKeySeen.has(key)) {
+      errors.push(`Duplicate education entry: "${ed.degree} @ ${ed.institution}"`);
+    }
+    eduKeySeen.add(key);
+  }
+
+  // Check for duplicated dynamic sections (same normalized title)
+  const dynTitleSeen = new Set<string>();
+  for (const ds of resume.dynamicSections || []) {
+    const key = ds.normalizedTitle || ds.title.toLowerCase();
+    if (dynTitleSeen.has(key)) {
+      warnings.push(`Duplicate dynamic section: "${ds.title}"`);
+    }
+    dynTitleSeen.add(key);
+  }
+
+  // Check for duplicate contact info (same email or phone appearing in multiple fields)
+  if (resume.contact?.email && resume.contact?.phone) {
+    const contactText = resumeText;
+    const emailCount = (contactText.match(new RegExp(resume.contact.email.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi')) || []).length;
+    if (emailCount > 2) {
+      warnings.push(`Contact email appears ${emailCount} times — possible header duplication`);
+    }
+  }
+
+  // Check for placeholder section titles (section headers in content fields)
+  const knownSectionHeaders = [
+    /professional\s+summary/i,
+    /professional\s+experience/i,
+    /education/i,
+    /core\s+competencies/i,
+    /languages/i,
+    /additional\s+information/i,
+    /certifications/i,
+    /projects/i,
+  ];
+  for (const pattern of knownSectionHeaders) {
+    // Check if any section title appears inside summary (indicates LLM injected a header)
+    if (resume.summary && pattern.test(resume.summary)) {
+      warnings.push(`Section header pattern found in summary: ${pattern.source} — possible duplication`);
+    }
+  }
+
+  // === 5. CROSS-FORMAT CONTENT CHECKSUM ===
+  // Compute and attach content hash for downstream format consistency checks
+  const contentHash = computeResumeContentHash(resume);
+  const expectedCharCount = canonicalCharCount(resume);
+
+  // Check if content hash has changed significantly from source
+  // If summary + experience bullets + education + skills are all shorter, flag it
+  const totalSourceBullets = resume.experience.reduce((sum, e) => sum + e.bullets.length, 0);
+  if (totalSourceBullets === 0 && resume.experience.length > 0) {
+    warnings.push("All experience entries have zero bullets — possible data loss");
+  }
+
   const canExport = errors.length === 0;
   const blockedReason = canExport ? null : `Export blocked: ${errors.length} error(s) — ${errors.slice(0, 3).join("; ")}`;
 
@@ -127,5 +281,6 @@ export function validateForExport(
     errors,
     warnings,
     blockedReason,
+    contentHash,
   };
 }

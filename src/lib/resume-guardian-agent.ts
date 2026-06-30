@@ -563,6 +563,64 @@ function checkBulletsPreserved(optimized: ResumeData, source: ResumeData): Guard
   };
 }
 
+/**
+ * Verifies that EVERY education entry has the EXACT SAME number of highlights
+ * as the corresponding entry in the source resume. This prevents the LLM
+ * from dropping or truncating education achievements during optimization.
+ */
+function checkEducationHighlightsPreserved(optimized: ResumeData, source: ResumeData): GuardianCheck {
+  if (source.education.length === 0) {
+    return {
+      name: "education_highlights_preserved",
+      passed: true,
+      critical: true,
+      detail: "No source education entries to check",
+    };
+  }
+
+  const failures: string[] = [];
+
+  for (const srcEdu of source.education) {
+    const optEdu = optimized.education.find(
+      (o) =>
+        o.institution?.toLowerCase() === srcEdu.institution?.toLowerCase() ||
+        o.id === srcEdu.id
+    );
+    if (!optEdu) continue; // Count check already catches removed entries
+
+    const srcHL = srcEdu.highlights || [];
+    const optHL = optEdu.highlights || [];
+    const srcCount = srcHL.length;
+    const optCount = optHL.length;
+
+    if (srcCount > 0 && optCount < srcCount) {
+      failures.push(
+        `"${srcEdu.degree} @ ${srcEdu.institution}": ${srcCount} highlights → ${optCount} (${srcCount - optCount} missing)`
+      );
+    } else if (srcCount > 0 && optCount > srcCount) {
+      failures.push(
+        `"${srcEdu.degree} @ ${srcEdu.institution}": ${srcCount} highlights → ${optCount} (${optCount - srcCount} extra — potential hallucination)`
+      );
+    }
+  }
+
+  if (failures.length === 0) {
+    return {
+      name: "education_highlights_preserved",
+      passed: true,
+      critical: true,
+      detail: "All education entries have the exact same number of highlights as the source",
+    };
+  }
+
+  return {
+    name: "education_highlights_preserved",
+    passed: false,
+    critical: true,
+    detail: `Education highlight count mismatch: ${failures.join("; ")}`,
+  };
+}
+
 // ── Check 14: Skill Categories Preserved (critical) ──────────────────────────
 
 /**
@@ -1142,6 +1200,7 @@ export async function runGuardianValidation(
   checks.push(checkNoHallucinations(optimized, source));
   checks.push(checkNoDuplicateSentences(optimized, source));
   checks.push(checkBulletsPreserved(optimized, source));
+  checks.push(checkEducationHighlightsPreserved(optimized, source));
   checks.push(checkSkillCategoriesPreserved(optimized, source));
   checks.push(checkPersonalDetailsPreserved(optimized, source));
   checks.push(checkNoProficiencyHallucination(optimized, source));
@@ -1353,6 +1412,7 @@ function assertResumeExportableWithSource(
     checkNoHallucinations(resume, source),
     checkNoDuplicateSentences(resume, source),
     checkBulletsPreserved(resume, source),
+    checkEducationHighlightsPreserved(resume, source),
     checkSkillCategoriesPreserved(resume, source),
     checkPersonalDetailsPreserved(resume, source),
     checkJobTitlesPreserved(resume, source),
