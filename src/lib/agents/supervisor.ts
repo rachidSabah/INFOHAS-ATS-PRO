@@ -866,6 +866,55 @@ export async function handleOptimizationRequested(
     }
     setCached(cacheK, result);
 
+    // === ZERO DATA LOSS VALIDATION ===
+    // Compare original vs optimized section counts. If any section lost entries, REJECT.
+    if (result.optimizedResume && resume) {
+      const violations: string[] = [];
+      const orig = resume;
+      const opt = result.optimizedResume;
+
+      if (opt.experience.length < orig.experience.length) {
+        violations.push(`Experience: ${orig.experience.length} → ${opt.experience.length}`);
+      }
+      if (opt.education.length < orig.education.length) {
+        violations.push(`Education: ${orig.education.length} → ${opt.education.length}`);
+      }
+      if (opt.languages.length < orig.languages.length) {
+        violations.push(`Languages: ${orig.languages.length} → ${opt.languages.length}`);
+      }
+      if ((orig.certifications?.length ?? 0) > 0 && (opt.certifications?.length ?? 0) < (orig.certifications?.length ?? 0)) {
+        violations.push(`Certifications: ${orig.certifications!.length} → ${opt.certifications?.length ?? 0}`);
+      }
+      if ((orig.projects?.length ?? 0) > 0 && (opt.projects?.length ?? 0) < (orig.projects?.length ?? 0)) {
+        violations.push(`Projects: ${orig.projects!.length} → ${opt.projects?.length ?? 0}`);
+      }
+
+      if (violations.length > 0) {
+        console.error(`[Supervisor] ZERO DATA LOSS VIOLATION: ${violations.join(", ")}`);
+        // Restore missing entries from source
+        if (opt.experience.length < orig.experience.length) {
+          const optIds = new Set(opt.experience.map(e => e.id));
+          for (const srcExp of orig.experience) {
+            if (!optIds.has(srcExp.id)) {
+              opt.experience.push({ ...srcExp });
+            }
+          }
+        }
+        if (opt.education.length < orig.education.length) {
+          const optEduIds = new Set(opt.education.map(e => e.id));
+          for (const srcEdu of orig.education) {
+            if (!optEduIds.has(srcEdu.id)) {
+              opt.education.push({ ...srcEdu });
+            }
+          }
+        }
+        if (opt.languages.length < orig.languages.length) {
+          opt.languages = orig.languages.map(l => ({ ...l }));
+        }
+        console.info(`[Supervisor] Restored missing entries from source — Zero Data Loss enforced`);
+      }
+    }
+
     // Update the shared context with the pipeline results
     updateContext({
       optimizedResume: result.optimizedResume,

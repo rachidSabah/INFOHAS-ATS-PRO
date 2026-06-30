@@ -1296,6 +1296,19 @@ ${jobMemory.industry}`);
           console.warn("[Final Safety Net] finalizeResume failed (non-fatal):", finErr?.message);
         }
 
+        // === SENTENCE COMPLETENESS VALIDATOR ===
+        // Reject truncated sentences like "demonstrating strong computer" or "excellent communication and"
+        try {
+          const { validateResumeSentenceCompleteness } = await import("../sentence-validator");
+          const sentenceResult = validateResumeSentenceCompleteness(result.optimizedResume!);
+          if (sentenceResult.issues.length > 0) {
+            console.warn(`[Sentence Validator] Fixed ${sentenceResult.issues.length} truncated sentence(s)`);
+            result.optimizedResume = sentenceResult.cleaned as any;
+          }
+        } catch (sentErr: any) {
+          console.warn("[Sentence Validator] Failed (non-fatal):", sentErr?.message);
+        }
+
         // Warn if the provider is Local Engine (all AI providers failed)
         if (/local\s*engine/i.test(result.provider || "")) {
           log("Resume Optimizer", `⚠ Warning: All AI providers failed. Using local engine output. The resume may not be fully optimized. Please retry when AI providers recover.`);
@@ -2184,29 +2197,15 @@ CONTENT REQUIREMENTS:
           };
         })
       : resume.experience,
-    education: (data.education ?? []).length > 0
-      ? data.education.map((ed: any) => ({
-          id: uid("ed"),
-          degree: String(ed.degree || ""),
-          institution: String(ed.institution || ""),
-          field: String(ed.field || ""),
-          location: flattenLocation(ed.location) || "",
-          startDate: String(ed.startDate || ""),
-          endDate: String(ed.endDate || ""),
-          highlights: ed.modules ? [`Modules: ${ed.modules}`] : ed.highlights || [],
-        }))
-      : resume.education,
+    // === ZERO DATA LOSS: Education ALWAYS from source (immutable) ===
+    // The AI is NOT allowed to modify, drop, or replace education.
+    education: resume.education.map((ed) => ({ ...ed })),
     skills,
     projects: resume.projects,
     certifications: resume.certifications,
-    languages: (data.languages ?? []).length > 0
-      ? data.languages.map((l: any) => ({
-          id: uid("l"),
-          name: l.name || "",
-          proficiency: (l.proficiency || "fluent").toLowerCase() as any,
-          ...(l.note ? { note: l.note } : {}),
-        })) as any
-      : resume.languages,
+    // === ZERO DATA LOSS: Languages ALWAYS from source (immutable) ===
+    // The AI is NOT allowed to modify, drop, or replace languages.
+    languages: resume.languages.map((l) => ({ ...l })),
     template: resume.template || "infohas-pro",
     accentColor: resume.accentColor || "#0563C1",
     photoUrl: resume.photoUrl,
