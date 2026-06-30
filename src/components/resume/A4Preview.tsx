@@ -4,6 +4,7 @@ import { forwardRef, useMemo } from "react";
 import type { ResumeData, RenderDocument } from "@/lib/types";
 import { useApp } from "@/lib/store";
 import { RenderDocumentPreview } from "./RenderDocumentPreview";
+import { toRenderDocument } from "@/lib/render-document";
 
 interface A4PreviewProps {
   resume: ResumeData;
@@ -86,7 +87,6 @@ const RenderDocumentA4Preview = forwardRef<HTMLDivElement, A4PreviewProps>(funct
   { resume, scale, className },
   ref
 ) {
-  const { toRenderDocument } = require("@/lib/render-document");
   const rd: RenderDocument = useMemo(() => toRenderDocument(resume), [resume]);
   return (
     <div ref={ref}>

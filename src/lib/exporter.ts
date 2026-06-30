@@ -1027,11 +1027,11 @@ export function exportHtmlAsDOC(htmlContent: string, filename: string, template:
  */
 import { computeSectionHashes } from "./section-hash";
 
-function validateRenderParity(resume: ResumeData, layout?: ResumeLayoutModel): string[] {
+async function validateRenderParity(resume: ResumeData, layout?: ResumeLayoutModel): Promise<string[]> {
   const warnings: string[] = [];
   try {
-    // Dynamic import to avoid circular dependency
-    const { toRenderDocument } = require("./render-document");
+    // Dynamic import to avoid circular dependency (render-document imports from this file)
+    const { toRenderDocument } = await import("./render-document");
     const rd = toRenderDocument(resume, layout);
     const hashes = computeSectionHashes(rd);
 
