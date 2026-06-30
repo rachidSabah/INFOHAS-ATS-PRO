@@ -61,3 +61,6 @@ tool-results/
 
 # Build-time generated repo index (committed for Cloudflare Pages, regenerated on each build)
 # public/repo-index.json
+
+# Plugin SDK — generated registry
+src/lib/plugin-sdk/plugin-registry.generated.ts
