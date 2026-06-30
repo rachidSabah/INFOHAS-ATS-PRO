@@ -1276,3 +1276,73 @@ export type OptimizationStage =
   | "languages"
   | "assembly";
 
+// ====================================================================
+// Preservation Architecture v2 — Section Fingerprints & Snapshot
+// ====================================================================
+
+/**
+ * Fingerprint for a single section — computed from canonical resume fields.
+ * Enables before/after comparison in the Guardian and Supervisor.
+ */
+export interface SectionFingerprint {
+  /** Stable section type (e.g. "professionalExperience", "education", "languages") */
+  sectionType: string;
+  /** Number of top-level entities in this section (e.g. experience entries, languages) */
+  entityCount: number;
+  /** Total text content character count (bullets + highlights + names) */
+  contentCount: number;
+  /** Total bullet/highlight items across all entities */
+  bulletCount: number;
+  /** FNV-1a hash of the canonical serialized content for this section alone */
+  hash: string;
+}
+
+/**
+ * Immutable snapshot created immediately after parsing.
+ * Represents the CANONICAL, UNALTERABLE source of truth.
+ * The optimizer may ONLY modify optimizable fields; the snapshot
+ * is used by the Merge Engine and Guardian to enforce preservation.
+ */
+export interface PreservationSnapshot {
+  /** When this snapshot was created */
+  createdAt: string;
+  /** Source file name (if from upload) or "manual" */
+  source: string;
+  /** Total section count (every section type that has >= 1 entity) */
+  sectionCount: number;
+  /** Per-section fingerprints for comparison */
+  sections: SectionFingerprint[];
+  /** Complete entity IDs for every entity in the resume */
+  entityIds: {
+    experience: string[];
+    education: string[];
+    skills: string[];
+    languages: string[];
+    projects: string[];
+    certifications: string[];
+    dynamicSections: string[];
+  };
+  /** Immutable fields — NEVER modified by optimization */
+  immutable: {
+    name: string;
+    email?: string;
+    phone?: string;
+    employerNames: string[];
+    institutionNames: string[];
+    degreeNames: string[];
+    languageNames: string[];
+    experienceDates: Array<{ id: string; startDate: string; endDate: string }>;
+    educationDates: Array<{ id: string; startDate: string; endDate: string }>;
+    certificationNames: string[];
+    projectNames: string[];
+  };
+  /** Optimizable fields — initial values for reference */
+  optimizable: {
+    summaryLength: number;
+    headlineLength: number;
+    bulletCount: number;
+    highlightCount: number;
+    skillCategoryCount: number;
+  };
+}
+

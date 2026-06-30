@@ -225,6 +225,51 @@ function checkLanguagesPreserved(optimized: ResumeData, source: ResumeData): Gua
   };
 }
 
+// ── Check 4b: Languages NOT in Skills (critical) ──────────────────────────
+// Languages must NEVER be merged into skills. If a language name appears in
+// skills, it's a data integrity violation.
+function checkLanguagesNotInSkills(optimized: ResumeData, source: ResumeData): GuardianCheck {
+  if (source.languages.length === 0) {
+    return {
+      name: "languages_not_in_skills",
+      passed: true,
+      critical: true,
+      detail: "No languages in source — skipping",
+    };
+  }
+
+  const langNames = new Set(
+    source.languages.map((l) => (l.name || "").toLowerCase().trim()).filter(Boolean),
+  );
+  if (langNames.size === 0) {
+    return {
+      name: "languages_not_in_skills",
+      passed: true,
+      critical: true,
+      detail: "No named languages in source — skipping",
+    };
+  }
+
+  const skillNames = optimized.skills.map((s) => (s.name || "").toLowerCase().trim()).filter(Boolean);
+  const leaked = skillNames.filter((sn) => langNames.has(sn));
+
+  if (leaked.length > 0) {
+    return {
+      name: "languages_not_in_skills",
+      passed: false,
+      critical: true,
+      detail: `Languages found in skills: [${leaked.join(", ")}]. Languages must remain in the Languages section, not skills.`,
+    };
+  }
+
+  return {
+    name: "languages_not_in_skills",
+    passed: true,
+    critical: true,
+    detail: "No language names leaked into skills",
+  };
+}
+
 // ── Check 5: Skills Preserved (non-critical) ───────────────────────────────
 
 function checkSkillsPreserved(optimized: ResumeData, source: ResumeData): GuardianCheck {
@@ -1194,6 +1239,7 @@ export async function runGuardianValidation(
   checks.push(checkDatesPreserved(optimized, source));
   checks.push(checkEducationPreserved(optimized, source));
   checks.push(checkLanguagesPreserved(optimized, source));
+  checks.push(checkLanguagesNotInSkills(optimized, source));
   checks.push(checkSkillsPreserved(optimized, source));
   checks.push(checkTemplatePreserved(optimized, source));
   checks.push(checkLayoutPreserved(optimized, source));
@@ -1407,6 +1453,7 @@ function assertResumeExportableWithSource(
     checkDatesPreserved(resume, source),
     checkEducationPreserved(resume, source),
     checkLanguagesPreserved(resume, source),
+    checkLanguagesNotInSkills(resume, source),
     checkSkillsPreserved(resume, source),
     checkTemplatePreserved(resume, source),
     checkNoHallucinations(resume, source),
