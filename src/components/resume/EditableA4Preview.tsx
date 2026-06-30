@@ -357,6 +357,75 @@ export function EditableA4Preview({ resume, onChange, scale = 0.7, className }: 
                 </InfohasSection>
               </EditableBlock>
             )}
+
+            {/* CERTIFICATIONS */}
+            {resume.certifications && resume.certifications.length > 0 && (
+              <InfohasSection title="CERTIFICATIONS">
+                <ul style={{ margin: 0, paddingLeft: `${L.bulletIndentMm}mm`, listStyleType: "•", lineHeight: 1.2 }}>
+                  {resume.certifications.map((cert) => (
+                    <li key={cert.id} style={{ color: BLACK, lineHeight: 1.2 }}>
+                      {safeRender(cert.name)}{cert.issuer ? ` — ${safeRender(cert.issuer)}` : ""}{cert.date ? ` (${cert.date})` : ""}
+                    </li>
+                  ))}
+                </ul>
+              </InfohasSection>
+            )}
+
+            {/* PROJECTS */}
+            {resume.projects && resume.projects.length > 0 && (
+              <InfohasSection title="PROJECTS">
+                {resume.projects.slice(0, 3).map((proj) => (
+                  <div key={proj.id} style={{ marginBottom: "0.5mm" }}>
+                    <div style={{ fontWeight: 700, color: BLACK, lineHeight: 1.2 }}>
+                      {safeRender(proj.name)}
+                    </div>
+                    {proj.description && (
+                      <p style={{ margin: "0.2mm 0", color: BLACK, lineHeight: 1.2, textAlign: "justify" }}>
+                        {safeRender(proj.description)}
+                      </p>
+                    )}
+                    {proj.bullets && proj.bullets.length > 0 && (
+                      <ul style={{ margin: 0, paddingLeft: `${L.bulletIndentMm}mm`, listStyleType: "•", lineHeight: 1.2 }}>
+                        {proj.bullets.map((b, i) => (
+                          <li key={i} style={{ color: BLACK, lineHeight: 1.2 }}>{safeRender(b)}</li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
+                ))}
+              </InfohasSection>
+            )}
+
+            {/* DYNAMIC SECTIONS — renders any section type not covered by static fields above */}
+            {resume.dynamicSections && resume.dynamicSections.length > 0 && resume.dynamicSections.map((ds) => (
+              <InfohasSection key={ds.id} title={ds.title.toUpperCase()}>
+                {ds.content && (
+                  <p style={{ margin: 0, color: BLACK, lineHeight: 1.2, textAlign: "justify" }}>
+                    {safeRender(ds.content)}
+                  </p>
+                )}
+                {ds.bullets && ds.bullets.length > 0 && (
+                  <ul style={{ margin: "0.3mm 0 0 0", paddingLeft: `${L.bulletIndentMm}mm`, listStyleType: "•", lineHeight: 1.2 }}>
+                    {ds.bullets.map((b, i) => (
+                      <li key={i} style={{ color: BLACK, lineHeight: 1.2 }}>{safeRender(b)}</li>
+                    ))}
+                  </ul>
+                )}
+              </InfohasSection>
+            ))}
+
+            {/* ADDITIONAL INFORMATION */}
+            {resume.additionalInfo && (
+              <InfohasSection title="ADDITIONAL INFORMATION">
+                {resume.additionalInfo.split("\n").map((line, i) => (
+                  line.trim() ? (
+                    <p key={i} style={{ margin: 0, color: BLACK, lineHeight: 1.2, textAlign: "justify" }}>
+                      {safeRender(line.trim())}
+                    </p>
+                  ) : null
+                ))}
+              </InfohasSection>
+            )}
           </div>
         </div>
         </div>

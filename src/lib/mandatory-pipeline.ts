@@ -541,6 +541,15 @@ function mapAIToResumeData(data: any, original: ResumeData): ResumeData {
     updatedAt: new Date().toISOString(),
     source: "ai-optimized",
     fileName: original.fileName,
+    // Preserve dynamic sections and additional info — the AI optimizer
+    // patches content sections but MUST NOT strip non-content metadata.
+    dynamicSections: (data.dynamicSections && data.dynamicSections.length > 0
+      ? data.dynamicSections
+      : original.dynamicSections) || [],
+    additionalInfo: data.additionalInfo || original.additionalInfo || "",
+    achievements: (data.achievements && data.achievements.length > 0
+      ? data.achievements
+      : original.achievements) || [],
   };
 
   return result;

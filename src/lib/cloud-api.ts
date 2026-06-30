@@ -336,16 +336,50 @@ export async function syncAllFromCloud(store: any): Promise<void> {
     // [PROVIDER SYNC] Synchronize D1 providers with seed defaults.
     // This merges API keys (from env vars), fixes invalid model names,
     // restores missing timeouts/maxTokens, and backfills missing providers.
-    const { syncProviderConfigs } = await import("./provider-sync");
-    const { providers: syncedProviders, result: syncResult } = syncProviderConfigs(providers as any);
-    if (syncResult.driftDetected) {
-      console.warn(
-        `[PROVIDER SYNC] Database drift detected. ` +
-        `${syncResult.repaired} repaired, ${syncResult.backfilled} backfilled. ` +
-        `Details: ${syncResult.driftDetails.join("; ")}`
-      );
+    const { syncProviderConfigs, calculateProviderHash } = await import("./provider-sync");
+    
+    // === HASH GUARD: Skip sync entirely if provider state is unchanged ===
+    const providerHash = calculateProviderHash(providers);
+    const lastHash = store.getState()._lastProviderHash || "";
+    if (providerHash !== lastHash) {
+      const { providers: syncedProviders, result: syncResult } = syncProviderConfigs(providers as any);
+      
+      // Persist backfilled providers to D1 so they survive refresh
+      if (syncResult.backfilled > 0) {
+        const backfilled = syncedProviders.filter(
+          (p: any) => !providers.some((d1: any) => d1.id === p.id)
+        );
+        for (const bp of backfilled) {
+          api.createProvider(bp).catch((e: any) => {
+            console.warn("[provider-sync] Backfill persist failed:", e instanceof Error ? e.message : e);
+          });
+        }
+      }
+      
+      // Deep equality check before store.setState
+      const currentProviders = store.getState().providers;
+      const currentJson = JSON.stringify(currentProviders);
+      const syncedJson = JSON.stringify(syncedProviders);
+      if (currentJson !== syncedJson) {
+        store.setState({ providers: syncedProviders, _lastProviderHash: calculateProviderHash(syncedProviders) });
+      } else {
+        // Store unchanged — just update hash to prevent future checks
+        store.setState({ _lastProviderHash: providerHash });
+      }
+      
+      if (syncResult.driftDetected) {
+        console.warn(
+          `[PROVIDER SYNC] Database drift detected. ` +
+          `${syncResult.repaired} repaired, ${syncResult.backfilled} backfilled. ` +
+          `Details: ${syncResult.driftDetails.join("; ")}`
+        );
+      } else {
+        console.info("[PROVIDER SYNC] Provider registry synchronized.");
+      }
+    } else {
+      // No drift — single line log
+      console.info("[PROVIDER SYNC] Provider registry already up-to-date.");
     }
-    store.setState({ providers: syncedProviders });
     if (prompts.length) store.setState({ prompts });
     if (logs.length) store.setState({ logs });
 

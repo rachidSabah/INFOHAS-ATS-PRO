@@ -129,6 +129,9 @@ interface AppState {
   // needs to be called from a useEffect to apply it (avoids hydration mismatch).
   _needsRehydrate: boolean;
 
+  // Provider sync hash — ensures deterministic sync across refresh
+  _lastProviderHash: string;
+
   // fallback offer (rate-limit UI)
   fallbackOfferOpen: boolean;
   fallbackOfferChoices: AIProvider[];
@@ -480,6 +483,7 @@ export const useApp = create<AppState>()(
       // Flag: true when a session was found in localStorage at module load
       // and needs to be applied via rehydrateSession() after hydration.
       _needsRehydrate: _hasPendingRehydration,
+      _lastProviderHash: "",
       fallbackOfferOpen: false,
       fallbackOfferChoices: [],
       fallbackOfferCurrentProviderId: null,
@@ -1069,28 +1073,42 @@ export const useApp = create<AppState>()(
       addProvider: (p) => {
         set((s) => ({ providers: [...s.providers, p] }));
         cloudApiSafe(createProvider)(p).catch((e) => { console.warn("[store] Cloud sync failed:", e instanceof Error ? e.message : e); });
-        // [PROVIDER SYNC] After adding a provider, sync all providers with seed defaults
-        // to ensure API keys and model names stay consistent.
+        // [PROVIDER SYNC] Sync with hash guard — only update if content actually changed
         try {
-          import("./provider-sync").then(({ syncProviderConfigs }) => {
+          import("./provider-sync").then(({ syncProviderConfigs, calculateProviderHash }) => {
             const currentProviders = get().providers as any[];
-            const { providers: syncedProviders } = syncProviderConfigs(currentProviders);
-            set({ providers: syncedProviders });
+            const currentHash = calculateProviderHash(currentProviders);
+            const lastHash = get()._lastProviderHash;
+            if (currentHash !== lastHash) {
+              const { providers: syncedProviders } = syncProviderConfigs(currentProviders);
+              const syncedJson = JSON.stringify(syncedProviders);
+              const currentJson = JSON.stringify(currentProviders);
+              if (currentJson !== syncedJson) {
+                set({ providers: syncedProviders, _lastProviderHash: calculateProviderHash(syncedProviders) });
+              }
+            }
           }).catch(() => {});
         } catch { /* non-fatal */ }
       },
       updateProvider: (id, patch) => {
         set((s) => ({ providers: s.providers.map((p) => (p.id === id ? { ...p, ...patch, updatedAt: new Date().toISOString() } : p)) }));
         cloudApiSafe(updateProvider)(id, patch).catch((e) => { console.warn("[store] Cloud sync failed:", e instanceof Error ? e.message : e); });
-        // [PROVIDER SYNC] After updating a provider, sync all providers with seed defaults
-        // to ensure API keys and model names stay consistent (especially when a new API key is added).
+        // [PROVIDER SYNC] Sync with hash guard — only update if content actually changed
         try {
-          import("./provider-sync").then(({ syncProviderConfigs }) => {
+          import("./provider-sync").then(({ syncProviderConfigs, calculateProviderHash }) => {
             const currentProviders = get().providers as any[];
-            const { providers: syncedProviders, result } = syncProviderConfigs(currentProviders);
-            if (result.repaired > 0 || result.backfilled > 0) {
-              set({ providers: syncedProviders });
-              console.info(`[PROVIDER SYNC] Provider updated. ${result.repaired} repaired, ${result.backfilled} backfilled.`);
+            const currentHash = calculateProviderHash(currentProviders);
+            const lastHash = get()._lastProviderHash;
+            if (currentHash !== lastHash) {
+              const { providers: syncedProviders, result } = syncProviderConfigs(currentProviders);
+              const syncedJson = JSON.stringify(syncedProviders);
+              const currentJson = JSON.stringify(currentProviders);
+              if (currentJson !== syncedJson) {
+                set({ providers: syncedProviders, _lastProviderHash: calculateProviderHash(syncedProviders) });
+                if (result.repaired > 0 || result.backfilled > 0) {
+                  console.info(`[PROVIDER SYNC] Provider updated. ${result.repaired} repaired, ${result.backfilled} backfilled.`);
+                }
+              }
             }
           }).catch(() => {});
         } catch { /* non-fatal */ }

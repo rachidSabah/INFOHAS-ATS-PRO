@@ -1043,19 +1043,19 @@ export function Optimizer() {
                       const exportCheck = validateResumeForExport(optimizedResume);
                       if (!exportCheck.valid && exportCheck.cleanedResume) {
                         toast.warning("Cleaned error leaks from resume before export.");
-                        const r = await exportResumePDF(exportCheck.cleanedResume, { enforceOnePage: true });
+                        const r = await exportResumePDF(exportCheck.cleanedResume, { enforceOnePage: true }, undefined, resume);
                         if (r.ok) { incUsage("downloads"); toast.success("PDF exported — 1 A4 page."); } else toast.error(r.error || "Export failed.");
                       } else if (!exportCheck.valid) {
                         toast.error("Resume contains errors and cannot be exported. Please regenerate.");
                       } else {
-                        const r = await exportResumePDF(optimizedResume, { enforceOnePage: true });
+                        const r = await exportResumePDF(optimizedResume, { enforceOnePage: true }, undefined, resume);
                         if (r.ok) { incUsage("downloads"); toast.success("PDF exported — 1 A4 page."); } else toast.error(r.error || "Export failed.");
                       }
                     }} className="bg-brand hover:bg-brand-dark text-white gap-2"><Icon name="Download" className="w-4 h-4" /> optimized_resume.pdf</Button>
                     <Button variant="outline" onClick={() => {
                       const exportCheck = validateResumeForExport(optimizedResume);
                       const r = exportCheck.cleanedResume || optimizedResume;
-                      exportResumeDOC(r);
+                      exportResumeDOC(r, "professional", resume);
                       incUsage("downloads");
                       log({ actor: "you", action: "Exported resume (DOC)", category: "export", details: `Times New Roman 12pt · @page A4 · ${pipelineResult?.charCount ?? "?"} chars`, severity: "info" });
                       toast.success("DOC exported — strict A4 one-page layout.");
@@ -1066,7 +1066,7 @@ export function Optimizer() {
                     <Button variant="outline" onClick={async () => {
                       const exportCheck = validateResumeForExport(optimizedResume);
                       const r = exportCheck.cleanedResume || optimizedResume;
-                      await exportResumeDOCX(r);
+                      await exportResumeDOCX(r, undefined, resume);
                       incUsage("downloads");
                       toast.success("DOCX exported.");
                       if (exportCheck.cleanedResume) toast.warning("Cleaned error leaks from resume before export.");
@@ -1074,7 +1074,7 @@ export function Optimizer() {
                     <Button variant="outline" onClick={() => {
                       const exportCheck = validateResumeForExport(optimizedResume);
                       const r = exportCheck.cleanedResume || optimizedResume;
-                      exportResumeTXT(r);
+                      exportResumeTXT(r, resume);
                       incUsage("downloads");
                       toast.success("TXT exported.");
                       if (exportCheck.cleanedResume) toast.warning("Cleaned error leaks from resume before export.");

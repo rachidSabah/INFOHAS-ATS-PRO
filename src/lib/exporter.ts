@@ -318,7 +318,14 @@ interface PDFOptions {
   enforceOnePage?: boolean;
 }
 
-export async function exportResumePDF(resume: ResumeData, opts: PDFOptions = {}, layout?: ResumeLayoutModel): Promise<{ ok: boolean; pages: number; error?: string }> {
+export async function exportResumePDF(resume: ResumeData, opts: PDFOptions = {}, layout?: ResumeLayoutModel, sourceResume?: ResumeData | null): Promise<{ ok: boolean; pages: number; error?: string }> {
+  // ── EXPORT GATE ──────────────────────────────────────────────────────
+  const gateResult = validateExportCompleteness(sourceResume ?? null, resume);
+  if (!gateResult.ok) {
+    const msg = gateResult.errors.join("\n");
+    throw new Error(`Export cancelled: data-loss detected.\n${msg}`);
+  }
+
   const L = layout ?? getDefaultResumeLayout();
   if (resume.template === "infohas-pro" || opts.template === "infohas-pro") {
     return exportInfohasProPDF(resume, opts, L);
@@ -933,7 +940,14 @@ function formatDate(d?: string): string {
 
 // ---------- TXT ----------
 
-export function exportResumeTXT(resume: ResumeData) {
+export function exportResumeTXT(resume: ResumeData, sourceResume?: ResumeData | null) {
+  // ── EXPORT GATE ──────────────────────────────────────────────────────
+  const gateResult = validateExportCompleteness(sourceResume ?? null, resume);
+  if (!gateResult.ok) {
+    const msg = gateResult.errors.join("\n");
+    throw new Error(`Export cancelled: data-loss detected.\n${msg}`);
+  }
+
   const lines: string[] = [];
   lines.push(resume.name || "");
   if (resume.headline) lines.push(resume.headline);
@@ -998,7 +1012,14 @@ export function exportResumeTXT(resume: ResumeData) {
 // Times New Roman 12pt, single column, left-aligned headers. This is the strict
 // one-page layout the aviation ATS directive requires.
 
-export function exportResumeDOC(resume: ResumeData, template: "professional" | "modern" | "minimal" = "professional") {
+export function exportResumeDOC(resume: ResumeData, template: "professional" | "modern" | "minimal" = "professional", sourceResume?: ResumeData | null) {
+  // ── EXPORT GATE ──────────────────────────────────────────────────────
+  const gateResult = validateExportCompleteness(sourceResume ?? null, resume);
+  if (!gateResult.ok) {
+    const msg = gateResult.errors.join("\n");
+    throw new Error(`Export cancelled: data-loss detected.\n${msg}`);
+  }
+
   const innerHtml = resumeToDirectiveHtml(resume);
   const fullHtml = getDocxHtml(innerHtml, template);
   // .doc with Word namespace opens natively in Word with CSS preserved
@@ -1076,9 +1097,111 @@ async function validateRenderParity(resume: ResumeData, layout?: ResumeLayoutMod
   return warnings;
 }
 
+/**
+ * Validate export completeness: compare the optimized resume against the
+ * source resume and detect any section type that was silently dropped.
+ *
+ * Returns an array of error messages. If empty, the resume is complete.
+ * The caller MUST block export when errors are non-empty.
+ *
+ * This is the primary Export Gate — the last line of defense before
+ * a corrupted resume is sent to the DOCX/PDF/HTML/TXT builders.
+ */
+export function validateExportCompleteness(
+  source: ResumeData | null,
+  optimized: ResumeData
+): { ok: true } | { ok: false; errors: string[] } {
+  const errors: string[] = [];
+
+  if (!source) {
+    // No source to compare against — run basic sanity checks only
+    if (optimized.experience.length === 0) {
+      errors.push("Export blocked: Professional Experience is empty");
+    }
+    if (optimized.education.length === 0 && optimized.experience.length > 0) {
+      errors.push("Export blocked: Education is empty (source likely had it)");
+    }
+    return errors.length > 0 ? { ok: false, errors } : { ok: true };
+  }
+
+  // ── Section-type presence comparison ────────────────────────────────
+  // Define all known section types with a getter and label.
+  const sectionChecks: Array<{
+    label: string;
+    present: (r: ResumeData) => boolean;
+  }> = [
+    { label: "Professional Summary", present: (r) => !!r.summary },
+    { label: "Contact Info", present: (r) => !!(r.contact?.email || r.contact?.phone) },
+    { label: "Professional Experience", present: (r) => r.experience.length > 0 },
+    { label: "Education", present: (r) => r.education.length > 0 },
+    { label: "Key Competencies & Skills", present: (r) => r.skills.length > 0 },
+    { label: "Languages", present: (r) => r.languages.length > 0 },
+    { label: "Certifications", present: (r) => (r.certifications?.length ?? 0) > 0 },
+    { label: "Projects", present: (r) => (r.projects?.length ?? 0) > 0 },
+    { label: "Achievements", present: (r) => (r.achievements?.length ?? 0) > 0 },
+    { label: "Additional Information", present: (r) => !!r.additionalInfo },
+    { label: "Dynamic Sections", present: (r) => (r.dynamicSections?.length ?? 0) > 0 },
+  ];
+
+  for (const check of sectionChecks) {
+    const hadSection = check.present(source);
+    const hasSection = check.present(optimized);
+
+    if (hadSection && !hasSection) {
+      errors.push(
+        `Export blocked: "${check.label}" was present in source but is empty/missing in optimized output. ` +
+        `This indicates data loss in the pipeline — review the resume before exporting.`
+      );
+    }
+  }
+
+  // ── Entity-count sanity check ───────────────────────────────────────
+  // If the source had 5 experience entries and the optimized has only 1,
+  // that's likely data loss (not optimization).
+  const entityChecks: Array<{
+    label: string;
+    count: (r: ResumeData) => number;
+    field: string;
+  }> = [
+    { label: "experience", count: (r) => r.experience.length, field: "experience" },
+    { label: "education", count: (r) => r.education.length, field: "education" },
+    { label: "skills", count: (r) => r.skills.length, field: "skills" },
+    { label: "languages", count: (r) => r.languages.length, field: "languages" },
+    { label: "certifications", count: (r) => r.certifications?.length ?? 0, field: "certifications" },
+    { label: "projects", count: (r) => r.projects?.length ?? 0, field: "projects" },
+  ];
+
+  for (const check of entityChecks) {
+    const srcCount = check.count(source);
+    const optCount = check.count(optimized);
+
+    // If source had 2+ entities and optimized lost more than half, flag it.
+    if (srcCount >= 2 && optCount < Math.ceil(srcCount / 2)) {
+      errors.push(
+        `Export blocked: "${check.label}" dropped from ${srcCount} to ${optCount} entries ` +
+        `(lost >50%). This likely indicates a pipeline data-loss bug.`
+      );
+    }
+  }
+
+  return errors.length > 0 ? { ok: false, errors } : { ok: true };
+}
+
 // ---------- DOCX ----------
 
-export async function exportResumeDOCX(resume: ResumeData, layout?: ResumeLayoutModel) {
+export async function exportResumeDOCX(resume: ResumeData, layout?: ResumeLayoutModel, sourceResume?: ResumeData | null) {
+  // ── EXPORT GATE: Section-level completeness check ─────────────────────
+  // Compare against source resume (if available) to detect data loss.
+  const gateResult = validateExportCompleteness(sourceResume ?? null, resume);
+  if (!gateResult.ok) {
+    const msg = gateResult.errors.join("\n");
+    console.error("[Export Gate] BLOCKED export — data loss detected:\n", msg);
+    throw new Error(
+      `Export cancelled: ${gateResult.errors.length} data-loss issue(s) detected.\n` +
+      `Please review the optimized resume before exporting.\n\nDetails:\n${msg}`
+    );
+  }
+
   // ── EXPORT GATE: Pre-export consistency check ──────────────────────────
   // Verify the resume data doesn't have obvious corruption before exporting.
   const corruptionWarnings: string[] = [];
