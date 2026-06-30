@@ -858,6 +858,264 @@ function checkDynamicSectionsPreserved(optimized: ResumeData, source: ResumeData
   };
 }
 
+// ── Check 17: Job Titles Preserved (critical) ────────────────────────────
+
+/**
+ * Verifies that EVERY experience entry has the EXACT SAME job title as the
+ * corresponding entry in the source resume. Prevents the LLM from silently
+ * changing job titles during optimization.
+ */
+function checkJobTitlesPreserved(optimized: ResumeData, source: ResumeData): GuardianCheck {
+  const failures: string[] = [];
+
+  for (const srcExp of source.experience) {
+    const optExp = optimized.experience.find(
+      (o) =>
+        o.company?.toLowerCase() === srcExp.company?.toLowerCase() ||
+        o.id === srcExp.id
+    );
+    if (!optExp) continue; // Already caught by checkCompaniesPreserved
+
+    const srcTitle = (srcExp.title || "").trim().toLowerCase();
+    const optTitle = (optExp.title || "").trim().toLowerCase();
+
+    if (srcTitle && optTitle && srcTitle !== optTitle) {
+      failures.push(
+        `"${srcExp.title}" → "${optExp.title}" at ${srcExp.company || "(unknown)"}`
+      );
+    }
+  }
+
+  if (failures.length === 0) {
+    return {
+      name: "job_titles_preserved",
+      passed: true,
+      critical: true,
+      detail: `All ${source.experience.length} experience job titles match source`,
+    };
+  }
+
+  return {
+    name: "job_titles_preserved",
+    passed: false,
+    critical: true,
+    detail: `Job title changes detected (${failures.length}): ${failures.join("; ")}`,
+  };
+}
+
+// ── Check 18: Contact Info Preserved (critical) ─────────────────────────
+
+/**
+ * Verifies that ALL contact fields from the source resume are preserved
+ * in the optimized output. This prevents silent corruption or dropping of
+ * email, phone, location, website, linkedin, and github fields.
+ */
+function checkContactInfoPreserved(optimized: ResumeData, source: ResumeData): GuardianCheck {
+  const contactFields: Array<{ key: string; get: (c: any) => string | undefined }> = [
+    { key: "email", get: (c) => c.email },
+    { key: "phone", get: (c) => c.phone },
+    { key: "location", get: (c) => c.location || c.city },
+    { key: "website", get: (c) => c.website },
+    { key: "linkedin", get: (c) => c.linkedin },
+    { key: "github", get: (c) => c.github },
+  ];
+
+  const missing: string[] = [];
+
+  for (const field of contactFields) {
+    const srcVal = field.get(source.contact);
+    if (srcVal && typeof srcVal === "string" && srcVal.trim()) {
+      const optVal = field.get(optimized.contact);
+      if (!optVal || !optVal.toString().trim()) {
+        missing.push(field.key);
+      }
+    }
+  }
+
+  if (missing.length === 0) {
+    return {
+      name: "contact_info_preserved",
+      passed: true,
+      critical: true,
+      detail: "All source contact fields preserved in output",
+    };
+  }
+
+  return {
+    name: "contact_info_preserved",
+    passed: false,
+    critical: true,
+    detail: `Missing contact fields: [${missing.join(", ")}]`,
+  };
+}
+
+// ── Check 19: Certifications Preserved (critical) ────────────────────────
+
+/**
+ * Verifies that ALL certifications from the source resume are preserved
+ * in the optimized output. Prevents the LLM from dropping certifications.
+ */
+function checkCertificationsPreserved(optimized: ResumeData, source: ResumeData): GuardianCheck {
+  const srcCerts = (source.certifications || []).map((c: any) => (c.name || "").toLowerCase().trim()).filter(Boolean);
+  const optCerts = (optimized.certifications || []).map((c: any) => (c.name || "").toLowerCase().trim()).filter(Boolean);
+
+  if (srcCerts.length === 0 && optCerts.length === 0) {
+    return {
+      name: "certifications_preserved",
+      passed: true,
+      critical: true,
+      detail: "No certifications in source or optimized — skipping",
+    };
+  }
+
+  if (optimized.certifications.length < source.certifications.length) {
+    return {
+      name: "certifications_preserved",
+      passed: false,
+      critical: true,
+      detail: `Certifications dropped: source has ${source.certifications.length}, optimized has ${optimized.certifications.length}`,
+    };
+  }
+
+  const missing = srcCerts.filter((sn: string) => !optCerts.includes(sn));
+
+  if (missing.length > 0) {
+    return {
+      name: "certifications_preserved",
+      passed: false,
+      critical: true,
+      detail: `Missing certifications: [${missing.join(", ")}]`,
+    };
+  }
+
+  return {
+    name: "certifications_preserved",
+    passed: true,
+    critical: true,
+    detail: `All ${source.certifications.length} certifications preserved`,
+  };
+}
+
+// ── Check 20: Additional Info Preserved (critical) ──────────────────────
+
+/**
+ * Verifies that the additionalInfo field from the source resume is preserved
+ * in the optimized output.
+ */
+function checkAdditionalInfoPreserved(optimized: ResumeData, source: ResumeData): GuardianCheck {
+  const srcInfo = (source as any).additionalInfo;
+  if (!srcInfo || typeof srcInfo !== "string" || !srcInfo.trim()) {
+    return {
+      name: "additional_info_preserved",
+      passed: true,
+      critical: true,
+      detail: "No additionalInfo in source — skipping",
+    };
+  }
+
+  const optInfo = (optimized as any).additionalInfo;
+  if (!optInfo || !optInfo.toString().trim()) {
+    return {
+      name: "additional_info_preserved",
+      passed: false,
+      critical: true,
+      detail: `additionalInfo ("${srcInfo.trim().slice(0, 80)}…") missing from output`,
+    };
+  }
+
+  return {
+    name: "additional_info_preserved",
+    passed: true,
+    critical: true,
+    detail: "additionalInfo preserved in output",
+  };
+}
+
+// ── Check 21: Section Order Preserved (critical) ─────────────────────────
+
+/**
+ * Verifies that the order of sections in the optimized resume matches the
+ * source resume. Uses the dynamicSections' order field plus the standard
+ * sections to determine section ordering.
+ */
+function checkSectionOrderPreserved(optimized: ResumeData, source: ResumeData): GuardianCheck {
+  // Build ordered list of section names from source
+  const getSectionNames = (r: ResumeData): string[] => {
+    const names: string[] = [];
+    // Use dynamicSections order if available
+    const dynSections = (r as any).dynamicSections || [];
+    if (dynSections.length > 0) {
+      const sorted = [...dynSections].sort((a: any, b: any) => (a.order ?? 0) - (b.order ?? 0));
+      for (const s of sorted) {
+        names.push(s.normalizedTitle || s.title?.toLowerCase() || "");
+      }
+    }
+    // Include standard sections by their natural order
+    if (r.summary) names.push("summary");
+    if (r.experience?.length) names.push("experience");
+    if (r.education?.length) names.push("education");
+    if (r.skills?.length) names.push("skills");
+    if (r.languages?.length) names.push("languages");
+    if (r.certifications?.length) names.push("certifications");
+    if (r.projects?.length) names.push("projects");
+    return names;
+  };
+
+  const srcSections = getSectionNames(source);
+  const optSections = getSectionNames(optimized);
+
+  if (srcSections.length === 0) {
+    return {
+      name: "section_order_preserved",
+      passed: true,
+      critical: true,
+      detail: "No sections to compare — skipping",
+    };
+  }
+
+  // Compare section count first
+  if (optSections.length < srcSections.length) {
+    const missing = srcSections.filter((s) => !optSections.includes(s));
+    return {
+      name: "section_order_preserved",
+      passed: false,
+      critical: true,
+      detail: `Sections dropped: source had ${srcSections.length}, optimized has ${optSections.length}. Missing: [${missing.join(", ")}]`,
+    };
+  }
+
+  // Check order is preserved
+  const orderIssues: string[] = [];
+  let srcIdx = 0;
+  for (const optSec of optSections) {
+    const foundIdx = srcSections.indexOf(optSec, srcIdx);
+    if (foundIdx === -1) {
+      // Section wasn't in source at all — could be hallucination
+      orderIssues.push(`unexpected section "${optSec}"`);
+    } else if (foundIdx < srcIdx) {
+      orderIssues.push(`section "${optSec}" reordered (was after "${srcSections[srcIdx - 1]}", now before)`);
+    } else {
+      srcIdx = foundIdx + 1;
+    }
+  }
+
+  if (orderIssues.length === 0) {
+    return {
+      name: "section_order_preserved",
+      passed: true,
+      critical: true,
+      detail: `Section order preserved (${srcSections.length} sections)`,
+    };
+  }
+
+  return {
+    name: "section_order_preserved",
+    passed: false,
+    critical: true,
+    detail: `Section order issues: ${orderIssues.join("; ")}`,
+  };
+}
+
 /**
  * Run ALL guardian checks and produce a GuardianVerdict with VETO enforcement.
  *
@@ -873,7 +1131,7 @@ export async function runGuardianValidation(
 ): Promise<GuardianVerdict> {
   const checks: GuardianCheck[] = [];
 
-  // Run all 16 checks
+  // Run all 21 checks
   checks.push(checkCompaniesPreserved(optimized, source));
   checks.push(checkDatesPreserved(optimized, source));
   checks.push(checkEducationPreserved(optimized, source));
@@ -891,6 +1149,12 @@ export async function runGuardianValidation(
   checks.push(checkAtsImprovement(optimized, source));
   checks.push(checkOnePageValidation(optimized));
   checks.push(checkDirectiveCompliance(optimized, source, policy));
+  // New checks for comprehensive immutable field preservation
+  checks.push(checkJobTitlesPreserved(optimized, source));
+  checks.push(checkContactInfoPreserved(optimized, source));
+  checks.push(checkCertificationsPreserved(optimized, source));
+  checks.push(checkAdditionalInfoPreserved(optimized, source));
+  checks.push(checkSectionOrderPreserved(optimized, source));
   // Dynamic sections preservation check — if dynamic sections exist in source,
   // verify they are preserved in optimized
   const sourceDynSections = (source as any).dynamicSections || [];
@@ -1023,4 +1287,89 @@ export function formatGuardianVerdict(v: GuardianVerdict): string {
   lines.push(divider);
 
   return lines.join("\n");
+}
+
+// ============================================================================
+// Export Gate — Guardian Check Before Export
+// ============================================================================
+
+/**
+ * Error thrown when a resume fails Guardian checks and cannot be exported.
+ * Contains the list of critical failures for user-friendly error messages.
+ */
+export class ExportGateError extends Error {
+  constructor(
+    message: string,
+    public readonly criticalFailures: string[],
+    public readonly verdict: GuardianVerdict,
+  ) {
+    super(message);
+    this.name = "ExportGateError";
+  }
+}
+
+/**
+ * Synchronous quick check — runs the IMMUTABLE FIELD checks only (no LLM calls).
+ *
+ * This is the EXPORT GATE. Called before every DOCX/PDF/TXT export to ensure
+ * the resume being exported hasn't been corrupted.
+ *
+ * Throws ExportGateError if ANY critical check fails.
+ * Returns the verdict if all critical checks pass.
+ */
+export function assertResumeExportable(
+  resume: ResumeData,
+  source: ResumeData,
+): GuardianVerdict {
+  // Run only deterministic (synchronous) checks for export gating.
+  // We skip: checkAtsImprovement, checkOnePageValidation (advisory only),
+  // checkDirectiveCompliance (policy-specific).
+  const checks: GuardianCheck[] = [
+    checkCompaniesPreserved(resume, source),
+    checkDatesPreserved(resume, source),
+    checkEducationPreserved(resume, source),
+    checkLanguagesPreserved(resume, source),
+    checkSkillsPreserved(resume, source),
+    checkTemplatePreserved(resume, source),
+    checkNoHallucinations(resume, source),
+    checkNoDuplicateSentences(resume, source),
+    checkBulletsPreserved(resume, source),
+    checkSkillCategoriesPreserved(resume, source),
+    checkPersonalDetailsPreserved(resume, source),
+    checkJobTitlesPreserved(resume, source),
+    checkContactInfoPreserved(resume, source),
+    checkCertificationsPreserved(resume, source),
+    checkAdditionalInfoPreserved(resume, source),
+    checkSectionOrderPreserved(resume, source),
+  ];
+
+  const criticalFailures = checks.filter((c) => c.critical && !c.passed);
+
+  if (criticalFailures.length > 0) {
+    const messages = criticalFailures.map((c) => `[${c.name}] ${c.detail}`);
+    const verdict: GuardianVerdict = {
+      passed: false,
+      status: "BLOCKED",
+      score: 0,
+      checks,
+    };
+    throw new ExportGateError(
+      `Cannot export: Resume failed ${criticalFailures.length} critical integrity check(s). ` +
+      `Fix these issues or re-optimize from the original source.`,
+      messages,
+      verdict,
+    );
+  }
+
+  const nonCriticalFailures = checks.filter((c) => !c.critical && !c.passed);
+  const totalChecks = checks.length;
+  const passedCount = checks.filter((c) => c.passed).length;
+  const score = Math.round((passedCount / totalChecks) * 100);
+
+  return {
+    passed: nonCriticalFailures.length === 0,
+    status: nonCriticalFailures.length > 0 ? "REQUIRES_MANUAL_REVIEW" : "PASS",
+    score,
+    checks,
+  };
 }

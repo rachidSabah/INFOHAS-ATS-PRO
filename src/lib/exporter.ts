@@ -1001,6 +1001,44 @@ export function exportHtmlAsDOC(htmlContent: string, filename: string, template:
 // ---------- DOCX ----------
 
 export async function exportResumeDOCX(resume: ResumeData, layout?: ResumeLayoutModel) {
+  // ── EXPORT GATE: Pre-export consistency check ──────────────────────────
+  // Verify the resume data doesn't have obvious corruption before exporting.
+  const corruptionWarnings: string[] = [];
+
+  // Check experience entries for empty company names
+  for (let i = 0; i < resume.experience.length; i++) {
+    const exp = resume.experience[i];
+    if (!exp.company || !exp.company.trim()) {
+      corruptionWarnings.push(`Experience[${i}] has empty company name (title: "${exp.title}")`);
+    }
+    if (!exp.title || !exp.title.trim()) {
+      corruptionWarnings.push(`Experience[${i}] has empty job title`);
+    }
+  }
+
+  // Check education entries exist if source had them (via the resume's own state)
+  if (resume.education.length === 0 && resume.experience.length > 0) {
+    corruptionWarnings.push("Education section is empty");
+  }
+
+  // Check languages exist
+  if (resume.languages.length === 0) {
+    corruptionWarnings.push("Languages section is empty");
+  }
+
+  // Check contact info
+  if (resume.contact && !resume.contact.email && !resume.contact.phone) {
+    corruptionWarnings.push("Contact info missing (no email or phone)");
+  }
+
+  if (corruptionWarnings.length > 0) {
+    console.warn("[Export Gate] Consistency warnings:", corruptionWarnings);
+    // We warn but don't block — the full Guardian check against source
+    // happens during optimization. This is a best-effort catch for
+    // corruption that could occur between optimization and export.
+  }
+  // ── End export gate ─────────────────────────────────────────────────────
+
   // NEW PATH: Convert to RenderDocument (single source of truth) and use the
   // unified DOCX renderer. This ensures section order, contact rendering,
   // skills categories, languages, education highlights, and additional info
