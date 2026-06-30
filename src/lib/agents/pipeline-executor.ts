@@ -244,7 +244,7 @@ export async function execute(
           attemptRec.status = "success";
           attemptRec.bytes = bytes;
 
-          recordSuccess(providerId);
+          circuitBreakerSuccess(providerId);
           onAttempt?.(attemptRec);
 
           return {
@@ -268,7 +268,7 @@ export async function execute(
         attemptRec.status = "success";
         attemptRec.bytes = bytes;
 
-        recordSuccess(providerId);
+        circuitBreakerSuccess(providerId);
         onAttempt?.(attemptRec);
 
         return {
@@ -299,7 +299,7 @@ export async function execute(
         attemptRec.status = "timeout";
         attemptRec.error = errorMsg;
         // Timeouts are retryable
-        recordFailure(providerId);
+        circuitBreakerFailure(providerId, "timeout");
         onAttempt?.(attemptRec);
 
         // Exponential backoff + jitter
@@ -314,7 +314,7 @@ export async function execute(
       if (isTransient(err)) {
         attemptRec.status = "retryable";
         attemptRec.error = errorMsg;
-        recordFailure(providerId);
+        circuitBreakerFailure(providerId, "network");
         onAttempt?.(attemptRec);
 
         // Exponential backoff + jitter
@@ -328,7 +328,7 @@ export async function execute(
       // Non-transient error — fail immediately
       attemptRec.status = "failed";
       attemptRec.error = errorMsg;
-      recordFailure(providerId);
+      circuitBreakerFailure(providerId, "network");
       onAttempt?.(attemptRec);
       break;
     }
