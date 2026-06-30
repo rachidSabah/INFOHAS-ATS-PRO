@@ -127,6 +127,20 @@ export interface DurableObjectStub {
   fetch(url: Request | string, init?: RequestInit): Promise<Response>;
 }
 
+/** Cloudflare Durable Object state — passed to DO constructor */
+export interface DurableObjectState {
+  id: DurableObjectId;
+  storage: {
+    get<T = unknown>(key: string): Promise<T | undefined>;
+    put<T>(key: string, value: T): Promise<void>;
+    delete(key: string): Promise<boolean>;
+    list<T = unknown>(options?: { prefix?: string; limit?: number }): Promise<Map<string, T>>;
+  };
+  waitUntil(promise: Promise<unknown>): void;
+  blockConcurrencyWhile(callback: () => Promise<unknown>): Promise<void>;
+  tags?: string[];
+}
+
 /** Combined Cloudflare bindings passed to handlers */
 export interface CloudflareBindings {
   [key: string]: unknown;

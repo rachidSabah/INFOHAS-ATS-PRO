@@ -279,23 +279,24 @@ export function assembleResume(
       warnings.push(`Removed ${removed.length} forbidden skill(s): ${removed.join(", ")}`);
     }
     skills = filtered;
-    // === SKILL PRESERVATION ===
-    // CRITICAL: If optimizer returns fewer skills than source, merge source skills back in.
-    // This prevents the LLM from silently dropping entire skill entries.
-    if (filtered.length < (sourceResume.skills?.length || 0)) {
+    // === SKILL PRESERVATION (ALWAYS) ===
+    // CRITICAL: Always merge source skills back in, regardless of count.
+    // The optimizer may return more skills (adding JD-relevant ones) but must
+    // NEVER drop source skills. This preserves 100% factual integrity.
+    const existingNames = new Set(filtered.map(s => s.name?.toLowerCase().trim()).filter(Boolean));
+    for (const srcSkill of sourceResume.skills || []) {
+      const key = srcSkill.name?.toLowerCase().trim();
+      if (key && !existingNames.has(key)) {
+        skills.push({ ...srcSkill });
+        existingNames.add(key);
+      }
+    }
+    const totalDropped = (sourceResume.skills?.length || 0) - existingNames.size;
+    if (totalDropped > 0) {
       warnings.push(
         `Optimizer returned ${filtered.length} skills vs ${sourceResume.skills?.length || 0} in source. ` +
-        `Merging source skills to prevent data loss.`
+        `Merged ${totalDropped} dropped source skill(s) to prevent data loss.`
       );
-      // Start with optimizer skills, then add any source skills not already present
-      const existingNames = new Set(filtered.map(s => s.name?.toLowerCase().trim()).filter(Boolean));
-      for (const srcSkill of sourceResume.skills || []) {
-        const key = srcSkill.name?.toLowerCase().trim();
-        if (key && !existingNames.has(key)) {
-          skills.push({ ...srcSkill });
-          existingNames.add(key);
-        }
-      }
     }
     // === SKILL CATEGORY RESTORATION ===
     // The optimizer often drops or mis-assigns categories (puts everything under

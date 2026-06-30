@@ -202,7 +202,7 @@ export function isLikelySectionHeader(line: string): boolean {
  * @returns Array of DynamicSection entries for ALL sections found
  */
 export function extractSectionsFromResume(resume: ResumeData): DynamicSection[] {
-  const sections: DynamicSection[] = [];
+  let sections: DynamicSection[] = [];
   let order = 0;
 
   // --- Summary ---
@@ -380,6 +380,37 @@ export function extractSectionsFromResume(resume: ResumeData): DynamicSection[] 
       }
     }
   }
+
+  // --- Filter out contact/personal info dynamic sections ---
+  // Contact info (name, email, phone, address) is already captured
+  // in the resume's header/contact fields — no need to duplicate.
+  const CONTACT_TITLE_SET = new Set([
+    "personal information",
+    "personal info",
+    "personal details",
+    "contact",
+    "contact information",
+    "contact info",
+    "nationality",
+    "address",
+    "personal",
+  ]);
+  const EMAIL_RE = /[\w.+-]+@[\w-]+\.[\w.-]+/i;
+  // Phone: optional + prefix, then 3-4 digit area (optionally in parens),
+  // then 3-4 digit exchange, then 3-4 digit line. This structure naturally
+  // excludes date ranges like (2020-01 - 2023-12) since those use 2-digit
+  // months/days that don't satisfy the 3-4 digit groups.
+  const PHONE_RE = /[\+]?\(?\d{3,4}\)?[-.\s]?\d{3,4}[-.\s]?\d{3,4}/i;
+
+  sections = sections.filter((s) => {
+    if (CONTACT_TITLE_SET.has(s.normalizedTitle)) {
+      return false;
+    }
+    if (EMAIL_RE.test(s.content) || PHONE_RE.test(s.content)) {
+      return false;
+    }
+    return true;
+  });
 
   return sections;
 }

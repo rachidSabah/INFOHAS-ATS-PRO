@@ -118,7 +118,23 @@ Return ONLY the JSON object with this EXACT shape:
 
 No prose. No markdown fences. No HTML. Only JSON.`;
 
-  return { systemPrompt, userPrompt };
+  // Enforce AI contract at prompt-construction time: ensure critical directives
+  // are present in the prompt before it's sent to any AI provider.
+  const combinedPrompt = systemPrompt + "\n" + userPrompt;
+  const requiredDirectives = [
+    { keyword: "DO NOT change", message: "IMPORTANT: DO NOT change, remove, or reorder experience/education IDs. They are immutable." },
+    { keyword: "Only modify", message: "CRITICAL: Only modify: summary text, experience bullet points, and skill bullet points. Never change job titles, companies, dates, or education entries." },
+    { keyword: "content must not be removed", message: "CRITICAL: Original content must not be removed or reduced unless explicitly instructed." },
+  ];
+
+  let finalSystemPrompt = systemPrompt;
+  for (const directive of requiredDirectives) {
+    if (!combinedPrompt.includes(directive.keyword)) {
+      finalSystemPrompt = directive.message + "\n" + finalSystemPrompt;
+    }
+  }
+
+  return { systemPrompt: finalSystemPrompt, userPrompt };
 }
 
 /**
@@ -234,6 +250,26 @@ export async function runBulletOnlyOptimizer(
   optimizationPolicy?: string | null,
 ): Promise<BulletOnlyOptimizerResult> {
   const { systemPrompt, userPrompt } = buildOptimizerInput(sourceResume, jd, intelligenceContext, directiveConfig, optimizationPolicy);
+
+  // FAST-FAIL: Structural validation before any AI call
+  const structuralErrors: string[] = [];
+  if (!sourceResume.experience || sourceResume.experience.length === 0) {
+    structuralErrors.push("Resume has no experience entries");
+  }
+  if (!sourceResume.education || sourceResume.education.length === 0) {
+    structuralErrors.push("Resume has no education entries");
+  }
+  if (!sourceResume.skills || sourceResume.skills.length === 0) {
+    structuralErrors.push("Resume has no skills");
+  }
+  if (!sourceResume.contact?.email && !sourceResume.contact?.phone) {
+    structuralErrors.push("Resume has no contact information (email or phone)");
+  }
+  if (structuralErrors.length > 0) {
+    throw new Error(
+      `PROVIDER-INDEPENDENT STRUCTURAL FAILURE: ${structuralErrors.join("; ")}`
+    );
+  }
 
   const agentDirectives = directiveConfig?.agentDirectives;
   const temp = agentDirectives?.supervisor?.temperature ?? 0.15;

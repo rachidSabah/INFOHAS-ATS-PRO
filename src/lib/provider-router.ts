@@ -12,6 +12,7 @@
 
 import { useApp } from "./store";
 import type { AIProvider } from "./types";
+import { isProviderInCooldown } from "./provider-cooldown";
 
 // ============================================================================
 // TASK CLASSIFICATION
@@ -140,7 +141,19 @@ export function routeProvider(taskCategory: TaskCategory): RouteResult {
   // Filter providers that can handle this task
   const eligible = activeProviders.filter((p) => canProviderHandleTask(p, taskCategory));
 
-  if (eligible.length === 0) {
+  // Filter out providers currently in cooldown (rate-limited, timed out, billing failures)
+  const eligibleWithoutCooldown = eligible.filter((p) => {
+    const inCooldown = isProviderInCooldown(p.id);
+    if (inCooldown) {
+      console.info(`[Provider Router] Skipping "${p.name}" — in cooldown`);
+    }
+    return !inCooldown;
+  });
+
+  // If all eligible providers are in cooldown, use the original eligible list (degraded mode)
+  const effectiveEligible = eligibleWithoutCooldown.length > 0 ? eligibleWithoutCooldown : eligible;
+
+  if (effectiveEligible.length === 0) {
     return {
       primary: null,
       fallbacks: [],
@@ -158,29 +171,29 @@ export function routeProvider(taskCategory: TaskCategory): RouteResult {
   // 1. Check user's configured default
   let primary: AIProvider | null = null;
   if (settings.defaultProviderId) {
-    primary = eligible.find((p) => p.id === settings.defaultProviderId) || null;
+    primary = effectiveEligible.find((p) => p.id === settings.defaultProviderId) || null;
   }
   // 2. Check isDefault flag
   if (!primary) {
-    primary = eligible.find((p) => p.isDefault) || null;
+    primary = effectiveEligible.find((p) => p.isDefault) || null;
   }
   // 3. For document tasks: pick by priority order (API providers only)
   if (!primary && taskCategory === "document") {
     for (const type of apiPriorityOrder) {
-      const found = eligible.find((p) => p.type === type);
+      const found = effectiveEligible.find((p) => p.type === type);
       if (found) { primary = found; break; }
     }
   }
   // 4. For interactive tasks: prefer Puter (if available), then API providers
   if (!primary && taskCategory === "interactive") {
-    primary = eligible.find((p) => isBrowserAuthProvider(p)) || eligible[0] || null;
+    primary = effectiveEligible.find((p) => isBrowserAuthProvider(p)) || effectiveEligible[0] || null;
   }
   // 5. Fallback: first eligible
   if (!primary) {
-    primary = eligible[0];
+    primary = effectiveEligible[0];
   }
 
-  // Safety: if primary is still null (shouldn't happen after eligible.length > 0 check), return error
+  // Safety: if primary is still null (shouldn't happen after effectiveEligible.length > 0 check), return error
   if (!primary) {
     return {
       primary: null,
@@ -190,7 +203,7 @@ export function routeProvider(taskCategory: TaskCategory): RouteResult {
   }
 
   // Build fallback chain (all eligible except primary) — safe now, primary is guaranteed non-null
-  const fallbacks = eligible.filter((p) => p.id !== primary.id);
+  const fallbacks = effectiveEligible.filter((p) => p.id !== primary.id);
 
   // For document tasks, sort fallbacks by priority order
   if (taskCategory === "document") {

@@ -40,6 +40,9 @@ const CRITICAL_PATTERNS = [
   /\[object object\]/i,
 ];
 
+// Legacy static list — kept as fallback when no JD content is provided.
+// Replaced by dynamic JD content extraction in runStructureGuardian when
+// the jdContent optional parameter is passed.
 const JD_COMPANY_NAMES = [
   "qatar duty free", "qatar airways group", "hamad international airport",
   "doha", "qatar", "dubai", "abu dhabi", "uae",
@@ -47,12 +50,106 @@ const JD_COMPANY_NAMES = [
 ];
 
 /**
+ * Extract meaningful company/location names from JD content for dynamic matching.
+ * Picks capitalized multi-word phrases that appear in the first ~20% of the JD
+ * (where company name usually sits), plus any clearly named entities.
+ */
+function extractJdEntities(jdContent: string): string[] {
+  const entities: string[] = [];
+  const lower = jdContent.toLowerCase();
+
+  // Extract the first ~200 chars (usually contains company name block)
+  const headerBlock = lower.slice(0, 200);
+  // Look for "at X" or "company: X" patterns
+  const namePatterns = [
+    ...headerBlock.matchAll(/\bat\s+([a-z][a-z0-9&.\s]{2,40})/g),
+    ...headerBlock.matchAll(/\bcompany[:\s]*([a-z][a-z0-9&.\s]{2,40})/g),
+    ...headerBlock.matchAll(/\bemployer[:\s]*([a-z][a-z0-9&.\s]{2,40})/g),
+    ...headerBlock.matchAll(/\b(?:hamad international airport|qatar airways|qatar duty free|doha|qatar)\b/g),
+  ];
+
+  for (const m of namePatterns) {
+    const name = m[1] || m[0];
+    const trimmed = name.trim().toLowerCase();
+    if (trimmed.length > 2 && !entities.includes(trimmed)) {
+      entities.push(trimmed);
+    }
+  }
+
+  return entities;
+}
+
+/**
+ * Check if headline text appears to be contaminated with contact information.
+ * Returns a list of issues found.
+ */
+function checkHeadlineForContactContamination(headline: string, resume: ResumeData): string[] {
+  const issues: string[] = [];
+  if (!headline) return issues;
+
+  const hl = headline.toLowerCase();
+  const contact = resume.contact || {};
+
+  // Check if headline contains the candidate's name (duplication)
+  if (resume.name && resume.name.length > 2) {
+    const nameParts = resume.name.toLowerCase().split(/\s+/).filter(Boolean);
+    const nameMatchCount = nameParts.filter((part) => hl.includes(part)).length;
+    if (nameMatchCount >= 2 && nameParts.length >= 2) {
+      issues.push(`Headline contains candidate's name ("${resume.name}") — should be a professional title only`);
+    }
+  }
+
+  // Check if headline contains phone number
+  if (contact.phone) {
+    const phoneDigits = contact.phone.replace(/\D/g, '');
+    if (phoneDigits.length >= 6 && hl.includes(phoneDigits)) {
+      issues.push(`Headline contains phone number`);
+    } else {
+      // Try matching part of the phone
+      const phonePrefix = phoneDigits.slice(0, Math.min(6, phoneDigits.length));
+      if (phonePrefix.length >= 4 && hl.includes(phonePrefix)) {
+        issues.push(`Headline contains phone number`);
+      }
+    }
+  }
+
+  // Check if headline contains email
+  if (contact.email) {
+    const emailPrefix = contact.email.split('@')[0].toLowerCase();
+    if (emailPrefix.length >= 4 && hl.includes(emailPrefix)) {
+      issues.push(`Headline contains email address`);
+    }
+  }
+
+  // Check if headline contains full address/street info
+  if (contact.location) {
+    const locParts = contact.location.toLowerCase().split(/[,;]/).map((s: string) => s.trim()).filter(Boolean);
+    for (const part of locParts) {
+      if (part.length >= 4 && hl.includes(part)) {
+        issues.push(`Headline contains location/address ("${part}")`);
+        break;
+      }
+    }
+  }
+
+  return issues;
+}
+
+/**
  * Run the Resume Structure Guardian on the final resume.
  *
  * Returns PASS if the resume is structurally sound, or
  * REQUIRES_MANUAL_REVIEW if critical issues are found.
+ *
+ * @param jdContent - Optional JD text for dynamic company name extraction.
+ *                    When provided, detected company/location names from the JD
+ *                    are used instead of the static JD_COMPANY_NAMES list.
  */
-export function runStructureGuardian(resume: ResumeData, sourceResume: ResumeData): GuardianResult {
+export function runStructureGuardian(
+  resume: ResumeData,
+  sourceResume: ResumeData,
+  jdContent?: string,
+): GuardianResult {
   const issues: string[] = [];
   const criticalIssues: string[] = [];
   const warnings: string[] = [];
@@ -95,13 +192,26 @@ export function runStructureGuardian(resume: ResumeData, sourceResume: ResumeDat
   // ========================================================================
   // 2. HEADLINE VALIDATION
   // ========================================================================
+
+  // Build dynamic JD entity list (if JD content provided)
+  const dynamicJdEntities = jdContent ? extractJdEntities(jdContent) : [];
+  const allJdEntities = [...new Set([...JD_COMPANY_NAMES, ...dynamicJdEntities])];
+
   if (!resume.headline || resume.headline.trim().length === 0) {
     warnings.push("Headline is empty");
   } else {
     const headlineLower = resume.headline.toLowerCase();
-    const containsJdCompany = JD_COMPANY_NAMES.some((name) => headlineLower.includes(name));
+
+    // Check against JD company names (static + dynamic)
+    const containsJdCompany = allJdEntities.some((name) => headlineLower.includes(name));
     if (containsJdCompany) {
       criticalIssues.push(`Headline contains JD company name: "${resume.headline}"`);
+    }
+
+    // Check for contact contamination (name, phone, email, address in headline)
+    const contactIssues = checkHeadlineForContactContamination(resume.headline, resume);
+    if (contactIssues.length > 0) {
+      criticalIssues.push(...contactIssues);
     }
   }
 
@@ -275,7 +385,7 @@ export function runStructureGuardian(resume: ResumeData, sourceResume: ResumeDat
   } else {
     for (const skill of resume.skills) {
       const skillLower = (skill.name || "").toLowerCase();
-      if (JD_COMPANY_NAMES.some((name) => skillLower === name || skillLower.includes(name))) {
+      if (allJdEntities.some((name) => skillLower === name || skillLower.includes(name))) {
         criticalIssues.push(`Skill "${skill.name}" is a JD company name/location — should not be in skills`);
       }
     }

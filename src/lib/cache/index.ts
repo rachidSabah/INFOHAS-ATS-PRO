@@ -5,6 +5,9 @@
 export { KVCacheClient, createTypedCache } from './kv-cache';
 export type { CacheEntry, CacheConfig, CacheStats } from './kv-cache';
 
+export { RequestDeduplicator } from './request-dedup';
+export type { DedupeOptions, DedupeStats } from './request-dedup';
+
 export { CacheInvalidationService, createDefaultInvalidationRules } from './cache-invalidation';
 export type { InvalidationEvent, InvalidationStrategy, InvalidationRule } from './cache-invalidation';
 

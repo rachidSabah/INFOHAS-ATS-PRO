@@ -15,7 +15,7 @@
 import { createIncident } from "./incident-service";
 import { recordPipelineFailure } from "./telemetry";
 
-export type DegradationLevel = "normal" | "degraded" | "critical" | "offline";
+export type DegradationLevel = "normal" | "degraded" | "degraded-optimization" | "critical" | "offline";
 
 export interface DegradationState {
   level: DegradationLevel;
@@ -117,6 +117,22 @@ export function reportAllProvidersFailed(error: string): void {
     "AI providers are temporarily unavailable. Your data is safe. " +
     "Requests will be processed automatically when providers recover. " +
     "Try again in a few minutes."
+  );
+}
+
+/**
+ * Report that the system fell back to a degraded (local/offline) optimization.
+ * The result is usable but was NOT produced by a real AI provider.
+ * UI should show a "degraded" badge or banner so the user knows the quality
+ * may be lower than a full AI optimization.
+ */
+export function reportDegradedOptimization(reason: string): void {
+  updateState(
+    "degraded-optimization",
+    `Degraded optimization: ${reason}`,
+    "Your resume was optimized using offline fallback because AI providers " +
+    "were unavailable. The result is structurally safe but may have lower " +
+    "quality than a full AI optimization. Export is still available."
   );
 }
 

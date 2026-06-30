@@ -5,10 +5,10 @@
 "use client";
 
 const KNOWN_LANGUAGES = new Set([
-  "english", "french", "arabic", "spanish", "german", "italic", "italian", "chinese", "japanese",
+  "english", "french", "arabic", "spanish", "german", "italian", "chinese", "japanese",
   "russian", "portuguese", "hindi", "bengali", "punjabi", "marathi", "telugu", "tamil",
   "urdu", "turkish", "korean", "vietnamese", "javanese", "thai", "persian",
-  "polish", "romanian", "dutch", "greek", "hungarian", "swedish", "czech", "hebrew",
+  "polish", "romanian", "dutch", "nederlands", "greek", "hungarian", "swedish", "czech", "hebrew",
   "indonesian", "malay", "norwegian", "danish", "finnish", "slovak", "ukrainian", "catalan",
   "swahili", "filipino", "tagalog", "luxembourgish", "kabyle", "berber", "amazigh",
   "latin", "sanskrit", "esperanto", "cantonese", "mandarin", "darija", "gaelic", "irish",
@@ -23,7 +23,7 @@ export function detectLanguage(s: string): { name: string; proficiency: "basic" 
   if (!clean) return null;
 
   const words = clean.toLowerCase().split(/[^a-z]+/);
-  const foundLang = words.find(w => KNOWN_LANGUAGES.has(w));
+  const foundLang = words.find(w => w.length >= 2 && KNOWN_LANGUAGES.has(w));
   if (!foundLang) {
     return null;
   }

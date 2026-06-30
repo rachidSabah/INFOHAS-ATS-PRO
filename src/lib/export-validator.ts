@@ -252,7 +252,24 @@ export function validateForExport(
     }
   }
 
-  // === 5. CROSS-FORMAT CONTENT CHECKSUM ===
+  // === 5. STRUCTURAL WARNINGS ELEVATION ===
+  // Some warnings indicate structural corruption that should block export
+  const structuralWarningPatterns: { pattern: RegExp; message: string }[] = [
+    { pattern: /duplicate dynamic section/i, message: 'Duplicate dynamic section detected' },
+    { pattern: /contact email appears \d+ times/i, message: 'Header duplication — contact info duplicated in body' },
+    { pattern: /section header pattern found in summary/i, message: 'Section header leaked into summary' },
+    { pattern: /all experience entries have zero bullets/i, message: 'All experience entries have zero bullets — possible data loss' },
+  ];
+
+  for (const { pattern, message } of structuralWarningPatterns) {
+    for (const w of warnings) {
+      if (pattern.test(w)) {
+        errors.push(`STRUCTURAL: ${message} — resolve before export`);
+      }
+    }
+  }
+
+  // === 6. CROSS-FORMAT CONTENT CHECKSUM ===
   // Compute and attach content hash for downstream format consistency checks
   const contentHash = computeResumeContentHash(resume);
   const expectedCharCount = canonicalCharCount(resume);

@@ -38,6 +38,7 @@ import { globalEventBus } from "./agent-event-bus";
 import { getCachedOptimization, setCachedOptimization } from "./semantic-cache";
 import { recordProviderSuccess, recordProviderFailure } from "./provider-health-monitor";
 import { runDynamicSectionPipeline } from "./dynamic-section-engine";
+import { reportDegradedOptimization } from "./degradation";
 
 export interface LockedPipelineResult {
   resume: ResumeData;
@@ -48,6 +49,7 @@ export interface LockedPipelineResult {
   errors: string[];
   guardianScore: number;
   guardianStatus: "PASS" | "REQUIRES_MANUAL_REVIEW";
+  isDegraded: boolean;
   fingerprintValid: boolean;
   blueprintValid: boolean;
   templateBlueprintValid: boolean;
@@ -152,6 +154,7 @@ export async function runLockedPipeline(
       templateBlueprintValid: true,
       guardianVerdict: undefined,
       retryCount: 0,
+      isDegraded: false,
       assemblerStats: {
         matchedById: 0, matchedByFingerprint: 0, matchedByTitleCompany: 0,
         matchedByIndex: 0, unmatched: 0,
@@ -184,6 +187,7 @@ export async function runLockedPipeline(
       blueprintValid: true,
       templateBlueprintValid: true,
       retryCount: 0,
+      isDegraded: false,
       assemblerStats: { matchedById: 1, matchedByFingerprint: 0, matchedByTitleCompany: 0, matchedByIndex: 0, unmatched: 0 },
     };
   }
@@ -328,6 +332,67 @@ export async function runLockedPipeline(
         contentViolations.push(`Missing critical contact information (email or name).`);
       }
 
+      // === Fix 7: Bullet immutability — every original bullet from each source experience must be present ===
+      // Bullets are string[] — compare by exact text match to catch removals
+      for (let i = 0; i < sourceResume.experience.length; i++) {
+        const srcExp = sourceResume.experience[i];
+        if (!srcExp.bullets || srcExp.bullets.length === 0) continue;
+        // Find matching assembled experience by ID
+        const assembledExp = assembleResult.resume.experience.find((e: any) => e.id === srcExp.id);
+        if (!assembledExp) {
+          contentViolations.push(`Experience "${srcExp.title || srcExp.id}" missing from assembled result`);
+          continue;
+        }
+        for (let b = 0; b < srcExp.bullets.length; b++) {
+          const srcBulletText = srcExp.bullets[b];
+          const bulletFound = (assembledExp.bullets || []).some(
+            (ab: string) => ab === srcBulletText
+          );
+          if (!bulletFound) {
+            contentViolations.push(
+              `Bullet "${srcBulletText.substring(0, 50)}..." from "${srcExp.title}" was removed`
+            );
+          }
+        }
+      }
+
+      // === Fix 8: Skills/Languages structural immutability ===
+      const srcSkills = sourceResume.skills || [];
+      const assembledSkills = assembleResult.resume.skills || [];
+      for (const srcSkill of srcSkills) {
+        const skillName = typeof srcSkill === "string" ? srcSkill : (srcSkill as any).name;
+        if (!skillName) continue;
+        const found = assembledSkills.some(
+          (as: any) =>
+            (typeof as === "string" ? as : as.name)?.toLowerCase() === skillName.toLowerCase()
+        );
+        if (!found) {
+          contentViolations.push(`Skill "${skillName}" was removed from assembled resume`);
+        }
+      }
+
+      const srcLangs = sourceResume.languages || [];
+      const assembledLangs = assembleResult.resume.languages || [];
+      for (const srcLang of srcLangs) {
+        const langName = typeof srcLang === "string" ? srcLang : (srcLang as any).name;
+        if (!langName) continue;
+        const found = assembledLangs.some(
+          (al: any) =>
+            (typeof al === "string" ? al : al.name)?.toLowerCase() === langName.toLowerCase()
+        );
+        if (!found) {
+          contentViolations.push(`Language "${langName}" was removed from assembled resume`);
+        }
+      }
+
+      // === Fix 9: Header integrity — preserve headline and contact.location ===
+      if (sourceResume.headline && !assembleResult.resume.headline) {
+        contentViolations.push("Headline was dropped from assembled resume");
+      }
+      if (sourceResume.contact?.location && !assembleResult.resume.contact?.location) {
+        contentViolations.push("Location was dropped from assembled resume");
+      }
+
       // Check if ID is missing in any final experience
       for (let i = 0; i < assembleResult.resume.experience.length; i++) {
         const exp = assembleResult.resume.experience[i];
@@ -368,7 +433,7 @@ export async function runLockedPipeline(
       // ========================================================================
       // Step 5: Structure Guardian
       // ========================================================================
-      const guardianResult = runStructureGuardian(assembleResult.resume, sourceResume);
+      const guardianResult = runStructureGuardian(assembleResult.resume, sourceResume, jd.rawText);
       warnings.push(...guardianResult.warnings);
       if (guardianResult.criticalIssues.length > 0) {
         errors.push(...guardianResult.criticalIssues);
@@ -458,6 +523,7 @@ export async function runLockedPipeline(
         templateBlueprintValid: blueprintCheck,
         guardianVerdict,
         retryCount: attempts,
+        isDegraded: false,
         assemblerStats: {
           matchedById: assembleResult.matchedById,
           matchedByFingerprint: assembleResult.matchedByFingerprint,
@@ -500,19 +566,42 @@ export async function runLockedPipeline(
         excludeProviderIds.push(err.provider);
       }
       if (attempts >= maxAttempts) {
-        // Exceeded max attempts, bubble up the error as a LockedPipelineError
-        throw new LockedPipelineError(
-          `Pipeline failed after ${attempts} attempts. Last error: ${err.message || err}`,
-          "REQUIRES_MANUAL_REVIEW",
-          [err.message || String(err)]
-        );
+        // Exceeded max attempts — let the post-loop degraded fallback run
+        console.warn(`[Locked Pipeline] All ${maxAttempts} attempt(s) exhausted. Falling through to degraded return.`);
       }
     }
   }
 
-  throw new LockedPipelineError(
-    `Pipeline failed after execution attempts.`,
-    "REQUIRES_MANUAL_REVIEW",
-    ["Exhausted attempts"]
-  );
+  // After all retries exhausted, fall back to returning the source resume
+  // with a degraded-optimization status instead of hard-failing.
+  // This allows the user to still export their original resume while being
+  // notified that AI optimization was unavailable.
+  console.warn(`[Locked Pipeline] All ${attempts} attempts failed. Returning source resume with degraded-optimization status.`);
+  reportDegradedOptimization("All AI providers failed or returned degraded results. Returning original resume.");
+  warnings.push("Optimization failed after all attempts. Returning original resume without changes.");
+  errors.push("All AI providers failed. Optimization unavailable.");
+  const fallbackCharCount = JSON.stringify({
+    summary: idReadyResume.summary, experience: idReadyResume.experience,
+    skills: idReadyResume.skills, education: idReadyResume.education, languages: idReadyResume.languages,
+  }).length;
+  return {
+    resume: idReadyResume,
+    provider: "degraded-optimization",
+    charCount: fallbackCharCount,
+    keywordsAdded: 0,
+    warnings,
+    errors,
+    guardianScore: 0,
+    guardianStatus: "REQUIRES_MANUAL_REVIEW",
+    fingerprintValid: true,
+    blueprintValid: true,
+    templateBlueprintValid: true,
+    guardianVerdict: undefined,
+    retryCount: attempts,
+    isDegraded: true,
+    assemblerStats: {
+      matchedById: 0, matchedByFingerprint: 0, matchedByTitleCompany: 0,
+      matchedByIndex: 0, unmatched: 0,
+    },
+  };
 }
