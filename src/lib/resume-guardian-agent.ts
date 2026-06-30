@@ -1314,10 +1314,29 @@ export class ExportGateError extends Error {
  * This is the EXPORT GATE. Called before every DOCX/PDF/TXT export to ensure
  * the resume being exported hasn't been corrupted.
  *
+ * When `source` is provided, runs the full comparison between source and resume.
+ * When `source` is omitted, runs self-consistency checks only (verifies no
+ * empty companies, missing education, etc.).
+ *
  * Throws ExportGateError if ANY critical check fails.
  * Returns the verdict if all critical checks pass.
  */
 export function assertResumeExportable(
+  resume: ResumeData,
+  source?: ResumeData,
+): GuardianVerdict {
+  // When source is available, run the full Guardian comparison
+  if (source) {
+    return assertResumeExportableWithSource(resume, source);
+  }
+  // Without source, run self-consistency checks only
+  return assertResumeSelfConsistent(resume);
+}
+
+/**
+ * Full export gating with source comparison — requires the source resume.
+ */
+function assertResumeExportableWithSource(
   resume: ResumeData,
   source: ResumeData,
 ): GuardianVerdict {
@@ -1371,5 +1390,84 @@ export function assertResumeExportable(
     status: nonCriticalFailures.length > 0 ? "REQUIRES_MANUAL_REVIEW" : "PASS",
     score,
     checks,
+  };
+}
+
+/**
+ * Self-consistency check — verifies all required fields are populated
+ * without needing a source resume to compare against.
+ *
+ * Catches: empty companies, missing education, missing languages,
+ * missing contact info, empty skills.
+ */
+function assertResumeSelfConsistent(resume: ResumeData): GuardianVerdict {
+  const issues: string[] = [];
+
+  // Check experience entries for empty companies/titles
+  for (const exp of resume.experience) {
+    if (!exp.company || exp.company.trim() === "") {
+      issues.push(`Experience entry has empty company name`);
+    }
+    if (!exp.title || exp.title.trim() === "") {
+      issues.push(`Experience entry has empty job title`);
+    }
+  }
+
+  // Check education exists and has content
+  if (!resume.education || resume.education.length === 0) {
+    issues.push(`Education section is missing`);
+  } else {
+    for (const edu of resume.education) {
+      if (!edu.institution || edu.institution.trim() === "") {
+        issues.push(`Education entry has empty institution`);
+      }
+    }
+  }
+
+  // Check languages exist
+  if (!resume.languages || resume.languages.length === 0) {
+    issues.push(`Languages section is missing`);
+  }
+
+  // Check contact info
+  if (!resume.contact.email && !resume.contact.phone) {
+    issues.push(`Both email and phone are missing`);
+  }
+
+  // Check skills exist
+  if (!resume.skills || resume.skills.length === 0) {
+    issues.push(`Skills section is empty`);
+  }
+
+  // Check certifications exist
+  if (!resume.certifications || resume.certifications.length === 0) {
+    issues.push(`Certifications section is missing`);
+  }
+
+  if (issues.length > 0) {
+    throw new ExportGateError(
+      `Cannot export: Resume has ${issues.length} integrity issue(s). ` +
+      `Run optimization or fill in missing fields before exporting. ` +
+      issues.join("; "),
+      issues,
+      {
+        passed: false,
+        status: "BLOCKED",
+        score: Math.max(0, 100 - issues.length * 20),
+        checks: issues.map((i) => ({
+          name: "self_consistency",
+          passed: false,
+          critical: true,
+          detail: i,
+        })),
+      },
+    );
+  }
+
+  return {
+    passed: true,
+    status: "PASS",
+    score: 100,
+    checks: [],
   };
 }

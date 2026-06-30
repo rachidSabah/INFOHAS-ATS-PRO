@@ -15,6 +15,7 @@ import { SmartTextarea } from "@/components/shared/SmartTextarea";
 import { useSectionCompleteness } from "@/lib/builder-extras";
 import { blankResume, parseResumeFile } from "@/lib/parser";
 import { exportResumePDF, exportResumeDOCX, exportResumeTXT, exportResumeDOC } from "@/lib/exporter";
+import { assertResumeExportable } from "@/lib/resume-guardian-agent";
 import { A4Preview } from "@/components/resume/A4Preview";
 import { ATSMatchMeter } from "@/components/optimizer/ATSMatchMeter";
 import { toast } from "sonner";
@@ -94,6 +95,7 @@ export function Builder() {
   const removeSkill = (id: string) => patch({ skills: resume.skills.filter((s) => s.id !== id) });
 
   const onExportPDF = async () => {
+    assertResumeExportable(resume);
     setExporting(true);
     await new Promise((r) => setTimeout(r, 100));
     const result = await exportResumePDF(resume, { enforceOnePage: true });
@@ -109,6 +111,7 @@ export function Builder() {
   const onExportDOCX = async () => {
     setExporting(true);
     try {
+      assertResumeExportable(resume);
       await exportResumeDOCX(resume);
       incUsage("downloads");
       log({ actor: "you", action: "Exported resume (DOCX)", category: "export", details: `${resume.name}_resume.docx`, severity: "info" });
@@ -120,12 +123,14 @@ export function Builder() {
     }
   };
   const onExportTXT = () => {
+    assertResumeExportable(resume);
     exportResumeTXT(resume);
     incUsage("downloads");
     log({ actor: "you", action: "Exported resume (TXT)", category: "export", details: `${resume.name}_resume.txt`, severity: "info" });
     toast.success("TXT exported.");
   };
   const onExportDOC = () => {
+    assertResumeExportable(resume);
     const template = resume.template === "modern" ? "modern" : resume.template === "minimal" || resume.template === "ats-professional" ? "minimal" : "professional";
     exportResumeDOC(resume, template as any);
     incUsage("downloads");
