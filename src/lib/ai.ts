@@ -1,3 +1,5 @@
+"use client";
+
 // ResumeAI Pro — client-side AI bridge.
 // Strategy:
 //   0. User-configured default API provider (from AI Providers settings) — FIRST priority.
@@ -12,8 +14,6 @@ export { clearAllProviderCooldowns };
 //   4. Local rule-based fallback (deterministic, always works as offline mode).
 //
 // All AI calls are wrapped in failover with try/catch + provider rotation.
-
-"use client";
 
 import { withTimeout, OptimizationProviderExhaustedError, AI_CALL_TIMEOUT_MS, OPTIMIZER_CALL_TIMEOUT_MS, PROVIDER_TIMEOUT_COOLDOWN_MS } from "./pipeline-watchdog";
 export { OptimizationProviderExhaustedError, OPTIMIZER_CALL_TIMEOUT_MS };
