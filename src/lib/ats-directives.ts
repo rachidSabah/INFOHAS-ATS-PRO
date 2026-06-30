@@ -15,11 +15,12 @@
 // so it inherits the full failover chain. The "Gemini" name is preserved for compatibility
 // with the original spec — in practice any provider can serve it.
 
-import { callAI, extractJSON, getOptimizerDirective, OPTIMIZER_CALL_TIMEOUT_MS } from "./ai";
+import { callAI, extractJSON, OPTIMIZER_CALL_TIMEOUT_MS } from "./ai";
 import { splitOptimizationDirective } from "./ai-diagnostics";
 import { INDUSTRY_PROFILES } from "./industry-ats";
 import type { OptimizerDirectiveConfig, ResumeData } from "./types";
 import { useApp } from "./store";
+import { getDirective } from "./optimizer-directive-engine";
 
 // ============================================================================
 // 1. KEYWORD BANKS
@@ -386,205 +387,17 @@ export function getAviationOptimizerDirective(
     baseConfig = undefined;
   }
 
-  const profile = AIRLINE_ATS_PROFILES[airlineProfile] || AIRLINE_ATS_PROFILES.generic;
-  const toneInstruction = settings?.tone || "Balanced";
-  const formatInstruction = settings?.format || "Chronological";
-  const strictnessInstruction =
-    settings?.strictness === "Aggressive"
-      ? "MAXIMUM keyword density — embed every priority keyword naturally."
-      : settings?.strictness === "Conservative"
-        ? "Conservative — embed only the most relevant priority keywords."
-        : "Balanced — embed priority keywords naturally without stuffing.";
-
-  // --- 2. If the super-admin has set a customDirectiveOverride, use it as the BASE ---
-  // This is the synchronization point: aviation mode respects the override.
+  // --- 2. Check for custom override (takes full priority over generated directive) ---
   const customOverride = baseConfig?.customDirectiveOverride?.trim();
-  const baseDirective = customOverride
-    ? customOverride
-    : getOptimizerDirective(); // generates from structured config OR falls back to hardcoded
-
-  // --- 3. Build the industry augmentation layer ---
-  const industryProfile = INDUSTRY_PROFILES[airlineProfile];
-  const aviationAugmentation = `
-═══════════════════════════════════════════════════════════════
-INDUSTRY ATS MODE — ACTIVE
-═══════════════════════════════════════════════════════════════
-OPTIMIZATION PROFILE: ${industryProfile?.label || profile.system}
-INDUSTRY: ${industryProfile?.description || profile.focus}
-${industryProfile?.priorityKeywords?.length ? `INDUSTRY PRIORITY KEYWORDS: ${industryProfile.priorityKeywords.join(", ")}` : `AIRLINE PRIORITY KEYWORDS: ${profile.priorityKeywords?.join(", ") || "(none)"}`}
-INDUSTRY TONE PREFERENCE: ${industryProfile?.tone || profile.tone || "Balanced"}
-
-USER-SELECTED TONE: ${toneInstruction}
-USER-SELECTED FORMAT: ${formatInstruction}
-USER-SELECTED STRICTNESS: ${strictnessInstruction}
-
-═══════════════════════════════════════════════════════════════
-MULTI-STAGE REASONING PIPELINE (THINK BEFORE WRITING)
-═══════════════════════════════════════════════════════════════
-
-Stage 1 — RESUME UNDERSTANDING:
-Extract: experience, achievements, technologies, competencies, certifications, transferable skills, leadership indicators, quantified metrics.
-Identify what the candidate is ACTUALLY good at (not what they claim — what their achievements prove).
-
-Stage 2 — JOB DESCRIPTION UNDERSTANDING:
-Deeply analyze: responsibilities, required skills, preferred skills, hidden expectations, seniority indicators, industry terminology, business goals, soft skills, action verbs, repeated phrases.
-Extract: high-value phrases, hiring signals, recruiter intent, critical requirements, implied requirements.
-
-Stage 3 — SEMANTIC MAPPING:
-Map: Resume Experience → Job Responsibilities. Resume Skills → Job Requirements. Resume Achievements → Business Objectives.
-Identify: gaps, strengths, opportunities, transferable skills.
-
-Stage 4 — OPTIMIZATION STRATEGY:
-Decide: which keywords to use, which phrases to use, which sections to prioritize, what to condense, what to expand, what should appear earlier, what should be emphasized.
-
-═══════════════════════════════════════════════════════════════
-HIGH-VALUE LANGUAGE OPTIMIZATION
-═══════════════════════════════════════════════════════════════
-Transform weak phrases into high-impact statements:
-- "Responsible for customer service" → "Delivered exceptional customer service resulting in measurable satisfaction improvements"
-- "Worked on software" → "Designed and implemented scalable software solutions supporting mission-critical applications"
-- "Helped with projects" → "Led cross-functional initiatives that improved operational efficiency and business outcomes"
-
-Extract and reuse high-value phrases from the JD naturally: "cross-functional collaboration", "stakeholder management", "process optimization", "data-driven decision making".
-
-═══════════════════════════════════════════════════════════════
-KEYWORD STRATEGY (NO STUFFING)
-═══════════════════════════════════════════════════════════════
-1. Identify critical keywords (must-haves from JD).
-2. Identify secondary keywords (nice-to-haves).
-3. Identify semantic synonyms.
-4. Identify industry terminology (from the keyword bank below).
-5. Embed ALL keywords NATURALLY — never stuff. Each keyword must appear in context.
-
-═══════════════════════════════════════════════════════════════
-INDUSTRY KEYWORD BANK (weave relevant keywords naturally into summary, skills, and bullets)
-═══════════════════════════════════════════════════════════════
-${INDUSTRY_PROFILES[airlineProfile]?.keywordBank || `${CABIN_CREW_KEYWORDS}\n${AVIATION_KEYWORDS}`}
-
-INDUSTRY WRITING GUIDANCE:
-${INDUSTRY_PROFILES[airlineProfile]?.writingGuidance || ""}
-
-═══════════════════════════════════════════════════════════════
-CONTENT TARGET — ONE A4 PAGE (NON-NEGOTIABLE)
-═══════════════════════════════════════════════════════════════
-Target: ~2,900 characters — fits one A4 page with compact margins. (Aim to EXPAND weak bullets to hit this target)
-Acceptable range: 2,200 – 2,700 characters.
-- Under 2,000 chars = TOO SHORT — add 1 more skill group, expand recent role to 3 bullets.
-- Over 2,800 chars = TOO LONG — reduce older roles to 1 bullet, tighten bullets, shorten summary.
-HOW TO HIT THE TARGET:
-1. PROFESSIONAL SUMMARY: 2-3 lines (~30-50 words). Embed 2 priority keywords naturally.
-2. EXPERIENCE: Most recent role: 2-3 bullets max. Older roles: 1-2 bullets max.
-3. Each bullet: start with action verb, 80-120 characters max (one line). Short and factual.
-4. CRITICAL: NEVER invent percentages, metrics, dollar amounts, or time savings. Only use real data from the original resume. No "20% improvement", "98% satisfaction", "100% resolution" — these are fake and damage credibility.
-5. SKILLS: Group into 2-3 categories with 3-5 items each. Embed priority keywords naturally.
-6. Never produce a half-empty page — fully utilize the A4 layout.
-
-═══════════════════════════════════════════════════════════════
-FACTUAL INTEGRITY (NON-NEGOTIABLE)
-═══════════════════════════════════════════════════════════════
-NEVER fabricate: experience, employers, dates, metrics, certifications, skills.
-ONLY use information from the original resume.
-Rephrase and optimize — but never invent. No fake numbers.
-
-═══════════════════════════════════════════════════════════════
-AIRLINE-SPECIFIC WRITING GUIDANCE
-═══════════════════════════════════════════════════════════════
-${airlineSpecificWritingGuidance(airlineProfile)}
-
-═══════════════════════════════════════════════════════════════
-DIRECTIVE HIERARCHY (MUST FOLLOW THIS ORDER)
-═══════════════════════════════════════════════════════════════
-1. SUPER-ADMIN OPTIMIZER DIRECTIVE (the base directive above — including any custom override)
-2. AIRLINE ATS PROFILE (priority keywords, tone preference, system-specific requirements)
-3. JOB DESCRIPTION REQUIREMENTS (required skills, responsibilities, keywords)
-4. ORIGINAL RESUME CONTENT (preserve factual information — never invent employers, dates, or metrics)
-5. AVIATION KEYWORD BANK (use relevant terms only — never stuff)
-
-If the super-admin's override directive conflicts with aviation defaults, THE OVERRIDE WINS.
-If the airline priority keywords conflict with the JD, PRIORITIZE THE JD's required skills.
-
-═══════════════════════════════════════════════════════════════
-OUTPUT FORMAT — STRICT JSON
-═══════════════════════════════════════════════════════════════
-Return ONLY valid JSON with this exact shape (no markdown fences, no prose, no HTML):
-{
-  "resume": {
-    "name": "FULL NAME",
-    "headline": "Target Role Title (e.g. Cabin Crew — Emirates Group)",
-    "location": "City, Country",
-    "phone": "+X ...",
-    "email": "...",
-    "dateOfBirth": "DD/MM/YYYY" | "",
-    "summary": "4-6 line professional summary paragraph (~60-90 words) with 2-3 priority keywords embedded naturally...",
-    "skills": [
-      { "category": "Cabin Safety & Emergency Procedures", "items": ["SEP", "Emergency Evacuation", "First Aid", "CPR/AED"] },
-      { "category": "Customer Service Excellence", "items": ["Premium Service", "Conflict Resolution", "Cultural Awareness"] },
-      { "category": "Aviation Operations", "items": ["CRM", "Galley Management", "Turnaround Operations"] },
-      { "category": "Languages", "items": ["English (Fluent)", "Arabic (Conversational)"] }
-    ],
-    "experience": [
-      {
-        "title": "Job Title",
-        "company": "Company",
-        "location": "City, Country",
-        "startDate": "Mon YYYY",
-        "endDate": "Mon YYYY" | "Present",
-        "bullets": [
-          "Strong action verb + measurable achievement + relevant priority keyword...",
-          "..."
-        ]
-      }
-    ],
-    "education": [
-      {
-        "degree": "Degree Name",
-        "institution": "Institution",
-        "location": "City, Country" | "",
-        "startDate": "YYYY",
-        "endDate": "YYYY",
-        "modules": "Module 1, Module 2, ..." | ""
-      }
-    ],
-    "languages": [
-      { "name": "English", "proficiency": "Fluent", "note": "ICAO Level 5" },
-      { "name": "Arabic", "proficiency": "Conversational", "note": "" }
-    ],
-    "missingKeywordsAdded": ["keyword1", "keyword2", ...],
-    "bulletsRewritten": 7
-  },
-  "score": 92,
-  "score_breakdown": { "impact": 90, "brevity": 95, "keywords": 92 },
-  "matched_keywords": ["Multicultural", "Premium Service", ...],
-  "missing_keywords": ["...", "..."],
-  "summary_critique": "Brief internal critique (NOT shown in the resume — analysis only). Max 2 sentences."
-}
-
-CRITICAL RULES:
-- The "resume" object MUST be a complete, professionally written resume — NOT an analysis report.
-- "summary" must be a professional paragraph ABOUT the candidate, never a critique like "The original resume lacks...".
-- "summary_critique" is a separate analysis field — it must NEVER appear in the resume output.
-- CRITICAL: NEVER invent percentages, metrics, dollar amounts, or time savings. Only use real data from the original resume. No fake numbers.
-- NEVER include provider errors, JSON parse errors, debug messages, or system text in the resume content.
-- NEVER include analysis artifacts ("ATS score", "Matched keywords", "AI Notes", "Optimization applied").
-- The output MUST fit on one A4 page. Target ~2,500 chars max.
-- ALL priority keywords from the airline profile MUST appear naturally in the resume content.
-`;
-
-  // If using custom override, mark it clearly so the user sees it in logs
   if (customOverride) {
-    return `${baseDirective}
-
-${aviationAugmentation}
-
-═══════════════════════════════════════════════════════════════
-NOTE: Super-admin's CUSTOM DIRECTIVE OVERRIDE is active. The above aviation
-augmentation is appended to the override. The override takes priority on conflicts.
-═══════════════════════════════════════════════════════════════`;
+    return customOverride; // full custom directive takes priority
   }
 
-  return `${baseDirective}
-
-${aviationAugmentation}`;
+  // --- 3. Use the directive engine as single source of truth ---
+  return getDirective("aviation", baseConfig, {
+    airlineProfile,
+    strictness: settings?.strictness,
+  });
 }
 
 /**

@@ -190,15 +190,18 @@ describe("getAviationOptimizerDirective", () => {
 
   it("includes the airline system name", () => {
     const d = getAviationOptimizerDirective("emirates", DEFAULT_APP_SETTINGS);
-    expect(d).toContain("Emirates Group Talent ATS (Workday)");
+    // Engine uses the consolidated Aviation industry profile
+    expect(d).toContain("Aviation (Cabin Crew)");
+    expect(d).toContain("INDUSTRY MODE: AVIATION");
   });
 
   it("includes the airline priority keywords", () => {
     const d = getAviationOptimizerDirective("emirates", DEFAULT_APP_SETTINGS);
+    // Priority keywords from the consolidated Aviation industry profile
     expect(d).toContain("Multicultural");
     expect(d).toContain("Premium Service");
-    expect(d).toContain("Diversity");
-    expect(d).toContain("Global Mindset");
+    expect(d).toContain("Safety");
+    expect(d).toContain("CRM");
   });
 
   it("includes the aviation keyword bank", () => {
@@ -211,15 +214,16 @@ describe("getAviationOptimizerDirective", () => {
   it("includes the ~2,900 character target", () => {
     const d = getAviationOptimizerDirective("emirates", DEFAULT_APP_SETTINGS);
     expect(d).toContain("2,900");
-    expect(d).toContain("EXPAND weak bullets");
+    expect(d).toContain("one A4 page");
   });
 
   it("requests structured JSON output (not HTML)", () => {
     const d = getAviationOptimizerDirective("emirates", DEFAULT_APP_SETTINGS);
+    expect(d).toContain("OUTPUT FORMAT — STRICT JSON");
     expect(d).toContain('"resume"');
     expect(d).toContain('"summary"');
     expect(d).toContain('"experience"');
-    expect(d).toContain('"missingKeywordsAdded"');
+    expect(d).toContain('"matched_keywords"');
   });
 
   it("synchronizes with super-admin custom override (takes priority)", () => {
@@ -230,8 +234,8 @@ describe("getAviationOptimizerDirective", () => {
       },
     });
     const d = getAviationOptimizerDirective("emirates", DEFAULT_APP_SETTINGS);
+    // Engine returns the raw override string (full priority, no annotation)
     expect(d).toContain("MY CUSTOM OVERRIDE — FOCUS ON LEADERSHIP ONLY.");
-    expect(d).toContain("CUSTOM DIRECTIVE OVERRIDE is active");
   });
 
   it("synchronizes with super-admin content limits (summaryMinWords etc.)", () => {
@@ -245,10 +249,9 @@ describe("getAviationOptimizerDirective", () => {
       },
     });
     const d = getAviationOptimizerDirective("emirates", DEFAULT_APP_SETTINGS);
-    // The base directive (from getOptimizerDirective) should reflect these values
-    expect(d).toContain("80");
-    expect(d).toContain("120");
-    expect(d).toContain("PRESERVE THE EXACT SAME NUMBER OF BULLETS");
+    // Engine reflects content limits via categorized policy format
+    expect(d).toContain("Summary Length");
+    expect(d).toContain("bullet-only");
   });
 
   it("adapts tone instruction based on strictness setting", () => {
@@ -262,7 +265,7 @@ describe("getAviationOptimizerDirective", () => {
       ...DEFAULT_APP_SETTINGS,
       strictness: "Conservative",
     });
-    expect(conservative).toContain("Conservative");
+    expect(conservative).toContain("Conservative keyword integration");
   });
 
   it("falls back gracefully when store is unavailable (uses hardcoded directive)", () => {
@@ -271,10 +274,10 @@ describe("getAviationOptimizerDirective", () => {
     useApp.setState({ optimizerDirective: undefined as any });
     try {
       const d = getAviationOptimizerDirective("emirates", DEFAULT_APP_SETTINGS);
-      // Should still return a usable directive (from OPTIMIZER_DIRECTIVE hardcoded fallback)
+      // Should still return a usable directive (from FALLBACK_CONFIG + engine)
       expect(typeof d).toBe("string");
       expect(d.length).toBeGreaterThan(1000);
-      expect(d).toContain("Emirates Group Talent ATS");
+      expect(d).toContain("Aviation (Cabin Crew)");
     } finally {
       useApp.setState({ optimizerDirective: original });
     }

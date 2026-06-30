@@ -832,9 +832,10 @@ describe("Enforce Locked Fields Bullet Length & Directive Cleaning", () => {
     } as any;
 
     const input = buildOptimizerInput(sourceResume, { title: "Manager", company: "Retail" } as any, "Context", directiveConfig);
-    expect(input.systemPrompt).toContain("LAYOUT & CONFIGURATION DIRECTIVES");
-    expect(input.systemPrompt).not.toContain("OUTPUT FORMAT");
-    expect(input.systemPrompt).not.toContain("OUTPUT CONTRACT");
+    // Engine-based prompt includes the full bullet rewrite directive
+    expect(input.systemPrompt).toContain("BULLET REWRITE DIRECTIVE");
+    expect(input.systemPrompt).toContain("CRITICAL ARCHITECTURE RULE");
+    expect(input.systemPrompt).toContain("Return ONLY valid JSON");
   });
 });
 
