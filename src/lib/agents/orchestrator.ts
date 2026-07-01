@@ -46,6 +46,8 @@ import { buildOptimizationPolicy, formatPolicyForPrompt, type OptimizationPolicy
 import { analyzeCompanyIntelligence, analyzeSkillGap, type CompanyIntelligence, type SkillGapIntelligence } from "./company-skill-agents";
 import { uid, useApp } from "../store";
 import type { ResumeSkill } from "../types";
+// Phase 11: Live JD Fetch Integration — additive, zero-touch existing pipeline
+import { prepareLiveJD, verifyOptimizationHonesty, checkCandidateEligibility } from "../jd-fetch-integration";
 import {
   OptimizationWatchdog,
   OptimizationTimeoutError,
@@ -530,6 +532,14 @@ export interface PipelineResult {
   metCharTarget: boolean;
   /** Whether the custom directive was successfully applied */
   customDirectiveApplied?: boolean;
+  /** Phase 11: Whether a live JD fetch was attempted */
+  liveFetchAttempted?: boolean;
+  /** Phase 11: The URL from which the JD was fetched live */
+  liveJDFetchUrl?: string;
+  /** Phase 11: Eligibility check report (candidate vs live JD requirements) */
+  eligibilityReport?: import("../jd-fetch-integration").EligibilityResult;
+  /** Phase 11: Guardian Strict anti-fabrication report */
+  guardianStrictReport?: import("../jd-fetch-integration").GuardianResult;
 }
 
 export interface ReflectionResult {
@@ -684,6 +694,28 @@ async function _runOptimizationPipelineInner(input: PipelineInput, watchdog: Opt
       log: message,
     });
   };
+
+  // ========================================================================
+  // [Phase 11] Live JD Fetch — enrich JD with live career page data
+  // ========================================================================
+  let liveFetchAttempted = false;
+  let liveJDFetchUrl: string | undefined;
+  let eligibilityReport: import("../jd-fetch-integration").EligibilityResult | undefined;
+  let guardianStrictReport: import("../jd-fetch-integration").GuardianResult | undefined;
+  try {
+    const enriched = await prepareLiveJD(resume, jd);
+    if (enriched.liveFetchAttempted) {
+      liveFetchAttempted = true;
+      liveJDFetchUrl = enriched.fetchedUrl;
+      if (enriched.jd) {
+        // Merge enriched JD fields into the pipeline JD
+        Object.assign(jd, enriched.jd);
+        console.info(`[Phase11] JD enriched from live fetch: URL=${enriched.fetchedUrl || "(search)"}, title=${enriched.jd.title}`);
+      }
+    }
+  } catch (e: any) {
+    console.warn(`[Phase11] Live JD fetch failed (non-fatal): ${e?.message}. Continuing with input JD.`);
+  }
 
   // ========================================================================
   // Step 1: Job Intelligence Agent
@@ -1727,6 +1759,40 @@ ${jobMemory.industry}`);
   if (!(result.status === "completed" || result.error != null)) {
     throw new Error("Quality Gate: Pipeline result must be completed or have a non-null error");
   }
+
+  // ========================================================================
+  // [Phase 11] Guardian Strict — anti-fabrication verification
+  // ========================================================================
+  if (result.optimizedResume && resume && result.status === "completed") {
+    try {
+      guardianStrictReport = verifyOptimizationHonesty(resume, result.optimizedResume);
+      console.info(
+        `[Phase11] Guardian Strict: ${guardianStrictReport.status}, ` +
+        `${guardianStrictReport.violations.length} violations, ` +
+        `${guardianStrictReport.warnings.length} warnings`
+      );
+    } catch (gsErr: any) {
+      console.warn(`[Phase11] Guardian Strict check failed (non-fatal): ${gsErr?.message}`);
+    }
+
+    // Eligibility check: compare candidate profile against enriched JD requirements
+    try {
+      eligibilityReport = checkCandidateEligibility(resume, jd);
+      console.info(
+        `[Phase11] Eligibility: ${eligibilityReport.isQualified ? "QUALIFIED" : "GAPS DETECTED"}, ` +
+        `${eligibilityReport.met.length} requirements met, ` +
+        `${eligibilityReport.gaps.length} gaps found`
+      );
+    } catch (elErr: any) {
+      console.warn(`[Phase11] Eligibility check failed (non-fatal): ${elErr?.message}`);
+    }
+  }
+
+  // Attach Phase 11 reports to pipeline result
+  result.liveFetchAttempted = liveFetchAttempted;
+  result.liveJDFetchUrl = liveJDFetchUrl;
+  result.eligibilityReport = eligibilityReport;
+  result.guardianStrictReport = guardianStrictReport;
 
   return result;
 }
