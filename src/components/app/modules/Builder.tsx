@@ -14,6 +14,7 @@ import { TEMPLATES } from "@/lib/brand";
 import { SmartTextarea } from "@/components/shared/SmartTextarea";
 import { SpellCheckPanel } from "@/components/shared/SpellCheckPanel";
 import { UndoRedoPanel } from "@/components/shared/UndoRedoPanel";
+import { ATSScoreInline } from "@/components/shared/ATSScorePreview";
 import { useSectionCompleteness } from "@/lib/builder-extras";
 import { blankResume, parseResumeFile } from "@/lib/parser";
 import { exportResumePDF, exportResumeDOCX, exportResumeTXT, exportResumeDOC } from "@/lib/exporter";
@@ -278,6 +279,14 @@ export function Builder() {
         onJump={(i) => { const d = jumpTo(i); if (d) { patch(d); return true; } return false; }}
         open={historyOpen}
         onToggle={() => setHistoryOpen(v => !v)}
+      />
+
+      <ATSScoreInline
+        resume={resume}
+        jd={jobDescriptions.length > 0 ? jobDescriptions[jobDescriptions.length - 1] : null}
+        onAddKeyword={(keyword, section) => {
+          toast.info(`Consider adding "${keyword}" to ${section}`);
+        }}
       />
 
       <div className="grid lg:grid-cols-12 gap-4">
