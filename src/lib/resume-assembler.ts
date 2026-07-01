@@ -378,7 +378,9 @@ export function assembleResume(
   const EDUCATION_SKILL_KEYWORDS = [
     "key competencies", "core competencies", "professional skills", "technical skills",
     "soft skills", "skills &", "skills and", "areas of expertise", "areas of strength",
-    "professional summary", "professional profile", "career overview", "qualifications"
+    "professional summary", "professional profile", "career overview", "qualifications",
+    "guest service excellence", "operational efficiency", "professional presence",
+    "key competencies and skills", "competencies"
   ];
   for (const ed of education) {
     // Check degree for contamination

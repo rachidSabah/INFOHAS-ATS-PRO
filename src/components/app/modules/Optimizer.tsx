@@ -338,7 +338,8 @@ export function Optimizer() {
     setAiLog((l) => [...l, `Mode: ${industryMode ? `Industry ATS (${INDUSTRY_PROFILES[industryId]?.label ?? "Generic"})` : "Standard"}`]);
     setAiLog((l) => [...l, "Starting 6-agent pipeline (V2) + post-optimization agents (V3)…"]);
 
-    // Start session memory round
+    // Start session memory round (reset first to prevent cross-session bleed)
+    OptimizationSession.reset();
     const session = OptimizationSession.getInstance();
     session.startRound(resume.id, {
       industryMode,

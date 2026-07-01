@@ -103,6 +103,11 @@ export async function runLockedPipeline(
 
   // Generate IDs for any experience/education entries that are missing them
   const idReadyResume = ensureExperienceIds(sourceResume);
+  // CRITICAL: Deep clone the id-ready resume for the degraded fallback path.
+  // During optimization, the optimizer and assembler receive shallow references and
+  // may mutate fields in place. If all attempts fail, we must return the ORIGINAL
+  // data — not a partially-mutated version.
+  const fallbackResume: ResumeData = JSON.parse(JSON.stringify(idReadyResume));
   console.info(`[Locked Pipeline] ensureExperienceIds: ${sourceResume.experience.filter(e => !e.id).length} experiences + ${sourceResume.education.filter(e => !(e as any).id).length} education entries got IDs`);
 
   // ========================================================================
@@ -581,11 +586,11 @@ export async function runLockedPipeline(
   warnings.push("Optimization failed after all attempts. Returning original resume without changes.");
   errors.push("All AI providers failed. Optimization unavailable.");
   const fallbackCharCount = JSON.stringify({
-    summary: idReadyResume.summary, experience: idReadyResume.experience,
-    skills: idReadyResume.skills, education: idReadyResume.education, languages: idReadyResume.languages,
+    summary: fallbackResume.summary, experience: fallbackResume.experience,
+    skills: fallbackResume.skills, education: fallbackResume.education, languages: fallbackResume.languages,
   }).length;
   return {
-    resume: idReadyResume,
+    resume: fallbackResume,
     provider: "degraded-optimization",
     charCount: fallbackCharCount,
     keywordsAdded: 0,

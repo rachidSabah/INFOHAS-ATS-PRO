@@ -791,6 +791,9 @@ export function cleanupGrammar(text: string): string {
   result = result.replace(/\s+\./g, ".");
   result = result.replace(/\s+,/g, ",");
 
+  // Normalize dates with embedded spaces (e.g. "202 4" → "2024", "Oct 202 4" → "Oct 2024")
+  result = result.replace(/(\d{2})\s+(\d)\b/g, "$1$2");
+
   // Remove filler phrases
   for (const phrase of FILLER_PHRASES) {
     result = result.replace(phrase, "");
@@ -806,7 +809,10 @@ export function cleanupGrammar(text: string): string {
   result = result.replace(/\s+\./g, ".");
 
   // Fix sentences that end with comma instead of period
-  result = result.replace(/,\s*$/gm, ".");
+  // CRITICAL: Only replace comma at the very end of the string, NOT end of every line
+  // (the 'm' flag would incorrectly match mid-text line breaks, turning legitimate
+  // mid-sentence commas into periods)
+  result = result.replace(/,\s*$/, ".");
 
   // Fix "word ," → "word,"
   result = result.replace(/\s+,/g, ",");
@@ -890,11 +896,23 @@ export function cleanupResumeGrammar<T>(data: T): T {
     }
   }
 
-  // Clean skills (strip backticks, fix whitespace)
+  // Clean skills (strip backticks, fix whitespace, remove AI-generated label prefixes)
   if (Array.isArray(cleaned.skills)) {
     for (const skill of cleaned.skills) {
-      if (skill.name) skill.name = cleanupGrammar(skill.name);
-      if (skill.category) skill.category = cleanupGrammar(skill.category);
+      if (skill.name) {
+        skill.name = cleanupGrammar(skill.name);
+        // Strip raw labels like "General:", "Job-Relevant:", "Transferable:"
+        // that AI may prepend to skill names as pseudo-categories.
+        // These are distinct from legitimate category:name patterns in the source.
+        skill.name = skill.name.replace(/^(General|Job.Relevant|Transferable|Core|Technical)\s*:\s*/i, "").trim();
+      }
+      if (skill.category) {
+        skill.category = cleanupGrammar(skill.category);
+        // Remove meaningless AI-generated category labels
+        if (/^(general|job.relevant|transferable)$/i.test(skill.category.trim())) {
+          skill.category = "";
+        }
+      }
     }
   }
 

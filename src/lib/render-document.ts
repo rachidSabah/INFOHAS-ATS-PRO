@@ -277,6 +277,40 @@ function fmtInfohasRenderDate(d?: string): string {
 }
 
 /**
+ * Normalize a section title for deduplication comparison
+ */
+function normalizeSectionTitle(title: string): string {
+  return title
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/**
+ * Known RenderSectionType values that correspond to structured resume fields.
+ * Dynamic sections whose normalized title overlaps with any of these will be
+ * skipped to prevent content duplication.
+ */
+const STRUCTURED_SECTION_TITLES = new Set([
+  "professional summary",
+  "summary",
+  "professional experience",
+  "experience",
+  "work experience",
+  "education",
+  "core competencies & skills",
+  "skills",
+  "core competencies",
+  "key skills",
+  "technical skills",
+  "languages",
+  "additional information",
+  "certifications",
+  "projects",
+]);
+
+/**
  * Convert ResumeData → RenderDocument (single source of truth for all renderers)
  */
 export function toRenderDocument(
@@ -285,34 +319,59 @@ export function toRenderDocument(
 ): RenderDocument {
   const L = layout ?? getDefaultResumeLayout();
 
-  const sectionBuilders: Array<() => RenderDocumentSection | null> = [
-    () => buildProfessionalProfile(resume),
-    () => buildExperienceSection(resume),
-    () => buildEducationSection(resume),
-    () => buildSkillsSection(resume),
-    () => buildLanguagesSection(resume),
-    () => buildAdditionalInfoSection(resume),
-    ...((resume.dynamicSections || []).map((ds) => () => {
-      const items: RenderContentItem[] = [];
-      if (ds.content) {
-        items.push({ kind: "text", text: ds.content });
-      }
-      if (ds.bullets && ds.bullets.length > 0) {
-        items.push({ kind: "bullets", bullets: ds.bullets, level: 0 });
-      }
-      if (items.length === 0) return null;
-      return {
-        type: "skills" as RenderSectionType, // fallback type
+  const sections: RenderDocumentSection[] = [];
+
+  // Track which section types have already been rendered to avoid dynamic section overlap
+  const renderedNormalizedTitles = new Set<string>();
+
+  const renderAndTrack = (builder: () => RenderDocumentSection | null): void => {
+    const section = builder();
+    if (section) {
+      sections.push(section);
+      const norm = normalizeSectionTitle(section.title);
+      if (norm) renderedNormalizedTitles.add(norm);
+    }
+  };
+
+  // 1. Standard structured sections (in canonical order)
+  renderAndTrack(() => buildProfessionalProfile(resume));
+  renderAndTrack(() => buildExperienceSection(resume));
+  renderAndTrack(() => buildEducationSection(resume));
+  renderAndTrack(() => buildSkillsSection(resume));
+  renderAndTrack(() => buildLanguagesSection(resume));
+  renderAndTrack(() => buildAdditionalInfoSection(resume));
+
+  // 2. Dynamic sections — only if they don't overlap with already-rendered content
+  const dynamicSections = resume.dynamicSections || [];
+  for (const ds of dynamicSections) {
+    const normTitle = normalizeSectionTitle(ds.title);
+
+    // Skip if the section was already rendered by a structured builder
+    if (renderedNormalizedTitles.has(normTitle) || STRUCTURED_SECTION_TITLES.has(normTitle)) {
+      continue;
+    }
+
+    // Also skip if the normalized title matches any structured section pattern
+    // (e.g. "KEY COMPETENCIES" matches "CORE COMPETENCIES & SKILLS")
+    const isStructuredOverlap = Array.from(STRUCTURED_SECTION_TITLES).some(t =>
+      normTitle.includes(t) || t.includes(normTitle)
+    );
+    if (isStructuredOverlap) continue;
+
+    const items: RenderContentItem[] = [];
+    if (ds.content) {
+      items.push({ kind: "text", text: ds.content });
+    }
+    if (ds.bullets && ds.bullets.length > 0) {
+      items.push({ kind: "bullets", bullets: ds.bullets, level: 0 });
+    }
+    if (items.length > 0) {
+      sections.push({
+        type: "dynamicSections" as RenderSectionType,
         title: ds.title.toUpperCase(),
         items,
-      };
-    })),
-  ];
-
-  const sections: RenderDocumentSection[] = [];
-  for (const builder of sectionBuilders) {
-    const section = builder();
-    if (section) sections.push(section);
+      });
+    }
   }
 
   // Estimate total chars
