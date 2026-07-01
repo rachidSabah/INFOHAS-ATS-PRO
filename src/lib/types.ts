@@ -154,6 +154,10 @@ export interface ResumeData {
   photoUrl?: string;
   dateOfBirth?: string;
   additionalInfo?: string;
+  /** Original raw text extracted from the uploaded file/paste.
+   *  Preserved so the LLM always has access to the full content
+   *  even if the parser's structured extraction missed sections. */
+  rawText?: string;
   createdAt: string;
   updatedAt: string;
   source?: "upload" | "manual" | "ai-optimized" | "ai-optimized-aviation" | "template";

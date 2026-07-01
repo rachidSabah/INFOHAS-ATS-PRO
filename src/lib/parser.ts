@@ -668,7 +668,14 @@ export function extractResumeFromText(text: string, fileName: string): ResumeDat
   };
 
   const sectionIndex = (labels: string[]) =>
-    lines.findIndex((l) => labels.some((lbl) => new RegExp(`^\\s*${lbl}\\s*:?$`, "i").test(l)));
+    lines.findIndex((l) => labels.some((lbl) => {
+      const lower = l.toLowerCase().trim();
+      return new RegExp(`^\\s*${lbl}\\s*:?$`, "i").test(l) ||
+        lower.startsWith(lbl + " &") ||
+        lower.startsWith(lbl + " and ") ||
+        lower.startsWith(lbl + ":") ||
+        lower.startsWith(lbl + ",");
+    }));
 
   const expStart = sectionIndex(KNOWN_LABELS.experience);
   const eduStart = sectionIndex(KNOWN_LABELS.education);
@@ -882,6 +889,7 @@ export function extractResumeFromText(text: string, fileName: string): ResumeDat
         };
       }),
     template: "ats-professional",
+    rawText: text, // preserve original text so LLM always sees full content
     accentColor: "#1154A3",
     createdAt: now,
     updatedAt: now,

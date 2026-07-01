@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo, useEffect, useCallback } from "react";
+import { useState, useMemo, useEffect, useCallback, useRef } from "react";
 import { motion } from "framer-motion";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -99,6 +99,90 @@ export function AIProviders() {
     setTesting(provider);
   };
 
+  const importRef = useRef<HTMLInputElement>(null);
+
+  const handleExportConfig = () => {
+    const config = providers.map((p) => ({
+      name: p.name,
+      type: p.type,
+      baseUrl: p.baseUrl || p.apiUrl || "",
+      modelName: p.modelName || "",
+      apiKey: p.apiKey || "",
+      priority: p.priority,
+      isActive: p.isActive,
+      isFallback: p.isFallback,
+      temperature: p.temperature,
+      maxTokens: p.maxTokens,
+      timeout: p.timeout,
+      retryAttempts: p.retryAttempts,
+      rateLimitPerMinute: p.rateLimitPerMinute,
+      authType: p.authType,
+    }));
+    const blob = new Blob([JSON.stringify({ version: 1, exportedAt: new Date().toISOString(), providers: config }, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `resumeai-providers-${new Date().toISOString().slice(0, 10)}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+    toast.success(`Exported ${config.length} provider configs.`);
+  };
+
+  const handleImportConfig = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    try {
+      const text = await file.text();
+      const data = JSON.parse(text);
+      if (!data.providers || !Array.isArray(data.providers)) {
+        toast.error("Invalid backup file — missing 'providers' array.");
+        return;
+      }
+      let added = 0;
+      for (const p of data.providers) {
+        // Fill defaults for fields the export may skip
+        const fullConfig: any = {
+          name: p.name,
+          type: p.type || "custom",
+          providerCategory: p.providerCategory || (p.type === "puter" ? "browser_auth" : "api"),
+          supportsServerSide: p.supportsServerSide ?? true,
+          supportsClientSide: p.supportsClientSide ?? true,
+          supportsStreaming: p.supportsStreaming ?? true,
+          supportsFunctionCalling: p.supportsFunctionCalling ?? true,
+          supportsJsonMode: p.supportsJsonMode ?? true,
+          requiresBrowserAuth: p.requiresBrowserAuth ?? false,
+          requiresApiKey: p.requiresApiKey ?? (p.apiKey ? true : false),
+          apiUrl: p.apiUrl || p.baseUrl || "",
+          baseUrl: p.baseUrl || p.apiUrl || "",
+          apiKey: p.apiKey || "",
+          modelName: p.modelName || "",
+          priority: p.priority ?? 50,
+          isActive: p.isActive ?? true,
+          isFallback: p.isFallback ?? false,
+          timeout: p.timeout ?? 60000,
+          maxTokens: p.maxTokens ?? 4096,
+          temperature: p.temperature ?? 0.7,
+          retryAttempts: p.retryAttempts ?? 2,
+          rateLimitPerMinute: p.rateLimitPerMinute ?? 30,
+          authType: p.authType || "bearer",
+          allowedForRegularUsers: p.allowedForRegularUsers ?? true,
+          enabledModels: p.enabledModels || [],
+          costPerInputToken: p.costPerInputToken ?? 0,
+          costPerOutputToken: p.costPerOutputToken ?? 0,
+          streamingEnabled: p.streamingEnabled ?? true,
+          health: { consecutiveFailures: 0, consecutiveSuccesses: 0 },
+        };
+        const id = ProviderManager.add(fullConfig as any);
+        if (id) added++;
+      }
+      toast.success(`Imported ${added} provider configs from backup.`);
+    } catch (err: any) {
+      toast.error(`Import failed: ${err?.message || "Invalid file"}`);
+    }
+    // Reset so re-selecting the same file triggers onChange again
+    if (importRef.current) importRef.current.value = "";
+  };
+
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -108,6 +192,13 @@ export function AIProviders() {
           <p className="text-sm text-muted-foreground mt-1">Multi-provider system with automatic failover. 17 types supported — extendable without code changes.</p>
         </div>
         <div className="flex gap-2">
+          <Button variant="outline" onClick={handleExportConfig} className="gap-2">
+            <Icon name="Download" className="w-4 h-4" /> Export
+          </Button>
+          <input ref={importRef} type="file" accept=".json" onChange={handleImportConfig} className="hidden" />
+          <Button variant="outline" onClick={() => importRef.current?.click()} className="gap-2">
+            <Icon name="Upload" className="w-4 h-4" /> Import
+          </Button>
           <Button variant="outline" onClick={() => setView("ai-settings")} className="gap-2">
             <Icon name="Settings" className="w-4 h-4" /> Routing settings
           </Button>

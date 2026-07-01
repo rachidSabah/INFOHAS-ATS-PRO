@@ -102,6 +102,12 @@ export function buildBulletDirective(
   config: OptimizerDirectiveConfig | null | undefined,
   context?: DirectiveContext,
 ): string {
+  // If custom override is set, it COMPLETELY REPLACES the generated directive
+  const customOverride = context?.customOverride?.trim();
+  if (customOverride) {
+    return customOverride;
+  }
+
   const policy = buildOptimizationPolicy(config);
   const policyBlock = formatPolicyForPrompt(policy);
   const c = config || FALLBACK_CONFIG;

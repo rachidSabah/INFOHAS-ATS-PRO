@@ -103,6 +103,8 @@ ${agentDirectives ? buildAgentDirectiveSection(agentDirectives) : ""}`;
 
 ${JSON.stringify(sourceForLLM, null, 2)}
 
+${sourceResume.rawText ? `\nFULL RAW RESUME TEXT (may contain content the parser missed — use it to fill gaps in the parsed data above):\n\n${sourceResume.rawText}\n` : ""}
+
 TARGET JOB DESCRIPTION:
 ${jd.rawText ?? JSON.stringify({ title: jd.title, company: jd.company, responsibilities: jd.responsibilities, requiredSkills: jd.requiredSkills, keywords: jd.keywords })}
 
@@ -252,22 +254,22 @@ export async function runBulletOnlyOptimizer(
   const { systemPrompt, userPrompt } = buildOptimizerInput(sourceResume, jd, intelligenceContext, directiveConfig, optimizationPolicy);
 
   // FAST-FAIL: Structural validation before any AI call
-  const structuralErrors: string[] = [];
+  const structuralWarnings: string[] = [];
   if (!sourceResume.experience || sourceResume.experience.length === 0) {
-    structuralErrors.push("Resume has no experience entries");
+    structuralWarnings.push("Resume has no experience entries — optimization limited to other sections.");
   }
   if (!sourceResume.education || sourceResume.education.length === 0) {
-    structuralErrors.push("Resume has no education entries");
+    structuralWarnings.push("Resume has no education entries — optimization will skip education.");
   }
   if (!sourceResume.skills || sourceResume.skills.length === 0) {
-    structuralErrors.push("Resume has no skills");
+    structuralWarnings.push("Resume has no skills — optimization will skip skills.");
   }
   if (!sourceResume.contact?.email && !sourceResume.contact?.phone) {
-    structuralErrors.push("Resume has no contact information (email or phone)");
+    structuralWarnings.push("Resume has no contact information (email or phone).");
   }
-  if (structuralErrors.length > 0) {
-    throw new Error(
-      `PROVIDER-INDEPENDENT STRUCTURAL FAILURE: ${structuralErrors.join("; ")}`
+  if (structuralWarnings.length > 0) {
+    console.warn(
+      `[BulletOnlyOptimizer] Structural advisories (non-blocking): ${structuralWarnings.join("; ")}`
     );
   }
 
@@ -300,7 +302,7 @@ export async function runBulletOnlyOptimizer(
     output,
     provider: result.provider,
     rawResponse: result.text,
-    warnings,
+    warnings: [...structuralWarnings, ...warnings],
   };
 }
 

@@ -98,6 +98,9 @@ const SECTION_SYNONYMS: Record<string, SectionType> = {
   "academic": "education",
   "qualifications": "education",
   "education and training": "education",
+  "education & professional development": "education",
+  "education and professional development": "education",
+  "professional development": "education",
 
   // Skills
   "skills": "skills",
@@ -115,6 +118,8 @@ const SECTION_SYNONYMS: Record<string, SectionType> = {
   "language": "languages",
   "language skills": "languages",
   "linguistic skills": "languages",
+  "languages & additional information": "languages",
+  "languages and additional information": "languages",
 
   // Certifications
   "certifications": "certifications",
