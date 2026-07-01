@@ -288,27 +288,39 @@ function normalizeSectionTitle(title: string): string {
 }
 
 /**
- * Known RenderSectionType values that correspond to structured resume fields.
- * Dynamic sections whose normalized title overlaps with any of these will be
- * skipped to prevent content duplication.
- */
-const STRUCTURED_SECTION_TITLES = new Set([
-  "professional summary",
-  "summary",
-  "professional experience",
-  "experience",
-  "work experience",
-  "education",
-  "core competencies & skills",
-  "skills",
-  "core competencies",
-  "key skills",
-  "technical skills",
-  "languages",
-  "additional information",
-  "certifications",
-  "projects",
-]);
+ /** Known RenderSectionType values that correspond to structured resume fields.
+  * Dynamic sections whose normalized title overlaps with any of these will be
+  * skipped to prevent content duplication.
+  */
+ const STRUCTURED_SECTION_TITLES = new Set([
+   "professional summary",
+   "summary",
+   "professional experience",
+   "experience",
+   "work experience",
+   "education",
+   "core competencies & skills",
+   "skills",
+   "core competencies",
+   "key skills",
+   "technical skills",
+   "key competencies",
+   "competencies",
+   "languages",
+   "additional information",
+   "certifications",
+   "projects",
+   "personal information",
+   "personal details",
+   "contact",
+   "contact information",
+   "personal",
+   "date of birth",
+   "nationality",
+ ]);
+
+ /** Email, phone, and personal-information patterns for detecting contact content in dynamic sections */
+ const PERSONAL_INFO_RE = /date\s*of\s*birth|dob\s*:|[\w.+-]+@[\w-]+\.[\w.-]+|[\+]?\d{8,}|\b\d{2}[\/\-]\d{2}[\/\-]\d{4}\b/i;
 
 /**
  * Convert ResumeData → RenderDocument (single source of truth for all renderers)
@@ -357,6 +369,18 @@ export function toRenderDocument(
       normTitle.includes(t) || t.includes(normTitle)
     );
     if (isStructuredOverlap) continue;
+
+    // Skip dynamic sections whose content contains contact/personal information
+    // (email, phone, date of birth) — these are already rendered via the contact block
+    if (
+      PERSONAL_INFO_RE.test(ds.content || "") ||
+      PERSONAL_INFO_RE.test(ds.title)
+    ) {
+      continue;
+    }
+
+    // Skip empty-titled sections (likely dangling header fragments)
+    if (!normTitle) continue;
 
     const items: RenderContentItem[] = [];
     if (ds.content) {

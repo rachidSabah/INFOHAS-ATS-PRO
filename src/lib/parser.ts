@@ -658,7 +658,7 @@ export function extractResumeFromText(text: string, fileName: string): ResumeDat
   const KNOWN_LABELS = {
     experience: ["experience", "work experience", "professional experience", "employment"],
     education: ["education", "academic background"],
-    skills: ["skills", "technical skills", "core skills", "core competencies", "competencies"],
+    skills: ["skills", "technical skills", "core skills", "core competencies", "key competencies", "competencies"],
     projects: ["projects", "side projects", "personal projects"],
     certifications: ["certifications", "certificates", "licenses"],
     languages: ["languages", "language skills", "linguistic skills"],
@@ -846,7 +846,24 @@ export function extractResumeFromText(text: string, fileName: string): ResumeDat
     languages,
     achievements: achievements.map((a) => a.title),
     dynamicSections: allPotentialHeaders
-      .filter(idx => !ALL_KNOWN_STARTS.includes(idx))
+      .filter(idx => {
+        if (ALL_KNOWN_STARTS.includes(idx)) return false;
+        // Exclude personal info / contact lines that look like section headers
+        // (e.g. "Date of Birth: 05/10/2005", "RABAT - MOROCCO", "YASSMINE AIT ELYACHI")
+        const headerTitle = lines[idx].replace(/:$/, "").trim();
+        // Exclude date-of-birth, dob, nationality lines
+        if (/^(date\s*of\s*birth|dob|nationality)/i.test(headerTitle)) return false;
+        // Exclude lines that contain obvious personal contact patterns
+        if (/@|[\+]?\d{8,}|\b\d{2}[\/\-]\d{2}[\/\-]\d{4}\b/i.test(headerTitle)) return false;
+        // Exclude header-zone lines (before first known section) that are all-caps with 2-4 words
+        // (catches name fragments like "YASSMINE AIT ELYACHI" in the contact header area)
+        const firstKnownLine = Math.min(...ALL_KNOWN_STARTS.filter(i => i >= 0));
+        if (Number.isFinite(firstKnownLine) && idx < firstKnownLine && /^[A-Z][A-Z\s.\-']{2,}$/.test(headerTitle)) {
+          const wordCount = headerTitle.split(/\s+/).length;
+          if (wordCount >= 2 && wordCount <= 5) return false;
+        }
+        return true;
+      })
       .map((idx, order) => {
         const title = lines[idx].replace(/:$/, "").trim();
         const contentLines = lines.slice(idx + 1, nextSectionStart(idx));
