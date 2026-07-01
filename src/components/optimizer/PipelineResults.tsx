@@ -4,6 +4,7 @@ import { motion } from "framer-motion";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge, Icon, ScoreRing } from "@/components/shared";
 import type { PipelineResult } from "@/lib/agents";
+import { Phase11Reports } from "./Phase11Reports";
 
 /**
  * PipelineResults — displays the full results of the 5-agent optimization pipeline.
@@ -154,6 +155,9 @@ export function PipelineResults({ result }: PipelineResultsProps) {
           </CardContent>
         </Card>
       )}
+
+      {/* === Phase 11 Reports: Live JD + Eligibility + Guardian Strict === */}
+      <Phase11Reports result={result} />
 
       {/* === Score Breakdown === */}
       <Card>
