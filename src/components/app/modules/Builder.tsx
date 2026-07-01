@@ -325,12 +325,33 @@ export function Builder() {
                         <Field label="End"><Input value={e.endDate} onChange={(ev) => updateExperience(e.id, { endDate: ev.target.value })} placeholder="Present or 2024-08" /></Field>
                       </div>
                       <Field label="Bullets (one per line — start with an action verb and a number)">
-                        <Textarea
-                          value={e.bullets.join("\n")}
-                          onChange={(ev) => updateExperience(e.id, { bullets: ev.target.value.split("\n") })}
-                          rows={4}
-                          placeholder={"Led migration to Next.js, cutting build times by 62%\nShipped design system used by 28 engineers"}
-                        />
+                        {e.bullets.map((bullet, bIdx) => (
+                          <div key={bIdx} className="mb-1.5">
+                            <SmartTextarea
+                              value={bullet}
+                              onChange={(v) => {
+                                const newBullets = [...e.bullets];
+                                newBullets[bIdx] = v;
+                                updateExperience(e.id, { bullets: newBullets });
+                              }}
+                              section="bullet"
+                              context={e.title}
+                              resume={resume}
+                              jobDescriptionText={activeJD?.rawText}
+                              rows={2}
+                              placeholder="Managed a cross-functional team, reducing delivery times by 34%"
+                              className="text-sm"
+                            />
+                          </div>
+                        ))}
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          className="h-6 text-[10px] gap-1 text-brand"
+                          onClick={() => updateExperience(e.id, { bullets: [...e.bullets, ""] })}
+                        >
+                          <Icon name="Plus" className="w-3 h-3" /> Add bullet
+                        </Button>
                       </Field>
                     </div>
                   ))}
