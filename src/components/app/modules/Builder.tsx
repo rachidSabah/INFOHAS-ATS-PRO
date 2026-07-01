@@ -12,6 +12,7 @@ import { useApp, uid } from "@/lib/store";
 import { useAutoSave, useUndoRedo, useLiveATSScore } from "@/lib/builder-hooks";
 import { TEMPLATES } from "@/lib/brand";
 import { SmartTextarea } from "@/components/shared/SmartTextarea";
+import { SpellCheckPanel } from "@/components/shared/SpellCheckPanel";
 import { useSectionCompleteness } from "@/lib/builder-extras";
 import { blankResume, parseResumeFile } from "@/lib/parser";
 import { exportResumePDF, exportResumeDOCX, exportResumeTXT, exportResumeDOC } from "@/lib/exporter";
@@ -45,6 +46,7 @@ export function Builder() {
   const [scale, setScale] = useState(0.6);
   const [exporting, setExporting] = useState(false);
   const [importing, setImporting] = useState(false);
+  const [spellCheckOpen, setSpellCheckOpen] = useState(false);
   const previewRef = useRef<HTMLDivElement>(null);
   const importFileRef = useRef<HTMLInputElement>(null);
 
@@ -207,6 +209,16 @@ export function Builder() {
             <button onClick={() => { const d = undoRedo.redo(); if (d) patch(d); }} disabled={!undoRedo.canRedo} className="text-[10px] text-muted-foreground hover:text-foreground disabled:opacity-30 p-1" title="Redo">
               <Icon name="Redo2" className="w-3 h-3" />
             </button>
+            <Button
+              variant={spellCheckOpen ? "default" : "outline"}
+              size="sm"
+              onClick={() => setSpellCheckOpen(v => !v)}
+              className={`gap-1.5 h-8 text-xs ${spellCheckOpen ? "bg-amber-500 hover:bg-amber-600 text-white" : ""}`}
+              title="Check spelling across your entire resume"
+            >
+              <Icon name="SpellCheck2" className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">Spelling</span>
+            </Button>
           </div>
         </div>
         {/* Export buttons — compact on mobile, full labels on desktop */}
@@ -241,6 +253,12 @@ export function Builder() {
           </Button>
         </div>
       </div>
+
+      <SpellCheckPanel
+        resume={resume}
+        open={spellCheckOpen}
+        onToggle={() => setSpellCheckOpen(v => !v)}
+      />
 
       <div className="grid lg:grid-cols-12 gap-4">
         {/* Editor */}
