@@ -48,7 +48,7 @@ export function Analytics() {
 
   // Live funnel from actual data
   const totalUsersCount = users.length;
-  const usersWithResumes = users.filter((u) => resumes.some((r) => r.id?.includes(u.id) || true)).length; // simplified
+  const usersWithResumes = users.filter((u) => resumes.some((r) => r.id?.includes(u.id))).length; // simplified
   const funnel = [
     { stage: "Users", value: totalUsersCount },
     { stage: "Resumes", value: resumes.length },

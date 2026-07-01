@@ -26,6 +26,24 @@ function safeRender(v: any): string {
 }
 
 /**
+ * Check if the resume's headline contains duplicate contact info
+ * (email, phone, or location) that is already rendered separately
+ * in the contact section. If so, skip rendering the headline
+ * to avoid triplicate display.
+ */
+function headlineIsDuplicateContact(headline: string, contact: ResumeData["contact"]): boolean {
+  if (!headline || !contact) return false;
+  const hl = headline.toLowerCase();
+  if (contact.email && hl.includes(contact.email.toLowerCase())) return true;
+  if (contact.phone) {
+    const phoneDigits = contact.phone.replace(/\D/g, "");
+    if (phoneDigits.length >= 5 && hl.includes(phoneDigits)) return true;
+  }
+  if (contact.location && hl === contact.location.toLowerCase()) return true;
+  return false;
+}
+
+/**
  * Detect whether the current device is a touch-only device (mobile/tablet without
  * a fine pointer). On touch devices we cannot rely on `:hover` to reveal the
  * edit pencil, so we show it persistently and also enable tap-anywhere-on-section
@@ -241,7 +259,7 @@ export function EditableA4Preview({ resume, onChange, scale = 0.7, className }: 
               <div style={{ color: L.nameColor, fontWeight: 700, fontSize: `${L.nameSizePt}pt`, letterSpacing: "0.3pt", marginBottom: "0.5mm", lineHeight: 1.1, textTransform: "uppercase" }}>
                 {(resume.name || "YOUR NAME").toUpperCase()}
               </div>
-              {resume.headline && <div style={{ fontSize: `${L.bodyFontSizePt}pt`, color: BLACK, marginBottom: "0.5mm", lineHeight: 1.2 }}>{safeRender(resume.headline)}</div>}
+              {resume.headline && !headlineIsDuplicateContact(resume.headline, resume.contact) && <div style={{ fontSize: `${L.bodyFontSizePt}pt`, color: BLACK, marginBottom: "0.5mm", lineHeight: 1.2 }}>{safeRender(resume.headline)}</div>}
               <div style={{ fontSize: `${L.bodyFontSizePt}pt`, color: BLACK, marginBottom: "0.3mm", lineHeight: 1.2 }}>
                 {[safeRender(resume.contact.location), safeRender(resume.contact.phone)].filter(Boolean).join(" | ")}
               </div>

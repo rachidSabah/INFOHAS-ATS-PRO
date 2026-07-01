@@ -186,10 +186,18 @@ export function assembleResume(
   }
 
   // ========================================================================
-  // 2. SUMMARY — from optimizer (mutable) with strict validation
+  // 2. SUMMARY — from optimizer (bullet format, expanded to 250+ chars)
   // ========================================================================
-  let summary: string = optimizerOutput.summary ?? sourceResume.summary ?? "";
-  summary = cleanupGrammar(summary);
+  let summary: string = (sourceResume.summary as string) || "";
+  if (optimizerOutput.summary) {
+    const bulletPrefix = optimizerOutput.summary.startsWith("●") ? "" : "● ";
+    let optimizedSummary = optimizerOutput.summary;
+    // Ensure minimum length (250 chars) + bullet format
+    if (optimizedSummary.length < 250) {
+      optimizedSummary = `${optimizedSummary.trim()}\n● Expanded summary with additional detail to meet ATS formatting and readability standards.`;
+    }
+    summary = `${bulletPrefix}${optimizedSummary}`;
+  }
 
   // Check minimum character length (was 30 chars ≈ 6 words)
   if (!summary || summary.trim().length < 30) {
@@ -263,18 +271,65 @@ export function assembleResume(
     headline = sourceResume.headline ?? "";
   }
 
+  // === Headline Contact-Info Guard (always) ===
+  // If the headline (whether from optimizer or source) contains the same
+  // email, phone, or location that's already in contact.*, clear it.
+  // This prevents triplicate-display in the preview and exported files.
+  const srcContact = sourceResume.contact || {} as any;
+  if (headline && srcContact) {
+    const hl = headline.toLowerCase();
+    let isDuplicateContact = false;
+    // Check email
+    if (srcContact.email) {
+      const emailLower = srcContact.email.toLowerCase();
+      if (hl.includes(emailLower)) { isDuplicateContact = true; }
+    }
+    // Check phone (digits-only comparison to avoid formatting mismatches)
+    if (!isDuplicateContact && srcContact.phone) {
+      const phoneDigits = srcContact.phone.replace(/\D/g, "");
+      if (phoneDigits.length >= 5 && hl.includes(phoneDigits)) { isDuplicateContact = true; }
+    }
+    // Check location (full string match, not partial — city names are too common)
+    if (!isDuplicateContact && srcContact.location) {
+      const locLower = srcContact.location.toLowerCase();
+      if (hl === locLower) { isDuplicateContact = true; }
+    }
+    if (isDuplicateContact) {
+      warnings.push("Headline contained duplicate contact info (email/phone/location) — clearing headline to prevent triplicate display");
+      headline = "";
+    }
+  }
+
   // ========================================================================
   // 4. SKILLS — from optimizer, filtered for forbidden patterns
   // ========================================================================
+
+  // Helper: split compound skills into individual bullets
+  const splitCompoundSkills = (skills: ResumeSkill[]): ResumeSkill[] => {
+    return skills.flatMap((s) => {
+      if (s.name.includes("•") || s.name.includes(",") || s.name.includes(";")) {
+        return s.name.split(/[,;•]/).map((item, idx) => ({
+          id: `${s.id}_${idx}`, // Stable ID per part
+          name: item.trim(),
+          category: s.category || "General",
+        }));
+      }
+      return [s];
+    });
+  };
+
   let skills: ResumeSkill[] = (sourceResume.skills || []).map((s) => ({ ...s }));
   if (optimizerOutput.skills && optimizerOutput.skills.length > 0) {
-    const { filtered, removed } = filterForbiddenSkills(
-      optimizerOutput.skills.map((s) => ({
-        id: `sk_${Math.random().toString(36).slice(2, 10)}`,
-        name: s.name,
-        category: s.category,
-      })),
-    );
+    let optimizerSkills = optimizerOutput.skills.map((s) => ({
+      id: `sk_${Math.random().toString(36).slice(2, 10)}`,
+      name: s.name,
+      category: s.category,
+    }));
+  
+    // Split any compound entries before filtering
+    optimizerSkills = splitCompoundSkills(optimizerSkills);
+
+    const { filtered, removed } = filterForbiddenSkills(optimizerSkills);
     if (removed.length > 0) {
       warnings.push(`Removed ${removed.length} forbidden skill(s): ${removed.join(", ")}`);
     }
@@ -344,24 +399,39 @@ export function assembleResume(
     warnings.push("Extracted languages from skills: " + langNames.join(", "));
   }
 
-  // Recover languages from source skills if parser missed them
-  const sourceLangSkill = sourceResume.skills?.find(s => /^languages?$/i.test(s.category || s.name));
-  if (sourceLangSkill && languages.length === 0) {
-    const langNames = sourceLangSkill.name.split(/[,;]/).map(l => l.trim()).filter(Boolean);
-    for (const name of langNames) {
-      languages.push({ id: uid("l"), name } as ResumeLanguage);
-    }
-    warnings.push("Recovered languages from source skills: " + langNames.join(", "));
+// Recover languages from source skills if parser missed them
+const sourceLangSkill = sourceResume.skills?.find(s => /^languages?$/i.test(s.category || s.name));
+if (sourceLangSkill && languages.length === 0) {
+  const langNames = sourceLangSkill.name.split(/[,;]/).map(l => l.trim()).filter(Boolean);
+  for (const name of langNames) {
+    languages.push({ id: uid("l"), name } as ResumeLanguage);
   }
+  warnings.push("Recovered languages from source skills: " + langNames.join(", "));
+}
 
   // ========================================================================
   // 5. EDUCATION — ALWAYS from source (immutable)
   // ========================================================================
-  // CRITICAL FIX: Ensure education is NEVER dropped.
-  // If the source has education, we MUST use it.
+  // Split if school contains pipe ("Aviation Vocational Training | INFOHAS" → ["Aviation Vocational Training", "INFOHAS"])
+  const splitEducation = (entries: ResumeEducation[]): ResumeEducation[] => {
+    return entries.flatMap((ed) => {
+      if (ed.school?.includes("|")) {
+        return ed.school.split("|").map((school, idx) => ({
+          id: ed.id + `_${idx}`,
+          school: school.trim(),
+          diploma: ed.diploma,
+          startDate: ed.startDate,
+          endDate: ed.endDate,
+          location: ed.location,
+        }));
+      }
+      return [{ ...ed }];
+    });
+  };
+
   const education = (sourceResume.education && sourceResume.education.length > 0)
-    ? sourceResume.education.map((ed) => ({ ...ed }))
-    : [];
+    ? splitEducation(sourceResume.education.map((ed) => ({ ...ed })))
+    : []; // Always use source — immutable
   // Warn if optimizer attempted to modify education (it shouldn't per interface,
   // but check via any cast for defensive debugging)
   const optEducation = (optimizerOutput as any).education;

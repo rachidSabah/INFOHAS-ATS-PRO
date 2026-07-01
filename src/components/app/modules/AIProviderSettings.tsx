@@ -23,9 +23,11 @@ export function AIProviderSettings() {
 
   // Sync form when settings change from the store (only if no unsaved changes)
   const settingsRef = settings;
-  if (!hasChanges && form !== settingsRef && JSON.stringify(form) !== JSON.stringify(settingsRef)) {
-    setForm(settingsRef);
-  }
+  useEffect(() => {
+    if (!hasChanges && JSON.stringify(form) !== JSON.stringify(settingsRef)) {
+      setForm(settingsRef);
+    }
+  }, [settings, hasChanges]);
 
   // Model prefetch state
   const [fetchingModels, setFetchingModels] = useState(false);

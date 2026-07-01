@@ -15,6 +15,24 @@ import type { ResumeData, CoverLetter, InterviewPackage, ResumeLayoutModel } fro
 import { getDocxHtml, resumeToDirectiveHtml } from "./ats-directives";
 import { useApp } from "./store";
 
+/**
+ * Check if the resume's headline contains duplicate contact info
+ * (email, phone, or location) that is already rendered separately
+ * in the contact section. If so, skip rendering the headline
+ * to avoid triplicate display in exported documents.
+ */
+function headlineIsDuplicateContact(headline: string, contact: ResumeData["contact"]): boolean {
+  if (!headline || !contact) return false;
+  const hl = headline.toLowerCase();
+  if (contact.email && hl.includes(contact.email.toLowerCase())) return true;
+  if (contact.phone) {
+    const phoneDigits = contact.phone.replace(/\D/g, "");
+    if (phoneDigits.length >= 5 && hl.includes(phoneDigits)) return true;
+  }
+  if (contact.location && hl === contact.location.toLowerCase()) return true;
+  return false;
+}
+
 // ============================================================================
 // ResumeLayoutModel — single source of truth for PDF + DOCX layout
 // ============================================================================
@@ -170,8 +188,8 @@ function buildResumeHtml(r: ResumeData, L: ResumeLayoutModel): string {
   // NAME
   lines.push(`<h1>${esc((r.name || "YOUR NAME").toUpperCase())}</h1>`);
 
-  // Headline
-  if (r.headline) {
+  // Headline (skip if it duplicates contact info rendered below)
+  if (r.headline && !headlineIsDuplicateContact(r.headline, r.contact)) {
     lines.push(`<div style="color:${sectionColor};font-size:${(bodySize * 1.05).toFixed(1)}pt;margin:0 0 0.5mm 0;line-height:${lh}">${esc(r.headline)}</div>`);
   }
 
