@@ -13,6 +13,7 @@ import { useAutoSave, useUndoRedo, useLiveATSScore } from "@/lib/builder-hooks";
 import { TEMPLATES } from "@/lib/brand";
 import { SmartTextarea } from "@/components/shared/SmartTextarea";
 import { SpellCheckPanel } from "@/components/shared/SpellCheckPanel";
+import { UndoRedoPanel } from "@/components/shared/UndoRedoPanel";
 import { useSectionCompleteness } from "@/lib/builder-extras";
 import { blankResume, parseResumeFile } from "@/lib/parser";
 import { exportResumePDF, exportResumeDOCX, exportResumeTXT, exportResumeDOC } from "@/lib/exporter";
@@ -47,6 +48,9 @@ export function Builder() {
   const [exporting, setExporting] = useState(false);
   const [importing, setImporting] = useState(false);
   const [spellCheckOpen, setSpellCheckOpen] = useState(false);
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const { saveCount, restoreEntry, dismissRestore } = useAutoSave(resume);
+  const { snapshot, undo, redo, jumpTo, canUndo, canRedo, undoStack, totalUndos, totalRedos } = useUndoRedo(resume);
   const previewRef = useRef<HTMLDivElement>(null);
   const importFileRef = useRef<HTMLInputElement>(null);
 
@@ -201,24 +205,26 @@ export function Builder() {
               </Badge>
             )}
             <Badge variant="outline" className="text-[10px] gap-1">
-              <Icon name="Save" className="w-3 h-3" /> Auto-saved
+              <Icon name="Save" className="w-3 h-3" /> Saved {saveCount > 0 ? `(${saveCount})` : "now"}
             </Badge>
-            <button onClick={() => { const d = undoRedo.undo(); if (d) patch(d); }} disabled={!undoRedo.canUndo} className="text-[10px] text-muted-foreground hover:text-foreground disabled:opacity-30 p-1" title="Undo">
+            <button onClick={() => { const d = undo(); if (d) patch(d); }} disabled={!canUndo} className="text-[10px] text-muted-foreground hover:text-foreground disabled:opacity-30 p-1" title="Undo (Ctrl+Z)">
               <Icon name="Undo2" className="w-3 h-3" />
             </button>
-            <button onClick={() => { const d = undoRedo.redo(); if (d) patch(d); }} disabled={!undoRedo.canRedo} className="text-[10px] text-muted-foreground hover:text-foreground disabled:opacity-30 p-1" title="Redo">
+            <button onClick={() => { const d = redo(); if (d) patch(d); }} disabled={!canRedo} className="text-[10px] text-muted-foreground hover:text-foreground disabled:opacity-30 p-1" title="Redo (Ctrl+Shift+Z)">
               <Icon name="Redo2" className="w-3 h-3" />
             </button>
-            <Button
-              variant={spellCheckOpen ? "default" : "outline"}
-              size="sm"
-              onClick={() => setSpellCheckOpen(v => !v)}
-              className={`gap-1.5 h-8 text-xs ${spellCheckOpen ? "bg-amber-500 hover:bg-amber-600 text-white" : ""}`}
-              title="Check spelling across your entire resume"
+            <SpellCheckPanel
+              resume={resume}
+              open={spellCheckOpen}
+              onToggle={() => setSpellCheckOpen(v => !v)}
+            />
+            <button
+              onClick={() => setHistoryOpen(v => !v)}
+              className={`text-[10px] p-1 ${historyOpen ? "text-brand" : "text-muted-foreground hover:text-foreground"}`}
+              title="Edit History (Ctrl+H)"
             >
-              <Icon name="SpellCheck2" className="w-3.5 h-3.5" />
-              <span className="hidden sm:inline">Spelling</span>
-            </Button>
+              <Icon name="History" className="w-3 h-3" />
+            </button>
           </div>
         </div>
         {/* Export buttons — compact on mobile, full labels on desktop */}
@@ -258,6 +264,20 @@ export function Builder() {
         resume={resume}
         open={spellCheckOpen}
         onToggle={() => setSpellCheckOpen(v => !v)}
+      />
+
+      <UndoRedoPanel
+        undoStack={undoStack}
+        canUndo={canUndo}
+        canRedo={canRedo}
+        totalUndos={totalUndos}
+        totalRedos={totalRedos}
+        onUndo={() => { const d = undo(); if (d) { patch(d); return true; } return false; }}
+        onRedo={() => { const d = redo(); if (d) { patch(d); return true; } return false; }}
+        onSnapshot={(label) => snapshot(label)}
+        onJump={(i) => { const d = jumpTo(i); if (d) { patch(d); return true; } return false; }}
+        open={historyOpen}
+        onToggle={() => setHistoryOpen(v => !v)}
       />
 
       <div className="grid lg:grid-cols-12 gap-4">
