@@ -3,6 +3,7 @@
 import { motion } from "framer-motion";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge, Icon, ScoreRing } from "@/components/shared";
+import { ErrorBoundary } from "@/components/shared/ErrorBoundary";
 import type { PipelineResult } from "@/lib/agents";
 import { Phase11Reports } from "./Phase11Reports";
 
@@ -157,7 +158,9 @@ export function PipelineResults({ result }: PipelineResultsProps) {
       )}
 
       {/* === Phase 11 Reports: Live JD + Eligibility + Guardian Strict === */}
-      <Phase11Reports result={result} />
+      <ErrorBoundary label="Intelligence & Eligibility" resetKey={result.liveFetchAttempted ? "1" : "0"}>
+        <Phase11Reports result={result} />
+      </ErrorBoundary>
 
       {/* === Score Breakdown === */}
       <Card>

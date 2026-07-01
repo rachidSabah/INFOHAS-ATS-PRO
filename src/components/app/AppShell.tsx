@@ -43,6 +43,7 @@ import {
 } from "./modules/CareerTools";
 import { ResumeReviewPlatform } from "./modules/ResumeReviewPlatform";
 import { SafeRender } from "./SafeRender";
+import { GlobalErrorCatcher } from "@/components/shared/GlobalErrorCatcher";
 import { Button } from "@/components/ui/button";
 import { Icon } from "@/components/shared";
 import { toast } from "sonner";
@@ -184,6 +185,7 @@ export function AppShell() {
 
   return (
     <div className="min-h-screen flex bg-background">
+      <GlobalErrorCatcher />
       <Sidebar />
       <div className="flex-1 flex flex-col min-w-0">
         <TopBar />
