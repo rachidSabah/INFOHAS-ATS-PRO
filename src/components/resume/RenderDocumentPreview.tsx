@@ -63,7 +63,7 @@ export function RenderDocumentPreview({
           minHeight: "297mm",
           fontFamily: L.fontFamily || "'Times New Roman', serif",
           fontSize: `${L.bodyFontSizePt}pt`,
-          lineHeight: L.lineHeight || 1.2,
+          lineHeight: L.lineHeightMm || 1.2,
           color: bodyColor,
           padding: `${L.marginTopMm}mm ${L.marginRightMm}mm ${L.marginBottomMm}mm ${L.marginLeftMm}mm`,
           backgroundColor: "#fff",
@@ -300,7 +300,7 @@ function RenderContentItem({
             margin: 0,
             marginBottom: "0.8mm",
             paddingLeft: `${fontSize * 1.2}pt`,
-            listStyle: item.level > 0 ? "circle" : "disc",
+            listStyle: (item.level ?? 0) > 0 ? "circle" : "disc",
           }}
         >
           {item.bullets.map((b, i) => (

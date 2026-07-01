@@ -537,9 +537,9 @@ export interface PipelineResult {
   /** Phase 11: The URL from which the JD was fetched live */
   liveJDFetchUrl?: string;
   /** Phase 11: Eligibility check report (candidate vs live JD requirements) */
-  eligibilityReport?: import("../jd-fetch-integration").EligibilityResult;
+  eligibilityReport?: import("../eligibility-checker").EligibilityReport;
   /** Phase 11: Guardian Strict anti-fabrication report */
-  guardianStrictReport?: import("../jd-fetch-integration").GuardianResult;
+  guardianStrictReport?: import("../jd-fetch-integration").PostOptimizationReport;
 }
 
 export interface ReflectionResult {
@@ -700,10 +700,10 @@ async function _runOptimizationPipelineInner(input: PipelineInput, watchdog: Opt
   // ========================================================================
   let liveFetchAttempted = false;
   let liveJDFetchUrl: string | undefined;
-  let eligibilityReport: import("../jd-fetch-integration").EligibilityResult | undefined;
-  let guardianStrictReport: import("../jd-fetch-integration").GuardianResult | undefined;
+  let eligibilityReport: import("../eligibility-checker").EligibilityReport | undefined;
+  let guardianStrictReport: import("../jd-fetch-integration").PostOptimizationReport | undefined;
   try {
-    const enriched = await prepareLiveJD(resume, jd);
+    const enriched = await prepareLiveJD(jd);
     if (enriched.liveFetchAttempted) {
       liveFetchAttempted = true;
       liveJDFetchUrl = enriched.fetchedUrl;
@@ -1767,9 +1767,9 @@ ${jobMemory.industry}`);
     try {
       guardianStrictReport = verifyOptimizationHonesty(resume, result.optimizedResume);
       console.info(
-        `[Phase11] Guardian Strict: ${guardianStrictReport.status}, ` +
-        `${guardianStrictReport.violations.length} violations, ` +
-        `${guardianStrictReport.warnings.length} warnings`
+        `[Phase11] Guardian Strict: ${guardianStrictReport.guardianStrict.verdict}, ` +
+        `${guardianStrictReport.guardianStrict.violations.length} violations, ` +
+        `${guardianStrictReport.guardianStrict.sourceFingerprint.numbers.size} source numbers`
       );
     } catch (gsErr: any) {
       console.warn(`[Phase11] Guardian Strict check failed (non-fatal): ${gsErr?.message}`);
@@ -1779,7 +1779,7 @@ ${jobMemory.industry}`);
     try {
       eligibilityReport = checkCandidateEligibility(resume, jd);
       console.info(
-        `[Phase11] Eligibility: ${eligibilityReport.isQualified ? "QUALIFIED" : "GAPS DETECTED"}, ` +
+        `[Phase11] Eligibility: ${eligibilityReport.eligible ? "QUALIFIED" : "GAPS DETECTED"}, ` +
         `${eligibilityReport.met.length} requirements met, ` +
         `${eligibilityReport.gaps.length} gaps found`
       );

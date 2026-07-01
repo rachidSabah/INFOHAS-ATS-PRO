@@ -7,7 +7,7 @@
 // same tree — Preview, DOCX, PDF, HTML, TXT all see identical content.
 
 import React from "react";
-import type { RenderNode } from "@/lib/types";
+import type { RenderNode } from "@/lib/document-render-tree/types";
 
 interface RenderNodePreviewProps {
   nodes: RenderNode[];

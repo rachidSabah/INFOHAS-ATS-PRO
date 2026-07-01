@@ -9,7 +9,7 @@ import { BaseExportPlugin } from '../../../src/lib/plugin-sdk/base-export-plugin
 import type { PluginManifest, ResumeData, ExportFormat, ExportResult } from '../../../src/lib/plugin-sdk/types';
 
 // Import existing implementation (wrap, don't rewrite — Phase 7 constraint)
-import { exportResumeDOCX as docxExport } from '../../../src/lib/exporter';
+import { exportResumeDOC as docxExport } from '../../../src/lib/exporter';
 
 export const create = (): DocxExportPlugin => new DocxExportPlugin();
 

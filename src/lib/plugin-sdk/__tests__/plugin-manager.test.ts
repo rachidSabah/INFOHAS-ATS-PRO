@@ -75,14 +75,14 @@ describe('PluginManager', () => {
     const origInit1 = base.initialize;
     base.initialize = vi.fn().mockImplementation(async () => {
       order.push('base');
-      await origInit1.call(base);
+      await origInit1(new ServiceContainer());
     });
 
     const dep = createMockPlugin('dependent', [{ id: 'base', versionRange: '>=1.0' }]);
     const origInit2 = dep.initialize;
     dep.initialize = vi.fn().mockImplementation(async () => {
       order.push('dependent');
-      await origInit2.call(dep);
+      await origInit2(new ServiceContainer());
     });
 
     await pm.loadFromRegistry([

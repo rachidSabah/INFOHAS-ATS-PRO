@@ -1034,8 +1034,49 @@ export function resumeToDirectiveHtml(r: ResumeData): string {
   }
 
   // Certifications
-  if (r.certifications.length) {
-    parts.push(`<h3>CERTIFICATIONS</h3><ul>${r.certifications.map((c) => `<li><strong>${escapeHtml(c.name)}</strong>${c.issuer ? " - " + escapeHtml(c.issuer) : ""}${c.date ? ` (${escapeHtml(fmtDate(c.date))})` : ""}</li>`).join("")}</ul>`);
+  if ((r.certifications?.length ?? 0) > 0) {
+    parts.push(`<h3>CERTIFICATIONS</h3><ul>${
+      (r.certifications??[]).map((c) => `<li><strong>${escapeHtml(c.name)}</strong>${
+        c.issuer ? " - " + escapeHtml(c.issuer) : ""
+      }${c.date ? ` (${escapeHtml(fmtDate(c.date))})` : ""}</li>`).join("")
+    }</ul>`);
+  }
+
+  // Projects
+  if ((r.projects?.length ?? 0) > 0) {
+    parts.push(`<h3>PROJECTS</h3><ul>${
+      r.projects.map((p) => `<li><strong>${escapeHtml(p.name)}</strong>${
+        p.description ? " — " + escapeHtml(p.description) : ""
+      }${p.url ? ` (${escapeHtml(p.url)})` : ""}</li>`).join("")
+    }</ul>`);
+  }
+
+  // Achievements
+  if ((r.achievements?.length ?? 0) > 0) {
+    parts.push(`<h3>ACHIEVEMENTS</h3><ul>${
+      (r.achievements??[]).map((a) => `<li>${escapeHtml(a)}</li>`).join("")
+    }</ul>`);
+  }
+
+  // Additional Information
+  if (r.additionalInfo) {
+    parts.push(`<h3>ADDITIONAL INFORMATION</h3><p>${escapeHtml(r.additionalInfo)}</p>`);
+  }
+
+  // Dynamic Sections — custom sections from the optimizer pipeline
+  // (e.g. "Luxury Guest Experience", "Cabin Safety Awareness" category breakdowns)
+  if ((r.dynamicSections?.length ?? 0) > 0) {
+    for (const ds of r.dynamicSections!) {
+      parts.push(`<h3>${escapeHtml(ds.title)}</h3>`);
+      if (ds.content) {
+        parts.push(`<p>${escapeHtml(ds.content)}</p>`);
+      }
+      if (ds.bullets?.length) {
+        parts.push(`<ul>${
+          (ds.bullets??[]).map((b) => `<li>${escapeHtml(b)}</li>`).join("")
+        }</ul>`);
+      }
+    }
   }
 
   return parts.join("\n");

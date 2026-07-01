@@ -377,7 +377,7 @@ export class DynamicMultiAgentSupervisor {
       companyNames: (resume.experience || []).map((e) => e.company).filter(Boolean),
       institutionNames: (resume.education || []).map((e) => e.institution).filter(Boolean),
       degreeNames: (resume.education || []).map((e) => e.degree).filter(Boolean),
-      languageNames: (resume.languages || []).map((l) => l.language).filter(Boolean),
+      languageNames: (resume.languages || []).map((l) => l.name).filter(Boolean),
       personName: resume.name || "",
       contactEmail: resume.contact?.email || "",
       contactPhone: resume.contact?.phone || "",

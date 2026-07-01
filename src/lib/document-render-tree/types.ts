@@ -19,12 +19,16 @@ import type {
 
 // ── Re-export Phase 3 types used by Phase 5 ─────────────────────────────
 export type {
+  RenderNode as Phase3RenderNode,
   RenderNodeStyle,
   RenderNodePosition,
   ResumeTheme,
   CanonicalSectionType,
   PageLayout,
 };
+
+// Convenience alias for external consumers
+export type RenderNode = Phase3RenderNode;
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Enhanced RenderNodeType — all node types supported in Phase 5

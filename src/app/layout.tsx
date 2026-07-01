@@ -147,26 +147,9 @@ export default function RootLayout({
             `,
           }}
         />
-        <script src="https://js.puter.com/v2/" async></script>
-        {/* Belt-and-suspenders: also set puter.quiet = true once Puter attaches,
-            in case Puter prints any follow-up banners after init. */}
-        <script
-          dangerouslySetInnerHTML={{
-            __html: `
-              var _pc = setInterval(function() {
-                try {
-                  if (window.puter && !window.puter._quietSet) {
-                    try { Object.defineProperty(window.puter, 'quiet', { value: true, writable: true, configurable: true }); }
-                    catch(e) { window.puter.quiet = true; }
-                    window.puter._quietSet = true;
-                    clearInterval(_pc);
-                  }
-                } catch(e) { /* intentional: puter.quiet setup is best-effort, failures are non-critical */ }
-              }, 10);
-              setTimeout(function() { clearInterval(_pc); }, 10000);
-            `,
-          }}
-        />
+        {/* Puter.js SDK — lazy-loaded on-demand by the Puter provider when the user
+            explicitly selects a Puter model. No eager WebSocket connection = no
+            console noise. */}
         <script
           type="application/ld+json"
           dangerouslySetInnerHTML={{

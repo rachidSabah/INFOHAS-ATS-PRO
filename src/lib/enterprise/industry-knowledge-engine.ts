@@ -1170,12 +1170,13 @@ export function findMatchingSkills(
       checkNodes(profile.skillGraph);
 
       if (bestMatch && bestScore > 0.6) {
+        const bm = bestMatch as { canonical: string; category?: string };
         results.push({
           skill,
           matched: false,
           confidence: bestScore,
-          matchedAs: bestMatch.canonical,
-          category: bestMatch.category,
+          matchedAs: bm.canonical,
+          category: bm.category,
         });
       } else {
         results.push({

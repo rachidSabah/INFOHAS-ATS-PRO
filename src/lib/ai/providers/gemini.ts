@@ -2,8 +2,47 @@
 // Supports BOTH:
 //   1. Native Gemini API (baseUrl without /openai/) — uses :generateContent?key=
 //   2. OpenAI-compatible endpoint (baseUrl with /openai/) — uses /chat/completions + Bearer
+//
+// Includes a sliding-window rate limiter to stay under Google's free-tier RPM cap.
+// Without throttling, bursty optimization calls hit 429 immediately even when
+// the daily quota (1500 RPD) is untouched.
 import { OpenAICompatibleProvider, ProviderError } from "./openai-compatible";
 import type { ChatRequest, ChatResponse, ProviderConfig } from "./interface";
+
+// ============================================================================
+// Sliding-window rate limiter — per-key, per-model
+// ============================================================================
+class SlidingWindowRateLimiter {
+  private windows = new Map<string, number[]>();
+
+  /** Wait until a request slot is available under `rpm` requests per 60s. */
+  async waitSlot(key: string, rpm: number): Promise<void> {
+    const now = Date.now();
+    const windowStart = now - 60_000;
+
+    let timestamps = this.windows.get(key) ?? [];
+    // Prune expired entries
+    timestamps = timestamps.filter((t) => t > windowStart);
+
+    if (timestamps.length >= rpm) {
+      // We're at the limit — wait until the oldest timestamp expires
+      const oldest = timestamps[0];
+      const waitMs = oldest + 60_000 - now + 50; // +50ms buffer
+      if (waitMs > 0) {
+        console.info(`[GeminiRateLimit] At ${rpm} RPM — waiting ${Math.ceil(waitMs)}ms before next request`);
+        await new Promise((r) => setTimeout(r, waitMs));
+      }
+      // Re-prune after waiting (in case other requests accumulated)
+      const afterWait = Date.now() - 60_000;
+      timestamps = (this.windows.get(key) ?? []).filter((t) => t > afterWait);
+    }
+
+    timestamps.push(Date.now());
+    this.windows.set(key, timestamps);
+  }
+}
+
+const rateLimiter = new SlidingWindowRateLimiter();
 
 export class GeminiProvider extends OpenAICompatibleProvider {
   constructor() { super("gemini"); }
@@ -12,14 +51,19 @@ export class GeminiProvider extends OpenAICompatibleProvider {
     const baseUrl = (config.baseUrl || "https://generativelanguage.googleapis.com/v1beta").replace(/\/$/, "");
 
     // OpenAI-compatible endpoint (/v1beta/openai/) — delegate to parent which uses
-    // /chat/completions with Authorization: Bearer header
+    // /chat/completions with Authorization: Bearer ***
     if (baseUrl.includes("/openai")) {
       return super.chat(req, config);
     }
 
-    // Native Gemini API — use :generateContent with ?key= query param
-    const t0 = performance.now();
+    // === Rate limit: respect config.rateLimitPerMinute or default to 8 RPM ===
+    // Google's free tier is ~10-30 RPM; we stay safely under at 8.
+    const rpm = config.rateLimitPerMinute ?? 8;
     const model = req.model || config.modelName || "gemini-2.0-flash";
+    const rateLimitKey = `${config.id ?? "gemini"}:${model}`;
+    await rateLimiter.waitSlot(rateLimitKey, rpm);
+
+    const t0 = performance.now();
     const key = config.apiKey || "";
 
     const url = `${baseUrl}/models/${model}:generateContent?key=${encodeURIComponent(key)}`;

@@ -51,7 +51,7 @@ export function SmartTextarea({ value, onChange, section, placeholder, className
   const [status, setStatus] = useState<SuggestStatus>("idle");
   const [showPopover, setShowPopover] = useState(false);
   const debRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const textareaRef = useRef<HTMLDivElement>(null);
 
   // Build full context for AI prompts
   const ctxMemo = buildContext(resume, jobDescriptionText);

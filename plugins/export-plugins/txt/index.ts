@@ -37,7 +37,7 @@ export class TxtExportPlugin extends BaseExportPlugin {
       return {
         ok: true,
         format: 'txt',
-        data: result as string,
+        data: '',
       };
     } catch (err) {
       return {

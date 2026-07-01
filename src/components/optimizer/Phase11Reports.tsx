@@ -198,180 +198,190 @@ export function Phase11Reports({ result }: Phase11ReportsProps) {
       )}
 
       {/* === Guardian Strict Anti-Fabrication === */}
-      {guardianStrictReport && (
-        <Card className={`border-2 ${
-          guardianStrictReport.passed
-            ? "border-emerald-200 dark:border-emerald-900"
-            : guardianStrictReport.guardianStrict.verdict === "FLAGGED"
-              ? "border-amber-200 dark:border-amber-900"
-              : "border-red-200 dark:border-red-900"
-        }`}>
-          <CardHeader className="pb-3">
-            <CardTitle className="text-sm flex items-center gap-2">
-              <Icon name="Fingerprint" className="w-4 h-4 text-brand" />
-              Guardian Strict — Anti-Fabrication
-              <Badge
-                variant={
-                  guardianStrictReport.passed
-                    ? "success"
-                    : guardianStrictReport.guardianStrict.verdict === "FLAGGED"
-                      ? "warning"
-                      : "danger"
-                }
-                className="ml-auto text-[10px]"
-              >
-                {guardianStrictReport.passed
-                  ? "PASSED"
-                  : guardianStrictReport.guardianStrict.verdict === "FLAGGED"
-                    ? "FLAGGED"
-                    : `${guardianStrictReport.guardianStrict.totalViolations} VIOLATIONS`}
-              </Badge>
-            </CardTitle>
-            <CardDescription className="text-xs">
-              Every metric, award, and credential in the optimized resume is traced back to the original source.
-              {guardianStrictReport.passed
-                ? " All values verified against source."
-                : ` ${guardianStrictReport.guardianStrict.totalViolations} untraceable value(s) found.`}
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="pt-0 space-y-3">
-            {/* Verdict banner */}
-            <div className={`rounded-lg p-3 flex items-center gap-3 ${
-              guardianStrictReport.passed
-                ? "bg-emerald-50 dark:bg-emerald-950/20 border border-emerald-200 dark:border-emerald-900"
-                : guardianStrictReport.guardianStrict.verdict === "FLAGGED"
-                  ? "bg-amber-50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-900"
-                  : "bg-red-50 dark:bg-red-950/20 border border-red-200 dark:border-red-900"
-            }`}>
-              <Icon
-                name={
-                  guardianStrictReport.passed
-                    ? "ShieldCheck"
-                    : guardianStrictReport.guardianStrict.verdict === "FLAGGED"
-                      ? "AlertTriangle"
-                      : "AlertOctagon"
-                }
-                className={`w-5 h-5 shrink-0 ${
-                  guardianStrictReport.passed
-                    ? "text-emerald-600"
-                    : guardianStrictReport.guardianStrict.verdict === "FLAGGED"
-                      ? "text-amber-600"
-                      : "text-red-600"
-                }`}
-              />
-              <div>
-                <div className={`text-sm font-semibold ${
-                  guardianStrictReport.passed
-                    ? "text-emerald-700 dark:text-emerald-400"
-                    : guardianStrictReport.guardianStrict.verdict === "FLAGGED"
-                      ? "text-amber-700 dark:text-amber-400"
-                      : "text-red-700 dark:text-red-400"
-                }`}>
-                  {guardianStrictReport.passed
-                    ? "All Metrics Verified"
-                    : guardianStrictReport.guardianStrict.verdict === "FLAGGED"
-                      ? `${guardianStrictReport.guardianStrict.warnings.length} Value(s) Flagged`
-                      : `${guardianStrictReport.guardianStrict.totalViolations} Untraceable Value(s)`}
-                </div>
-                <p className="text-xs text-muted-foreground mt-0.5">
-                  {guardianStrictReport.passed
-                    ? "Every number, metric, award, and certification was traced back to the source resume. No fabrication detected."
-                    : "Some values in the optimized resume could not be traced back to the source. Review flagged items below."}
-                </p>
-              </div>
-            </div>
-
-            {/* Violations list */}
-            {guardianStrictReport.guardianStrict.violations.length > 0 && (
-              <div className="space-y-1.5">
-                <div className="text-xs font-semibold text-red-600 flex items-center gap-1.5">
-                  <Icon name="AlertOctagon" className="w-3.5 h-3.5" />
-                  Violations ({guardianStrictReport.guardianStrict.violations.length})
-                </div>
-                {guardianStrictReport.guardianStrict.violations.map((v, i) => (
-                  <div key={i} className="flex items-start gap-2 p-2 rounded-lg bg-red-50/50 dark:bg-red-950/10 border border-red-100 dark:border-red-950">
-                    <div className="w-1.5 h-1.5 rounded-full bg-red-500 shrink-0 mt-1.5" />
-                    <div className="flex-1 min-w-0">
-                      <div className="text-xs font-medium">{v.value}</div>
-                      <div className="text-[10px] text-muted-foreground">{v.reason}</div>
-                      {v.location && (
-                        <div className="text-[9px] text-muted-foreground mt-0.5">in: {v.location}</div>
-                      )}
-                    </div>
-                    <Badge
-                      variant={v.severity === "violation" ? "danger" : "warning"}
-                      className="text-[9px] shrink-0"
-                    >
-                      {v.type}
-                    </Badge>
-                  </div>
-                ))}
-              </div>
-            )}
-
-            {/* Warnings list */}
-            {guardianStrictReport.guardianStrict.warnings.length > 0 && (
-              <div className="space-y-1.5">
-                <div className="text-xs font-semibold text-amber-600 flex items-center gap-1.5">
-                  <Icon name="AlertTriangle" className="w-3.5 h-3.5" />
-                  Warnings ({guardianStrictReport.guardianStrict.warnings.length})
-                </div>
-                {guardianStrictReport.guardianStrict.warnings.map((w, i) => (
-                  <div key={i} className="flex items-start gap-2 p-2 rounded-lg bg-amber-50/50 dark:bg-amber-950/10 border border-amber-100 dark:border-amber-950">
-                    <div className="w-1.5 h-1.5 rounded-full bg-amber-500 shrink-0 mt-1.5" />
-                    <div className="flex-1 min-w-0">
-                      <div className="text-xs font-medium">{w.value}</div>
-                      <div className="text-[10px] text-muted-foreground">{w.reason}</div>
-                      {w.location && (
-                        <div className="text-[9px] text-muted-foreground mt-0.5">in: {w.location}</div>
-                      )}
-                    </div>
-                    <Badge variant="warning" className="text-[9px] shrink-0">
-                      {w.type}
-                    </Badge>
-                  </div>
-                ))}
-              </div>
-            )}
-
-            {/* Source summary */}
-            <details className="text-xs">
-              <summary className="cursor-pointer text-muted-foreground hover:text-foreground font-medium">
-                Source Fingerprint ({guardianStrictReport.guardianStrict.sourceFingerprint.numbers.size} numbers,{" "}
-                {guardianStrictReport.guardianStrict.sourceFingerprint.awards.size} awards,{" "}
-                {guardianStrictReport.guardianStrict.sourceFingerprint.certifications.size} certifications)
-              </summary>
-              <div className="mt-2 p-2 rounded-lg bg-secondary/30 space-y-1">
-                {guardianStrictReport.guardianStrict.sourceFingerprint.numbers.size > 0 && (
-                  <div>
-                    <span className="font-medium">Numbers:</span>{" "}
-                    {Array.from(guardianStrictReport.guardianStrict.sourceFingerprint.numbers).slice(0, 20).join(", ")}
-                    {guardianStrictReport.guardianStrict.sourceFingerprint.numbers.size > 20 && (
-                      <span className="text-muted-foreground"> +{guardianStrictReport.guardianStrict.sourceFingerprint.numbers.size - 20} more</span>
-                    )}
-                  </div>
-                )}
-                {guardianStrictReport.guardianStrict.sourceFingerprint.awards.size > 0 && (
-                  <div>
-                    <span className="font-medium">Awards/Recognition:</span>{" "}
-                    {Array.from(guardianStrictReport.guardianStrict.sourceFingerprint.awards).slice(0, 10).join(", ")}
-                  </div>
-                )}
-                {guardianStrictReport.guardianStrict.sourceFingerprint.certifications.size > 0 && (
-                  <div>
-                    <span className="font-medium">Certifications:</span>{" "}
-                    {Array.from(guardianStrictReport.guardianStrict.sourceFingerprint.certifications).slice(0, 10).join(", ")}
-                  </div>
-                )}
-              </div>
-            </details>
-
-            <p className="text-[9px] text-muted-foreground">
-              Assessed at: {new Date(guardianStrictReport.guardianStrict.assessedAt).toLocaleString()}
-            </p>
-          </CardContent>
-        </Card>
-      )}
+      {guardianStrictReport && <GuardianStrictCard report={guardianStrictReport} />}
     </>
+  );
+}
+
+/**
+ * Guardian Strict card — rendered separately so it can safely access
+ * guardianStrict sub-properties with optional chaining.
+ */
+function GuardianStrictCard({ report }: { report: NonNullable<PipelineResult["guardianStrictReport"]> }) {
+  // Safari-guard: if guardianStrict is missing, don't crash — show nothing
+  const gs = (report as any)?.guardianStrict;
+  if (!gs) return null;
+
+  const violations: Array<{ type: string; value: string; location: string; reason: string; severity: string }> =
+    gs.violations ?? [];
+  // GuardianStrictReport has `violations` with a `severity` field.
+  // Derive warnings from violations where severity === "warning" for backwards compat.
+  const warnings = violations.filter((v) => v.severity === "warning");
+  const hardViolations = violations.filter((v) => v.severity === "violation" || !v.severity);
+
+  const passed = !report.passed === false ? report.passed : true;
+  // Derive verdict: if report.passed is true => CLEAN, else use gs.verdict
+  const verdict: string = report.passed ? "CLEAN" : (gs.verdict ?? "VIOLATION");
+  const totalViolations = gs.totalViolations ?? violations.length;
+  const sourceFingerprint = gs.sourceFingerprint;
+
+  return (
+    <Card className={`border-2 ${
+      passed
+        ? "border-emerald-200 dark:border-emerald-900"
+        : verdict === "FLAGGED"
+          ? "border-amber-200 dark:border-amber-900"
+          : "border-red-200 dark:border-red-900"
+    }`}>
+      <CardHeader className="pb-3">
+        <CardTitle className="text-sm flex items-center gap-2">
+          <Icon name="Fingerprint" className="w-4 h-4 text-brand" />
+          Guardian Strict — Anti-Fabrication
+          <Badge
+            variant={passed ? "success" : verdict === "FLAGGED" ? "warning" : "danger"}
+            className="ml-auto text-[10px]"
+          >
+            {passed ? "PASSED" : verdict === "FLAGGED" ? "FLAGGED" : `${totalViolations} VIOLATIONS`}
+          </Badge>
+        </CardTitle>
+        <CardDescription className="text-xs">
+          Every metric, award, and credential in the optimized resume is traced back to the original source.
+          {passed
+            ? " All values verified against source."
+            : ` ${totalViolations} untraceable value(s) found.`}
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="pt-0 space-y-3">
+        {/* Verdict banner */}
+        <div className={`rounded-lg p-3 flex items-center gap-3 ${
+          passed
+            ? "bg-emerald-50 dark:bg-emerald-950/20 border border-emerald-200 dark:border-emerald-900"
+            : verdict === "FLAGGED"
+              ? "bg-amber-50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-900"
+              : "bg-red-50 dark:bg-red-950/20 border border-red-200 dark:border-red-900"
+        }`}>
+          <Icon
+            name={passed ? "ShieldCheck" : verdict === "FLAGGED" ? "AlertTriangle" : "AlertOctagon"}
+            className={`w-5 h-5 shrink-0 ${
+              passed
+                ? "text-emerald-600"
+                : verdict === "FLAGGED"
+                  ? "text-amber-600"
+                  : "text-red-600"
+            }`}
+          />
+          <div>
+            <div className={`text-sm font-semibold ${
+              passed
+                ? "text-emerald-700 dark:text-emerald-400"
+                : verdict === "FLAGGED"
+                  ? "text-amber-700 dark:text-amber-400"
+                  : "text-red-700 dark:text-red-400"
+            }`}>
+              {passed
+                ? "All Metrics Verified"
+                : verdict === "FLAGGED"
+                  ? `${warnings.length} Value(s) Flagged`
+                  : `${totalViolations} Untraceable Value(s)`}
+            </div>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              {passed
+                ? "Every number, metric, award, and certification was traced back to the source resume. No fabrication detected."
+                : "Some values in the optimized resume could not be traced back to the source. Review flagged items below."}
+            </p>
+          </div>
+        </div>
+
+        {/* Violations list */}
+        {hardViolations.length > 0 && (
+          <div className="space-y-1.5">
+            <div className="text-xs font-semibold text-red-600 flex items-center gap-1.5">
+              <Icon name="AlertOctagon" className="w-3.5 h-3.5" />
+              Violations ({hardViolations.length})
+            </div>
+            {hardViolations.map((v, i) => (
+              <div key={i} className="flex items-start gap-2 p-2 rounded-lg bg-red-50/50 dark:bg-red-950/10 border border-red-100 dark:border-red-950">
+                <div className="w-1.5 h-1.5 rounded-full bg-red-500 shrink-0 mt-1.5" />
+                <div className="flex-1 min-w-0">
+                  <div className="text-xs font-medium">{v.value}</div>
+                  <div className="text-[10px] text-muted-foreground">{v.reason}</div>
+                  {v.location && (
+                    <div className="text-[9px] text-muted-foreground mt-0.5">in: {v.location}</div>
+                  )}
+                </div>
+                <Badge variant={v.severity === "violation" ? "danger" : "warning"} className="text-[9px] shrink-0">
+                  {v.type}
+                </Badge>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Warnings list (derived from violations with severity === "warning") */}
+        {warnings.length > 0 && (
+          <div className="space-y-1.5">
+            <div className="text-xs font-semibold text-amber-600 flex items-center gap-1.5">
+              <Icon name="AlertTriangle" className="w-3.5 h-3.5" />
+              Warnings ({warnings.length})
+            </div>
+            {warnings.map((w, i) => (
+              <div key={i} className="flex items-start gap-2 p-2 rounded-lg bg-amber-50/50 dark:bg-amber-950/10 border border-amber-100 dark:border-amber-950">
+                <div className="w-1.5 h-1.5 rounded-full bg-amber-500 shrink-0 mt-1.5" />
+                <div className="flex-1 min-w-0">
+                  <div className="text-xs font-medium">{w.value}</div>
+                  <div className="text-[10px] text-muted-foreground">{w.reason}</div>
+                  {w.location && (
+                    <div className="text-[9px] text-muted-foreground mt-0.5">in: {w.location}</div>
+                  )}
+                </div>
+                <Badge variant="warning" className="text-[9px] shrink-0">
+                  {w.type}
+                </Badge>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Source summary */}
+        {sourceFingerprint && (
+          <details className="text-xs">
+            <summary className="cursor-pointer text-muted-foreground hover:text-foreground font-medium">
+              Source Fingerprint ({sourceFingerprint.numbers?.size ?? 0} numbers,{" "}
+              {sourceFingerprint.awards?.size ?? 0} awards,{" "}
+              {sourceFingerprint.certifications?.size ?? 0} certifications)
+            </summary>
+            <div className="mt-2 p-2 rounded-lg bg-secondary/30 space-y-1">
+              {(sourceFingerprint.numbers?.size ?? 0) > 0 && (
+                <div>
+                  <span className="font-medium">Numbers:</span>{" "}
+                  {Array.from(sourceFingerprint.numbers ?? []).slice(0, 20).join(", ")}
+                  {(sourceFingerprint.numbers?.size ?? 0) > 20 && (
+                    <span className="text-muted-foreground"> +{(sourceFingerprint.numbers?.size ?? 0) - 20} more</span>
+                  )}
+                </div>
+              )}
+              {(sourceFingerprint.awards?.size ?? 0) > 0 && (
+                <div>
+                  <span className="font-medium">Awards/Recognition:</span>{" "}
+                  {Array.from(sourceFingerprint.awards ?? []).slice(0, 10).join(", ")}
+                </div>
+              )}
+              {(sourceFingerprint.certifications?.size ?? 0) > 0 && (
+                <div>
+                  <span className="font-medium">Certifications:</span>{" "}
+                  {Array.from(sourceFingerprint.certifications ?? []).slice(0, 10).join(", ")}
+                </div>
+              )}
+            </div>
+          </details>
+        )}
+
+        {gs.assessedAt && (
+          <p className="text-[9px] text-muted-foreground">
+            Assessed at: {new Date(gs.assessedAt).toLocaleString()}
+          </p>
+        )}
+      </CardContent>
+    </Card>
   );
 }

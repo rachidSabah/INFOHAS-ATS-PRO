@@ -54,6 +54,7 @@ export interface RenderNodeStyle {
   marginBottomMm?: number;
   marginLeftMm?: number;
   marginRightMm?: number;
+  borderBottom?: string;
 }
 
 /** Position within a page layout */

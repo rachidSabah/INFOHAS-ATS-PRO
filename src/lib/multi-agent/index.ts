@@ -4,6 +4,7 @@
 
 export { DynamicMultiAgentSupervisor, runDynamicMultiAgentOptimization } from "./dynamic-supervisor";
 export { getSpecialistAgent, getAllAgentTypes } from "./specialist-agents";
+export type { SpecialistAgent } from "./specialist-agents";
 export {
   applyPatches,
   validatePatch,
@@ -24,7 +25,6 @@ export type {
   
   // Agent types
   SpecialistAgentType,
-  SpecialistAgent,
   
   // Context types
   IndustryContext,

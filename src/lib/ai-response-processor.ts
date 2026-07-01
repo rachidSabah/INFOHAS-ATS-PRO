@@ -104,8 +104,8 @@ const LEAK_PATTERNS: RegExp[] = [
   /at\s+Object\./i,
   /at\s+async/i,
 
-  // === Forbidden section titles ===
-  /\b(requirements match|ats analysis|keyword match|additional information|ai notes|optimization notes|provider errors|system messages|debug information)\b/i,
+  // === Forbidden section titles — AI analysis headings that look like resume sections ===
+  /\b(requirements match|ats analysis|keyword match|ai notes|optimization notes|provider errors|system messages|debug information)\b/i,
 
   // === ANALYSIS ARTIFACTS — the AI is outputting analysis instead of resume content ===
   // These patterns indicate the AI is describing the resume rather than writing it
@@ -130,7 +130,6 @@ const LEAK_PATTERNS: RegExp[] = [
   /to improve the (resume|ats score)/i,
   /recommended changes?\s*:/i,
   /changes? made\s*:/i,
-  /what was changed\s*:/i,
   /summary of (changes|optimization|improvements)/i,
   /analysis of the (resume|job|jd)/i,
   /the ai (has|identified|found|determined)/i,
@@ -650,14 +649,22 @@ function stripLeaksFromResume(resume: ResumeData): ResumeData | null {
       company: clean(e.company),
       bullets: e.bullets.map(clean).filter((b) => b.length > 0),
     })),
-    skills: resume.skills.filter((s) => detectLeaks(s.name).length === 0),
+    skills: resume.skills.map((s) => ({
+      ...s,
+      name: clean(s.name),
+      category: s.category ? clean(s.category) : undefined,
+    })).filter((s) => s.name.length > 0),
     education: resume.education.map((ed) => ({
       ...ed,
       degree: clean(ed.degree),
       institution: clean(ed.institution),
       highlights: ed.highlights?.map(clean).filter((h) => h.length > 0),
     })),
-    languages: resume.languages.filter((l) => detectLeaks(`${l.name} ${l.proficiency}`).length === 0),
+    languages: resume.languages.map((l) => ({
+      ...l,
+      name: clean(l.name),
+      proficiency: clean(l.proficiency) as ResumeLanguage["proficiency"],
+    })).filter((l) => l.name.length > 0),
     additionalInfo: resume.additionalInfo ? clean(resume.additionalInfo) : undefined,
     dynamicSections: (resume.dynamicSections || []).map((ds) => ({
       ...ds,

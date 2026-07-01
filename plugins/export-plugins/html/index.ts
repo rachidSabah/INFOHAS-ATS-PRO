@@ -8,7 +8,7 @@
 import { BaseExportPlugin } from '../../../src/lib/plugin-sdk/base-export-plugin';
 import type { PluginManifest, ResumeData, ExportFormat, ExportResult } from '../../../src/lib/plugin-sdk/types';
 
-import { exportResumeHTML as htmlExport } from '../../../src/lib/exporter';
+import { resumeToDirectiveHtml } from '../../../src/lib/ats-directives';
 
 export const create = (): HtmlExportPlugin => new HtmlExportPlugin();
 
@@ -36,11 +36,11 @@ export class HtmlExportPlugin extends BaseExportPlugin {
 
   protected async doExport(data: ResumeData): Promise<ExportResult> {
     try {
-      const result = await htmlExport(data, this.sourceResume);
+      const html = resumeToDirectiveHtml(data);
       return {
         ok: true,
         format: 'html',
-        data: result as string,
+        data: html,
       };
     } catch (err) {
       return {
