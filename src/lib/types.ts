@@ -862,6 +862,30 @@ export interface ResumeLayoutModel {
   minFontSizePt: number;
 }
 
+/**
+ * OptimizerConfig — strict quality gates for the resume optimizer agent.
+ * Controls retry, validation, and failure behavior.
+ */
+export interface OptimizerConfig {
+  maxRetries: number;
+  requireStructuredOutput: boolean;
+  strictJson: boolean;
+  failOnMissingSections: boolean;
+  failOnHalfPage: boolean;
+  failOnDirectiveBypass: boolean;
+  failOnParserConfidenceBelow: number;
+}
+
+export const DEFAULT_OPTIMIZER_CONFIG: OptimizerConfig = {
+  maxRetries: 3,
+  requireStructuredOutput: true,
+  strictJson: true,
+  failOnMissingSections: true,
+  failOnHalfPage: true,
+  failOnDirectiveBypass: true,
+  failOnParserConfidenceBelow: 90,
+};
+
 export interface AuditLog {
   id: string;
   timestamp: string;

@@ -571,14 +571,14 @@ export const SEED_PROVIDER_LOGS: AIProviderLog[] = [
 ];
 
 export const SEED_PROVIDER_SETTINGS: AIProviderSettings = {
-  // Default to OpenCode — API provider that works without browser auth.
+  // Default to Ollama Local — runs on 127.0.0.1:11434, no API key needed.
   // Puter is available as a browser-auth fallback for interactive tasks.
-  // NVIDIA/Mistral are fallbacks if the user configures valid API keys.
-  defaultProviderId: "p_opencode",
-  defaultModel: "deepseek-v4-flash-free",
-  fallbackProviderIds: ["p_puter", "p_nvidia", "p_openrouter", "p_mistral"],
-  retryAttempts: 2,
-  timeout: 30000,
+  // OpenCode and NVIDIA/Mistral are fallbacks if configured with valid API keys.
+  defaultProviderId: "p_ollama_local",
+  defaultModel: "deepseek-coder-v2",
+  fallbackProviderIds: ["p_puter", "p_opencode", "p_nvidia", "p_mistral"],
+  retryAttempts: 3,
+  timeout: 60000,
   rateLimitPerMinute: 60,
   enableFailover: true,
   enableCaching: true,

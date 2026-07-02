@@ -119,6 +119,8 @@ export type AgentId =
   | "memory"
   | "research"
   | "resume-parser"
+  | "resume-repair"
+  | "content-expansion"
   | "job-intelligence"
   | "company-intelligence"
   | "skill-gap"

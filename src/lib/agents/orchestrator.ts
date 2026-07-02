@@ -1148,6 +1148,25 @@ ${jobMemory.industry}`);
       result.charCount = optimizeResult.charCount;
 
       // ========================================================================
+      // [V3.5] ResumeRepairAgent — fix structural issues from optimizer
+      // Runs immediately after optimizer catches broken fields, missing sections,
+      // and other integrity issues before V3 pipeline processes the resume.
+      // ========================================================================
+      try {
+        const { runResumeRepair, DEFAULT_REPAIR_CONFIG } = await import("./resume-repair-agent");
+        const repairResult = await runResumeRepair(result.optimizedResume, resume, DEFAULT_REPAIR_CONFIG);
+        result.optimizedResume = repairResult.resume;
+        if (repairResult.repairs.length > 0) {
+          log("Resume Optimizer", `✓ ResumeRepairAgent: ${repairResult.repairs.length} repair(s) applied (confidence: ${repairResult.confidence}%)`);
+          for (const r of repairResult.repairs) {
+            console.info(`[ResumeRepair] [${r.severity}] ${r.section}: ${r.detail}`);
+          }
+        }
+      } catch (repairErr: any) {
+        console.warn("[ResumeRepairAgent] Failed (non-fatal):", repairErr?.message);
+      }
+
+      // ========================================================================
       // [V3 MULTI-AGENT PIPELINE] Post-optimization agents (ContentExpansionAgent)
       //
       // SKIP V3 pipeline when using the locked pipeline — the locked pipeline
@@ -1194,6 +1213,31 @@ ${jobMemory.industry}`);
             `quality ${v3Result.qualityReport.overallScore}/100`
           );
           emitProgress(3, `✓ V3 agents complete. Quality: ${v3Result.qualityReport.overallScore}/100, ${v3Result.finalCharCount} chars`);
+
+          // ================================================================
+          // [V3.5] ContentExpansionAgent — expand content if it's too short
+          // Runs after V3 pipeline when the output is below target chars.
+          // Expands bullets, summary, and skills to fill the page naturally.
+          // ================================================================
+          if (result.charCount < 2500) {
+            try {
+              const { runContentExpansion, DEFAULT_EXPANSION_CONFIG } = await import("./content-expansion-agent");
+              const expansionResult = await runContentExpansion(
+                result.optimizedResume!, jd, result.jobIntelligence, DEFAULT_EXPANSION_CONFIG,
+              );
+              result.optimizedResume = expansionResult.resume;
+              result.charCount = expansionResult.finalCharCount;
+              result.metCharTarget = expansionResult.finalCharCount >= 2800 && expansionResult.finalCharCount <= 3800;
+              if (expansionResult.expandedSections.length > 0) {
+                log("Resume Optimizer", `✓ ContentExpansionAgent: expanded ${expansionResult.expandedSections.length} section(s), now ${expansionResult.finalCharCount} chars`);
+                for (const s of expansionResult.expandedSections) {
+                  console.info(`[ContentExpansion] ${s.section}: ${s.beforeChars} → ${s.afterChars} chars`);
+                }
+              }
+            } catch (expandErr: any) {
+              console.warn("[ContentExpansionAgent] Failed (non-fatal):", expandErr?.message);
+            }
+          }
         } catch (v3Err: any) {
           console.warn("[V3 Pipeline] Failed (non-fatal):", v3Err?.message);
         }

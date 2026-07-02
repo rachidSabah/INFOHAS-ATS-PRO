@@ -85,6 +85,118 @@ export function Optimizer() {
 
   const [pasteText, setPasteText] = useState("");
   const [parsingText, setParsingText] = useState(false);
+  const [jdUrl, setJdUrl] = useState("");
+  const [scrapingJdUrl, setScrapingJdUrl] = useState(false);
+
+  const scrapeJdUrl = async () => {
+    if (!jdUrl || !/^https?:\/\//.test(jdUrl)) {
+      toast.error("Please enter a valid URL (including https://).");
+      return;
+    }
+    setScrapingJdUrl(true);
+    setAiLog([]);
+    setAiLog((l) => [...l, `Scraping job description from ${jdUrl}…`]);
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 25000);
+    try {
+      const res = await fetch("/api/jd-scrape", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url: jdUrl }),
+        signal: controller.signal,
+      });
+
+      const text = await res.text();
+      let data: any;
+      try {
+        data = JSON.parse(text);
+      } catch {
+        throw new Error(`Server returned a non-JSON response (${res.status} ${res.statusText}).`);
+      }
+
+      if (!res.ok) throw new Error(data.error || `Fetch failed (${res.status})`);
+
+      if (!data.text || data.text.trim().length < 30) {
+        throw new Error("No readable text was found on the page. Please paste the JD manually.");
+      }
+
+      setJdText(data.text);
+      toast.success(`Scraped job description successfully!`);
+      setAiLog((l) => [...l, "✓ Scraped text successfully.", "Now extracting job details via AI..."]);
+      
+      setAiThinking(true);
+      const parseResult = await callAI({
+        systemPrompt: "You are a job description parser. Extract structured data. Return ONLY valid JSON.",
+        userPrompt: `Extract from this job description:\n\n${data.text}\n\nReturn JSON with keys: title, company, location, employmentType, salary, responsibilities (array), requiredSkills (array), preferredSkills (array), technologies (array), experienceYears, education, keywords (array of 8-15).`,
+        maxTokens: 2000,
+        taskCategory: "document",
+      });
+
+      let parsedData: any;
+      try {
+        parsedData = extractJSON<any>(parseResult.text);
+      } catch {
+        parsedData = { title: "Parsed role", keywords: [] };
+      }
+
+      const flattenLoc = (v: any): string | undefined => {
+        if (!v) return undefined;
+        if (typeof v === "string") return v;
+        if (typeof v === "object") {
+          const parts = [v.city, v.state, v.region, v.country, v.address].filter((x: any) => x && typeof x === "string");
+          if (parts.length > 0) return parts.join(", ");
+          return Object.values(v).filter(Boolean).join(", ");
+        }
+        return String(v);
+      };
+      const flattenStr = (v: any): string | undefined => {
+        if (v === null || v === undefined) return undefined;
+        if (typeof v === "string") return v;
+        if (typeof v === "number" || typeof v === "boolean") return String(v);
+        if (typeof v === "object") return JSON.stringify(v);
+        return String(v);
+      };
+      const flattenArray = (v: any): string[] => {
+        if (!Array.isArray(v)) return [];
+        return v.map((x: any) => typeof x === "string" ? x : (typeof x === "object" ? JSON.stringify(x) : String(x))).filter(Boolean);
+      };
+
+      const parsedJd: JobDescription = {
+        id: uid("jd"),
+        title: flattenStr(parsedData.title) || "Untitled role",
+        company: flattenStr(parsedData.company),
+        location: flattenLoc(parsedData.location),
+        employmentType: flattenStr(parsedData.employmentType),
+        salary: flattenStr(parsedData.salary),
+        responsibilities: flattenArray(parsedData.responsibilities),
+        requiredSkills: flattenArray(parsedData.requiredSkills),
+        preferredSkills: flattenArray(parsedData.preferredSkills),
+        technologies: flattenArray(parsedData.technologies),
+        experienceYears: flattenStr(parsedData.experienceYears),
+        education: flattenStr(parsedData.education),
+        keywords: flattenArray(parsedData.keywords),
+        rawText: data.text,
+        source: "url",
+        url: jdUrl,
+        createdAt: new Date().toISOString(),
+      };
+
+      setJdParsed(parsedJd);
+      addJD(parsedJd);
+      toast.success(`Extracted: ${parsedJd.title}`);
+      setStep("analyze");
+    } catch (e: any) {
+      const msg = e?.name === "AbortError"
+        ? "The fetch timed out. Please paste the JD text manually."
+        : (e?.message || "Unknown error");
+      toast.error(msg);
+      setAiLog((l) => [...l, `⚠ Error: ${msg}`]);
+    } finally {
+      clearTimeout(timeout);
+      setScrapingJdUrl(false);
+      setAiThinking(false);
+    }
+  };
 
   const handlePasteResume = async () => {
     if (pasteText.trim().length < 30) {
@@ -637,27 +749,67 @@ export function Optimizer() {
         {/* Step 2: JD */}
         {step === "jd" && (
           <motion.div key="jd" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }}>
-            <Card>
-              <CardHeader><CardTitle className="text-lg">Paste the target job description</CardTitle><CardDescription>We'll extract title, company, keywords, and required skills — either via AI or heuristics.</CardDescription></CardHeader>
-              <CardContent className="space-y-3">
-                <Textarea
-                  value={jdText}
-                  onChange={(e) => setJdText(e.target.value)}
-                  rows={10}
-                  placeholder="Paste the full job description here, or use the JD Scraper to extract from a URL…"
-                />
-                <div className="flex flex-wrap gap-2 justify-between">
-                  <Button variant="outline" onClick={() => setStep("upload")} className="gap-1.5"><Icon name="ArrowLeft" className="w-4 h-4" /> Back</Button>
-                  <div className="flex gap-2">
+            <Card className="flex flex-col">
+              <Tabs defaultValue="url" className="w-full flex-1 flex flex-col">
+                <CardHeader className="pb-2">
+                  <div className="flex items-center justify-between">
+                    <CardTitle className="text-lg">Target job description</CardTitle>
+                    <TabsList className="grid w-[240px] grid-cols-2">
+                      <TabsTrigger value="url">Fetch from URL</TabsTrigger>
+                      <TabsTrigger value="text">Paste Text</TabsTrigger>
+                    </TabsList>
+                  </div>
+                  <CardDescription>Enter a job listing URL or paste the job description text below.</CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-3 pt-0">
+                  <TabsContent value="url" className="space-y-3 mt-2">
+                    <div className="flex gap-2">
+                      <input
+                        type="url"
+                        value={jdUrl}
+                        onChange={(e) => setJdUrl(e.target.value)}
+                        placeholder="https://example.com/careers/job-listing-url"
+                        className="flex-1 h-9 px-3 rounded-md border border-input bg-background text-sm"
+                      />
+                      <Button onClick={scrapeJdUrl} disabled={scrapingJdUrl || aiThinking} className="bg-brand hover:bg-brand-dark text-white gap-2">
+                        {scrapingJdUrl || aiThinking ? <Icon name="Loader2" className="w-4 h-4 animate-spin" /> : <Icon name="Globe" className="w-4 h-4" />}
+                        {scrapingJdUrl ? "Scraping..." : aiThinking ? "Parsing..." : "Fetch & Parse"}
+                      </Button>
+                    </div>
+                    {jdText && (
+                      <div className="mt-3">
+                        <label className="text-xs font-semibold text-muted-foreground uppercase mb-1">Scraped text preview:</label>
+                        <Textarea
+                          value={jdText}
+                          readOnly
+                          rows={6}
+                          className="text-xs bg-secondary/30"
+                        />
+                      </div>
+                    )}
+                  </TabsContent>
+                  <TabsContent value="text" className="space-y-3 mt-2">
+                    <Textarea
+                      value={jdText}
+                      onChange={(e) => setJdText(e.target.value)}
+                      rows={10}
+                      placeholder="Paste the full job description here…"
+                    />
+                    <div className="flex justify-end">
+                      <Button onClick={parseJD} disabled={aiThinking || jdText.length < 30} className="bg-brand hover:bg-brand-dark text-white gap-2">
+                        {aiThinking ? <Icon name="Loader2" className="w-4 h-4 animate-spin" /> : <Icon name="Sparkles" className="w-4 h-4" />}
+                        {aiThinking ? "Parsing…" : "Parse with AI"}
+                      </Button>
+                    </div>
+                  </TabsContent>
+
+                  <div className="flex flex-wrap gap-2 justify-between mt-3 pt-3 border-t border-border">
+                    <Button variant="outline" onClick={() => setStep("upload")} className="gap-1.5"><Icon name="ArrowLeft" className="w-4 h-4" /> Back</Button>
                     {jds.length > 0 && (
                       <select
                         onChange={(e) => {
                           const j = jds.find((x) => x.id === e.target.value);
                           if (j) {
-                            // Defensive: every array field is guaranteed by
-                            // normalizeJD, but use optional chaining as belt-
-                            // and-suspenders so a malformed JD can never
-                            // crash the page.
                             const kws = Array.isArray(j.keywords) ? j.keywords : [];
                             const raw = typeof j.rawText === "string" ? j.rawText : "";
                             setJdText(raw || kws.join(", "));
@@ -672,24 +824,21 @@ export function Optimizer() {
                         {jds.map((j) => <option key={j.id} value={j.id}>{j.title || "Untitled role"}</option>)}
                       </select>
                     )}
-                    <Button onClick={parseJD} disabled={aiThinking || jdText.length < 30} className="bg-brand hover:bg-brand-dark text-white gap-2">
-                      {aiThinking ? <Icon name="Loader2" className="w-4 h-4 animate-spin" /> : <Icon name="Sparkles" className="w-4 h-4" />}
-                      {aiThinking ? "Parsing…" : "Parse with AI"}
-                    </Button>
                   </div>
-                </div>
-                {aiThinking && (
-                  <div className="rounded-lg bg-secondary p-3 text-xs font-mono space-y-1">
-                    {aiLog.map((l, i) => <div key={i} className="flex items-center gap-2"><span className="text-brand">›</span> {l}</div>)}
+
+                  {(aiThinking || scrapingJdUrl) && (
+                    <div className="rounded-lg bg-secondary p-3 text-xs font-mono space-y-1 mt-3">
+                      {aiLog.map((l, i) => <div key={i} className="flex items-center gap-2"><span className="text-brand">›</span> {l}</div>)}
+                    </div>
+                  )}
+                  <div className="rounded-lg bg-brand/5 dark:bg-brand/10 border border-brand/20 p-2.5 flex items-start gap-2 mt-3">
+                    <Icon name="Info" className="w-3.5 h-3.5 text-brand shrink-0 mt-0.5" />
+                    <p className="text-xs text-muted-foreground">
+                      Paste a job posting or provide a job listing link to tailor your resume. The Job Intelligence Agent will extract required skills, technologies, certifications, ATS keywords, and industry terminology.
+                    </p>
                   </div>
-                )}
-                <div className="rounded-lg bg-brand/5 dark:bg-brand/10 border border-brand/20 p-2.5 flex items-start gap-2">
-                  <Icon name="Info" className="w-3.5 h-3.5 text-brand shrink-0 mt-0.5" />
-                  <p className="text-xs text-muted-foreground">
-                    Paste a job posting to tailor your resume. The Job Intelligence Agent will extract required skills, technologies, certifications, ATS keywords, and industry terminology. You can also use the <button onClick={() => useApp.getState().setView("jd-scraper")} className="text-brand underline hover:no-underline">JD Scraper</button> to extract from a URL.
-                  </p>
-                </div>
-              </CardContent>
+                </CardContent>
+              </Tabs>
             </Card>
           </motion.div>
         )}

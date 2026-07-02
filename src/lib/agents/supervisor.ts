@@ -138,6 +138,8 @@ const AGENT_DEFINITIONS: { id: AgentId; name: string; icon: string }[] = [
   { id: "memory", name: "Memory", icon: "Database" },
   { id: "research", name: "Research", icon: "Search" },
   { id: "resume-parser", name: "Resume Parser", icon: "FileText" },
+  { id: "resume-repair", name: "Resume Repair", icon: "Wrench" },
+  { id: "content-expansion", name: "Content Expansion", icon: "Expand" },
   { id: "job-intelligence", name: "Job Intelligence", icon: "Briefcase" },
   { id: "company-intelligence", name: "Company Intelligence", icon: "Building2" },
   { id: "skill-gap", name: "Skill Gap", icon: "GitCompare" },

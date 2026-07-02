@@ -28,6 +28,10 @@ export { runOptimizationPipeline, runReflectionAgent, type PipelineInput, type P
 // V2 agents
 export { analyzeCompanyIntelligence, analyzeSkillGap, type CompanyIntelligence, type SkillGapIntelligence } from "./company-skill-agents";
 
+// V3.5 agents — Resume Repair + Content Expansion
+export { runResumeRepair, type RepairResult, type Repair, type RepairConfig, DEFAULT_REPAIR_CONFIG } from "./resume-repair-agent";
+export { runContentExpansion, type ExpansionResult, type ExpandedSection, type ExpansionConfig, DEFAULT_EXPANSION_CONFIG } from "./content-expansion-agent";
+
 // V3 — Supervisor + Memory + shared context
 export {
   getSupervisorState,
