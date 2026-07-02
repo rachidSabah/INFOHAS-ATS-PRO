@@ -142,7 +142,7 @@ export async function exchangeAuthorizationCode(
       return { type: "failed", error: `Token exchange failed: ${errText.slice(0, 300)}` };
     }
 
-    const tokenData = await tokenResponse.json();
+    const tokenData = (await tokenResponse.json()) as any;
 
     // Fetch user email
     let email: string | undefined;
@@ -153,7 +153,7 @@ export async function exchangeAuthorizationCode(
         },
       });
       if (userRes.ok) {
-        const userData = await userRes.json();
+        const userData = (await userRes.json()) as any;
         email = userData.email;
       }
     } catch { /* email fetch is optional */ }
@@ -197,7 +197,7 @@ export async function refreshAntigravityToken(
       return { type: "failed", error: `Token refresh failed: ${errText.slice(0, 200)}` };
     }
 
-    const tokenData = await tokenResponse.json();
+    const tokenData = (await tokenResponse.json()) as any;
     return {
       type: "success",
       accessToken: tokenData.access_token,
@@ -298,7 +298,7 @@ export async function generateAntigravity(
     throw new Error(`Antigravity API ${res.status}: ${text.slice(0, 200)}`);
   }
 
-  const data = await res.json();
+  const data = (await res.json()) as any;
   const text = data.choices?.[0]?.message?.content || "";
   return { text, provider: "antigravity", latencyMs };
 }

@@ -63,7 +63,7 @@ export async function discoverModels(provider: AIProvider): Promise<string[] | n
       return null;
     }
 
-    const data = await response.json();
+    const data = (await response.json()) as any;
     if (!data.models || !Array.isArray(data.models)) {
       return null;
     }

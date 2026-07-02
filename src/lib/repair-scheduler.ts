@@ -184,7 +184,7 @@ export async function scanDatabase(): Promise<void> {
 
   try {
     const response = await fetch("/api/health", { signal: AbortSignal.timeout(5000) });
-    const data = await response.json();
+    const data = (await response.json()) as any;
 
     if (!data.ok || data.db !== "connected") {
       console.warn("[Repair Scheduler] Database health check failed:", data);

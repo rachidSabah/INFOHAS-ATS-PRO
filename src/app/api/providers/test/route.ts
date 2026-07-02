@@ -59,7 +59,7 @@ function isAllowedProviderUrl(urlStr: string): boolean {
 
 export async function POST(req: NextRequest) {
   try {
-    const body = await req.json().catch(() => ({}));
+    const body = ((await req.json().catch(() => ({}))) as any) as any;
     const { baseUrl, apiKey, authType, headersJson, model, testPrompt, timeout } = body;
 
     if (!baseUrl) {

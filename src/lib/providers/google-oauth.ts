@@ -148,7 +148,7 @@ export async function signInWithGoogle(clientId?: string): Promise<GoogleOAuthRe
             return;
           }
 
-          const userInfo: GoogleUserInfo = await userInfoRes.json();
+          const userInfo: GoogleUserInfo = (await userInfoRes.json()) as any;
 
           if (!userInfo.sub || !userInfo.email) {
             reject(new Error("Google OAuth returned incomplete user info"));
@@ -192,7 +192,7 @@ export async function verifyGoogleTokenServerSide(
 
     if (!res.ok) return null;
 
-    const payload = await res.json();
+    const payload = (await res.json()) as any;
 
     // Verify the audience matches our client ID
     if (payload.aud !== expectedClientId) {

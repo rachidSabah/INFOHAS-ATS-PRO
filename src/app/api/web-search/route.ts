@@ -24,7 +24,7 @@ const CACHE_TTL_MS = 5 * 60 * 1000;
 
 export async function POST(req: NextRequest) {
   try {
-    const body = await req.json();
+    const body = (await req.json()) as any;
     const { company, jobTitle, industry } = body;
 
     if (!company && !jobTitle) {
@@ -102,7 +102,7 @@ export async function POST(req: NextRequest) {
             signal: AbortSignal.timeout(10000),
           });
           if (!searchResponse.ok) return [];
-          const searchData = await searchResponse.json();
+          const searchData = (await searchResponse.json()) as any;
           const results = Array.isArray(searchData) ? searchData : (searchData?.output ?? []);
           return results.slice(0, 5).map((r: any) => {
             // Defensive: r.url may be missing or relative — wrap separately so

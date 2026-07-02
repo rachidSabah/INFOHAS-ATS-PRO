@@ -107,7 +107,7 @@ async function fetchModelList(baseUrl: string, apiKey: string | undefined, provi
 
     if (!res.ok) return [];
 
-    const data = await res.json();
+    const data = (await res.json()) as any;
     let models: string[] = [];
     
     if (Array.isArray(data?.data)) {

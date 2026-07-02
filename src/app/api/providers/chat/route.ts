@@ -144,7 +144,7 @@ export async function POST(req: NextRequest) {
       }, { status: res.status });
     }
 
-    const data = await res.json();
+    const data = (await res.json()) as any;
 
     let text = "";
     if (responsePath) {

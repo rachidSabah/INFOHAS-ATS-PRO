@@ -186,8 +186,8 @@ export default function QADashboardPage() {
   const fetchData = useCallback(async () => {
     try {
       const [qaRes, healthRes] = await Promise.all([
-        fetch("/api/qa/run").then((r) => r.json()),
-        fetch("/api/health").then((r) => r.json()),
+        fetch("/api/qa/run").then((r) => r.json() as any),
+        fetch("/api/health").then((r) => r.json() as any),
       ]);
       setQaResult(qaRes);
       setHealthResult(healthRes);

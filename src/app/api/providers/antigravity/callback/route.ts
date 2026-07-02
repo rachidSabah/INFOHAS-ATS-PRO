@@ -61,7 +61,7 @@ export async function GET(req: NextRequest) {
       );
     }
 
-    const tokenData: any = await tokenRes.json();
+    const tokenData: any = (await tokenRes.json()) as any;
 
     // Fetch user email
     let email = "";
@@ -70,7 +70,7 @@ export async function GET(req: NextRequest) {
         headers: { "Authorization": `Bearer ${tokenData.access_token}` },
       });
       if (userRes.ok) {
-        const userData: any = await userRes.json();
+        const userData: any = (await userRes.json()) as any;
         email = userData.email || "";
       }
     } catch { /* non-fatal */ }

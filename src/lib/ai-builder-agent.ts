@@ -267,7 +267,7 @@ async function getProjectStructure(): Promise<string> {
   try {
     const res = await fetch("/repo-index.json");
     if (!res.ok) return "Unable to load project structure.";
-    const index = await res.json();
+    const index = (await res.json()) as any;
     const files = Object.keys(index);
 
     // Group by top-level directory

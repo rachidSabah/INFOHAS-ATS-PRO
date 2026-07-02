@@ -309,7 +309,7 @@ export default function TestRunnerPage() {
       const response = await fetch("/api/qa/run");
       if (!response.ok) throw new Error(`API returned ${response.status}`);
 
-      const data: QAResponse = await response.json();
+      const data: QAResponse = (await response.json()) as any;
 
       clearInterval(progressInterval);
 

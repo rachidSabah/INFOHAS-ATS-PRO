@@ -3,7 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 export const runtime = "edge";
 export async function POST(req: NextRequest) {
   try {
-    const body = await req.json();
+    const body = (await req.json()) as any;
     const { sessionId, stage, data } = body;
     console.log(`[Checkpoint] Persisted: ${sessionId} @ ${stage}`);
     return NextResponse.json({ ok: true });

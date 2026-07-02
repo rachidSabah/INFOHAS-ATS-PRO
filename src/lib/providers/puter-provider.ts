@@ -125,7 +125,7 @@ export class PuterProvider implements OAuthAIProvider {
       try {
         const res = await fetch("/api/providers/puter/accounts");
         if (res.ok) {
-          const apiData = await res.json();
+          const apiData = (await res.json()) as any;
           if (apiData.accounts) {
             data = apiData;
           }

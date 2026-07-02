@@ -93,7 +93,7 @@ export class GeminiProvider extends OpenAICompatibleProvider {
       const errText = await res.text().catch(() => "");
       throw new ProviderError(`Gemini API ${res.status}: ${errText.slice(0, 200)}`, res.status, latencyMs);
     }
-    const data = await res.json();
+    const data = (await res.json()) as any;
     const text = data?.candidates?.[0]?.content?.parts?.map((p: any) => p.text).join("") ?? "";
     return {
       text,
@@ -124,7 +124,7 @@ export class GeminiProvider extends OpenAICompatibleProvider {
     if (!res.ok) {
       throw new Error(`Gemini listModels ${res.status}: ${(await res.text().catch(() => "")).slice(0, 200)}`);
     }
-    const data = await res.json();
+    const data = (await res.json()) as any;
     return (data?.models ?? [])
       .map((m: any) => m.name?.replace(/^models\//, "") || m.name)
       .filter((n: string) => n && !n.includes("/"))

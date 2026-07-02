@@ -61,9 +61,9 @@ app.options("*", (c) => {
 });
 
 // Helper: parse JSON body
-async function parseBody(req: Request): Promise<Record<string, unknown>> {
+async function parseBody(req: Request): Promise<any> {
   try {
-    return await req.json();
+    return (await req.json()) as any;
   } catch (parseErr) {
     console.warn("[Worker] Body parse failed:", parseErr instanceof Error ? parseErr.message : parseErr);
     return {};
@@ -146,7 +146,7 @@ async function columnExists(db: D1Database, table: string, column: string): Prom
 // ============================================================================
 
 async function getEncryptionKey(env: Env): Promise<CryptoKey | null> {
-  const keyHex = (env as Record<string, string>).ENCRYPTION_KEY;
+  const keyHex = (env as any).ENCRYPTION_KEY;
   if (!keyHex || keyHex.length !== 64) return null;
   try {
     const keyBytes = new Uint8Array(keyHex.match(/.{2}/g)!.map((b: string) => parseInt(b, 16)));
@@ -328,7 +328,7 @@ app.get("/api/health/schema", async (c) => {
  */
 async function getCached(c: any, url: string): Promise<Response | null> {
   try {
-    const cache = caches.default;
+    const cache = (caches as any).default;
     const cacheKey = new Request(url, { method: "GET" });
     const cached = await cache.match(cacheKey);
     if (cached) {
@@ -350,7 +350,7 @@ async function getCached(c: any, url: string): Promise<Response | null> {
  */
 async function setCached(c: any, url: string, response: Response, maxAgeSec = 60, swrSec = 300): Promise<void> {
   try {
-    const cache = caches.default;
+    const cache = (caches as any).default;
     const cacheKey = new Request(url, { method: "GET" });
     const cached = new Response(response.body, response);
     cached.headers.set("Cache-Control", `s-maxage=${maxAgeSec}, stale-while-revalidate=${swrSec}`);
@@ -369,7 +369,7 @@ async function setCached(c: any, url: string, response: Response, maxAgeSec = 60
  */
 async function purgeCached(c: any, url: string): Promise<void> {
   try {
-    const cache = caches.default;
+    const cache = (caches as any).default;
     const cacheKey = new Request(url, { method: "GET" });
     c.executionCtx.waitUntil(cache.delete(cacheKey));
   } catch (cachePurgeErr) {

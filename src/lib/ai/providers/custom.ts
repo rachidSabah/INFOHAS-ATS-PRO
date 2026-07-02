@@ -60,7 +60,7 @@ export class CustomProvider implements AIProviderAdapter {
       const errText = await res.text().catch(() => "");
       throw new ProviderError(`Custom provider ${res.status}: ${errText.slice(0, 200)}`, res.status, latencyMs);
     }
-    const data = await res.json();
+    const data = (await res.json()) as any;
 
     // Extract text via responsePath, or fall back to common paths
     const text = config.responsePath

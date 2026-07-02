@@ -8,7 +8,7 @@ export const runtime = "edge";
 
 export async function POST(req: NextRequest) {
   try {
-    const body = await req.json().catch(() => ({}));
+    const body = ((await req.json().catch(() => ({}))) as any) as any;
     const { systemPrompt, userPrompt, maxTokens = 4096, temperature = 0.7 } = body as {
       systemPrompt?: string;
       userPrompt?: string;
@@ -77,7 +77,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const data = await res.json();
+    const data = (await res.json()) as any;
     const text = data?.choices?.[0]?.message?.content ?? "";
     return NextResponse.json({ text, provider: "z-ai" });
   } catch (e: unknown) {

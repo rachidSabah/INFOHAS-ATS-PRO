@@ -26,7 +26,7 @@ export class ZaiFallbackProvider implements AIProviderAdapter {
       const errText = await res.text().catch(() => "");
       throw new Error(`Z.ai fallback ${res.status}: ${errText.slice(0, 200)}`);
     }
-    const data = await res.json();
+    const data = (await res.json()) as any;
     return {
       text: data.text,
       provider: "z-ai-fallback",

@@ -52,7 +52,7 @@ export class OpenAICompatibleProvider implements AIProviderAdapter {
       throw new ProviderError(`${this.type} API ${res.status}: ${errText.slice(0, 200)}`, res.status, latencyMs);
     }
 
-    const data = await res.json();
+    const data = (await res.json()) as any;
     const text = data?.choices?.[0]?.message?.content ?? "";
     return {
       text,
@@ -114,7 +114,7 @@ export class OpenAICompatibleProvider implements AIProviderAdapter {
       const errText = await res.text().catch(() => "");
       throw new ProviderError(`${this.type} listModels ${res.status}: ${errText.slice(0, 200)}`, res.status, 0);
     }
-    const data = await res.json();
+    const data = (await res.json()) as any;
     // OpenAI-compatible APIs return { data: [{ id: "model-name", ... }, ...] }
     const models: string[] = (data?.data ?? data?.models ?? []).map((m: any) => m.id || m.name).filter(Boolean);
     return models.sort();

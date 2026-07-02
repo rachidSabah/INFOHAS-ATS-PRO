@@ -286,7 +286,7 @@ async function loadFromCloud(provider: string): Promise<ProviderSession | null> 
   try {
     const res = await fetch(`${CLOUD_API_BASE}/api/provider-sessions/${provider}`);
     if (res.ok) {
-      return await res.json();
+      return (await res.json()) as any;
     }
   } catch (loadErr) {
     console.warn("[SessionManager] Cloud load failed:", loadErr instanceof Error ? loadErr.message : loadErr);

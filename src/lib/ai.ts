@@ -905,7 +905,7 @@ async function callUserProvider(
       clearTimeout(fetchTimer);
     }
 
-    const proxyData = await proxyRes.json();
+    const proxyData = (await proxyRes.json()) as any;
     if (!proxyData.ok) {
       // The proxy returns `error` AND `message` (and `isTimeout` for aborts).
       // Use all three to construct a timeout-detectable error message.
@@ -992,7 +992,7 @@ async function callUserProvider(
   // For OpenCode Zen free models: maxConcurrent=1, backoff 1s/2s/4s, max 3 attempts
   const timeoutMs = provider.timeout && provider.timeout > 0 ? provider.timeout * 1000 : 30000;
   const queue = getRequestQueue(provider);
-  const data = await queue.run(() =>
+  const data = (await queue.run(() =>
     withRateLimitRetry(
       async () => {
         const r = await withTimeout(
@@ -1033,7 +1033,7 @@ async function callUserProvider(
       },
       provider,
     ),
-  );
+  )) as any;
 
   // Extract text from common response shapes:
   //   OpenAI-style:    data.choices[0].message.content

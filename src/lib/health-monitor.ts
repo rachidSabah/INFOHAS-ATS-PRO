@@ -57,7 +57,7 @@ export async function runHealthCheck(): Promise<HealthStatus> {
       const t0 = performance.now();
       const response = await fetch("/api/health", { signal: AbortSignal.timeout(5000) });
       dbLatency = Math.round(performance.now() - t0);
-      const data = await response.json();
+      const data = (await response.json()) as any;
       dbHealthy = data.ok === true && data.db === "connected";
     } catch (e) {
       dbHealthy = false;

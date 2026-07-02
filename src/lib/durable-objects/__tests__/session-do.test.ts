@@ -153,7 +153,7 @@ describe('SessionDO error handling', () => {
 
     const response = await sessionDO.fetch(req);
     expect(response.status).toBe(400);
-    const body = await response.json();
+    const body = (await response.json()) as any;
     expect(body.error).toBe('Unknown action');
   });
 
@@ -178,7 +178,7 @@ describe('SessionDO error handling', () => {
 
     const response = await sessionDO.fetch(req);
     expect(response.status).toBe(400);
-    const body = await response.json();
+    const body = (await response.json()) as any;
     expect(body.error).toBe('Operation type required');
   });
 });

@@ -129,6 +129,7 @@ export function validateResumeContent(resume: ResumeData): ValidationResult {
     fieldsToCheck.push({ name: `skills[${s.name}]`, value: s.name });
   }
 
+  const seenEducationFingerprints = new Set<string>();
   for (const ed of resume.education) {
     const educationFingerprint = `${ed.institution}-${ed.degree}`.toLowerCase().replace(/\s+/g, " ").trim();
     if (seenEducationFingerprints.has(educationFingerprint)) {

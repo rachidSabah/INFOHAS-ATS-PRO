@@ -8,7 +8,7 @@ export const runtime = "edge";
 
 export async function POST(req: NextRequest) {
   try {
-    const body = await req.json().catch(() => ({}));
+    const body = ((await req.json().catch(() => ({}))) as any) as any;
     console.log("[PuterSession] Session saved:", body.authenticated ? "authenticated" : "not authenticated");
     return NextResponse.json({ ok: true });
   } catch (e: any) {

@@ -350,7 +350,7 @@ export function BulkGenerator() {
     setNewJobUrl("");
     try {
       const res = await fetch("/api/jd-scrape", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ url: jobs.find(j => j.id === jobId)?.value || newJobUrl }) });
-      const data = await res.json();
+      const data = (await res.json()) as any;
       if (data.error) throw new Error(data.error);
       setJobs((j) => j.map((job) => job.id === jobId ? { ...job, status: "pending", statusLabel: "Ready", value: data.text || job.value, company: data.title?.split(" - ")[1] || "", title: data.title?.split(" - ")[0] || "" } : job));
       toast.success("URL scraped successfully.");
@@ -1156,7 +1156,7 @@ export function CompanyResearch() {
       const webPromise = fetch("/api/web-search", {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ company: targetCompany, jobTitle: jd?.title || "", industry: "" }),
-      }).then((r) => r.json()).catch(() => ({ results: [] }));
+      }).then((r) => r.json() as any).catch(() => ({ results: [] }));
 
       const resumeContext = resume ? JSON.stringify({
         name: resume.name, headline: resume.headline, summary: resume.summary,

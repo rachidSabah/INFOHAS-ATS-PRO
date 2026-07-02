@@ -244,11 +244,11 @@ export class ProviderManager {
       });
 
       if (!res.ok) {
-        const err = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
+        const err = (await res.json().catch(() => ({ error: `HTTP ${res.status}` }))) as any;
         return { ok: false, models: [], error: err.error || `Failed to fetch models (${res.status})` };
       }
 
-      const data = await res.json();
+      const data = (await res.json()) as any;
       if (data.models && data.models.length > 0) {
         return { ok: true, models: data.models };
       }

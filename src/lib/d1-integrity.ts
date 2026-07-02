@@ -34,7 +34,7 @@ export async function checkD1Integrity(): Promise<D1IntegrityResult> {
   try {
     // Try calling the health endpoint first (lighter check)
     const healthResponse = await fetch("/api/health", { signal: AbortSignal.timeout(5000) });
-    const healthData = await healthResponse.json();
+    const healthData = (await healthResponse.json()) as any;
 
     if (!healthData.ok || healthData.db !== "connected") {
       issues.push("D1 database is not connected");
@@ -53,7 +53,7 @@ export async function checkD1Integrity(): Promise<D1IntegrityResult> {
       signal: AbortSignal.timeout(5000),
     });
     if (resumesResponse.ok) {
-      const resumesData = await resumesResponse.json();
+      const resumesData = (await resumesResponse.json()) as any;
       const resumes = resumesData.resumes || [];
       // We can't run PRAGMA directly from the client, but we can check
       // if the data looks consistent

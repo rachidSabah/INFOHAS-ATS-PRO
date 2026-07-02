@@ -135,7 +135,7 @@ export class SessionDO {
   // ── PUT ─────────────────────────────────────────────────────────────
 
   private async handlePut(request: Request): Promise<Response> {
-    const body = await request.json() as {
+    const body = (await request.json()) as any as {
       action: 'start' | 'update-progress' | 'complete' | 'fail' | 'save-snapshot' | 'cancel';
       operation?: SessionOperation;
       payload?: Record<string, unknown>;
@@ -445,7 +445,7 @@ export class SessionManager {
       }),
     );
     if (!response.ok) {
-      const err = await response.json().catch(() => ({ error: response.statusText }));
+      const err = (await response.json().catch(() => ({ error: response.statusText }))) as any;
       throw new Error((err as any).error ?? `Session DO error: ${response.status}`);
     }
     return response.json();

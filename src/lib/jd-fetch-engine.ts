@@ -214,7 +214,7 @@ async function searchJobPosting(query: JDSearchQuery): Promise<JDSearchResult[]>
       });
 
       if (res.ok) {
-        const data = await res.json();
+        const data = (await res.json()) as any;
         if (data.items && Array.isArray(data.items)) {
           for (const item of data.items.slice(0, 5)) {
             const title = item.title || "";

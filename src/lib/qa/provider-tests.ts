@@ -73,7 +73,7 @@ export async function testProvider(opts: {
       return result;
     }
 
-    const data = await response.json().catch(() => null);
+    const data = (await response.json().catch(() => null)) as any;
     if (!data) {
       result.networkErrors.push("Invalid JSON response from test endpoint");
       result.message = "Invalid JSON response";

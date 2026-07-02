@@ -41,7 +41,7 @@ export class ClaudeProvider extends OpenAICompatibleProvider {
       const errText = await res.text().catch(() => "");
       throw new ProviderError(`Claude API ${res.status}: ${errText.slice(0, 200)}`, res.status, latencyMs);
     }
-    const data = await res.json();
+    const data = (await res.json()) as any;
     const text = data?.content?.[0]?.text ?? "";
     return {
       text,
@@ -69,7 +69,7 @@ export class ClaudeProvider extends OpenAICompatibleProvider {
     if (!res.ok) {
       throw new Error(`Claude listModels ${res.status}: ${(await res.text().catch(() => "")).slice(0, 200)}`);
     }
-    const data = await res.json();
+    const data = (await res.json()) as any;
     return (data?.data ?? []).map((m: any) => m.id).filter(Boolean).sort();
   }
 }

@@ -83,7 +83,7 @@ export function useTaskPolling(taskId: string | null): UseTaskPollingResult {
         return;
       }
 
-      const data = await res.json();
+      const data = (await res.json()) as any;
       if (data.ok) {
         setTask({
           id: data.id,
@@ -204,7 +204,7 @@ export async function createTask(input: CreateTaskInput): Promise<CreateTaskResu
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(input),
     });
-    const data = await res.json();
+    const data = (await res.json()) as any;
     if (data.ok) {
       return { ok: true, task: data.task };
     }
@@ -249,7 +249,7 @@ export async function getTaskResult(taskId: string): Promise<any | null> {
   try {
     const res = await fetch(`${API_BASE}/api/tasks/${taskId}`);
     if (!res.ok) return null;
-    const data = await res.json();
+    const data = (await res.json()) as any;
     if (data.ok && data.task) {
       return data.task.result;
     }

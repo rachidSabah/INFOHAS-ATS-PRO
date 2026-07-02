@@ -30,7 +30,7 @@ export class OllamaProvider implements AIProviderAdapter {
       const errText = await res.text().catch(() => "");
       throw new ProviderError(`Ollama ${res.status}: ${errText.slice(0, 200)}`, res.status, latencyMs);
     }
-    const data = await res.json();
+    const data = (await res.json()) as any;
     return {
       text: data?.message?.content ?? "",
       provider: "ollama",
@@ -48,7 +48,7 @@ export class OllamaProvider implements AIProviderAdapter {
     try {
       const res = await fetch(`${(config.baseUrl || "http://localhost:11434").replace(/\/$/, "")}/api/tags`);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const data = await res.json();
+      const data = (await res.json()) as any;
       const models = (data?.models ?? []).map((m: any) => m.name);
       return { ok: true, latencyMs: Math.round(performance.now() - t0), message: `Connected — ${models.length} models available`, response: models.slice(0, 5).join(", ") };
     } catch (e: any) {
@@ -59,7 +59,7 @@ export class OllamaProvider implements AIProviderAdapter {
   async listModels(config: ProviderConfig): Promise<string[]> {
     const res = await fetch(`${(config.baseUrl || "http://localhost:11434").replace(/\/$/, "")}/api/tags`);
     if (!res.ok) return [];
-    const data = await res.json();
+    const data = (await res.json()) as any;
     return (data?.models ?? []).map((m: any) => m.name);
   }
 }

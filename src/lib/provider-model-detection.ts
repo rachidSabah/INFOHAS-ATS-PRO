@@ -84,7 +84,7 @@ export async function fetchProviderModels(provider: AIProvider): Promise<ModelDe
         throw new Error(`HTTP ${response.status}: ${response.statusText}`);
       }
 
-      const data = await response.json();
+      const data = (await response.json()) as any;
       rawModels = data.data || data.models || data;
     } else {
       // Use proxy to avoid CORS issues
@@ -104,7 +104,7 @@ export async function fetchProviderModels(provider: AIProvider): Promise<ModelDe
         throw new Error(`HTTP ${response.status}: ${response.statusText}`);
       }
 
-      const data = await response.json();
+      const data = (await response.json()) as any;
       if (data && Array.isArray(data.models)) {
         rawModels = data.models.map((id: string) => ({ id, name: id }));
       } else {

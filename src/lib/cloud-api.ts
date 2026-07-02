@@ -124,7 +124,7 @@ async function apiFetch<T = any>(path: string, options: RequestInit = {}): Promi
   try {
     const res = await fetchWithRetry(`${API_BASE}${path}`, options, 2);
     if (!res.ok) {
-      const err = await res.json().catch(() => ({ error: res.statusText }));
+      const err = (await res.json().catch(() => ({ error: res.statusText }))) as any;
       throw new Error(err.error || `API ${res.status}`);
     }
     return res.json();

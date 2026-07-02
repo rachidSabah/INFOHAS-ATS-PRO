@@ -8,7 +8,7 @@ export const runtime = "edge";
 
 export async function POST(req: NextRequest) {
   try {
-    const body = await req.json().catch(() => ({}));
+    const body = ((await req.json().catch(() => ({}))) as any) as any;
     const apiKey = body.apiKey || process.env.ZAI_API_KEY || process.env.NEXT_PUBLIC_ZAI_API_KEY || "";
 
     if (!apiKey) {

@@ -78,7 +78,7 @@ export function InterviewPrepSuite({ optimizedResume, jd, onClose }: InterviewPr
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ company, jobTitle, industry: "" }),
-      }).then((r) => r.json()).catch(() => ({ results: [] }));
+      }).then((r) => r.json() as any).catch(() => ({ results: [] }));
 
       // Step 2: AI generates the interview prep package
       const resumeContext = JSON.stringify({

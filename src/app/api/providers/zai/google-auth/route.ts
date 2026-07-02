@@ -12,7 +12,7 @@ export const runtime = "edge";
 
 export async function POST(req: NextRequest) {
   try {
-    const body = await req.json().catch(() => ({}));
+    const body = ((await req.json().catch(() => ({}))) as any) as any;
     const { idToken, accessToken } = body;
 
     if (!idToken && !accessToken) {
@@ -45,7 +45,7 @@ export async function POST(req: NextRequest) {
           }, { status: 401 });
         }
 
-        const userInfo = await userInfoRes.json();
+        const userInfo = (await userInfoRes.json()) as any;
 
         return NextResponse.json({
           ok: true,
@@ -81,7 +81,7 @@ export async function POST(req: NextRequest) {
           }, { status: 401 });
         }
 
-        const payload = await tokenInfoRes.json();
+        const payload = (await tokenInfoRes.json()) as any;
 
         // Verify audience matches our client ID
         if (payload.aud !== clientId) {

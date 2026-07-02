@@ -40,7 +40,7 @@ function isAllowedProviderUrl(urlStr: string): boolean {
 
 export async function POST(req: NextRequest) {
   try {
-    const { baseUrl, apiKey, authType, headersJson } = await req.json();
+    const { baseUrl, apiKey, authType, headersJson } = (await req.json()) as any;
 
     if (!baseUrl) {
       return NextResponse.json({ error: "baseUrl is required" }, { status: 400 });
@@ -96,7 +96,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: explanation }, { status: res.status });
     }
 
-    const data = await res.json();
+    const data = (await res.json()) as any;
 
     let models: string[] = [];
     if (data?.data) {

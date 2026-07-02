@@ -136,7 +136,7 @@ export default function DebugDashboardPage() {
     fetch("/api/debug")
       .then((r) => {
         if (!r.ok) throw new Error(`HTTP ${r.status}`);
-        return r.json();
+        return r.json() as any;
       })
       .then((d: DebugResponse) => setData(d))
       .catch((e: Error) => setError(e.message))
