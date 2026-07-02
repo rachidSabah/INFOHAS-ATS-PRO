@@ -6,6 +6,7 @@ import { uid } from "./store";
 import { isForbiddenSkill } from "./entity-lock";
 import { detectSectionBoundaries } from "./section-boundary-parser";
 import { extractSectionsFromResume } from "./dynamic-section-engine";
+import { callAI, extractJSON } from "./ai";
 
 function safeCall<T extends (...args: any[]) => any>(fn: T, args: Parameters<T>, fallback: ReturnType<T>): ReturnType<T> {
   try { return typeof fn === 'function' ? fn(...args) : fallback; } catch { return fallback; }
@@ -340,6 +341,18 @@ export async function parseResumeFile(file: File): Promise<ResumeData> {
       return blankResume(file.name.replace(/\.[^/.]+$/, ""));
     }
 
+    try {
+      console.log("[parser] Attempting AI parsing...");
+      const aiParsed = await extractResumeWithAI(rawText, file.name);
+      if (aiParsed && (aiParsed.experience.length > 0 || aiParsed.education.length > 0)) {
+        console.log("[parser] AI parsing successful");
+        return aiParsed;
+      }
+      console.warn("[parser] AI parsed result is empty or incomplete, falling back to heuristics");
+    } catch (aiErr) {
+      console.warn("[parser] AI parsing encountered an error:", aiErr);
+    }
+
     const primaryResult = safeCall(extractResumeFromText, [rawText, file.name], null as any);
     if (!primaryResult) {
       console.warn("[parser] extractResumeFromText failed. Returning blank resume.");
@@ -383,6 +396,17 @@ export async function parseResumeText(text: string): Promise<ResumeData> {
     if (text.trim().length < 30) {
       console.warn("[parser] Pasted text too short. Returning blank resume.");
       return blankResume("Pasted Resume");
+    }
+
+    try {
+      console.log("[parser] Attempting AI parsing for pasted text...");
+      const aiParsed = await extractResumeWithAI(text, "Pasted Resume");
+      if (aiParsed && (aiParsed.experience.length > 0 || aiParsed.education.length > 0)) {
+        console.log("[parser] AI parsing successful for pasted text");
+        return aiParsed;
+      }
+    } catch (aiErr) {
+      console.warn("[parser] AI parsing encountered an error:", aiErr);
     }
 
     const primaryResult = safeCall(extractResumeFromText, [text, "Pasted Resume"], null as any);
@@ -1690,4 +1714,185 @@ export function blankResume(name = "Untitled Resume"): ResumeData {
     updatedAt: now,
     source: "manual",
   };
+}
+
+export async function extractResumeWithAI(text: string, fileName: string): Promise<ResumeData> {
+  const systemPrompt = `You are an expert AI resume parser. Parse the following raw resume text and extract ALL details into a structured JSON object.
+CRITICAL: Do NOT drop, omit, summarize, or shorten any experience bullet points, projects, skills, certifications, languages, or achievements. Extract every single item and detail.
+If any fields or sections are missing from the raw text, omit them or return empty arrays/objects. Do NOT invent or fabricate any details.`;
+
+  const userPrompt = `Extract all details from the raw resume text:
+
+${text}
+
+Return ONLY a JSON object with this EXACT structure (do not output any prose, explanation, or markdown formatting blocks):
+{
+  "name": "First Last",
+  "headline": "Professional Title",
+  "contact": {
+    "email": "email@address.com",
+    "phone": "+1234567890",
+    "location": "City, State, Country",
+    "website": "URL",
+    "linkedin": "URL",
+    "github": "URL"
+  },
+  "summary": "Professional summary paragraph",
+  "experience": [
+    {
+      "company": "Company Name",
+      "title": "Job/Role Title",
+      "location": "City, State",
+      "startDate": "YYYY-MM or Month YYYY",
+      "endDate": "YYYY-MM, Month YYYY, or 'Present'",
+      "bullets": ["Detail 1", "Detail 2", ...]
+    }
+  ],
+  "education": [
+    {
+      "institution": "University Name",
+      "degree": "Degree (e.g. B.S., M.S., Ph.D.)",
+      "field": "Field of Study",
+      "location": "City, State",
+      "startDate": "YYYY-MM or Year",
+      "endDate": "YYYY-MM, Year, or 'Present'",
+      "highlights": ["Highlight 1", ...]
+    }
+  ],
+  "skills": [
+    { "name": "Skill Name", "category": "Category" }
+  ],
+  "projects": [
+    {
+      "name": "Project Name",
+      "description": "Short description",
+      "url": "URL",
+      "bullets": ["Detail 1", ...]
+    }
+  ],
+  "certifications": [
+    { "name": "Certification Name", "issuer": "Issuer", "date": "Date", "url": "URL" }
+  ],
+  "languages": [
+    { "name": "Language", "proficiency": "basic" | "conversational" | "fluent" | "native" }
+  ],
+  "achievements": ["Achievement 1", ...]
+}`;
+
+  try {
+    const aiResult = await callAI({
+      systemPrompt,
+      userPrompt,
+      maxTokens: 3500,
+      taskCategory: "document",
+    });
+
+    const parsed = extractJSON<any>(aiResult.text);
+
+    const now = new Date().toISOString();
+    const normalizeString = (val: any): string => {
+      if (typeof val === "string") return val.trim();
+      if (val === null || val === undefined) return "";
+      return String(val).trim();
+    };
+
+    const normalizeArray = (val: any): string[] => {
+      if (Array.isArray(val)) return val.map(normalizeString).filter(Boolean);
+      return [];
+    };
+
+    const experience = Array.isArray(parsed.experience) ? parsed.experience.map((e: any) => ({
+      id: uid("e"),
+      company: normalizeString(e.company),
+      title: normalizeString(e.title),
+      location: normalizeString(e.location),
+      startDate: normalizeString(e.startDate),
+      endDate: normalizeString(e.endDate),
+      bullets: normalizeArray(e.bullets),
+    })) : [];
+
+    const education = Array.isArray(parsed.education) ? parsed.education.map((ed: any) => ({
+      id: uid("ed"),
+      institution: normalizeString(ed.institution),
+      degree: normalizeString(ed.degree),
+      field: normalizeString(ed.field),
+      location: normalizeString(ed.location),
+      startDate: normalizeString(ed.startDate),
+      endDate: normalizeString(ed.endDate),
+      highlights: normalizeArray(ed.highlights),
+    })) : [];
+
+    const skills = Array.isArray(parsed.skills) ? parsed.skills.map((s: any) => ({
+      id: uid("s"),
+      name: normalizeString(s.name || s),
+      category: normalizeString(s.category),
+    })) : [];
+
+    const projects = Array.isArray(parsed.projects) ? parsed.projects.map((p: any) => ({
+      id: uid("p"),
+      name: normalizeString(p.name),
+      description: normalizeString(p.description),
+      url: normalizeString(p.url),
+      bullets: normalizeArray(p.bullets),
+    })) : [];
+
+    const certifications = Array.isArray(parsed.certifications) ? parsed.certifications.map((c: any) => ({
+      id: uid("c"),
+      name: normalizeString(c.name || c),
+      issuer: normalizeString(c.issuer),
+      date: normalizeString(c.date),
+      url: normalizeString(c.url),
+    })) : [];
+
+    const languages = Array.isArray(parsed.languages) ? parsed.languages.map((l: any) => {
+      let prof: "basic" | "conversational" | "fluent" | "native" = "fluent";
+      const pStr = normalizeString(l.proficiency).toLowerCase();
+      if (pStr.includes("native") || pStr.includes("bilingual")) prof = "native";
+      else if (pStr.includes("conversational") || pStr.includes("intermediate")) prof = "conversational";
+      else if (pStr.includes("basic") || pStr.includes("elementary")) prof = "basic";
+      return {
+        id: uid("l"),
+        name: normalizeString(l.name || l),
+        proficiency: prof,
+      };
+    }) : [];
+
+    const baseResume: ResumeData = {
+      id: uid("r"),
+      name: normalizeString(parsed.name) || "Your Name",
+      headline: normalizeString(parsed.headline),
+      contact: {
+        email: normalizeString(parsed.contact?.email),
+        phone: normalizeString(parsed.contact?.phone),
+        location: normalizeString(parsed.contact?.location),
+        website: normalizeString(parsed.contact?.website),
+        linkedin: normalizeString(parsed.contact?.linkedin),
+        github: normalizeString(parsed.contact?.github),
+      },
+      summary: normalizeString(parsed.summary),
+      experience,
+      education,
+      skills,
+      projects,
+      certifications,
+      languages,
+      achievements: normalizeArray(parsed.achievements),
+      template: "ats-professional",
+      rawText: text,
+      accentColor: "#1154A3",
+      createdAt: now,
+      updatedAt: now,
+      source: "upload",
+      fileName,
+    };
+
+    const dynamicSections = extractSectionsFromResume(baseResume);
+    return {
+      ...baseResume,
+      dynamicSections,
+    };
+  } catch (error) {
+    console.error("[parser] AI parsing failed, falling back to heuristic parser:", error);
+    return extractResumeFromText(text, fileName);
+  }
 }

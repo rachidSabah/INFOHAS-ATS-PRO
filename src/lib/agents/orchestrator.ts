@@ -1845,7 +1845,73 @@ ${jobMemory.industry}`);
 // Standard Resume Optimizer (extracted from Optimizer.tsx inline logic)
 // ============================================================================
 
+function computeSimpleHash(str: string): string {
+  let hash = 0;
+  for (let i = 0; i < str.length; i++) {
+    const char = str.charCodeAt(i);
+    hash = (hash << 5) - hash + char;
+    hash |= 0; // Convert to 32bit integer
+  }
+  return Math.abs(hash).toString(16);
+}
+
+function getOptimizationCacheKey(
+  resume: ResumeData,
+  jd: JobDescription,
+  directive: string,
+): string {
+  const sourcePayload = JSON.stringify({
+    summary: resume.summary,
+    experience: resume.experience.map(e => ({ title: e.title, company: e.company, bullets: e.bullets })),
+    skills: resume.skills.map(s => ({ name: s.name, category: s.category })),
+    languages: resume.languages.map(l => ({ name: l.name, proficiency: l.proficiency })),
+    certifications: resume.certifications.map(c => ({ name: c.name, issuer: c.issuer, date: c.date })),
+    projects: resume.projects.map(p => ({ name: p.name, description: p.description, bullets: p.bullets })),
+    jdText: jd.rawText || jd.keywords.join(","),
+    directive,
+  });
+  return `opt_cache_${computeSimpleHash(sourcePayload)}`;
+}
+
 async function optimizeResumeStandard(
+  resume: ResumeData,
+  jd: JobDescription,
+  directive: string,
+  ji: JobIntelligence | null,
+  company: CompanyIntelligence | null = null,
+  skillGap: SkillGapIntelligence | null = null,
+): Promise<{ resume: ResumeData; provider: string; charCount: number; keywordsAdded: number }> {
+  const cacheKey = getOptimizationCacheKey(resume, jd, directive);
+  try {
+    if (typeof window !== "undefined" && typeof localStorage !== "undefined") {
+      const cached = localStorage.getItem(cacheKey);
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        if (parsed && parsed.resume && typeof parsed.charCount === "number") {
+          console.info(`[Optimizer] Cache hit! Returning cached optimized resume. Key: ${cacheKey}`);
+          return parsed;
+        }
+      }
+    }
+  } catch (cacheErr) {
+    console.warn("[Optimizer] Failed to read from optimization cache:", cacheErr);
+  }
+
+  const result = await optimizeResumeStandardInner(resume, jd, directive, ji, company, skillGap);
+
+  try {
+    if (typeof window !== "undefined" && typeof localStorage !== "undefined") {
+      localStorage.setItem(cacheKey, JSON.stringify(result));
+      console.info(`[Optimizer] Saved optimized result to cache. Key: ${cacheKey}`);
+    }
+  } catch (cacheErr) {
+    console.warn("[Optimizer] Failed to save optimization to cache:", cacheErr);
+  }
+
+  return result;
+}
+
+async function optimizeResumeStandardInner(
   resume: ResumeData,
   jd: JobDescription,
   directive: string,

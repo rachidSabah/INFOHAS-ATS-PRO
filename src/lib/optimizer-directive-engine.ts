@@ -182,11 +182,16 @@ CRITICAL RULES:
 3. BULLET RULES:
    - Each bullet: 80-120 characters, one line.
    - Start every bullet with a strong action verb (past tense for past roles, present for current).
-   - Preserve the EXACT number of bullets per entry.
-   - Preserve all factual content — rephrase only.
+   - Preserve the EXACT number of bullets per entry. Never drop any bullets, details, or accomplishments.
+   - Preserve all factual content — rewrite and enhance only.
    - Use industry-recognized terminology where supported by the original content.
 
-4. SUMMARY RULES:
+4. NO-DROP POLICY:
+   - Do NOT drop, omit, or shorten any section, work experience, education, project, skill, language, or certification.
+   - Every single item fetched from the source resume must be preserved and professionally enhanced.
+   - The optimization should be an enhancement (active verbs, key skills alignment, readability) based strictly on the source, not a reduction or truncation.
+
+5. SUMMARY RULES:
    - Single paragraph, no bullet points, no line breaks.
    - Integrate 2-3 keywords from the job description naturally.
    - Keep within ${minWords}-${maxWords} words.

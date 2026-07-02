@@ -69,6 +69,7 @@ const eslintConfig = [...nextCoreWebVitals, ...nextTypescript, {
     "*.config.mjs",
     "*.config.js",
     "*.js",
+    "scratch/**",
   ]
 }];
 

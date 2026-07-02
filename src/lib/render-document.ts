@@ -232,6 +232,54 @@ function buildAdditionalInfoSection(resume: ResumeData): RenderDocumentSection |
   };
 }
 
+function buildProjectsSection(resume: ResumeData): RenderDocumentSection | null {
+  if (!resume.projects?.length) return null;
+  const items: RenderContentItem[] = [];
+  for (const p of resume.projects) {
+    items.push({
+      kind: "table-row",
+      cells: [
+        { text: p.name, bold: true, align: "left" },
+        { text: p.url ?? "", bold: false, align: "right" },
+      ],
+    });
+    if (p.description) {
+      items.push({ kind: "text", text: p.description });
+    }
+    if (p.bullets?.length) {
+      items.push({ kind: "bullets", bullets: p.bullets });
+    }
+  }
+  return {
+    type: "projects",
+    title: SECTION_TITLES.projects,
+    items,
+  };
+}
+
+function buildCertificationsSection(resume: ResumeData): RenderDocumentSection | null {
+  if (!resume.certifications?.length) return null;
+  const items: RenderContentItem[] = [];
+  for (const c of resume.certifications) {
+    const leftText = `${c.name}${c.issuer ? ` – ${c.issuer}` : ""}`;
+    items.push({
+      kind: "table-row",
+      cells: [
+        { text: leftText, bold: true, align: "left" },
+        { text: c.date ?? "", bold: false, align: "right" },
+      ],
+    });
+    if (c.url) {
+      items.push({ kind: "text", text: c.url, italic: true });
+    }
+  }
+  return {
+    type: "certifications",
+    title: SECTION_TITLES.certifications,
+    items,
+  };
+}
+
 /**
  * Build a RenderDocumentSection from dynamic sections that were preserved
  * or restored by the Dynamic Section Preservation Engine.
@@ -352,6 +400,8 @@ export function toRenderDocument(
   renderAndTrack(() => buildSkillsSection(resume));
   renderAndTrack(() => buildLanguagesSection(resume));
   renderAndTrack(() => buildAdditionalInfoSection(resume));
+  renderAndTrack(() => buildProjectsSection(resume));
+  renderAndTrack(() => buildCertificationsSection(resume));
 
   // 2. Dynamic sections — only if they don't overlap with already-rendered content
   const dynamicSections = resume.dynamicSections || [];
