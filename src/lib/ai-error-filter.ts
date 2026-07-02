@@ -130,6 +130,11 @@ export function validateResumeContent(resume: ResumeData): ValidationResult {
   }
 
   for (const ed of resume.education) {
+    const educationFingerprint = `${ed.institution}-${ed.degree}`.toLowerCase().replace(/\s+/g, " ").trim();
+    if (seenEducationFingerprints.has(educationFingerprint)) {
+      errors.push(`Duplicate education entry detected: ${ed.institution} - ${ed.degree}`);
+    }
+    seenEducationFingerprints.add(educationFingerprint);
     fieldsToCheck.push({ name: `education[${ed.degree}]`, value: `${ed.degree} ${ed.institution}` });
     if (ed.highlights) fieldsToCheck.push({ name: `education[${ed.degree}].highlights`, value: ed.highlights.join(" ") });
   }

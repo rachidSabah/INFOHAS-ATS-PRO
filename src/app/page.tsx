@@ -35,6 +35,12 @@ export default function Home() {
     }
   }, [needsRehydrate, rehydrateSession]);
 
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      (window as any).useApp = useApp;
+    }
+  }, []);
+
   // === V3.0.3: Restore pipeline snapshot on app load ===
   // STRICT MODE PROTECTION: useRef guard prevents double-restore in React 19 Strict Mode
   const hasRestoredSnapshot = useRef(false);

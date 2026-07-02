@@ -57,6 +57,13 @@ export interface OptimizerOutput {
     /** Rewritten bullet points */
     bullets: string[];
   }>;
+  /** Rewritten education highlights — matched back to source by ID */
+  education?: Array<{
+    /** MUST match a source education ID */
+    id: string;
+    /** Rewritten highlights */
+    highlights: string[];
+  }>;
   /** Optional: keywords the optimizer embedded (for logging only) */
   missingKeywordsAdded?: string[];
   /** Optional: number of bullets rewritten (for logging only) */
@@ -426,16 +433,28 @@ if (sourceLangSkill && languages.length === 0) {
     }) as ResumeEducation[];
   };
 
-  const education = (sourceResume.education && sourceResume.education.length > 0)
-    ? splitEducation(sourceResume.education.map((ed) => ({ ...ed })))
-    : []; // Always use source — immutable
+  const education: ResumeEducation[] = sourceResume.education.map((srcEd) => {
+    const optEdMatch = optimizerOutput.education?.find((optEd) => optEd.id === srcEd.id);
+    if (optEdMatch) {
+      // Only update highlights, keep other fields from source
+      const cleanedHighlights = optEdMatch.highlights
+        .map((h) => cleanupGrammar(h))
+        .filter((h) => h && h.length > 0);
+
+      // Use optimizer's highlights if they're non-empty, otherwise keep source
+      const highlights = (cleanedHighlights.length > 0) ? cleanedHighlights : srcEd.highlights;
+      return { ...srcEd, highlights };
+    }
+    return { ...srcEd }; // Keep source education if no optimizer match
+  });
+
   // Warn if optimizer attempted to modify education (it shouldn't per interface,
   // but check via any cast for defensive debugging)
   const optEducation = (optimizerOutput as any).education;
   if (optEducation && Array.isArray(optEducation) && optEducation.length > 0) {
     warnings.push(
       `Education immutable guard: optimizer returned ${optEducation.length} education entries. ` +
-      `Using source education as-is (education is immutable).`
+      `Only highlights were merged; other fields are immutable.`
     );
   }
   // === EDUCATION STRUCTURAL CLEANUP ===

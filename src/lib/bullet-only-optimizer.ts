@@ -80,6 +80,7 @@ export function buildOptimizerInput(
       bullets: e.bullets,
     })),
     education: sourceResume.education.map((ed) => ({
+      id: ed.id, // CRITICAL: include ID so LLM can echo it back
       degree: ed.degree,
       institution: ed.institution,
       field: ed.field,
@@ -115,7 +116,8 @@ Return ONLY the JSON object with this EXACT shape:
   "summary": "...",
   "headline": "...",
   "skills": [{ "name": "...", "category": "..." }],
-  "experiences": [{ "id": "EXACT_SOURCE_ID", "bullets": ["...", "..."] }]
+  "experiences": [{ "id": "EXACT_SOURCE_ID", "bullets": ["...", "..."] }],
+  "education": [{ "id": "EXACT_SOURCE_ID", "highlights": ["...", "..."] }]
 }
 
 No prose. No markdown fences. No HTML. Only JSON.`;
@@ -221,6 +223,19 @@ export function parseOptimizerOutput(rawResponse: string): { output: OptimizerOu
                 : [],
             }))
         : undefined,
+    education: Array.isArray(parsed.education)
+      ? parsed.education
+          .filter((ed: any) => ed && typeof ed === "object" && typeof ed.id === "string")
+          .map((ed: any) => ({
+            id: ed.id,
+            highlights: Array.isArray(ed.highlights)
+              ? ed.highlights
+                  .filter((h: any) => typeof h === "string")
+                  .map((h: string) => cleanupGrammar(h))
+                  .filter((h: string) => h.length > 0)
+              : [],
+          }))
+      : undefined,
     missingKeywordsAdded: Array.isArray(parsed.missingKeywordsAdded) ? parsed.missingKeywordsAdded : undefined,
     bulletsRewritten: typeof parsed.bulletsRewritten === "number" ? parsed.bulletsRewritten : undefined,
   };

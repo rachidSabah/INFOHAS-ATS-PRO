@@ -29,8 +29,9 @@ export function calculateParserConfidence(resume: ResumeData): number {
 
 export function validateParsedResume(resume: ResumeData): boolean {
   return (
-    resume.experience.length > 0 &&
-    resume.education.length > 0
+    resume.experience.length > 0 ||
+    resume.education.length > 0 ||
+    resume.skills.length > 0
   );
 }
 
@@ -647,14 +648,29 @@ export function extractNameFromLines(lines: string[]): string {
  * Not perfect, but good enough for initial parsing and to seed the builder.
  */
 export function extractResumeFromText(text: string, fileName: string): ResumeData {
-  const lines = text.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+  let processedText = text;
+  const newlineCount = (text.match(/\n/g) || []).length;
+  if (newlineCount < 5) {
+    const headers = [
+      "PROFESSIONAL SUMMARY", "WORK EXPERIENCE", "PROFESSIONAL EXPERIENCE", "EXPERIENCE",
+      "EDUCATION", "CORE COMPETENCIES & SKILLS", "CORE COMPETENCIES", "SKILLS",
+      "LANGUAGES", "CERTIFICATIONS", "PROJECTS", "SUMMARY", "ABOUT ME", "CABIN SAFETY AWARENESS", "EMERGENCY PROCEDURES"
+    ];
+    for (const header of headers) {
+      const escaped = header.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      const regex = new RegExp(`\\s{2,}(?=${escaped}\\b)`, "gi");
+      processedText = processedText.replace(regex, "\n");
+    }
+  }
+
+  const lines = processedText.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
   const joined = lines.join("\n");
 
   // === SECTION BOUNDARY PARSER ===
   // Use the new boundary-based parser for reliable section extraction.
   // This replaces the fragile sliceSection/allPotentialHeaders approach
   // that broke when content lines looked like section headers.
-  const boundaries = detectSectionBoundaries(text.split(/\r?\n/));
+  const boundaries = detectSectionBoundaries(lines);
   const sectionMap = new Map<string, string[]>();
   for (const b of boundaries) {
     if (b.type !== "unknown") {
@@ -1317,42 +1333,34 @@ function parseDateRange(s: string): { start: string; end: string } {
     let start = parts[0].trim();
     let end = parts[1].trim();
     return { start, end };
-  }
-  // If only one part and it looks like a single year, use it as startDate
-  // with empty endDate (NOT "Present" — that was the bug)
-  if (parts.length === 1) {
-    return { start: parts[0].trim(), end: "" };
-  }
-  // Can't parse — return empty (NOT "Present")
-  return { start: s, end: "" };
-}
+  // Format education entry to enforce bullets, bold institution, italic degree, and years in parentheses
+  const formattedHighlights = highlights.map(h => `• ${h}`);
+  const yearStr = startDate && endDate ? `(${startDate} - ${endDate})` : "";
+  const formattedEntry = `• **${institution}** *${degree}* ${yearStr}`;
+  const formattedHighlightsWithEntry = [formattedEntry, ...formattedHighlights];
 
-export function cleanEducationLine(l: string): string {
-  let clean = l;
-  
-  // 1. Remove date ranges matching DATE_RANGE_RE (extended to include ongoing)
-  const rangeRe = new RegExp("(?:(?:\\d{1,2}[\\/\\.]\\d{4})|(?:\\d{4})|(?:(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\\.?\\s+\\d{4}))\\s*(?:[\\-–—]|\\bto\\b|–)\\s*(?:present|current|ongoing|(?:\\d{1,2}[\\/\\.]\\d{4})|(?:\\d{4})|(?:(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\\.?\\s+\\d{4}))", "i");
-  clean = clean.replace(rangeRe, "");
-  
-  // 2. Remove year ranges like "2021-2022" or "2021 - 2022"
-  clean = clean.replace(new RegExp("\\b(19|20)\\d{2}\\s*[\\-–—]\\s*(19|20)\\d{2}\\b", "g"), "");
-  
-  // 3. Remove single years with trailing dash/separator e.g. "2022 -" or "2022 –"
-  clean = clean.replace(new RegExp("\\b(19|20)\\d{2}\\s*[\\-–—]?", "g"), "");
-  
-  // 4. Remove standalone months and words like present, ongoing, current
-  clean = clean.replace(/\b(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\b/gi, "");
-  clean = clean.replace(/\b(?:present|ongoing|current)\b/gi, "");
-  
-  // 5. Clean up leading/trailing punctuation and double spaces
-  // NOTE: Pipe (|) is a valid field separator — only strip from line START, never from end.
-  // Stripping trailing pipe destroys "Diploma | INFOHAS" to just "Diploma".
-  clean = clean.replace(new RegExp("^[:\\s,—–\\-|·•▪◦\\(\\)]+"), "");
-  clean = clean.replace(new RegExp("[:\\s,—–\\-·•▪◦\\(\\)]+$"), "");
-  clean = clean.replace(/\s+/g, " ").trim();
-  
-  return clean;
-}
+  return {
+    id: uid("ed"),
+    degree,
+    institution,
+    field,
+    location,
+    startDate,
+    endDate,
+    highlights: formattedHighlightsWithEntry,
+  };
+  });
+  }
+
+  function cleanEducationLine(line: string): string {
+  return line.replace(/^\s*[-•*·▪◦]\s*/, "").trim();
+  }
+
+  // ========================================================================
+  // POST-PROCESS institution: strip em-dash garbling.
+  function cleanInstitution(inst: string): string {
+  return inst.replace(/—/g, "-").trim();
+  }
 
 function parseEducation(lines: string[]): ResumeData["education"] {
   if (!lines.length) return [];
@@ -1518,28 +1526,27 @@ function parseEducation(lines: string[]): ResumeData["education"] {
           degree = leftSide;
         }
 
-
         if (!institution) {
-            // Attempt to extract institution from the previous line if it contains a colon.
-            const prevIdx = i - 1;
-            if (prevIdx >= 0) {
-              const prevLine = cleanedEntryLines[prevIdx];
-              const colonPos = prevLine.indexOf(':');
-              if (colonPos !== -1) {
-                const possibleInst = prevLine.slice(colonPos + 1).trim();
-                if (possibleInst && !yearRangePattern.test(possibleInst)) {
-                  institution = possibleInst;
-                }
+          // Attempt to extract institution from the previous line if it contains a colon.
+          const prevIdx = i - 1;
+          if (prevIdx >= 0) {
+            const prevLine = cleanedEntryLines[prevIdx];
+            const colonPos = prevLine.indexOf(':');
+            if (colonPos !== -1) {
+              const possibleInst = prevLine.slice(colonPos + 1).trim();
+              if (possibleInst && !yearRangePattern.test(possibleInst)) {
+                institution = possibleInst;
               }
-              // If no colon, use the entire previous non-degree line as institution
-              if (!institution) {
-                const possibleInst = prevLine.trim();
-                if (possibleInst && !degreePattern.test(possibleInst) && !yearRangePattern.test(possibleInst) && !new RegExp("^[\\-\\-·▪◦]").test(possibleInst)) {
-                  institution = possibleInst;
-                }
+            }
+            // If no colon, use the entire previous non-degree line as institution
+            if (!institution) {
+              const possibleInst = prevLine.trim();
+              if (possibleInst && !degreePattern.test(possibleInst) && !yearRangePattern.test(possibleInst) && !new RegExp("^[\\-\\-·▪◦]").test(possibleInst)) {
+                institution = possibleInst;
               }
             }
           }
+        }
 
       } else if (!institution && !degreePattern.test(cleanedLine) && !yearRangePattern.test(cleanedLine) && !new RegExp("^[•\\-\\*·▪◦]").test(cleanedLine)) {
         institution = cleanedLine;

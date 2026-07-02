@@ -367,7 +367,11 @@ export function Optimizer() {
   };
 
   const analyze = () => {
-    if (!resume || !jdParsed) return;
+    console.log("[Optimizer] analyze() called. resume:", !!resume, "jdParsed:", !!jdParsed);
+    if (!resume || !jdParsed) {
+      console.warn("[Optimizer] analyze() aborted due to missing resume or jdParsed!");
+      return;
+    }
     // Defensive: clone the JD with normalized array fields so scoreATS and
     // detectIndustry never throw on undefined.length / undefined.join.
     const safeJd = {
