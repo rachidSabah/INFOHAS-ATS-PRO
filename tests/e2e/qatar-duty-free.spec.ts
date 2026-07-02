@@ -66,6 +66,15 @@ Now is the time to bring your best ideas and passion to a place where your ambit
 test.describe("Qatar Duty Free JD parsing", () => {
   test("successfully navigates to Job Scraper and extracts the pasted JD", async ({ page }) => {
     await page.goto(BASE_URL);
+    await page.evaluate(() => {
+      if ((window as any).useApp) {
+        (window as any).useApp.setState({
+          isAuthed: true,
+          user: { id: "test-user", name: "Test User", email: "test@example.com", role: "admin", status: "active" },
+          view: "dashboard"
+        });
+      }
+    });
     await page.waitForLoadState("networkidle");
 
     // Navigate to Job Scraper tab

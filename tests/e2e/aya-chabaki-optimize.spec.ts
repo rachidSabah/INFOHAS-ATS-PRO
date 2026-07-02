@@ -28,6 +28,15 @@ Preferred: Previous Retails and or Customer Service experience.`;
 test.describe("Aya Chabaki Resume Optimization", () => {
   test("runs the full optimization pipeline E2E", async ({ page }) => {
     await page.goto(BASE_URL);
+    await page.evaluate(() => {
+      if ((window as any).useApp) {
+        (window as any).useApp.setState({
+          isAuthed: true,
+          user: { id: "test-user", name: "Test User", email: "test@example.com", role: "admin", status: "active" },
+          view: "dashboard"
+        });
+      }
+    });
     await page.waitForLoadState("networkidle");
 
     // 1. Navigate to Job Scraper to save the JD

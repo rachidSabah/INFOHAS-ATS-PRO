@@ -28,6 +28,15 @@ const BASE_URL = process.env.PLAYWRIGHT_BASE_URL || "https://resumeai-pro.pages.
 test.describe("ResumeAI Pro — Optimizer Pipeline", () => {
   test.beforeEach(async ({ page }) => {
     await page.goto(BASE_URL);
+    await page.evaluate(() => {
+      if ((window as any).useApp) {
+        (window as any).useApp.setState({
+          isAuthed: true,
+          user: { id: "test-user", name: "Test User", email: "test@example.com", role: "admin", status: "active" },
+          view: "dashboard"
+        });
+      }
+    });
     await page.waitForLoadState("networkidle");
   });
 
