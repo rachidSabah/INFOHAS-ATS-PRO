@@ -65,23 +65,57 @@ Now is the time to bring your best ideas and passion to a place where your ambit
 
 test.describe("Qatar Duty Free JD parsing", () => {
   test("successfully navigates to Job Scraper and extracts the pasted JD", async ({ page }) => {
-    await page.goto(BASE_URL);
-    await page.evaluate(() => {
-      if ((window as any).useApp) {
-        (window as any).useApp.setState({
-          isAuthed: true,
-          user: { id: "test-user", name: "Test User", email: "test@example.com", role: "admin", status: "active" },
-          view: "dashboard"
-        });
-      }
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.addInitScript(() => {
+      window.localStorage.setItem("resumeai-session", JSON.stringify({
+        user: { id: "test-user", name: "Test User", email: "test@example.com", role: "admin", status: "approved" },
+        expiresAt: Date.now() + 7 * 24 * 60 * 60 * 1000
+      }));
     });
-    await page.waitForLoadState("networkidle");
+    await page.goto(BASE_URL);
+    await page.route("**/api/providers/chat", async (route) => {
+      const postData = JSON.parse(route.request().postData() || "{}");
+      const messages = postData.messages || [];
+      const userPrompt = (messages[messages.length - 1]?.content || "").toLowerCase();
+      
+      let textResponse = "";
+      if (userPrompt.includes("extract") || userPrompt.includes("job description")) {
+        textResponse = JSON.stringify({
+          title: "Till Assistant",
+          company: "Qatar Duty Free",
+          location: "Doha, Qatar",
+          employmentType: "Full-time",
+          salary: "Competitive",
+          responsibilities: ["Ensure the float is correct and keyed information into the POS terminal is done accurately."],
+          requiredSkills: ["Basic Literacy and Numeracy skills", "English communication skills"],
+          preferredSkills: ["Previous Retail and or Customer Service experience"],
+          technologies: ["POS", "PC"],
+          experienceYears: "No prior experience",
+          education: "Basic Literacy",
+          keywords: ["Till Assistant", "POS", "Qatar Duty Free", "customer service"]
+        });
+      } else {
+        textResponse = "Mock response";
+      }
+
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ ok: true, text: textResponse })
+      });
+    });
+    await page.waitForLoadState("load");
+    
+    // Wait for page hydration by checking that the dashboard welcome message is visible
+    await expect(page.locator('text=Welcome back').first()).toBeVisible({ timeout: 10000 });
+    await page.waitForFunction(() => typeof (window as any).useApp !== "undefined", { timeout: 10000 }).catch(() => {});
+    await page.waitForTimeout(1000);
 
     // Navigate to Job Scraper tab
-    await page.click('text=Job Scraper');
+    await page.click('nav[aria-label="App navigation"] button:has-text("Job Scraper")');
     
     // Fill the text paste area with the Qatar Duty Free JD
-    const textarea = page.locator('placeholder="Paste the full job description here…"');
+    const textarea = page.locator('[placeholder="Paste the full job description here…"]');
     await expect(textarea).toBeVisible();
     await textarea.fill(QATAR_DUTY_FREE_JD);
 

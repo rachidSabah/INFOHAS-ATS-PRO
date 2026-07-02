@@ -27,17 +27,15 @@ const BASE_URL = process.env.PLAYWRIGHT_BASE_URL || "https://resumeai-pro.pages.
 
 test.describe("ResumeAI Pro — Optimizer Pipeline", () => {
   test.beforeEach(async ({ page }) => {
-    await page.goto(BASE_URL);
-    await page.evaluate(() => {
-      if ((window as any).useApp) {
-        (window as any).useApp.setState({
-          isAuthed: true,
-          user: { id: "test-user", name: "Test User", email: "test@example.com", role: "admin", status: "active" },
-          view: "dashboard"
-        });
-      }
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.addInitScript(() => {
+      window.localStorage.setItem("resumeai-session", JSON.stringify({
+        user: { id: "test-user", name: "Test User", email: "test@example.com", role: "admin", status: "approved" },
+        expiresAt: Date.now() + 7 * 24 * 60 * 60 * 1000
+      }));
     });
-    await page.waitForLoadState("networkidle");
+    await page.goto(BASE_URL);
+    await page.waitForLoadState("load");
   });
 
   test("homepage loads successfully", async ({ page }) => {
@@ -46,9 +44,9 @@ test.describe("ResumeAI Pro — Optimizer Pipeline", () => {
 
   test("optimizer page is accessible", async ({ page }) => {
     // Navigate to optimizer
-    await page.click('text=Resume Optimizer').catch(() => {});
+    await page.click('nav[aria-label="App navigation"] button:has-text("Resume Optimizer")');
     // Check that the upload step is visible
-    await expect(page.locator('text=upload, text=Upload').first()).toBeVisible({ timeout: 10000 });
+    await expect(page.locator('text=Drop your resume or click to browse').first()).toBeVisible({ timeout: 10000 });
   });
 
   test("console has no critical errors on load", async ({ page }) => {
