@@ -5,7 +5,7 @@ import * as path from "path";
 
 describe("Diagnose uploaded PDF parsing", () => {
   it("parses the PDFs in the brain directory", async () => {
-    const brainDir = "C:\\Users\\InGodWeTrust\\.gemini\\antigravity\\brain\\96fe2b76-f159-456e-b2d3-e876c85a991e";
+    const brainDir = "C:/Users/InGodWeTrust/.gemini/antigravity/brain/96fe2b76-f159-456e-b2d3-e876c85a991e";
     const pdfs = ["media__1782480563587.pdf", "media__1782480550147.pdf"];
 
     for (const name of pdfs) {

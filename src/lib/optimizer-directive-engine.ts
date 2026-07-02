@@ -52,6 +52,8 @@ export interface DirectiveContext {
   customOverride?: string;
   /** Strictness level for keyword density / tone */
   strictness?: "Balanced" | "Aggressive" | "Conservative";
+  /** Raw resume text (for full document extraction / fallback context) */
+  rawResumeText?: string;
 }
 
 // ============================================================================
@@ -91,6 +93,17 @@ const FALLBACK_CONFIG: Partial<OptimizerDirectiveConfig> = {
 };
 
 // ============================================================================
+// SECTION — HELPERS
+// ============================================================================
+
+/** Format the raw resume text context block, if available */
+function formatRawResumeTextBlock(context?: DirectiveContext): string {
+  if (!context?.rawResumeText?.trim()) return "";
+  // Use \n as literal newlines inside the template literal block
+  return "\nRAW RESUME TEXT (full document extracted):\n" + context.rawResumeText.trim() + "\nEND RAW TEXT\n";
+}
+
+// ============================================================================
 // SECTION — BUILDERS
 // ============================================================================
 
@@ -110,18 +123,15 @@ export function buildBulletDirective(
 
   const policy = buildOptimizationPolicy(config);
   const policyBlock = formatPolicyForPrompt(policy);
-    const rawResumeTextBlock = context?.rawResumeText ? `\nRAW RESUME TEXT (full document extracted):\n${context.rawResumeText}\nEND RAW TEXT\n` : "";
-    return `${policyBlock}${rawResumeTextBlock}\n═════════════════════════════════════════════════════════════`;
+  const c = config || FALLBACK_CONFIG;
   const minWords = c.summaryMinWords ?? 60;
   const maxWords = c.summaryMaxWords ?? 90;
 
-  return `${policyBlock}
-const policyBlock = formatPolicyForPrompt(policy);
-  const rawResumeTextBlock = context?.rawResumeText ? `\nRAW RESUME TEXT (full document extracted):\n${context.rawResumeText}\nEND RAW TEXT\n` : "";
-  return `${policyBlock}${rawResumeTextBlock}\n═════════════════════════════════════════════════════════════`;
-const policyBlock = formatPolicyForPrompt(policy);
-  const rawResumeTextBlock = context?.rawResumeText ? `\nRAW RESUME TEXT (full document extracted):\n${context.rawResumeText}\nEND RAW TEXT\n` : "";
-  return `${policyBlock}${rawResumeTextBlock}\n═════════════════════════════════════════════════════════════`;
+  return `${policyBlock}${formatRawResumeTextBlock(context)}
+
+═══════════════════════════════════════════════════════════════
+BULLET REWRITE DIRECTIVE
+═══════════════════════════════════════════════════════════════
 
 You are an expert ATS resume optimizer. You may ONLY modify summary, headline, skills, and experience bullets. Everything else is LOCKED.
 
@@ -195,8 +205,7 @@ export function buildStandardDirective(
 ): string {
   const policy = buildOptimizationPolicy(config);
   const policyBlock = formatPolicyForPrompt(policy);
-    const rawResumeTextBlock = context?.rawResumeText ? `\nRAW RESUME TEXT (full document extracted):\n${context.rawResumeText}\nEND RAW TEXT\n` : "";
-    return `${policyBlock}${rawResumeTextBlock}\n═════════════════════════════════════════════════════════════`;
+  const c = config || FALLBACK_CONFIG;
 
   const sectionLimitsBlock = c.sectionLimits
     ? `- HEADER (name + contact): ${c.sectionLimits.header.min}-${c.sectionLimits.header.max} characters
@@ -207,21 +216,17 @@ export function buildStandardDirective(
 - LANGUAGES: ${c.sectionLimits.languages.min}-${c.sectionLimits.languages.max} characters`
     : "";
 
-  return `${policyBlock}
-const policyBlock = formatPolicyForPrompt(policy);
-  const rawResumeTextBlock = context?.rawResumeText ? `\nRAW RESUME TEXT (full document extracted):\n${context.rawResumeText}\nEND RAW TEXT\n` : "";
-  return `${policyBlock}${rawResumeTextBlock}\n═════════════════════════════════════════════════════════════`;
-const policyBlock = formatPolicyForPrompt(policy);
-  const rawResumeTextBlock = context?.rawResumeText ? `\nRAW RESUME TEXT (full document extracted):\n${context.rawResumeText}\nEND RAW TEXT\n` : "";
-  return `${policyBlock}${rawResumeTextBlock}\n═════════════════════════════════════════════════════════════`;
+  return `${policyBlock}${formatRawResumeTextBlock(context)}
+
+═══════════════════════════════════════════════════════════════
+OPTIMIZER DIRECTIVE
+═══════════════════════════════════════════════════════════════
 
 You are the ResumeAI Pro Optimizer. You MUST preserve the EXACT layout framework described below. Only modify CONTENT — never modify LAYOUT, section order, content density, photo position, or the compact recruiter-friendly structure.
-const policyBlock = formatPolicyForPrompt(policy);
-  const rawResumeTextBlock = context?.rawResumeText ? `\nRAW RESUME TEXT (full document extracted):\n${context.rawResumeText}\nEND RAW TEXT\n` : "";
-  return `${policyBlock}${rawResumeTextBlock}\n═════════════════════════════════════════════════════════════`;
-const policyBlock = formatPolicyForPrompt(policy);
-  const rawResumeTextBlock = context?.rawResumeText ? `\nRAW RESUME TEXT (full document extracted):\n${context.rawResumeText}\nEND RAW TEXT\n` : "";
-  return `${policyBlock}${rawResumeTextBlock}\n═════════════════════════════════════════════════════════════`;
+
+═══════════════════════════════════════════════════════════════
+PAGE FORMAT & CONTENT DENSITY
+═══════════════════════════════════════════════════════════════
 - Document size: ${c.pageSize}
 - Maximum pages: 1
 - Required pages: EXACTLY 1
@@ -231,70 +236,56 @@ const policyBlock = formatPolicyForPrompt(policy);
 - Fully utilize the A4 page — no excessive whitespace.
 - Dynamic adjustment: if the candidate has less experience, expand bullets with more detail. If more experience, keep all roles and all bullets.
 ${c.enforceOnePage ? "- Validation: assert(pdf.pages === 1)" : ""}
-const policyBlock = formatPolicyForPrompt(policy);
-  const rawResumeTextBlock = context?.rawResumeText ? `\nRAW RESUME TEXT (full document extracted):\n${context.rawResumeText}\nEND RAW TEXT\n` : "";
-  return `${policyBlock}${rawResumeTextBlock}\n═════════════════════════════════════════════════════════════`;
-const policyBlock = formatPolicyForPrompt(policy);
-  const rawResumeTextBlock = context?.rawResumeText ? `\nRAW RESUME TEXT (full document extracted):\n${context.rawResumeText}\nEND RAW TEXT\n` : "";
-  return `${policyBlock}${rawResumeTextBlock}\n═════════════════════════════════════════════════════════════`;
+
+═══════════════════════════════════════════════════════════════
+MARGINS (very compact — use these EXACT values)
+═══════════════════════════════════════════════════════════════
 - Top: ${c.marginTopMm}mm
 - Bottom: ${c.marginBottomMm}mm
 - Left: ${c.marginLeftMm}mm
 - Right: ${c.marginRightMm}mm
-const policyBlock = formatPolicyForPrompt(policy);
-  const rawResumeTextBlock = context?.rawResumeText ? `\nRAW RESUME TEXT (full document extracted):\n${context.rawResumeText}\nEND RAW TEXT\n` : "";
-  return `${policyBlock}${rawResumeTextBlock}\n═════════════════════════════════════════════════════════════`;
-const policyBlock = formatPolicyForPrompt(policy);
-  const rawResumeTextBlock = context?.rawResumeText ? `\nRAW RESUME TEXT (full document extracted):\n${context.rawResumeText}\nEND RAW TEXT\n` : "";
-  return `${policyBlock}${rawResumeTextBlock}\n═════════════════════════════════════════════════════════════`;
+
+═══════════════════════════════════════════════════════════════
+FONT RULES
+═══════════════════════════════════════════════════════════════
 - Primary font: ${c.fontFamily} (fallback: Georgia, Cambria)
 - Body size: ${c.bodyFontSizePt}pt
 - Section titles: ${c.sectionTitleSizePt}pt, BOLD, UPPERCASE, color ${c.sectionTitleColor}
 - Name: BOLD, ${c.nameSizePt}pt, color ${c.nameColor}, UPPERCASE
 - Body text: color ${c.bodyTextColor}
-const policyBlock = formatPolicyForPrompt(policy);
-  const rawResumeTextBlock = context?.rawResumeText ? `\nRAW RESUME TEXT (full document extracted):\n${context.rawResumeText}\nEND RAW TEXT\n` : "";
-  return `${policyBlock}${rawResumeTextBlock}\n═════════════════════════════════════════════════════════════`;
-const policyBlock = formatPolicyForPrompt(policy);
-  const rawResumeTextBlock = context?.rawResumeText ? `\nRAW RESUME TEXT (full document extracted):\n${context.rawResumeText}\nEND RAW TEXT\n` : "";
-  return `${policyBlock}${rawResumeTextBlock}\n═════════════════════════════════════════════════════════════`;
+
+═══════════════════════════════════════════════════════════════
+SPACING
+═══════════════════════════════════════════════════════════════
 - Line height: ${c.lineHeight} (compact single-spacing)
 - Section gap: ${c.sectionGapMm}mm
 - Bullet indent: ${c.bulletIndentMm}mm from left margin
-const policyBlock = formatPolicyForPrompt(policy);
-  const rawResumeTextBlock = context?.rawResumeText ? `\nRAW RESUME TEXT (full document extracted):\n${context.rawResumeText}\nEND RAW TEXT\n` : "";
-  return `${policyBlock}${rawResumeTextBlock}\n═════════════════════════════════════════════════════════════`;
-const policyBlock = formatPolicyForPrompt(policy);
-  const rawResumeTextBlock = context?.rawResumeText ? `\nRAW RESUME TEXT (full document extracted):\n${context.rawResumeText}\nEND RAW TEXT\n` : "";
-  return `${policyBlock}${rawResumeTextBlock}\n═════════════════════════════════════════════════════════════`;
+
+═══════════════════════════════════════════════════════════════
+PHOTO
+═══════════════════════════════════════════════════════════════
 ${c.photoEnabled
     ? `- Photo: ${c.photoWidthMm}×${c.photoHeightMm}mm, top-right corner
 - ${c.showPlaceholderIfNoPhoto ? "Show empty placeholder if no photo uploaded" : "If no photo exists: remove photo section ENTIRELY. Do NOT use placeholders. Do NOT draw an empty box."}`
     : "- Photo section DISABLED. Do not include any photo."}
-const policyBlock = formatPolicyForPrompt(policy);
-  const rawResumeTextBlock = context?.rawResumeText ? `\nRAW RESUME TEXT (full document extracted):\n${context.rawResumeText}\nEND RAW TEXT\n` : "";
-  return `${policyBlock}${rawResumeTextBlock}\n═════════════════════════════════════════════════════════════`;
-const policyBlock = formatPolicyForPrompt(policy);
-  const rawResumeTextBlock = context?.rawResumeText ? `\nRAW RESUME TEXT (full document extracted):\n${context.rawResumeText}\nEND RAW TEXT\n` : "";
-  return `${policyBlock}${rawResumeTextBlock}\n═════════════════════════════════════════════════════════════`;
+
+═══════════════════════════════════════════════════════════════
+SECTION ORDER (MANDATORY — in this exact order)
+═══════════════════════════════════════════════════════════════
 1. PROFESSIONAL SUMMARY — ${c.summaryMinWords}-${c.summaryMaxWords} words, single paragraph, no bullets
 2. CORE COMPETENCIES & SKILLS — max ${c.skillsMaxGroups} groups, bullet format
 3. PROFESSIONAL EXPERIENCE — PRESERVE ALL original entries, PRESERVE THE EXACT SAME NUMBER OF BULLETS as the source resume for each entry. Never drop bullets.
 4. EDUCATION — PRESERVE ALL original entries
 5. LANGUAGES — max ${c.languagesMaxEntries} entries, one line per language
-const policyBlock = formatPolicyForPrompt(policy);
-  const rawResumeTextBlock = context?.rawResumeText ? `\nRAW RESUME TEXT (full document extracted):\n${context.rawResumeText}\nEND RAW TEXT\n` : "";
-  return `${policyBlock}${rawResumeTextBlock}\n═════════════════════════════════════════════════════════════`;
-const policyBlock = formatPolicyForPrompt(policy);
-  const rawResumeTextBlock = context?.rawResumeText ? `\nRAW RESUME TEXT (full document extracted):\n${context.rawResumeText}\nEND RAW TEXT\n` : "";
-  return `${policyBlock}${rawResumeTextBlock}\n═════════════════════════════════════════════════════════════`;
+
+═══════════════════════════════════════════════════════════════
+SECTION CHARACTER LIMITS
+═══════════════════════════════════════════════════════════════
 ${sectionLimitsBlock || "- Summary: " + c.summaryMinWords + "-" + c.summaryMaxWords + " words"}
-const policyBlock = formatPolicyForPrompt(policy);
-  const rawResumeTextBlock = context?.rawResumeText ? `\nRAW RESUME TEXT (full document extracted):\n${context.rawResumeText}\nEND RAW TEXT\n` : "";
-  return `${policyBlock}${rawResumeTextBlock}\n═════════════════════════════════════════════════════════════`;
-const policyBlock = formatPolicyForPrompt(policy);
-  const rawResumeTextBlock = context?.rawResumeText ? `\nRAW RESUME TEXT (full document extracted):\n${context.rawResumeText}\nEND RAW TEXT\n` : "";
-  return `${policyBlock}${rawResumeTextBlock}\n═════════════════════════════════════════════════════════════`;
+
+═══════════════════════════════════════════════════════════════
+CONTENT COMPRESSION ENGINE
+═══════════════════════════════════════════════════════════════
 ${c.enforceOnePage
     ? `Apply IN THIS ORDER until content fits one page:
 1. Tighten word choice (replace long phrases with shorter ones)
@@ -305,12 +296,10 @@ ${c.enforceOnePage
 WARNING: NEVER remove bullets, experience entries, education entries, languages, or custom sections. NEVER change dates.
 NEVER create page two. assert(pdf.pages === 1).`
     : "Multi-page output allowed if content exceeds one page."}
-const policyBlock = formatPolicyForPrompt(policy);
-  const rawResumeTextBlock = context?.rawResumeText ? `\nRAW RESUME TEXT (full document extracted):\n${context.rawResumeText}\nEND RAW TEXT\n` : "";
-  return `${policyBlock}${rawResumeTextBlock}\n═════════════════════════════════════════════════════════════`;
-const policyBlock = formatPolicyForPrompt(policy);
-  const rawResumeTextBlock = context?.rawResumeText ? `\nRAW RESUME TEXT (full document extracted):\n${context.rawResumeText}\nEND RAW TEXT\n` : "";
-  return `${policyBlock}${rawResumeTextBlock}\n═════════════════════════════════════════════════════════════`;
+
+═══════════════════════════════════════════════════════════════
+FACTUAL INTEGRITY
+═══════════════════════════════════════════════════════════════
 NEVER fabricate: experience, employers, dates, metrics, certifications, skills.
 ONLY use information from the original resume.
 CRITICAL: NEVER invent percentages, metrics, or numbers.
@@ -361,8 +350,7 @@ export function buildAviationDirective(
 ): string {
   const policy = buildOptimizationPolicy(config);
   const policyBlock = formatPolicyForPrompt(policy);
-    const rawResumeTextBlock = context?.rawResumeText ? `\nRAW RESUME TEXT (full document extracted):\n${context.rawResumeText}\nEND RAW TEXT\n` : "";
-    return `${policyBlock}${rawResumeTextBlock}\n═════════════════════════════════════════════════════════════`;
+  const profile = context?.airlineProfile || "generic";
   // Map airline-specific profiles (e.g. "emirates", "qatar") to the aviation industry
   const KNOWN_AIRLINE_KEYS = new Set(["emirates", "qatar", "etihad", "lufthansa", "ryanair", "singapore", "airfrance", "british", "generic"]);
   const industryKey = KNOWN_AIRLINE_KEYS.has(profile) ? "aviation" : (INDUSTRY_PROFILES[profile] ? profile : "aviation");
@@ -384,32 +372,26 @@ export function buildAviationDirective(
   Regulatory: EASA Part-CC, FAA Part 121/135, CAA CAP 789, ICAO Annex 6, IATA DGR, Aviation Audits (IOSA), Safety Management Systems (SMS).
   Languages: English (ICAO Level 4+), Arabic, French, German, Spanish, Mandarin, Hindi, Urdu — cross-cultural communication.`;
 
-  return `${policyBlock}
-const policyBlock = formatPolicyForPrompt(policy);
-  const rawResumeTextBlock = context?.rawResumeText ? `\nRAW RESUME TEXT (full document extracted):\n${context.rawResumeText}\nEND RAW TEXT\n` : "";
-  return `${policyBlock}${rawResumeTextBlock}\n═════════════════════════════════════════════════════════════`;
-const policyBlock = formatPolicyForPrompt(policy);
-  const rawResumeTextBlock = context?.rawResumeText ? `\nRAW RESUME TEXT (full document extracted):\n${context.rawResumeText}\nEND RAW TEXT\n` : "";
-  return `${policyBlock}${rawResumeTextBlock}\n═════════════════════════════════════════════════════════════`;
+  return `${policyBlock}${formatRawResumeTextBlock(context)}
+
+═══════════════════════════════════════════════════════════════
+INDUSTRY MODE: AVIATION
+═══════════════════════════════════════════════════════════════
 
 OPTIMIZATION PROFILE: ${industryProfile?.label || "Generic Aviation"}
 INDUSTRY: ${industryProfile?.description || "Aviation / Cabin Crew"}
 ${industryProfile?.priorityKeywords?.length ? `INDUSTRY PRIORITY KEYWORDS: ${industryProfile.priorityKeywords.join(", ")}` : ""}
-const policyBlock = formatPolicyForPrompt(policy);
-  const rawResumeTextBlock = context?.rawResumeText ? `\nRAW RESUME TEXT (full document extracted):\n${context.rawResumeText}\nEND RAW TEXT\n` : "";
-  return `${policyBlock}${rawResumeTextBlock}\n═════════════════════════════════════════════════════════════`;
-const policyBlock = formatPolicyForPrompt(policy);
-  const rawResumeTextBlock = context?.rawResumeText ? `\nRAW RESUME TEXT (full document extracted):\n${context.rawResumeText}\nEND RAW TEXT\n` : "";
-  return `${policyBlock}${rawResumeTextBlock}\n═════════════════════════════════════════════════════════════`;
+
+═══════════════════════════════════════════════════════════════
+INDUSTRY KEYWORD BANK
+═══════════════════════════════════════════════════════════════
 ${industryProfile?.keywordBank || `${CABIN_CREW_KEYWORDS}\n${AVIATION_KEYWORDS}`}
 
 ${industryProfile?.writingGuidance ? `INDUSTRY WRITING GUIDANCE:\n${industryProfile.writingGuidance}` : ""}
-const policyBlock = formatPolicyForPrompt(policy);
-  const rawResumeTextBlock = context?.rawResumeText ? `\nRAW RESUME TEXT (full document extracted):\n${context.rawResumeText}\nEND RAW TEXT\n` : "";
-  return `${policyBlock}${rawResumeTextBlock}\n═════════════════════════════════════════════════════════════`;
-const policyBlock = formatPolicyForPrompt(policy);
-  const rawResumeTextBlock = context?.rawResumeText ? `\nRAW RESUME TEXT (full document extracted):\n${context.rawResumeText}\nEND RAW TEXT\n` : "";
-  return `${policyBlock}${rawResumeTextBlock}\n═════════════════════════════════════════════════════════════`;
+
+═══════════════════════════════════════════════════════════════
+AVIATION-SPECIFIC RULES
+═══════════════════════════════════════════════════════════════
 
 1. HIGHLIGHT: safety certifications, language proficiency, customer service excellence, cultural awareness.
 2. PRESERVE: all ICAO language levels, type ratings, certifications, licenses.
@@ -417,33 +399,27 @@ const policyBlock = formatPolicyForPrompt(policy);
 4. FORMAT: skills into Cabin Safety, Customer Service, Operations, Languages categories.
 5. NEVER: invent flight hours, aircraft types, certifications, or airline names.
 6. TARGET: ~2,900 characters, one A4 page.
-const policyBlock = formatPolicyForPrompt(policy);
-  const rawResumeTextBlock = context?.rawResumeText ? `\nRAW RESUME TEXT (full document extracted):\n${context.rawResumeText}\nEND RAW TEXT\n` : "";
-  return `${policyBlock}${rawResumeTextBlock}\n═════════════════════════════════════════════════════════════`;
-const policyBlock = formatPolicyForPrompt(policy);
-  const rawResumeTextBlock = context?.rawResumeText ? `\nRAW RESUME TEXT (full document extracted):\n${context.rawResumeText}\nEND RAW TEXT\n` : "";
-  return `${policyBlock}${rawResumeTextBlock}\n═════════════════════════════════════════════════════════════`;
+${context?.strictness === "Aggressive" ? `
+═══════════════════════════════════════════════════════════════
+STRICTNESS: AGGRESSIVE
+═══════════════════════════════════════════════════════════════
 
 - MAXIMUM keyword density: target every priority keyword appearing in summary AND skills AND experience.
 - Strong bias toward ATS match score over preservation of original wording.
 - Rewrite weak bullets aggressively — use industry-standard terminology.
-const policyBlock = formatPolicyForPrompt(policy);
-  const rawResumeTextBlock = context?.rawResumeText ? `\nRAW RESUME TEXT (full document extracted):\n${context.rawResumeText}\nEND RAW TEXT\n` : "";
-  return `${policyBlock}${rawResumeTextBlock}\n═════════════════════════════════════════════════════════════`;
-const policyBlock = formatPolicyForPrompt(policy);
-  const rawResumeTextBlock = context?.rawResumeText ? `\nRAW RESUME TEXT (full document extracted):\n${context.rawResumeText}\nEND RAW TEXT\n` : "";
-  return `${policyBlock}${rawResumeTextBlock}\n═════════════════════════════════════════════════════════════`;
+- Prioritize keyword inclusion over natural flow.` : context?.strictness === "Conservative" ? `
+═══════════════════════════════════════════════════════════════
+STRICTNESS: CONSERVATIVE
+═══════════════════════════════════════════════════════════════
 
 - Conservative keyword integration — only add keywords where they fit naturally.
 - Preserve original writing style and tone as much as possible.
 - Minimal rewriting of experience bullets; keep original structure.
 - Prioritize readability and authenticity over keyword density.` : ""}
-const policyBlock = formatPolicyForPrompt(policy);
-  const rawResumeTextBlock = context?.rawResumeText ? `\nRAW RESUME TEXT (full document extracted):\n${context.rawResumeText}\nEND RAW TEXT\n` : "";
-  return `${policyBlock}${rawResumeTextBlock}\n═════════════════════════════════════════════════════════════`;
-const policyBlock = formatPolicyForPrompt(policy);
-  const rawResumeTextBlock = context?.rawResumeText ? `\nRAW RESUME TEXT (full document extracted):\n${context.rawResumeText}\nEND RAW TEXT\n` : "";
-  return `${policyBlock}${rawResumeTextBlock}\n═════════════════════════════════════════════════════════════`;
+
+═══════════════════════════════════════════════════════════════
+OUTPUT FORMAT — STRICT JSON
+═══════════════════════════════════════════════════════════════
 Return ONLY valid JSON with this exact shape (no markdown fences, no prose):
 {
   "resume": {
@@ -499,15 +475,12 @@ export function buildGuardianDirective(
 ): string {
   const policy = buildOptimizationPolicy(config);
   const policyBlock = formatPolicyForPrompt(policy);
-    const rawResumeTextBlock = context?.rawResumeText ? `\nRAW RESUME TEXT (full document extracted):\n${context.rawResumeText}\nEND RAW TEXT\n` : "";
-    return `${policyBlock}${rawResumeTextBlock}\n═════════════════════════════════════════════════════════════`;
+
   return `${policyBlock}
-const policyBlock = formatPolicyForPrompt(policy);
-  const rawResumeTextBlock = context?.rawResumeText ? `\nRAW RESUME TEXT (full document extracted):\n${context.rawResumeText}\nEND RAW TEXT\n` : "";
-  return `${policyBlock}${rawResumeTextBlock}\n═════════════════════════════════════════════════════════════`;
-const policyBlock = formatPolicyForPrompt(policy);
-  const rawResumeTextBlock = context?.rawResumeText ? `\nRAW RESUME TEXT (full document extracted):\n${context.rawResumeText}\nEND RAW TEXT\n` : "";
-  return `${policyBlock}${rawResumeTextBlock}\n═════════════════════════════════════════════════════════════`;
+
+═══════════════════════════════════════════════════════════════
+GUARDIAN VALIDATION DIRECTIVE
+═══════════════════════════════════════════════════════════════
 
 You are the ResumeAI Pro Guardian. Your job is to validate that the optimized resume
 preserves ALL entity integrity and meets all policy requirements.
@@ -537,15 +510,12 @@ export function buildCompressionDirective(
 ): string {
   const policy = buildOptimizationPolicy(config);
   const policyBlock = formatPolicyForPrompt(policy);
-    const rawResumeTextBlock = context?.rawResumeText ? `\nRAW RESUME TEXT (full document extracted):\n${context.rawResumeText}\nEND RAW TEXT\n` : "";
-    return `${policyBlock}${rawResumeTextBlock}\n═════════════════════════════════════════════════════════════`;
+
   return `${policyBlock}
-const policyBlock = formatPolicyForPrompt(policy);
-  const rawResumeTextBlock = context?.rawResumeText ? `\nRAW RESUME TEXT (full document extracted):\n${context.rawResumeText}\nEND RAW TEXT\n` : "";
-  return `${policyBlock}${rawResumeTextBlock}\n═════════════════════════════════════════════════════════════`;
-const policyBlock = formatPolicyForPrompt(policy);
-  const rawResumeTextBlock = context?.rawResumeText ? `\nRAW RESUME TEXT (full document extracted):\n${context.rawResumeText}\nEND RAW TEXT\n` : "";
-  return `${policyBlock}${rawResumeTextBlock}\n═════════════════════════════════════════════════════════════`;
+
+═══════════════════════════════════════════════════════════════
+COMPRESSION DIRECTIVE
+═══════════════════════════════════════════════════════════════
 
 Compress the resume content to fit one A4 page while preserving ALL information.
 
@@ -572,15 +542,12 @@ export function buildProfessionalWritingDirective(
 ): string {
   const policy = buildOptimizationPolicy(config);
   const policyBlock = formatPolicyForPrompt(policy);
-    const rawResumeTextBlock = context?.rawResumeText ? `\nRAW RESUME TEXT (full document extracted):\n${context.rawResumeText}\nEND RAW TEXT\n` : "";
-    return `${policyBlock}${rawResumeTextBlock}\n═════════════════════════════════════════════════════════════`;
+
   return `${policyBlock}
-const policyBlock = formatPolicyForPrompt(policy);
-  const rawResumeTextBlock = context?.rawResumeText ? `\nRAW RESUME TEXT (full document extracted):\n${context.rawResumeText}\nEND RAW TEXT\n` : "";
-  return `${policyBlock}${rawResumeTextBlock}\n═════════════════════════════════════════════════════════════`;
-const policyBlock = formatPolicyForPrompt(policy);
-  const rawResumeTextBlock = context?.rawResumeText ? `\nRAW RESUME TEXT (full document extracted):\n${context.rawResumeText}\nEND RAW TEXT\n` : "";
-  return `${policyBlock}${rawResumeTextBlock}\n═════════════════════════════════════════════════════════════`;
+
+═══════════════════════════════════════════════════════════════
+PROFESSIONAL WRITING DIRECTIVE
+═══════════════════════════════════════════════════════════════
 
 Rewrite the resume as if written by a Senior Executive Recruiter.
 
@@ -603,19 +570,16 @@ export function buildAtsDirective(
 ): string {
   const policy = buildOptimizationPolicy(config);
   const policyBlock = formatPolicyForPrompt(policy);
-    const rawResumeTextBlock = context?.rawResumeText ? `\nRAW RESUME TEXT (full document extracted):\n${context.rawResumeText}\nEND RAW TEXT\n` : "";
-    return `${policyBlock}${rawResumeTextBlock}\n═════════════════════════════════════════════════════════════`;
+
   const jdBlock = context?.jobDescription
     ? `JOB DESCRIPTION:\n${context.jobDescription}`
     : "No job description provided.";
 
-  return `${policyBlock}
-const policyBlock = formatPolicyForPrompt(policy);
-  const rawResumeTextBlock = context?.rawResumeText ? `\nRAW RESUME TEXT (full document extracted):\n${context.rawResumeText}\nEND RAW TEXT\n` : "";
-  return `${policyBlock}${rawResumeTextBlock}\n═════════════════════════════════════════════════════════════`;
-const policyBlock = formatPolicyForPrompt(policy);
-  const rawResumeTextBlock = context?.rawResumeText ? `\nRAW RESUME TEXT (full document extracted):\n${context.rawResumeText}\nEND RAW TEXT\n` : "";
-  return `${policyBlock}${rawResumeTextBlock}\n═════════════════════════════════════════════════════════════`;
+  return `${policyBlock}${formatRawResumeTextBlock(context)}
+
+═══════════════════════════════════════════════════════════════
+ATS OPTIMIZATION DIRECTIVE
+═══════════════════════════════════════════════════════════════
 
 Optimize the resume for maximum ATS compatibility.
 

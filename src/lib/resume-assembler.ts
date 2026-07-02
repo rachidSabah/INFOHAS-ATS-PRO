@@ -32,7 +32,7 @@
 
 "use client";
 
-import type { ResumeData, ResumeExperience, ResumeSkill, ResumeLanguage } from "./types";
+import type { ResumeData, ResumeEducation, ResumeExperience, ResumeSkill, ResumeLanguage } from "./types";
 import { cleanupGrammar, cleanupResumeGrammar, filterForbiddenSkills, isForbiddenSkill } from "./ai-response-processor";
 import { findMatchingSourceExperience, validateExperienceFingerprints, computeExperienceFingerprint } from "./experience-fingerprint";
 import { uid } from "./store";
@@ -320,11 +320,11 @@ export function assembleResume(
 
   let skills: ResumeSkill[] = (sourceResume.skills || []).map((s) => ({ ...s }));
   if (optimizerOutput.skills && optimizerOutput.skills.length > 0) {
-    let optimizerSkills = optimizerOutput.skills.map((s) => ({
-      id: `sk_${Math.random().toString(36).slice(2, 10)}`,
-      name: s.name,
-      category: s.category,
-    }));
+    let optimizerSkills: ResumeSkill[] = optimizerOutput.skills.map((s) => ({
+        id: `sk_${Math.random().toString(36).slice(2, 10)}`,
+        name: s.name,
+        category: s.category,
+      }));
   
     // Split any compound entries before filtering
     optimizerSkills = splitCompoundSkills(optimizerSkills);
@@ -415,18 +415,15 @@ if (sourceLangSkill && languages.length === 0) {
   // Split if school contains pipe ("Aviation Vocational Training | INFOHAS" → ["Aviation Vocational Training", "INFOHAS"])
   const splitEducation = (entries: ResumeEducation[]): ResumeEducation[] => {
     return entries.flatMap((ed) => {
-      if (ed.school?.includes("|")) {
-        return ed.school.split("|").map((school, idx) => ({
+      if (ed.institution?.includes("|")) {
+        return ed.institution.split("|").map((school, idx) => ({
+          ...ed,
           id: ed.id + `_${idx}`,
-          school: school.trim(),
-          diploma: ed.diploma,
-          startDate: ed.startDate,
-          endDate: ed.endDate,
-          location: ed.location,
+          institution: school.trim(),
         }));
       }
       return [{ ...ed }];
-    });
+    }) as ResumeEducation[];
   };
 
   const education = (sourceResume.education && sourceResume.education.length > 0)
