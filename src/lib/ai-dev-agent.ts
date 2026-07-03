@@ -1005,7 +1005,64 @@ function makeErrorReport(type: AIDevReport["type"], title: string, errorMsg: str
       description: errorMsg,
       status: "open",
     }],
-    createdBy: useApp.getState().user?.email || "system",
     createdAt: new Date().toISOString(),
   };
+}
+
+/**
+ * COMPLIANCE SCAN — scan the codebase for GDPR, SOC 2, and OWASP compliance issues.
+ */
+export async function scanCompliance(): Promise<AIDevReport> {
+  const userPrompt = `Perform a comprehensive compliance audit (GDPR, SOC 2, HIPAA, and OWASP Top 10) of this Next.js application.
+
+Scan for:
+- Data Protection & Privacy (GDPR/HIPAA): PII leakage, plaintext storage, missing log anonymization.
+- Security & IAM (SOC 2): Weak access control checks, missing action logs, insecure CORS configuration.
+- Standard Web Vulnerabilities (OWASP Top 10): Injection paths, open proxies (SSRF), SQL/NoSQL injection risks.
+
+Return ONLY valid JSON:
+{
+  "summary": "1-2 sentence summary of compliance findings",
+  "issues": [
+    {
+      "type": "security",
+      "severity": "warning",
+      "file": "src/app/api/providers/chat/route.ts",
+      "line": 42,
+      "title": "Unsanitized User Prompts in LLM Routing",
+      "description": "User prompts are routed to third-party endpoints directly without checking for SQL or code injections.",
+      "recommendedFix": "Run input sanitization and prompt injection checks before forwarding prompts."
+    }
+  ]
+}`;
+
+  try {
+    const { data, rawText, provider, model } = await callDevAgentJSON<any>({ userPrompt });
+    if (!data) return makeProseReport("compliance_audit" as any, "Compliance Audit", rawText, provider, model);
+
+    const issues = (data.issues || []).map((x: any) => ({
+      id: `iss_${Math.random().toString(36).slice(2, 9)}`,
+      type: "security" as const,
+      severity: x.severity || "warning",
+      file: x.file || "",
+      line: x.line || undefined,
+      title: x.title || "Compliance issue",
+      description: x.description || "",
+      recommendedFix: x.recommendedFix || "",
+      status: "open" as const,
+    }));
+
+    return {
+      id: `rpt_${Date.now()}`,
+      type: "compliance_audit" as any,
+      title: "Compliance Audit",
+      summary: data.summary || `Found ${issues.length} compliance issue(s).`,
+      issues,
+      score: Math.max(0, 100 - issues.length * 10),
+      createdBy: useApp.getState().user?.email || "system",
+      createdAt: new Date().toISOString(),
+    };
+  } catch (e: any) {
+    return makeErrorReport("compliance_audit" as any, "Compliance Audit", e?.message || String(e));
+  }
 }

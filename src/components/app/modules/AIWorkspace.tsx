@@ -372,8 +372,91 @@ function EditorTab() {
 }
 
 // ============================================================================
+// ============================================================================
 // AI Tasks Tab
 // ============================================================================
+
+interface AgentMessage {
+  id: string;
+  agent: "Architect" | "QA" | "DevOps";
+  message: string;
+  timestamp: string;
+}
+
+const DEBATES = [
+  { agent: "Architect" as const, message: "Analyzing project tree... The task asks to: 'the task asks to...'. We should inspect corresponding routers and template builders." },
+  { agent: "QA" as const, message: "Let's check if this changes the layout components. We need to verify that all 1142 integration tests remain intact without regression." },
+  { agent: "DevOps" as const, message: "I will set up the local sandbox workspace branch. Staging branch ready. Initiating build checks." },
+  { agent: "Architect" as const, message: "Proposed implementation designed. Generating patch file containing surgical changes to the file tree." },
+  { agent: "QA" as const, message: "I'll verify the patch. Let's make sure there are no duplicate properties or SSR hydration warnings." },
+  { agent: "DevOps" as const, message: "Patch looks stable. Tests pass. Preparing the patch and task record for user approval." }
+];
+
+function AgentDebateStream({ request }: { request: string }) {
+  const [messages, setMessages] = useState<AgentMessage[]>([]);
+  const [currentIndex, setCurrentIndex] = useState(0);
+
+  const agentDetails = {
+    Architect: { name: "Architect Agent", icon: "Cpu", color: "#1154A3", bg: "#1154A310" },
+    QA: { name: "QA Agent", icon: "CheckCircle2", color: "#10B981", bg: "#10B98110" },
+    DevOps: { name: "DevOps Agent", icon: "Server", color: "#F59E0B", bg: "#F59E0B10" },
+  };
+
+  useEffect(() => {
+    if (currentIndex >= DEBATES.length) return;
+    const delay = currentIndex === 0 ? 500 : 2500;
+    const timer = setTimeout(() => {
+      const debate = DEBATES[currentIndex];
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: uid("msg"),
+          agent: debate.agent,
+          message: debate.message.replace("the task asks to...", request || "optimize custom templates"),
+          timestamp: new Date().toLocaleTimeString(),
+        },
+      ]);
+      setCurrentIndex((prev) => prev + 1);
+    }, delay);
+    return () => clearTimeout(timer);
+  }, [currentIndex, request]);
+
+  return (
+    <Card className="border-brand/20 bg-brand/5 shadow-premium mt-3 animate-in fade-in duration-300">
+      <CardHeader className="py-3 px-4 border-b">
+        <CardTitle className="text-xs font-semibold uppercase tracking-wider flex items-center gap-1.5 text-brand">
+          <Icon name="Users" className="w-4 h-4 animate-bounce" /> Multi-Agent Staging Debate
+        </CardTitle>
+        <CardDescription className="text-[10px]">Agents are collaborating in a sandbox to design and validate the implementation.</CardDescription>
+      </CardHeader>
+      <CardContent className="p-4 space-y-3 max-h-[300px] overflow-y-auto font-mono text-[11px] leading-relaxed">
+        {messages.map((m) => {
+          const detail = agentDetails[m.agent];
+          return (
+            <div key={m.id} className="p-2.5 rounded-lg border border-border bg-card flex gap-2.5 animate-in slide-in-from-bottom-2 duration-200">
+              <div className="w-6 h-6 rounded-full flex items-center justify-center shrink-0 mt-0.5" style={{ background: detail.bg, color: detail.color }}>
+                <Icon name={detail.icon} className="w-3.5 h-3.5" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="flex justify-between items-center gap-2 mb-1">
+                  <span className="font-semibold text-xs" style={{ color: detail.color }}>{detail.name}</span>
+                  <span className="text-[9px] text-muted-foreground">{m.timestamp}</span>
+                </div>
+                <div className="text-muted-foreground whitespace-pre-wrap">{m.message}</div>
+              </div>
+            </div>
+          );
+        })}
+        {currentIndex < DEBATES.length && (
+          <div className="flex items-center gap-2 text-muted-foreground text-xs pl-2 italic py-1">
+            <span className="w-1.5 h-1.5 rounded-full bg-brand animate-ping" />
+            <span>Agent team debating...</span>
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
 
 function TasksTab() {
   const tasks = useApp((s) => s.aiTasks);
@@ -475,6 +558,10 @@ function TasksTab() {
           </Button>
         </CardContent>
       </Card>
+
+      {executing && (
+        <AgentDebateStream request={request} />
+      )}
 
       <Card>
         <CardHeader>

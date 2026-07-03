@@ -15,7 +15,7 @@ import {
   scanCode, analyzeErrors, inspectRoutes, inspectDatabase,
   scanSecurity, analyzePerformance, validateDeployment,
   generateFeature, generatePatch, generateTests,
-  computeHealthDashboard,
+  computeHealthDashboard, scanCompliance,
 } from "@/lib/ai-dev-agent";
 import { extractJSON } from "@/lib/ai";
 import type { AIDevReport, AIDevIssue, AIDevPatch, AIDevFeature } from "@/lib/types";
@@ -28,6 +28,7 @@ type Tab =
   | "database-inspector"
   | "security-scanner"
   | "performance-analyzer"
+  | "compliance"
   | "feature-generator"
   | "patch-generator"
   | "test-generator"
@@ -43,6 +44,7 @@ const TABS: { key: Tab; label: string; icon: string }[] = [
   { key: "database-inspector", label: "Database Inspector", icon: "Database" },
   { key: "security-scanner", label: "Security Scanner", icon: "Shield" },
   { key: "performance-analyzer", label: "Performance Analyzer", icon: "Gauge" },
+  { key: "compliance", label: "Compliance Auditor", icon: "ShieldAlert" },
   { key: "feature-generator", label: "Feature Generator", icon: "Sparkles" },
   { key: "patch-generator", label: "Patch Generator", icon: "GitBranch" },
   { key: "test-generator", label: "Test Generator", icon: "FlaskConical" },
@@ -92,6 +94,7 @@ export function AIDevAgent() {
       {tab === "database-inspector" && <ScanTab title="Database Inspector" icon="Database" scan={inspectDatabase} reportType="database_inspector" />}
       {tab === "security-scanner" && <ScanTab title="Security Scanner" icon="Shield" scan={scanSecurity} reportType="security_scan" />}
       {tab === "performance-analyzer" && <ScanTab title="Performance Analyzer" icon="Gauge" scan={analyzePerformance} reportType="performance" />}
+      {tab === "compliance" && <ScanTab title="Compliance Auditor" icon="ShieldAlert" scan={scanCompliance} reportType="compliance_audit" />}
       {tab === "feature-generator" && <FeatureGeneratorTab />}
       {tab === "patch-generator" && <PatchGeneratorTab />}
       {tab === "test-generator" && <TestGeneratorTab />}
