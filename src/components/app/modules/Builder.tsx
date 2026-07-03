@@ -315,29 +315,42 @@ Guidelines:
 3. When referencing experience or skills, ensure you map them using the exact 'id' values provided in the current resume.
 4. Keep the text concise and suitable for a 1-page A4 format.`;
 
-      const contextPrompt = `
-TARGET JOB DETAILS:
-${activeJD ? JSON.stringify({ title: activeJD.title, company: activeJD.company, keywords: activeJD.keywords }) : "General Optimization (No specific job selected)"}
+      const isPlaceholderSummary = !resume?.summary ||
+        resume.summary.trim().length < 30 ||
+        resume.summary.toLowerCase().includes("revise and enhance") ||
+        resume.summary.toLowerCase().includes("maximise clarity") ||
+        resume.summary.toLowerCase().includes("maximize clarity");
+
+      const resumeContext = resume ? JSON.stringify({
+        name: resume.name,
+        headline: resume.headline,
+        summary: isPlaceholderSummary ? "(empty — user has not written a summary yet)" : resume.summary,
+        experience: resume.experience.map(e => ({ id: e.id, company: e.company, title: e.title, bullets: e.bullets })),
+        skills: resume.skills,
+        education: resume.education,
+        languages: resume.languages,
+      }, null, 2) : "{}";
+
+      const fullSystemPrompt = `${systemPrompt}
+
+---
+CANDIDATE CONTEXT (use this as the source of truth — do NOT invent facts):
+
+TARGET JOB:
+${activeJD ? JSON.stringify({ title: activeJD.title, company: activeJD.company, keywords: activeJD.keywords }) : "General Optimization (No specific job target selected)"}
 
 CURRENT RESUME DATA:
-${resume ? JSON.stringify({
-  name: resume.name,
-  headline: resume.headline,
-  summary: resume.summary,
-  experience: resume.experience.map(e => ({ id: e.id, company: e.company, title: e.title, bullets: e.bullets })),
-  skills: resume.skills
-}) : "{}"}
-`;
+${resumeContext}
+---`;
 
       const response = await ProviderRouter.chat({
         messages: [
-          { role: "system", content: systemPrompt },
-          { role: "user", content: contextPrompt },
+          { role: "system", content: fullSystemPrompt },
           ...messages.map((m) => ({ role: m.role, content: m.content })),
           { role: "user", content: userText }
         ],
-        maxTokens: 800,
-        temperature: 0.5
+        maxTokens: 1000,
+        temperature: 0.65
       }, { agentTask: "summary" });
 
       const reply = response.text || "";
