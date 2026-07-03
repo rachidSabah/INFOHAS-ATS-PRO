@@ -85,9 +85,29 @@ export function Prompts() {
                     {p.variables.map((v) => <Badge key={v} variant="outline" className="text-[10px]">{`{{${v}}}`}</Badge>)}
                   </div>
                 )}
-                <div className="mt-3 flex gap-1">
+                <div className="mt-3 flex flex-wrap gap-1 items-center">
                   <Button size="sm" variant="outline" onClick={() => setEditing(p)} className="gap-1.5"><Icon name="Pencil" className="w-3.5 h-3.5" /> Edit</Button>
-                  <Button size="sm" variant="outline" onClick={() => { updatePrompt(p.id, { isActive: !p.isActive }); toast.success(p.isActive ? "Deactivated" : "Activated"); }} className="gap-1.5"><Icon name={p.isActive ? "Power" : "Power"} className="w-3.5 h-3.5" /> {p.isActive ? "Deactivate" : "Activate"}</Button>
+                  <Button size="sm" variant="outline" onClick={() => { updatePrompt(p.id, { isActive: !p.isActive }); toast.success(p.isActive ? "Deactivated" : "Activated"); }} className="gap-1.5"><Icon name="Power" className="w-3.5 h-3.5" /> {p.isActive ? "Deactivate" : "Activate"}</Button>
+                  <Button 
+                    size="sm" 
+                    variant="outline" 
+                    onClick={() => {
+                      addPrompt({
+                        id: uid("pt"),
+                        name: `${p.name} (Copy)`,
+                        category: p.category,
+                        content: p.content,
+                        version: 1,
+                        isActive: false,
+                        variables: [...p.variables],
+                      });
+                      log({ actor: "you", action: `Duplicated prompt: ${p.name}`, category: "admin", details: p.category, severity: "info" });
+                      toast.success("Prompt duplicated.");
+                    }} 
+                    className="gap-1.5"
+                  >
+                    <Icon name="Copy" className="w-3.5 h-3.5" /> Clone
+                  </Button>
                   <Button size="sm" variant="ghost" className="text-destructive ml-auto" onClick={() => { removePrompt(p.id); toast.success("Deleted."); }}><Icon name="Trash2" className="w-3.5 h-3.5" /></Button>
                 </div>
               </CardContent>
@@ -123,9 +143,14 @@ function PromptEditor({ prompt, onClose, onSave }: { prompt: PromptTemplate; onC
     name: prompt.name,
     category: prompt.category,
     content: prompt.content,
-    variables: prompt.variables.join(", "),
     isActive: prompt.isActive,
   });
+
+  // Autodetect variables using regex
+  const detectedVariables = Array.from(
+    new Set(Array.from(form.content.matchAll(/\{\{([a-zA-Z0-9_]+)\}\}/g)).map((m) => m[1]))
+  );
+
   return (
     <div className="fixed inset-0 z-50 bg-background/80 backdrop-blur-sm flex items-center justify-center p-4" onClick={onClose}>
       <div className="bg-card rounded-2xl border border-border shadow-premium w-full max-w-3xl max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
@@ -150,10 +175,23 @@ function PromptEditor({ prompt, onClose, onSave }: { prompt: PromptTemplate; onC
             <Label className="text-xs uppercase tracking-wide text-muted-foreground">Prompt content (use {"{{variable}}"} placeholders)</Label>
             <Textarea value={form.content} onChange={(e) => setForm({ ...form, content: e.target.value })} rows={10} className="font-mono text-sm" />
           </div>
-          <div className="space-y-1.5">
-            <Label className="text-xs uppercase tracking-wide text-muted-foreground">Variables (comma-separated)</Label>
-            <Input value={form.variables} onChange={(e) => setForm({ ...form, variables: e.target.value })} placeholder="keywords, resume" />
+          
+          {/* Detected variables */}
+          <div className="space-y-1.5 bg-secondary/35 p-3 rounded-lg border border-border">
+            <Label className="text-xs uppercase tracking-wide text-muted-foreground block">Detected Variables</Label>
+            {detectedVariables.length > 0 ? (
+              <div className="flex flex-wrap gap-1.5 mt-1">
+                {detectedVariables.map((v) => (
+                  <Badge key={v} variant="outline" className="text-[10px] bg-brand-light/30 border-brand/20 text-brand">
+                    {`{{${v}}}`}
+                  </Badge>
+                ))}
+              </div>
+            ) : (
+              <span className="text-xs text-muted-foreground italic">No variables detected. Add some using double curly brackets like {"{{my_variable}}"}.</span>
+            )}
           </div>
+
           <div className="flex items-center gap-2">
             <input type="checkbox" id="prompt-active" checked={form.isActive} onChange={(e) => setForm({ ...form, isActive: e.target.checked })} />
             <Label htmlFor="prompt-active" className="text-sm">Active (will be used by the AI)</Label>
@@ -161,7 +199,7 @@ function PromptEditor({ prompt, onClose, onSave }: { prompt: PromptTemplate; onC
         </div>
         <div className="sticky bottom-0 bg-card border-t border-border p-4 flex justify-end gap-2">
           <Button variant="outline" onClick={onClose}>Cancel</Button>
-          <Button onClick={() => onSave({ ...form, variables: form.variables.split(",").map((v) => v.trim()).filter(Boolean) })} className="bg-brand hover:bg-brand-dark text-white gap-2"><Icon name="Save" className="w-4 h-4" /> Save prompt</Button>
+          <Button onClick={() => onSave({ ...form, variables: detectedVariables })} className="bg-brand hover:bg-brand-dark text-white gap-2"><Icon name="Save" className="w-4 h-4" /> Save prompt</Button>
         </div>
       </div>
     </div>

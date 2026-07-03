@@ -1,11 +1,29 @@
 "use client";
 
+import { useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Switch } from "@/components/ui/switch";
+import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
 import { Badge, Icon } from "@/components/shared";
 import { useApp } from "@/lib/store";
 import { toast } from "sonner";
 import type { FeatureFlags as Flags } from "@/lib/types";
+
+// Default seed values to allow "Reset to Defaults"
+const DEFAULT_SEED_FLAGS: Record<keyof Flags, boolean> = {
+  enableResumeBuilder: true,
+  enableATSChecker: true,
+  enableOptimizer: true,
+  enableCoverLetter: true,
+  enableInterviewPrep: true,
+  enableJDScraper: true,
+  enableAIFailover: true,
+  enableDonations: true,
+  enableAds: false,
+  maintenanceMode: false,
+  pipeline_websocket_enabled: false,
+};
 
 const FLAGS: { key: keyof Flags; label: string; desc: string; icon: string; severity: "safe" | "feature" | "danger" }[] = [
   { key: "enableResumeBuilder", label: "Resume Builder", desc: "Allow users to create and edit resumes.", icon: "FilePlus2", severity: "feature" },
@@ -17,6 +35,7 @@ const FLAGS: { key: keyof Flags; label: string; desc: string; icon: string; seve
   { key: "enableAIFailover", label: "AI Failover", desc: "Automatically switch providers on failure.", icon: "RefreshCcw", severity: "safe" },
   { key: "enableDonations", label: "Donations", desc: "Show optional donation prompts.", icon: "Heart", severity: "safe" },
   { key: "enableAds", label: "Advertisements", desc: "Non-intrusive ads. Must never block features.", icon: "Megaphone", severity: "safe" },
+  { key: "pipeline_websocket_enabled", label: "WebSocket Pipeline", desc: "Enable real-time WebSocket connection to the pipeline worker.", icon: "Network", severity: "safe" },
   { key: "maintenanceMode", label: "Maintenance Mode", desc: "Take the entire app offline for users.", icon: "Wrench", severity: "danger" },
 ];
 
@@ -25,18 +44,64 @@ export function FeatureFlags() {
   const updateFlag = useApp((s) => s.updateFlag);
   const log = useApp((s) => s.log);
 
+  const [search, setSearch] = useState("");
+  const [filter, setFilter] = useState<"all" | "feature" | "safe" | "danger">("all");
+
+  const filteredFlags = FLAGS.filter((f) => {
+    const matchesSearch = f.label.toLowerCase().includes(search.toLowerCase()) || 
+                          f.desc.toLowerCase().includes(search.toLowerCase());
+    const matchesFilter = filter === "all" || f.severity === filter;
+    return matchesSearch && matchesFilter;
+  });
+
+  const handleResetDefaults = () => {
+    Object.entries(DEFAULT_SEED_FLAGS).forEach(([key, val]) => {
+      updateFlag(key as keyof Flags, val);
+    });
+    log({ actor: "you", action: "Reset all flags to defaults", category: "admin", details: "All flags", severity: "warning" });
+    toast.success("All feature flags reset to system defaults.");
+  };
+
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="font-display text-2xl font-bold flex items-center gap-2"><Icon name="Flag" className="w-6 h-6 text-brand" /> Feature Flags</h1>
-        <p className="text-sm text-muted-foreground mt-1">Toggle features on or off instantly, without redeploying.</p>
+      <div className="flex flex-wrap items-center justify-between gap-4">
+        <div>
+          <h1 className="font-display text-2xl font-bold flex items-center gap-2"><Icon name="Flag" className="w-6 h-6 text-brand" /> Feature Flags</h1>
+          <p className="text-sm text-muted-foreground mt-1">Toggle features on or off instantly, without redeploying.</p>
+        </div>
+        <Button onClick={handleResetDefaults} variant="outline" size="sm" className="gap-1.5 text-xs">
+          <Icon name="RotateCcw" className="w-3.5 h-3.5" />
+          Reset to Defaults
+        </Button>
+      </div>
+
+      {/* Search and Filters */}
+      <div className="flex flex-wrap gap-2 items-center">
+        <Input
+          placeholder="Search flags..."
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          className="max-w-xs h-9 text-xs"
+        />
+        <div className="flex gap-1.5 border border-border rounded-lg p-0.5 bg-secondary/20">
+          {(["all", "feature", "safe", "danger"] as const).map((t) => (
+            <Button
+              key={t}
+              onClick={() => setFilter(t)}
+              variant={filter === t ? "secondary" : "ghost"}
+              className="h-7 px-2.5 text-[10px] uppercase font-semibold tracking-wider rounded-md"
+            >
+              {t}
+            </Button>
+          ))}
+        </div>
       </div>
 
       <div className="grid sm:grid-cols-2 gap-3">
-        {FLAGS.map((f) => {
+        {filteredFlags.map((f) => {
           const on = flags[f.key];
           return (
-            <Card key={f.key} className={on ? "" : "opacity-70"}>
+            <Card key={f.key} className={`${on ? "" : "opacity-75"} border border-border/80 transition-all hover:border-brand/35`}>
               <CardContent className="p-4 flex items-start gap-3">
                 <div className={`w-10 h-10 rounded-lg flex items-center justify-center shrink-0 ${f.severity === "danger" ? "bg-red-100 text-red-700 dark:bg-red-400/10 dark:text-red-300" : f.severity === "feature" ? "bg-brand-light text-brand dark:bg-brand/15" : "bg-amber-100 text-amber-700 dark:bg-amber-400/10 dark:text-amber-300"}`}>
                   <Icon name={f.icon} className="w-5 h-5" />
@@ -49,7 +114,7 @@ export function FeatureFlags() {
                   <div className="text-xs text-muted-foreground mt-0.5">{f.desc}</div>
                 </div>
                 <Switch
-                  checked={on}
+                  checked={!!on}
                   onCheckedChange={(v) => {
                     updateFlag(f.key, v);
                     log({ actor: "you", action: `Flag ${f.key} ${v ? "ON" : "OFF"}`, category: "admin", details: f.label, severity: v ? "info" : "warning" });
@@ -60,6 +125,11 @@ export function FeatureFlags() {
             </Card>
           );
         })}
+        {filteredFlags.length === 0 && (
+          <div className="col-span-full text-center py-10 text-xs text-muted-foreground">
+            No feature flags found matching the filters.
+          </div>
+        )}
       </div>
 
       <Card className="bg-amber-100/40 dark:bg-amber-400/5 border-amber-300/50">

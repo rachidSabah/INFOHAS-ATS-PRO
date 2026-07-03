@@ -44,6 +44,8 @@ export function Builder() {
   const sectionScores = useSectionCompleteness(resume);
 
   const patch = (p: Partial<ResumeData>) => updateResume(resume.id, p);
+  const updateOptimizerDirective = useApp((s) => s.updateOptimizerDirective);
+
   const [tab, setTab] = useState<"basics" | "experience" | "education" | "skills" | "extra" | "design">("basics");
   const [scale, setScale] = useState(0.6);
   const [exporting, setExporting] = useState(false);
@@ -54,6 +56,66 @@ export function Builder() {
   const { snapshot, undo, redo, jumpTo, canUndo, canRedo, undoStack, totalUndos, totalRedos } = useUndoRedo(resume);
   const previewRef = useRef<HTMLDivElement>(null);
   const importFileRef = useRef<HTMLInputElement>(null);
+
+  const [shrinking, setShrinking] = useState(false);
+  const handleAutoShrink = () => {
+    setShrinking(true);
+    let attempts = 0;
+    const runStep = () => {
+      const el = previewRef.current;
+      if (!el || attempts >= 10) {
+        setShrinking(false);
+        return;
+      }
+      const a4HeightPx = 297 * 3.7795275591;
+      const actualHeight = el.scrollHeight || el.clientHeight || el.offsetHeight;
+      
+      if (actualHeight > a4HeightPx + 2) {
+        const directive = useApp.getState().optimizerDirective;
+        const currentFontSize = directive.bodyFontSizePt ?? 10.5;
+        const currentLineHeight = directive.lineHeight ?? 1.2;
+        const currentSectionGap = directive.sectionGapMm ?? 3;
+        const currentMarginTop = directive.marginTopMm ?? 6.35;
+        const currentMarginBottom = directive.marginBottomMm ?? 6.35;
+        const currentMarginLeft = directive.marginLeftMm ?? 8.89;
+        const currentMarginRight = directive.marginRightMm ?? 8.89;
+        
+        let changed = false;
+        const nextPatch: any = {};
+        if (currentFontSize > 9) {
+          nextPatch.bodyFontSizePt = Math.max(9, currentFontSize - 0.5);
+          changed = true;
+        }
+        if (currentLineHeight > 1.05) {
+          nextPatch.lineHeight = Math.max(1.05, currentLineHeight - 0.05);
+          changed = true;
+        }
+        if (currentSectionGap > 1.5) {
+          nextPatch.sectionGapMm = Math.max(1.5, currentSectionGap - 0.5);
+          changed = true;
+        }
+        if (currentMarginTop > 4.5) {
+          nextPatch.marginTopMm = Math.max(4.5, currentMarginTop - 0.5);
+          nextPatch.marginBottomMm = Math.max(4.5, currentMarginBottom - 0.5);
+          nextPatch.marginLeftMm = Math.max(6.35, currentMarginLeft - 0.5);
+          nextPatch.marginRightMm = Math.max(6.35, currentMarginRight - 0.5);
+          changed = true;
+        }
+        
+        if (changed) {
+          updateOptimizerDirective(nextPatch);
+          attempts++;
+          setTimeout(runStep, 80); // Wait for React render cycle
+        } else {
+          setShrinking(false);
+        }
+      } else {
+        setShrinking(false);
+        toast.success("Resume shrunk to fit one page successfully!");
+      }
+    };
+    runStep();
+  };
 
   // Responsive scaling — tuned for mobile readability
   useEffect(() => {
@@ -391,14 +453,36 @@ export function Builder() {
                             />
                           </div>
                         ))}
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          className="h-6 text-[10px] gap-1 text-brand"
-                          onClick={() => updateExperience(e.id, { bullets: [...e.bullets, ""] })}
-                        >
-                          <Icon name="Plus" className="w-3 h-3" /> Add bullet
-                        </Button>
+                        <div className="flex gap-2">
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            className="h-6 text-[10px] gap-1 text-brand"
+                            onClick={() => updateExperience(e.id, { bullets: [...e.bullets, ""] })}
+                          >
+                            <Icon name="Plus" className="w-3 h-3" /> Add bullet
+                          </Button>
+                          {e.bullets.length > 2 && (
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              className="h-6 text-[10px] gap-1 text-amber-600 hover:text-amber-700 hover:bg-amber-50"
+                              onClick={async () => {
+                                const toastId = toast.loading("AI is trimming and consolidating bullets...");
+                                try {
+                                  const { trimExperienceBullets } = await import("@/lib/agents/content-expansion-agent");
+                                  const trimmed = await trimExperienceBullets(e, 3);
+                                  updateExperience(e.id, { bullets: trimmed });
+                                  toast.success("Bullets consolidated to 3 entries!", { id: toastId });
+                                } catch (err) {
+                                  toast.error("Failed to trim bullets.", { id: toastId });
+                                }
+                              }}
+                            >
+                              <Icon name="Scissors" className="w-3 h-3" /> AI Trim to 3 Bullets
+                            </Button>
+                          )}
+                        </div>
                       </Field>
                     </div>
                   ))}
@@ -540,6 +624,23 @@ export function Builder() {
                         <Icon name="Pipette" className="w-3.5 h-3.5 text-muted-foreground" />
                       </label>
                     </div>
+                  </div>
+
+                  {/* Page Fit Optimizer Control */}
+                  <div className="pt-4 border-t border-border">
+                    <Label className="text-xs uppercase tracking-wide text-muted-foreground block mb-2">Page Fit Optimizer</Label>
+                    <Button 
+                      onClick={handleAutoShrink}
+                      disabled={shrinking}
+                      variant="outline"
+                      className="w-full gap-2 text-xs py-1.5 h-auto hover:bg-brand/5 hover:text-brand border-dashed hover:border-brand/40"
+                    >
+                      <Icon name={shrinking ? "Loader2" : "Sparkles"} className={`w-3.5 h-3.5 text-brand ${shrinking ? "animate-spin" : ""}`} />
+                      {shrinking ? "Shrinking to fit..." : "Auto Shrink to Fit (1 Page)"}
+                    </Button>
+                    <p className="text-[10px] text-muted-foreground mt-1.5 leading-relaxed">
+                      Automatically scales fonts, line height, margins, and gaps incrementally until the resume fits on exactly one A4 page.
+                    </p>
                   </div>
                 </div>
               )}

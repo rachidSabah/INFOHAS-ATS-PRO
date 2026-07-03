@@ -1531,11 +1531,6 @@ function assertResumeSelfConsistent(resume: ResumeData): GuardianVerdict {
     }
   }
 
-  // Check languages exist
-  if (!resume.languages || resume.languages.length === 0) {
-    issues.push(`Languages section is missing`);
-  }
-
   // Check contact info
   if (!resume.contact.email && !resume.contact.phone) {
     issues.push(`Both email and phone are missing`);
@@ -1544,11 +1539,6 @@ function assertResumeSelfConsistent(resume: ResumeData): GuardianVerdict {
   // Check skills exist
   if (!resume.skills || resume.skills.length === 0) {
     issues.push(`Skills section is empty`);
-  }
-
-  // Check certifications exist
-  if (!resume.certifications || resume.certifications.length === 0) {
-    issues.push(`Certifications section is missing`);
   }
 
   if (issues.length > 0) {

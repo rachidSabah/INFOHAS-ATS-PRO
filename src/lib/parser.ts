@@ -449,23 +449,40 @@ export async function parseResumeText(text: string): Promise<ResumeData> {
 }
 
 async function parsePdf(file: File): Promise<string> {
-  // Load pdf.js v3.11.174 from CDN — most reliable approach for all environments
-  // (browser, Cloudflare Pages, Edge runtime). Uses script tag injection.
-  if (!(window as any).pdfjsLib) {
-    await new Promise<void>((resolve, reject) => {
-      const script = document.createElement("script");
-      script.src = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js";
-      script.onload = () => {
-        (window as any).pdfjsLib.GlobalWorkerOptions.workerSrc =
-          "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
-        resolve();
-      };
-      script.onerror = () => reject(new Error("Failed to load PDF.js from CDN."));
-      document.head.appendChild(script);
-    });
+  let pdfjsLib: any;
+
+  if (typeof window === "undefined") {
+    try {
+      // Node/Vitest test environment
+      pdfjsLib = await import("pdfjs-dist/legacy/build/pdf.mjs");
+    } catch (e) {
+      console.warn("[parser] Failed to import pdfjs-dist/legacy/build/pdf.mjs, trying standard pdfjs-dist...", e);
+      try {
+        pdfjsLib = await import("pdfjs-dist");
+      } catch (err) {
+        console.error("[parser] Both pdfjs-dist imports failed in Node:", err);
+        throw err;
+      }
+    }
+  } else {
+    // Load pdf.js v3.11.174 from CDN — most reliable approach for all environments
+    // (browser, Cloudflare Pages, Edge runtime). Uses script tag injection.
+    if (!(window as any).pdfjsLib) {
+      await new Promise<void>((resolve, reject) => {
+        const script = document.createElement("script");
+        script.src = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js";
+        script.onload = () => {
+          (window as any).pdfjsLib.GlobalWorkerOptions.workerSrc =
+            "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+          resolve();
+        };
+        script.onerror = () => reject(new Error("Failed to load PDF.js from CDN."));
+        document.head.appendChild(script);
+      });
+    }
+    pdfjsLib = (window as any).pdfjsLib;
   }
 
-  const pdfjsLib = (window as any).pdfjsLib;
   const arrayBuffer = await file.arrayBuffer();
 
   const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
@@ -1376,18 +1393,33 @@ function cleanInstitution(inst: string): string {
 function parseEducation(lines: string[]): ResumeData["education"] {
   if (!lines.length) return [];
 
-  // Split into entries by blank lines OR by lines that look like a degree/institution header.
-  // A "header" line is one that contains a degree keyword (B.S., M.S., PhD, Bachelor, Master, etc.)
-  // or a year range (2014-2018, 2014 - 2018, 2014–2018).
-  const degreePattern = /\b(b\.?\s?s\.?|b\.?\s?a\.?|b\.?\s?eng\.?|b\.?\s?tech|m\.?\s?s\.?|m\.?\s?a\.?|mba|ph\.?d|bachelor|master|doctorate|diploma|certificate|associate|degree|high\s+school)\b/i;
+  const degreePattern = /\b(b\.?\s?s\.?|b\.?\s?a\.?|b\.?\s?eng\.?|b\.?\s?tech|m\.?\s?s\.?|m\.?\s?a\.?|mba|ph\.?d|bachelor|master|doctorate|diploma|certificate|associate|degree|high\s+school|technician|technicien|training|formation|baccalauréat|baccalaureate|bac|licence|licenciate|magistère|technicien spécialisé|ingénieur|ingenieur|doctorat)\b/i;
   const yearRangePattern = new RegExp("\\b(19|20)\\d{2}\\s*[–\\-]\\s*(19|20)\\d{2}\\b|\\b(19|20)\\d{2}\\s*[–\\-]\\s*present\\b", "i");
+  const INST_KEYWORDS = /\b(University|College|Institute|School|Academy|Polytechnic|Conservatory|INFOHAS|OFPPT)\b/i;
+
+  // Preprocess lines: Split lines containing multiple degrees or institutions separated by pipes
+  const processedLines: string[] = [];
+  for (const line of lines) {
+    if (line.includes("|")) {
+      const parts = line.split("|").map(p => p.trim()).filter(Boolean);
+      let degreeCount = 0;
+      let instCount = 0;
+      for (const p of parts) {
+        if (degreePattern.test(p)) degreeCount++;
+        if (INST_KEYWORDS.test(p)) instCount++;
+      }
+      if (degreeCount > 1 || instCount > 1 || (degreeCount >= 1 && instCount >= 2)) {
+        processedLines.push(...parts);
+        continue;
+      }
+    }
+    processedLines.push(line);
+  }
 
   const entries: string[][] = [];
   let current: string[] = [];
 
-  const INST_KEYWORDS = /\b(University|College|Institute|School|Academy|Polytechnic|Conservatory)\b/i;
-
-  for (const line of lines) {
+  for (const line of processedLines) {
     const hasYearRange = yearRangePattern.test(line);
     const hasDegree = degreePattern.test(line);
     const hasInst = INST_KEYWORDS.test(line);
@@ -1401,7 +1433,7 @@ function parseEducation(lines: string[]): ResumeData["education"] {
         shouldSplit = true;
       } else if (hasDegree && currentHasDegree) {
         // Avoid splitting when the line is a plain degree phrase without an institution.
-        const plainDegreeOnly = /^(high\s+school|school|b\.?\s?s\.?|m\.?\s?s\.?|ph\.?\s?d\.?|bachelor|master|diploma|associate|degree)\b/i.test(line.trim());
+        const plainDegreeOnly = /^(high\s+school|school|b\.?\s?s\.?|m\.?\s?s\.?|ph\.?\s?d\.?|bachelor|master|diploma|associate|degree|baccalauréat|baccalaureate|bac|licence|licenciate|magistère|technicien spécialisé|technicien|technician|training|formation|ingénieur|ingenieur|doctorat|doctorate)\b/i.test(line.trim());
         if (!plainDegreeOnly && (hasInst || currentHasInst)) {
           shouldSplit = true;
         }
@@ -1526,12 +1558,12 @@ function parseEducation(lines: string[]): ResumeData["education"] {
           degree = leftSide.slice(0, kwEnd).trim();
 
           const afterKw = leftSide.slice(kwEnd);
-          const fieldMatch = afterKw.match(new RegExp("^\\s+(?:of|in|with)\\s+([A-Za-z\\s&]+?)(?=\\s+(?:University|College|Institute|School|Academy|Polytechnic|Conservatory)|$)", "i"));
+          const fieldMatch = afterKw.match(new RegExp("^\\s+(?:of|in|with)\\s+([A-Za-z\\s&]+?)(?=\\s+(?:University|College|Institute|School|Academy|Polytechnic|Conservatory|INFOHAS|OFPPT)|$)", "i"));
           if (fieldMatch) {
             field = fieldMatch[1].trim();
             institution = afterKw.slice(fieldMatch[0].length).trim();
           } else if (!institution) {
-            institution = afterKw.trim();
+            institution = afterKw.replace(/^[:\s,—–\-|·•▪◦\(\)]+/, "").trim();
           }
         } else {
           degree = leftSide;

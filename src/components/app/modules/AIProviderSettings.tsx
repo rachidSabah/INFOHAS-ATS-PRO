@@ -33,6 +33,10 @@ export function AIProviderSettings() {
   const [fetchingModels, setFetchingModels] = useState(false);
   const [liveModels, setLiveModels] = useState<string[]>([]);
 
+  // Chain diagnostics state
+  const [testingChain, setTestingChain] = useState(false);
+  const [chainResults, setChainResults] = useState<Record<string, { ok: boolean; latencyMs: number; error?: string }>>({});
+
   const defaultProvider = providers.find((p) => p.id === form.defaultProviderId);
   const fallbackProviders = form.fallbackProviderIds
     .map((id) => providers.find((p) => p.id === id))
@@ -61,19 +65,42 @@ export function AIProviderSettings() {
       return;
     }
     setFetchingModels(true);
-    // === PRESERVE last known valid model list on failure ===
-    // Do NOT clear liveModels on failure — keep the previous list so the
-    // user's routing configuration stays valid. Only clear on success.
     const result = await ProviderManager.fetchModels(defaultProvider);
     setFetchingModels(false);
     if (result.ok && result.models.length > 0) {
       setLiveModels(result.models);
       toast.success(`Loaded ${result.models.length} ${defaultProvider.type === "puter" ? "built-in" : "live"} models from ${defaultProvider.name}.`);
     } else {
-      // === DO NOT clear provider, model, or routing config ===
-      // Just show the error — the user's last known valid config is preserved.
       toast.error(result.error || "Failed to fetch models. Your existing configuration is preserved.");
     }
+  };
+
+  const handleTestChain = async () => {
+    setTestingChain(true);
+    setChainResults({});
+    
+    const providersToTest = [
+      defaultProvider,
+      ...fallbackProviders
+    ].filter(Boolean) as typeof providers;
+
+    for (const p of providersToTest) {
+      setChainResults(prev => ({ ...prev, [p.id]: { ok: true, latencyMs: 0, error: "Testing..." } as any }));
+      try {
+        const res = await ProviderManager.testConnection(p as any);
+        setChainResults(prev => ({
+          ...prev,
+          [p.id]: { ok: res.ok, latencyMs: res.ok ? res.latencyMs : 0, error: res.ok ? undefined : res.message }
+        }));
+      } catch (err: any) {
+        setChainResults(prev => ({
+          ...prev,
+          [p.id]: { ok: false, latencyMs: 0, error: err?.message || "Connection error" }
+        }));
+      }
+    }
+    setTestingChain(false);
+    toast.success("AI Routing Chain diagnostics complete.");
   };
 
   // === Import / Export ===
@@ -175,7 +202,6 @@ export function AIProviderSettings() {
                   <Input value={form.defaultModel} onChange={(e) => update({ defaultModel: e.target.value })} placeholder="claude-sonnet-4" className="flex-1" />
                 )}
                 {defaultProvider?.type === "puter" ? (
-                  // Puter uses built-in models — show a static list instead of fetching
                   <Button variant="outline" size="sm" onClick={fetchModels} disabled={fetchingModels} className="gap-1.5 shrink-0">
                     {fetchingModels ? <Icon name="Loader2" className="w-3.5 h-3.5 animate-spin" /> : <Icon name="List" className="w-3.5 h-3.5" />}
                     Show built-in models
@@ -191,6 +217,90 @@ export function AIProviderSettings() {
               {liveModels.length > 0 && <p className="text-[10px] text-muted-foreground">{liveModels.length} {defaultProvider?.type === "puter" ? "built-in" : "live"} models from {defaultProvider?.name}</p>}
             </div>
           </div>
+        </CardContent>
+      </Card>
+
+      {/* Diagnostics Card */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-lg flex items-center justify-between">
+            <span className="flex items-center gap-2">
+              <Icon name="Activity" className="w-4 h-4 text-emerald-500" /> 
+              Routing Chain Diagnostics
+            </span>
+            <Button 
+              onClick={handleTestChain} 
+              disabled={testingChain || (!defaultProvider && fallbackProviders.length === 0)}
+              variant="outline" 
+              size="sm"
+              className="text-xs gap-1.5"
+            >
+              {testingChain ? <Icon name="Loader2" className="w-3.5 h-3.5 animate-spin" /> : <Icon name="Play" className="w-3.5 h-3.5 text-brand" />}
+              {testingChain ? "Testing..." : "Test Entire Chain"}
+            </Button>
+          </CardTitle>
+          <CardDescription>
+            Simulate live API calls to verify credentials, check latency, and ensure failover resilience across your configuration.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-2">
+          {defaultProvider && (
+            <div className="flex items-center justify-between p-2.5 rounded-lg bg-secondary/30 text-xs border border-border">
+              <div className="flex items-center gap-2">
+                <Badge variant="secondary">Primary</Badge>
+                <span className="font-semibold">{defaultProvider.name}</span>
+                <span className="text-muted-foreground font-mono">({form.defaultModel || "no model"})</span>
+              </div>
+              <div>
+                {chainResults[defaultProvider.id] ? (
+                  chainResults[defaultProvider.id].error === "Testing..." ? (
+                    <span className="text-amber-500 animate-pulse font-medium">Checking...</span>
+                  ) : chainResults[defaultProvider.id].ok ? (
+                    <span className="text-emerald-500 font-bold flex items-center gap-1">
+                      <Icon name="Check" className="w-3.5 h-3.5" /> Healthy ({chainResults[defaultProvider.id].latencyMs}ms)
+                    </span>
+                  ) : (
+                    <span className="text-red-500 font-bold flex items-center gap-1" title={chainResults[defaultProvider.id].error}>
+                      <Icon name="X" className="w-3.5 h-3.5" /> Unhealthy
+                    </span>
+                  )
+                ) : (
+                  <span className="text-muted-foreground">Not tested</span>
+                )}
+              </div>
+            </div>
+          )}
+          {fallbackProviders.map((p, idx) => (
+            <div key={p.id} className="flex items-center justify-between p-2.5 rounded-lg bg-secondary/10 text-xs border border-border">
+              <div className="flex items-center gap-2">
+                <Badge variant="outline">Fallback #{idx + 1}</Badge>
+                <span className="font-semibold">{p.name}</span>
+                <span className="text-muted-foreground font-mono">({p.modelName || "no model"})</span>
+              </div>
+              <div>
+                {chainResults[p.id] ? (
+                  chainResults[p.id].error === "Testing..." ? (
+                    <span className="text-amber-500 animate-pulse font-medium">Checking...</span>
+                  ) : chainResults[p.id].ok ? (
+                    <span className="text-emerald-500 font-bold flex items-center gap-1">
+                      <Icon name="Check" className="w-3.5 h-3.5" /> Healthy ({chainResults[p.id].latencyMs}ms)
+                    </span>
+                  ) : (
+                    <span className="text-red-500 font-bold flex items-center gap-1" title={chainResults[p.id].error}>
+                      <Icon name="X" className="w-3.5 h-3.5" /> Unhealthy
+                    </span>
+                  )
+                ) : (
+                  <span className="text-muted-foreground">Not tested</span>
+                )}
+              </div>
+            </div>
+          ))}
+          {!defaultProvider && fallbackProviders.length === 0 && (
+            <div className="text-xs text-muted-foreground text-center py-4 border border-dashed border-border rounded-lg">
+              Set up a primary or fallback provider to run diagnostics.
+            </div>
+          )}
         </CardContent>
       </Card>
 

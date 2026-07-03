@@ -404,6 +404,8 @@ AVIATION-SPECIFIC RULES
 4. FORMAT: skills into Cabin Safety, Customer Service, Operations, Languages categories.
 5. NEVER: invent flight hours, aircraft types, certifications, or airline names.
 6. TARGET: ~2,900 characters, one A4 page.
+7. EDUCATION FORMAT: List education entries separately. Do not group vocational aviation training (e.g. INFOHAS) and high school or technician vocational training (e.g. OFPPT) into a single entry or paragraph. Keep them separate.
+8. EXPERIENCES: Limit to 2-3 entries with 3-4 concise, quantified bullets each to enforce strict A4 one-page layout.
 ${context?.strictness === "Aggressive" ? `
 ═══════════════════════════════════════════════════════════════
 STRICTNESS: AGGRESSIVE

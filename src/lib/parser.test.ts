@@ -279,5 +279,22 @@ Communication`;
     expect(parsed.education[1].startDate).toBe("2021");
     expect(parsed.education[1].endDate).toBe("2022");
   });
+
+  it("correctly splits combined education lines and handles OFPPT and INFOHAS", () => {
+    const text = `EDUCATION
+High School Degree | Aviation and Hospitality Vocational Training  INFOHAS | Temara High School
+Focus: In-Flight Service Standards, Emergency Procedures, Premium Guest Experience.
+Specialized Technician, Business Management  OFPPT.`;
+    const parsedEdu = extractResumeFromText(text, "test.pdf").education;
+    console.log("DEBUG SPLIT EDUCATION:", JSON.stringify(parsedEdu, null, 2));
+    
+    // It should split them into separate entries (4 entries heuristically before AI cleanup)
+    expect(parsedEdu.length).toBeGreaterThanOrEqual(3);
+    
+    // Check that we captured INFOHAS and OFPPT
+    const institutions = parsedEdu.map((e) => e.institution);
+    expect(institutions.some((inst) => inst.includes("INFOHAS"))).toBe(true);
+    expect(institutions.some((inst) => inst.includes("OFPPT"))).toBe(true);
+  });
 });
 

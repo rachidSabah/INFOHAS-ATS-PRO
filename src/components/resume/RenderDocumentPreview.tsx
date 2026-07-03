@@ -42,6 +42,28 @@ export function RenderDocumentPreview({
   const scaledWidthMm = 210 * scale;
   const scaledHeightMm = 297 * scale;
 
+  const contentRef = React.useRef<HTMLDivElement>(null);
+  const [overflows, setOverflows] = React.useState(false);
+  const [fillPercent, setFillPercent] = React.useState(0);
+
+  React.useEffect(() => {
+    const el = contentRef.current;
+    if (!el) return;
+
+    const checkHeight = () => {
+      const a4HeightPx = 297 * 3.7795275591;
+      const actualHeight = el.scrollHeight || el.clientHeight || el.offsetHeight;
+      const percent = (actualHeight / a4HeightPx) * 100;
+      setFillPercent(Math.round(percent));
+      setOverflows(actualHeight > a4HeightPx + 2); // 2px tolerance
+    };
+
+    checkHeight();
+    const observer = new MutationObserver(checkHeight);
+    observer.observe(el, { childList: true, subtree: true, characterData: true });
+    return () => observer.disconnect();
+  }, [rd]);
+
   return (
     <div
       style={{
@@ -52,6 +74,7 @@ export function RenderDocumentPreview({
       }}
     >
       <div
+        ref={contentRef}
         className={`origin-top-left ${className ?? ""}`}
         style={{
           transform: `scale(${scale})`,
@@ -81,7 +104,70 @@ export function RenderDocumentPreview({
             accentColor={accentColor}
           />
         ))}
+
+        {/* ============ Page-Break Indicator Line ============ */}
+        {overflows && (
+          <div
+            style={{
+              position: "absolute",
+              top: "297mm",
+              left: 0,
+              width: "100%",
+              borderTop: "2px dashed #EF4444",
+              zIndex: 49,
+              pointerEvents: "none",
+            }}
+          />
+        )}
       </div>
+
+      {/* ============ Interactive Overflows Warning Badge ============ */}
+      {overflows && (
+        <div
+          style={{
+            position: "absolute",
+            bottom: "8px",
+            left: "50%",
+            transform: "translateX(-50%)",
+            backgroundColor: "rgba(239, 68, 68, 0.95)",
+            color: "white",
+            fontSize: "11px",
+            fontWeight: "bold",
+            padding: "4px 10px",
+            borderRadius: "9999px",
+            boxShadow: "0 4px 12px rgba(0, 0, 0, 0.15)",
+            zIndex: 50,
+            pointerEvents: "none",
+            border: "1px solid rgb(248, 113, 113)",
+            fontFamily: "sans-serif",
+          }}
+        >
+          ⚠️ OVERFLOWS PAGE ({fillPercent}%)
+        </div>
+      )}
+      {!overflows && fillPercent > 90 && (
+        <div
+          style={{
+            position: "absolute",
+            bottom: "8px",
+            left: "50%",
+            transform: "translateX(-50%)",
+            backgroundColor: "rgba(245, 158, 11, 0.95)",
+            color: "white",
+            fontSize: "11px",
+            fontWeight: "bold",
+            padding: "4px 10px",
+            borderRadius: "9999px",
+            boxShadow: "0 4px 12px rgba(0, 0, 0, 0.15)",
+            zIndex: 50,
+            pointerEvents: "none",
+            border: "1px solid rgb(251, 191, 36)",
+            fontFamily: "sans-serif",
+          }}
+        >
+          📏 FITS PAGE ({fillPercent}%)
+        </div>
+      )}
     </div>
   );
 }

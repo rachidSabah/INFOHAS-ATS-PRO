@@ -1,6 +1,6 @@
 "use client";
 
-import { forwardRef, useMemo } from "react";
+import { forwardRef, useMemo, useRef, useState, useEffect } from "react";
 import type { ResumeData, RenderDocument } from "@/lib/types";
 import { useApp } from "@/lib/store";
 import { RenderDocumentPreview } from "./RenderDocumentPreview";
@@ -39,6 +39,28 @@ export const A4Preview = forwardRef<HTMLDivElement, A4PreviewProps>(function A4P
   const accent = resume.accentColor || "#1154A3";
   const Template = TEMPLATE_MAP[resume.template] ?? ATSProfessionalTemplate;
 
+  const innerRef = useRef<HTMLDivElement>(null);
+  const [overflows, setOverflows] = useState(false);
+  const [fillPercent, setFillPercent] = useState(0);
+
+  useEffect(() => {
+    const el = innerRef.current;
+    if (!el) return;
+
+    const checkHeight = () => {
+      const a4HeightPx = 297 * 3.7795275591;
+      const actualHeight = el.scrollHeight || el.clientHeight || el.offsetHeight;
+      const percent = (actualHeight / a4HeightPx) * 100;
+      setFillPercent(Math.round(percent));
+      setOverflows(actualHeight > a4HeightPx + 2); // 2px tolerance
+    };
+
+    checkHeight();
+    const observer = new MutationObserver(checkHeight);
+    observer.observe(el, { childList: true, subtree: true, characterData: true });
+    return () => observer.disconnect();
+  }, [resume]);
+
   // Compute the scaled dimensions in mm so the wrapper occupies the correct
   // layout space (prevents horizontal overflow on mobile).
   const scaledWidthMm = 210 * scale;
@@ -49,6 +71,16 @@ export const A4Preview = forwardRef<HTMLDivElement, A4PreviewProps>(function A4P
   if (useRenderDocument) {
     return <RenderDocumentA4Preview resume={resume} scale={scale} className={className} ref={ref} />;
   }
+
+  // Helper to attach forwarded ref + local measuring ref
+  const handleRef = (node: HTMLDivElement | null) => {
+    (innerRef as any).current = node;
+    if (typeof ref === "function") {
+      ref(node);
+    } else if (ref) {
+      (ref as any).current = node;
+    }
+  };
 
   return (
     <div
@@ -62,7 +94,7 @@ export const A4Preview = forwardRef<HTMLDivElement, A4PreviewProps>(function A4P
       }}
     >
       <div
-        ref={ref}
+        ref={handleRef}
         className={`a4-page origin-top-left ${className ?? ""}`}
         style={{
           transform: `scale(${scale})`,
@@ -73,7 +105,70 @@ export const A4Preview = forwardRef<HTMLDivElement, A4PreviewProps>(function A4P
         }}
       >
         <Template resume={resume} accent={accent} />
+
+        {/* ============ Page-Break Indicator Line ============ */}
+        {overflows && (
+          <div
+            style={{
+              position: "absolute",
+              top: "297mm",
+              left: 0,
+              width: "100%",
+              borderTop: "2px dashed #EF4444",
+              zIndex: 49,
+              pointerEvents: "none",
+            }}
+          />
+        )}
       </div>
+
+      {/* ============ Interactive Overflows Warning Badge ============ */}
+      {overflows && (
+        <div
+          style={{
+            position: "absolute",
+            bottom: "8px",
+            left: "50%",
+            transform: "translateX(-50%)",
+            backgroundColor: "rgba(239, 68, 68, 0.95)",
+            color: "white",
+            fontSize: "11px",
+            fontWeight: "bold",
+            padding: "4px 10px",
+            borderRadius: "9999px",
+            boxShadow: "0 4px 12px rgba(0, 0, 0, 0.15)",
+            zIndex: 50,
+            pointerEvents: "none",
+            border: "1px solid rgb(248, 113, 113)",
+            fontFamily: "sans-serif",
+          }}
+        >
+          ⚠️ OVERFLOWS PAGE ({fillPercent}%)
+        </div>
+      )}
+      {!overflows && fillPercent > 90 && (
+        <div
+          style={{
+            position: "absolute",
+            bottom: "8px",
+            left: "50%",
+            transform: "translateX(-50%)",
+            backgroundColor: "rgba(245, 158, 11, 0.95)",
+            color: "white",
+            fontSize: "11px",
+            fontWeight: "bold",
+            padding: "4px 10px",
+            borderRadius: "9999px",
+            boxShadow: "0 4px 12px rgba(0, 0, 0, 0.15)",
+            zIndex: 50,
+            pointerEvents: "none",
+            border: "1px solid rgb(251, 191, 36)",
+            fontFamily: "sans-serif",
+          }}
+        >
+          📏 FITS PAGE ({fillPercent}%)
+        </div>
+      )}
     </div>
   );
 });

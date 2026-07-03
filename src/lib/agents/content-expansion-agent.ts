@@ -162,3 +162,41 @@ Return ONLY a JSON array of strings:
   }
   return exp;
 }
+
+/**
+ * Trim and consolidate bullets for a specific experience entry.
+ */
+export async function trimExperienceBullets(
+  exp: ResumeData["experience"][0],
+  targetCount = 3
+): Promise<string[]> {
+  try {
+    const result = await callAI({
+      systemPrompt: "You are an expert resume writer and editor. Your job is to trim, consolidate, and shorten the bullet points for a job experience entry to make them more concise, high-impact, and quantified, fitting strictly into a smaller layout space while retaining all factual metrics and achievements.",
+      userPrompt: `Role: ${exp.title} at ${exp.company}
+Current bullets:
+${JSON.stringify(exp.bullets)}
+
+Please rewrite and consolidate these bullets down to exactly ${targetCount} bullet points.
+Rules:
+1. Every bullet must start with a strong action verb (e.g. Optimized, Led, Formulated).
+2. Keep it factual and preserve all metrics (percentages, dollar amounts, number of users, etc.).
+3. Combine overlapping achievements to make them concise.
+4. Return ONLY a valid JSON array of strings:
+["bullet 1", "bullet 2", "bullet 3"]`,
+      maxTokens: 500,
+      temperature: 0.2,
+      taskCategory: "document"
+    });
+    const text = result.text?.trim() ?? "[]";
+    const cleaned = text.replace(/```json\s*/gi, "").replace(/```\s*$/gi, "").trim();
+    const trimmed: string[] = JSON.parse(cleaned);
+    if (Array.isArray(trimmed) && trimmed.length > 0) {
+      return trimmed;
+    }
+  } catch (err) {
+    console.warn("[trimExperienceBullets] failed:", err);
+  }
+  return exp.bullets;
+}
+
