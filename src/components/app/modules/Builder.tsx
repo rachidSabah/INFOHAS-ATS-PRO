@@ -46,6 +46,23 @@ export function Builder() {
   const atsScore = useLiveATSScore(resume, activeJD);
   const sectionScores = useSectionCompleteness(resume);
 
+  // Real-time keyword alignment checks
+  const keywordsList = useMemo(() => {
+    if (!activeJD || !resume) return [];
+    const resumeSkillNames = resume.skills.map((s) => s.name.toLowerCase().trim());
+    const resumeTextLower = [
+      resume.summary,
+      ...resume.experience.map(e => [e.title, e.company, ...e.bullets].join(" ")),
+      ...resume.skills.map(s => s.name),
+    ].join(" ").toLowerCase();
+
+    return (activeJD.keywords || []).map((kw) => {
+      const kwLower = kw.toLowerCase().trim();
+      const matched = resumeSkillNames.includes(kwLower) || resumeTextLower.includes(kwLower);
+      return { keyword: kw, matched };
+    });
+  }, [resume, activeJD]);
+
   const patch = (p: Partial<ResumeData>) => resume && updateResume(resume.id, p);
 
   const updateOptimizerDirective = useApp((s) => s.updateOptimizerDirective);
@@ -215,12 +232,13 @@ Guidelines:
       if (issue.type === "summary") {
         const prompt = `Rewrite this resume summary to be highly professional, impactful, and about 90 words: "${resume.summary ?? ""}". ` +
           (activeJD ? `Ensure you align it with the target job: "${activeJD.title} at ${activeJD.company || 'Target Employer'}". ` : "") +
-          `Return ONLY the summary text.`;
+          `Return ONLY the summary text. Do NOT use any asterisks or markdown bold formatting.`;
         const res = await ProviderRouter.chat({
           messages: [{ role: "user", content: prompt }], maxTokens: 250, temperature: 0.6
         }, { agentTask: "summary" });
         if (res.text) {
-          patch({ summary: res.text.trim() });
+          const cleanSummary = res.text.trim().replace(/\*\*|\*/g, "");
+          patch({ summary: cleanSummary });
           toast.success("Summary optimized successfully!", { id: toastId });
         }
       } else if (issue.type === "experience") {
@@ -228,15 +246,16 @@ Guidelines:
         if (exp) {
           const prompt = `Rewrite the bullet points for the role "${exp.title} at ${exp.company}" to include realistic metrics and measurable achievements (e.g. increase efficiency by X%, save hours, grow revenue):
 ${JSON.stringify(exp.bullets)}
-Return ONLY a valid JSON array of string bullets, NO formatting, NO markdown.`;
+Return ONLY a valid JSON array of string bullets, NO formatting, NO markdown, NO asterisks.`;
           const res = await ProviderRouter.chat({
             messages: [{ role: "user", content: prompt }], maxTokens: 400, temperature: 0.7
           }, { agentTask: "experience" });
           try {
             const parsedBullets = JSON.parse(res.text.trim());
             if (Array.isArray(parsedBullets)) {
+              const cleanBullets = parsedBullets.map((b) => typeof b === "string" ? b.replace(/\*\*|\*/g, "") : b);
               patch({
-                experience: resume.experience.map((e) => e.id === exp.id ? { ...e, bullets: parsedBullets } : e)
+                experience: resume.experience.map((e) => e.id === exp.id ? { ...e, bullets: cleanBullets } : e)
               });
               toast.success("Metrics added successfully!", { id: toastId });
             }
@@ -245,9 +264,10 @@ Return ONLY a valid JSON array of string bullets, NO formatting, NO markdown.`;
           }
         }
       } else if (issue.type === "skills") {
-        const newSkills = [...resume.skills, { id: uid("s"), name: issue.meta.skill, category: "Core Competencies" }];
+        const cleanSkillName = (issue.meta.skill as string).replace(/\*\*|\*/g, "");
+        const newSkills = [...resume.skills, { id: uid("s"), name: cleanSkillName, category: "Core Competencies" }];
         patch({ skills: newSkills });
-        toast.success(`Weaved "${issue.meta.skill}" into your skills list!`, { id: toastId });
+        toast.success(`Weaved "${cleanSkillName}" into your skills list!`, { id: toastId });
       }
     } catch (err: any) {
       toast.error(`Failed to apply fix: ${err?.message}`, { id: toastId });
@@ -1348,7 +1368,7 @@ ${resumeContext}
               </div>
             ) : (
               /* ATS Audit panel UI */
-              <div className="flex flex-col h-[calc(100vh-220px)] border border-border rounded-xl bg-card p-4 overflow-y-auto space-y-3.5 scrollbar-thin">
+              <div className="flex flex-col h-[calc(100vh-220px)] border border-border rounded-xl bg-card p-4 overflow-y-auto space-y-4 scrollbar-thin">
                 <div className="flex items-center justify-between border-b border-border pb-2">
                   <span className="text-xs font-bold text-foreground flex items-center gap-1.5">
                     <Icon name="AlertCircle" className="w-4 h-4 text-brand" /> ATS Recommendation Center
@@ -1357,58 +1377,135 @@ ${resumeContext}
                     {auditIssues.filter(i => i.severity === "warning").length} Warnings
                   </Badge>
                 </div>
-                <div className="space-y-2.5">
-                  {auditIssues.map((issue) => (
-                    <div
-                      key={issue.id}
-                      className={`p-3 rounded-lg border text-xs flex flex-col gap-2 transition ${
-                        issue.severity === "warning"
-                          ? "bg-amber-50/40 border-amber-200 dark:bg-amber-950/10 dark:border-amber-900/30"
-                          : issue.severity === "success"
-                          ? "bg-emerald-50/40 border-emerald-200 dark:bg-emerald-950/10 dark:border-emerald-900/30"
-                          : "bg-secondary/40 border-border"
-                      }`}
-                    >
-                      <div className="flex items-start justify-between gap-2">
-                        <div className="flex-1">
-                          <div className="font-semibold text-foreground flex items-center gap-1">
-                            {issue.severity === "success" ? (
-                              <Icon name="Check" className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
-                            ) : issue.severity === "warning" ? (
-                              <Icon name="AlertTriangle" className="w-3.5 h-3.5 text-amber-600 shrink-0" />
-                            ) : (
-                              <Icon name="Info" className="w-3.5 h-3.5 text-blue-600 shrink-0" />
-                            )}
-                            {issue.title}
-                          </div>
-                          <div className="text-muted-foreground text-[10px] mt-1 leading-relaxed">
-                            {issue.description}
-                          </div>
-                        </div>
-                        {issue.actionLabel && (
-                          <Button
-                            size="sm"
-                            disabled={fixingIssueId === issue.id}
-                            onClick={() => fixIssue(issue)}
-                            className="bg-brand hover:bg-brand-dark text-white text-[10px] h-7 px-2 shrink-0 gap-1"
+
+                {!activeJD ? (
+                  <div className="rounded-xl border border-dashed border-border p-5 text-center space-y-3 bg-secondary/20">
+                    <Icon name="Briefcase" className="w-8 h-8 text-muted-foreground/50 mx-auto" />
+                    <div className="text-xs font-bold text-foreground">No Target Job Selected</div>
+                    <p className="text-[10px] text-muted-foreground max-w-[220px] mx-auto leading-relaxed">
+                      Select or scrape a job description to audit your resume for critical skill gaps and key ATS terms.
+                    </p>
+                    <div className="space-y-2">
+                      <select
+                        value={activeJdId || ""}
+                        onChange={(e) => setActiveJD(e.target.value || null)}
+                        className="w-full h-8 px-2 rounded border border-input bg-background text-xs"
+                      >
+                        <option value="">Select a saved job...</option>
+                        {jobDescriptions.map((j) => (
+                          <option key={j.id} value={j.id}>{j.title} {j.company ? `— ${j.company}` : ""}</option>
+                        ))}
+                      </select>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => {
+                          const setView = useApp.getState().setView;
+                          setView("jd-scraper");
+                        }}
+                        className="w-full h-8 text-[11px] gap-1"
+                      >
+                        <Icon name="Search" className="w-3 h-3" /> Scrape New Job
+                      </Button>
+                    </div>
+                  </div>
+                ) : (
+                  <>
+                    {/* Keyword Density / Checklist */}
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between text-xs font-bold text-foreground">
+                        <span className="flex items-center gap-1.5">
+                          <Icon name="KeyRound" className="w-3.5 h-3.5 text-brand" /> Target Job Keywords
+                        </span>
+                        <span className="text-[10px] text-muted-foreground font-mono bg-secondary px-1.5 py-0.5 rounded">
+                          {keywordsList.filter(k => k.matched).length}/{keywordsList.length} Matched
+                        </span>
+                      </div>
+                      <div className="grid grid-cols-2 gap-1.5 max-h-[160px] overflow-y-auto p-1 border border-border rounded-lg bg-secondary/10 scrollbar-thin">
+                        {keywordsList.map(({ keyword, matched }) => (
+                          <div
+                            key={keyword}
+                            className={`flex items-center justify-between p-1.5 rounded border text-[10px] transition ${
+                              matched
+                                ? "bg-emerald-50/30 border-emerald-100/50 text-emerald-800 dark:text-emerald-300"
+                                : "bg-background border-border text-muted-foreground"
+                            }`}
                           >
-                            {fixingIssueId === issue.id ? (
-                              <Icon name="Loader2" className="w-3 h-3 animate-spin" />
+                            <span className="truncate pr-1 font-medium" title={keyword}>{keyword}</span>
+                            {matched ? (
+                              <Icon name="Check" className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
                             ) : (
-                              <Icon name="Sparkles" className="w-3 h-3" />
+                              <button
+                                onClick={() => fixIssue({ type: "skills", meta: { skill: keyword } })}
+                                className="text-brand hover:text-brand-dark cursor-pointer p-0.5 rounded hover:bg-brand/10 transition shrink-0"
+                                title="Weave into skills"
+                              >
+                                <Icon name="Plus" className="w-3 h-3" />
+                              </button>
                             )}
-                            <span>{issue.actionLabel}</span>
-                          </Button>
-                        )}
+                          </div>
+                        ))}
                       </div>
                     </div>
-                  ))}
-                  {auditIssues.length === 0 && (
-                    <div className="text-center py-8 text-muted-foreground text-xs font-semibold">
-                      ✓ No issues found. Your resume structure and keyword density are optimal!
+
+                    {/* Recommendation Cards */}
+                    <div className="space-y-2.5">
+                      <div className="text-[11px] font-bold text-muted-foreground uppercase tracking-wider mt-2">
+                        Audit Recommendations
+                      </div>
+                      {auditIssues.map((issue) => (
+                        <div
+                          key={issue.id}
+                          className={`p-3 rounded-lg border text-xs flex flex-col gap-2 transition ${
+                            issue.severity === "warning"
+                              ? "bg-amber-50/40 border-amber-200 dark:bg-amber-950/10 dark:border-amber-900/30"
+                              : issue.severity === "success"
+                              ? "bg-emerald-50/40 border-emerald-200 dark:bg-emerald-950/10 dark:border-emerald-900/30"
+                              : "bg-secondary/40 border-border"
+                          }`}
+                        >
+                          <div className="flex items-start justify-between gap-2">
+                            <div className="flex-1">
+                              <div className="font-semibold text-foreground flex items-center gap-1">
+                                {issue.severity === "success" ? (
+                                  <Icon name="Check" className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                                ) : issue.severity === "warning" ? (
+                                  <Icon name="AlertTriangle" className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+                                ) : (
+                                  <Icon name="Info" className="w-3.5 h-3.5 text-blue-600 shrink-0" />
+                                )}
+                                {issue.title}
+                              </div>
+                              <div className="text-muted-foreground text-[10px] mt-1 leading-relaxed">
+                                {issue.description}
+                              </div>
+                            </div>
+                            {issue.actionLabel && (
+                              <Button
+                                size="sm"
+                                disabled={fixingIssueId === issue.id}
+                                onClick={() => fixIssue(issue)}
+                                className="bg-brand hover:bg-brand-dark text-white text-[10px] h-7 px-2 shrink-0 gap-1"
+                              >
+                                {fixingIssueId === issue.id ? (
+                                  <Icon name="Loader2" className="w-3 h-3 animate-spin" />
+                                ) : (
+                                  <Icon name="Sparkles" className="w-3 h-3" />
+                                )}
+                                <span>{issue.actionLabel}</span>
+                              </Button>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                      {auditIssues.length === 0 && (
+                        <div className="text-center py-8 text-muted-foreground text-xs font-semibold">
+                          ✓ No issues found. Your resume structure and keyword density are optimal!
+                        </div>
+                      )}
                     </div>
-                  )}
-                </div>
+                  </>
+                )}
               </div>
             )}
           </div>
