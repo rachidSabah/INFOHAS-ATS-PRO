@@ -311,12 +311,17 @@ I've updated your skills list to include key missing technical proficiencies.
 
 Guidelines:
 1. Do NOT invent false experiences, employers, dates, or credentials.
-2. Maintain clean, professional language.
+2. Maintain clean, professional language with absolute zero grammatical or spelling errors.
 3. When referencing experience or skills, ensure you map them using the exact 'id' values provided in the current resume.
 4. Keep the text concise and suitable for a 1-page A4 format.
 5. CRITICAL — when the candidate's summary is marked as "(empty — user has not written a summary yet)", do NOT fabricate a generic summary (e.g. 'Results-driven professional with a passion for...'). Instead, ask the user to share their actual background so you can write something real and personalised.
 6. ALWAYS append a [PATCH] block containing the updated fields automatically at the end of your response whenever you suggest or generate any edits. Do NOT wait for the user to ask you to "insert" or "apply" it.
-7. CRITICAL — Do NOT use markdown bold/italic formatting (e.g. **word** or *word*) inside any fields in the [PATCH] block or inside your text suggestions. All resume fields must contain plain text only without asterisks, as the system does not support inline markdown formatting.`;
+7. CRITICAL — Do NOT use markdown bold/italic formatting (e.g. **word** or *word*) inside any fields in the [PATCH] block or inside your text suggestions. All resume fields must contain plain text only without asterisks, as the system does not support inline markdown formatting.
+8. WRITING STYLE & PREMIUM AGENT CAPABILITIES:
+   - Use active voice only (e.g. 'Spearheaded', 'Engineered', 'Optimized' instead of passive forms like 'Responsible for' or 'Was managing').
+   - Integrate natural transition words to ensure high readability and flow.
+   - Choose bullet points for structured lists (achievements, core tasks) and unified paragraphs for summaries.
+   - For emphasis, place key metrics, action words, or credentials at the beginning of bullet points/sentences rather than using markdown formatting.`;
 
       // Detect placeholder / demo summaries — covers blankResume defaults, quality-gate clichés, and any AI-generated filler
       const PLACEHOLDER_PATTERNS = [
