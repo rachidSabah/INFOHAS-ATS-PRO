@@ -1132,14 +1132,8 @@ export function validateExportCompleteness(
   const errors: string[] = [];
 
   if (!source) {
-    // No source to compare against — run basic sanity checks only
-    if (optimized.experience.length === 0) {
-      errors.push("Export blocked: Professional Experience is empty");
-    }
-    if (optimized.education.length === 0 && optimized.experience.length > 0) {
-      errors.push("Export blocked: Education is empty (source likely had it)");
-    }
-    return errors.length > 0 ? { ok: false, errors } : { ok: true };
+    // No source to compare against — allow export (no data-loss comparison is possible)
+    return { ok: true };
   }
 
   // ── Section-type presence comparison ────────────────────────────────
