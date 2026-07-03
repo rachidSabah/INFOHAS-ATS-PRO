@@ -55,6 +55,13 @@ export function InterviewSession({ pkg, onClose }: InterviewSessionProps) {
   const [showFinalReport, setShowFinalReport] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Audio Speech Recognition and TTS States
+  const [isListening, setIsListening] = useState(false);
+  const [isPlayingQuestion, setIsPlayingQuestion] = useState(false);
+  const recognitionRef = useRef<any>(null);
+  const synthRef = useRef<SpeechSynthesis | null>(null);
+  const utteranceRef = useRef<SpeechSynthesisUtterance | null>(null);
+
   const questions = pkg.questions;
   const total = questions.length;
   const current = questions[currentIndex];
@@ -63,6 +70,109 @@ export function InterviewSession({ pkg, onClose }: InterviewSessionProps) {
   const isLastQuestion = currentIndex === total - 1;
   const answeredCount = Object.values(answers).filter((a) => a.submitted).length;
   const percent = Math.round(((currentIndex + 1) / total) * 100);
+
+  // Initialize Speech Synthesis and Speech Recognition
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      synthRef.current = window.speechSynthesis;
+      const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+      if (SpeechRecognition) {
+        const rec = new SpeechRecognition();
+        rec.continuous = true;
+        rec.interimResults = false;
+        rec.lang = "en-US";
+
+        rec.onresult = (event: any) => {
+          const resultText = event.results[event.results.length - 1][0].transcript;
+          if (resultText) {
+            setAnswers((prev) => {
+              const currentText = prev[current?.id]?.answer ?? "";
+              const space = currentText && !currentText.endsWith(" ") ? " " : "";
+              return {
+                ...prev,
+                [current?.id]: {
+                  questionId: current?.id,
+                  answer: currentText + space + resultText,
+                  submitted: prev[current?.id]?.submitted ?? false,
+                },
+              };
+            });
+          }
+        };
+
+        rec.onerror = (e: any) => {
+          console.error("Speech recognition error:", e);
+          setIsListening(false);
+        };
+
+        rec.onend = () => {
+          setIsListening(false);
+        };
+
+        recognitionRef.current = rec;
+      }
+    }
+
+    return () => {
+      if (synthRef.current) {
+        synthRef.current.cancel();
+      }
+      if (recognitionRef.current) {
+        try {
+          recognitionRef.current.stop();
+        } catch (_) {}
+      }
+    };
+  }, [current?.id]);
+
+  // Read current question out loud
+  const speakQuestion = useCallback(() => {
+    if (!current || !synthRef.current) return;
+    
+    synthRef.current.cancel();
+    setIsPlayingQuestion(true);
+
+    const utterance = new SpeechSynthesisUtterance(current.question);
+    utterance.onend = () => {
+      setIsPlayingQuestion(false);
+    };
+    utterance.onerror = () => {
+      setIsPlayingQuestion(false);
+    };
+    
+    utteranceRef.current = utterance;
+    synthRef.current.speak(utterance);
+  }, [current]);
+
+  // Stop reading current question
+  const stopSpeakingQuestion = useCallback(() => {
+    if (synthRef.current) {
+      synthRef.current.cancel();
+      setIsPlayingQuestion(false);
+    }
+  }, []);
+
+  // Toggle Microphone listener
+  const toggleListening = useCallback(() => {
+    if (!recognitionRef.current) {
+      toast.error("Speech recognition is not supported in this browser. Please use Chrome or Safari.");
+      return;
+    }
+
+    if (isListening) {
+      recognitionRef.current.stop();
+      setIsListening(false);
+    } else {
+      stopSpeakingQuestion();
+      try {
+        recognitionRef.current.start();
+        setIsListening(true);
+        toast.info("Listening... Speak your answer.");
+      } catch (err) {
+        console.error("Failed to start speech recognition:", err);
+      }
+    }
+  }, [isListening, stopSpeakingQuestion]);
 
   // === Answer management ===
   const setAnswerText = useCallback((questionId: string, text: string) => {
@@ -80,8 +190,16 @@ export function InterviewSession({ pkg, onClose }: InterviewSessionProps) {
   // === Submit answer for AI feedback ===
   const submitAnswer = useCallback(async () => {
     if (!current || !currentAnswer?.answer?.trim()) {
-      toast.error("Please write an answer before submitting.");
+      toast.error("Please write or speak an answer before submitting.");
       return;
+    }
+
+    // Stop listening when submitting
+    if (isListening && recognitionRef.current) {
+      try {
+        recognitionRef.current.stop();
+      } catch (_) {}
+      setIsListening(false);
     }
 
     setSubmitting(true);
@@ -89,7 +207,7 @@ export function InterviewSession({ pkg, onClose }: InterviewSessionProps) {
 
     try {
       const result = await callAI({
-        systemPrompt: "You are an expert interview coach. Evaluate the candidate's answer and provide constructive feedback. Return ONLY valid JSON.",
+        systemPrompt: "You are an expert interview coach. Evaluate the candidate's answer and provide constructive feedback. Focus heavily on checking for behavioral components if applicable: STAR structure (Situation, Task, Action, Result) with specific quantified outcomes. Return ONLY valid JSON.",
         userPrompt: `Question: ${current.question}
 Category: ${current.category}
 Difficulty: ${current.difficulty}
@@ -108,11 +226,11 @@ Evaluate the candidate's answer. Return JSON:
   "improvements": ["improvement 1", "improvement 2"],
   "suggestedAnswer": "A model answer incorporating the talking points",
   "starFeedback": {
-    "situation": "feedback on situation framing",
-    "task": "feedback on task clarity",
-    "action": "feedback on action description",
-    "result": "feedback on result quantification",
-    "note": "overall STAR feedback"
+    "situation": "feedback on situation framing. Did they explain the context?",
+    "task": "feedback on task clarity. What was the goal or constraint?",
+    "action": "feedback on action description. What did they specifically do?",
+    "result": "feedback on result quantification. Did they provide numbers/percentages?",
+    "note": "overall STAR feedback detailing what is missing or well executed"
   },
   "score": 85
 }
@@ -147,22 +265,24 @@ Score 0-100 based on: relevance, clarity, specificity, quantification, and STAR 
     } finally {
       setSubmitting(false);
     }
-  }, [current, currentAnswer]);
+  }, [current, currentAnswer, isListening]);
 
   // === Navigation ===
   const goNext = useCallback(() => {
+    stopSpeakingQuestion();
     if (isLastQuestion) {
       setShowFinalReport(true);
     } else {
       setCurrentIndex((i) => Math.min(i + 1, total - 1));
       setError(null);
     }
-  }, [isLastQuestion, total]);
+  }, [isLastQuestion, total, stopSpeakingQuestion]);
 
   const goPrev = useCallback(() => {
+    stopSpeakingQuestion();
     setCurrentIndex((i) => Math.max(i - 1, 0));
     setError(null);
-  }, []);
+  }, [stopSpeakingQuestion]);
 
   // === Final report computation ===
   const finalReport = computeFinalReport(questions, answers);
@@ -250,7 +370,18 @@ Score 0-100 based on: relevance, clarity, specificity, quantification, and STAR 
 
               {/* Question */}
               <div>
-                <div className="text-[10px] uppercase tracking-wide text-muted-foreground font-semibold mb-1">Question {currentIndex + 1}</div>
+                <div className="flex items-center justify-between mb-1">
+                  <div className="text-[10px] uppercase tracking-wide text-muted-foreground font-semibold">Question {currentIndex + 1}</div>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={isPlayingQuestion ? stopSpeakingQuestion : speakQuestion}
+                    className="h-6 text-[10px] gap-1 hover:bg-secondary"
+                  >
+                    <Icon name={isPlayingQuestion ? "VolumeX" : "Volume2"} className={`w-3.5 h-3.5 ${isPlayingQuestion ? "text-red-500" : "text-brand"}`} />
+                    {isPlayingQuestion ? "Stop Audio" : "Read Question"}
+                  </Button>
+                </div>
                 <p className="text-base sm:text-lg font-semibold text-pretty">{current.question}</p>
               </div>
 
@@ -289,7 +420,18 @@ Score 0-100 based on: relevance, clarity, specificity, quantification, and STAR 
               {/* Answer textarea */}
               <div>
                 <div className="flex items-center justify-between mb-1.5">
-                  <label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Your Answer</label>
+                  <div className="flex items-center gap-2">
+                    <label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Your Answer</label>
+                    <Button
+                      size="sm"
+                      variant={isListening ? "secondary" : "ghost"}
+                      onClick={toggleListening}
+                      className={`h-6 text-[10px] gap-1 ${isListening ? "bg-red-100 hover:bg-red-200 text-red-700 animate-pulse" : "hover:bg-secondary text-brand"}`}
+                    >
+                      <Icon name="Mic" className="w-3.5 h-3.5" />
+                      {isListening ? "Listening (Click to Stop)" : "Answer verbally"}
+                    </Button>
+                  </div>
                   <span className="text-[10px] text-muted-foreground">{currentAnswer?.answer?.length ?? 0} chars</span>
                 </div>
                 <Textarea
