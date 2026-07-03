@@ -18,6 +18,9 @@ const TOOLS = [
   { id: "keywords", name: "Keyword Generator", icon: "KeyRound", desc: "Extract industry keywords from your field.", color: "#EC4899" },
   { id: "skills", name: "Skill Suggestions", icon: "Wrench", desc: "Suggest skills you should add based on your role.", color: "#1154A3" },
   { id: "rewrite", name: "Resume Rewriter", icon: "RefreshCcw", desc: "Rewrite your entire resume section-by-section.", color: "#F59E0B" },
+  { id: "salary", name: "Salary Negotiator", icon: "DollarSign", desc: "Draft a professional email to negotiate salary offers.", color: "#10B981" },
+  { id: "interview", name: "Interview Q&A Builder", icon: "MessagesSquare", desc: "Generate mock interview Q&As tailored to your resume.", color: "#8B5CF6" },
+  { id: "cover_letter_outline", name: "Cover Letter Outline", icon: "FileText", desc: "Create a structured outline for your cover letter.", color: "#EC4899" },
 ];
 
 export function AITools() {
@@ -55,6 +58,12 @@ export function AITools() {
         user = `Suggest 10 skills (with brief justification) this candidate should add:\n${input || JSON.stringify(resume?.skills)}`;
       } else if (active === "rewrite") {
         user = `Rewrite this resume section to be ATS-friendly and impactful:\n${input}`;
+      } else if (active === "salary") {
+        user = `Draft a professional email to negotiate a salary offer based on these details (role, target salary, original offer):\n${input}`;
+      } else if (active === "interview") {
+        user = `Generate 5 custom behavioral interview questions (STAR method) and recommended answers for this resume:\n${input || JSON.stringify(resume ?? {})}`;
+      } else if (active === "cover_letter_outline") {
+        user = `Create a structured cover letter outline based on this target role/description:\n${input}`;
       }
       const result = await callAI({ systemPrompt: sys, userPrompt: user, maxTokens: 1500, taskCategory: "document" });
       setOutput(result.text);

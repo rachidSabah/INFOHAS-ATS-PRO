@@ -6,13 +6,26 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Badge, Icon } from "@/components/shared";
 import { toast } from "sonner";
 import { Textarea } from "@/components/ui/textarea";
+import { useApp } from "@/lib/store";
 
 type ConnectState = "idle" | "connecting" | "authorized" | "error";
 
 export function ConnectAntigravityDialog() {
+  const storeProvider = useApp((s) => s.providers.find((p) => p.id === "p_antigravity"));
+  const isAuthorizedInStore = !!storeProvider?.apiKey && storeProvider?.isActive;
+
   const [state, setState] = useState<ConnectState>("idle");
   const [token, setToken] = useState("");
   const [errorMsg, setErrorMsg] = useState("");
+
+  // Sync state with store status on mount and when store changes
+  useEffect(() => {
+    if (isAuthorizedInStore) {
+      setState("authorized");
+    } else if (state === "authorized") {
+      setState("idle");
+    }
+  }, [isAuthorizedInStore]);
 
   // Restore saved session on mount + listen for OAuth callback
   useEffect(() => {
@@ -24,7 +37,6 @@ export function ConnectAntigravityDialog() {
         if (session?.authenticated) {
           setState("authorized");
           try {
-            const { useApp } = await import("@/lib/store");
             const storeProvider = useApp.getState().providers.find((p: any) => p.id === "p_antigravity");
             if (storeProvider && !storeProvider.isActive) {
               useApp.getState().updateProvider("p_antigravity", {
@@ -51,7 +63,6 @@ export function ConnectAntigravityDialog() {
             if (refreshToken) {
               await provider.saveRefreshToken(refreshToken, expiresIn);
             }
-            const { useApp } = await import("@/lib/store");
             useApp.getState().updateProvider("p_antigravity", {
               isActive: true,
               apiKey: accessToken,
@@ -116,7 +127,6 @@ export function ConnectAntigravityDialog() {
       setState("authorized");
       toast.success("Antigravity connected successfully!");
       try {
-        const { useApp } = await import("@/lib/store");
         useApp.getState().updateProvider("p_antigravity", {
           isActive: true,
           apiKey: trimmed,
@@ -135,7 +145,6 @@ export function ConnectAntigravityDialog() {
       const provider = getAntigravityProvider();
       await provider.logout();
       try {
-        const { useApp } = await import("@/lib/store");
         useApp.getState().updateProvider("p_antigravity", {
           isActive: false,
           apiKey: "",
@@ -225,7 +234,6 @@ export function ConnectAntigravityDialog() {
                 const { getAntigravityProvider } = await import("@/lib/providers/antigravity-provider");
                 const models = await getAntigravityProvider().listModels();
                 try {
-                  const { useApp } = await import("@/lib/store");
                   useApp.getState().updateProvider("p_antigravity", {
                     enabledModels: models,
                   });

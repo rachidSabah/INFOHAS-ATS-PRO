@@ -139,23 +139,28 @@ export class AntigravityProvider implements OAuthAIProvider {
       if (useApp) {
         try {
           const storeProvider = useApp.getState().providers.find((p: any) => p.id === "p_antigravity");
-          if (storeProvider && storeProvider.apiKey && storeProvider.apiKey.trim() !== "") {
-            this.session = {
-              provider: "antigravity",
-              authenticated: true,
-              email: this.session.email || null,
-              userId: null,
-              accessToken: storeProvider.apiKey,
-              refreshToken: this.session.refreshToken || null,
-              expiresAt: this.session.expiresAt || null,
-              connectedAt: this.session.connectedAt || Date.now(),
-              models: storeProvider.enabledModels || this.session.models || [],
-              sharedAdminAccount: false,
-              authMethod: "api_key",
-              googleUserId: null,
-              googlePicture: null,
-            };
-            return true;
+          if (storeProvider) {
+            if (storeProvider.apiKey && storeProvider.apiKey.trim() !== "" && storeProvider.isActive) {
+              this.session = {
+                provider: "antigravity",
+                authenticated: true,
+                email: this.session.email || null,
+                userId: null,
+                accessToken: storeProvider.apiKey,
+                refreshToken: this.session.refreshToken || null,
+                expiresAt: this.session.expiresAt || null,
+                connectedAt: this.session.connectedAt || Date.now(),
+                models: storeProvider.enabledModels || this.session.models || [],
+                sharedAdminAccount: false,
+                authMethod: "api_key",
+                googleUserId: null,
+                googlePicture: null,
+              };
+              return true;
+            } else {
+              this.session.authenticated = false;
+              this.session.accessToken = null;
+            }
           }
         } catch {}
       }
