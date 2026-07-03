@@ -201,6 +201,26 @@ export function SmartTextarea({ value, onChange, section, placeholder, className
   };
 
   /**
+   * Fix grammar, spelling, and autocomplete incomplete phrases.
+   */
+  const onFixAndPolish = async () => {
+    if (!value) return;
+    setStatus("loading");
+    const gen = await callAI(
+      (ctxMemo ? `Context:\n${ctxMemo}\n\n` : "") +
+      `Fix any grammar, spelling, or sentence structure issues in this text: "${value}". ` +
+      `If the text is incomplete or written as a shorthand note, complete it into a professional, high-impact resume statement. ` +
+      (jobDescriptionText ? `Naturally weave in relevant keywords and skills from the target job description. ` : "") +
+      `Ensure it starts with a strong action verb (if it is a bullet point) and has a clean, professional tone. Return ONLY the polished text.`
+    );
+    if (gen) {
+      onChange(gen);
+      toast.success("Phrase polished and completed!");
+    }
+    setStatus("idle");
+  };
+
+  /**
    * Show suggestion popover with variants.
    */
   const onShowSuggestions = async () => {
@@ -376,6 +396,22 @@ export function SmartTextarea({ value, onChange, section, placeholder, className
               : <Icon name="Sparkles" className="w-3 h-3" />
             }
             Generate
+          </Button>
+        )}
+        {/* Fix & Polish (when has value) */}
+        {value && (
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={onFixAndPolish}
+            disabled={status === "loading"}
+            className="h-6 px-1.5 text-[10px] gap-1 text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50 dark:hover:bg-emerald-950/20"
+            title="Fix grammar, spelling & autocomplete phrase"
+          >
+            {status === "loading"
+              ? <Icon name="Loader2" className="w-3 h-3 animate-spin" />
+              : <Icon name="CheckCheck" className="w-3 h-3" />
+            }
           </Button>
         )}
         {/* Regenerate (when has value) */}
