@@ -1,34 +1,60 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge, Icon } from "@/components/shared";
 import { toast } from "sonner";
 import { Textarea } from "@/components/ui/textarea";
 import { useApp } from "@/lib/store";
+import { ANTIGRAVITY_CLIENT_ID, ANTIGRAVITY_SCOPES } from "@/lib/providers/antigravity-auth";
 
 type ConnectState = "idle" | "connecting" | "authorized" | "error";
 
+// ── Google Identity Services (GIS) token client ───────────────────────────────
+// Uses the implicit / token model — no redirect URI needed.
+// The token is returned directly via a JavaScript callback in the browser.
+declare global {
+  interface Window {
+    google?: {
+      accounts: {
+        oauth2: {
+          initTokenClient: (cfg: {
+            client_id: string;
+            scope: string;
+            callback: (resp: { access_token?: string; error?: string }) => void;
+            error_callback?: (err: any) => void;
+          }) => { requestAccessToken: () => void };
+        };
+      };
+    };
+  }
+}
+
+function loadGISScript(): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (window.google?.accounts?.oauth2) { resolve(); return; }
+    const existing = document.getElementById("gis-script");
+    if (existing) { existing.addEventListener("load", () => resolve()); return; }
+    const script = document.createElement("script");
+    script.id = "gis-script";
+    script.src = "https://accounts.google.com/gsi/client";
+    script.async = true;
+    script.defer = true;
+    script.onload = () => resolve();
+    script.onerror = () => reject(new Error("Failed to load Google Identity Services script."));
+    document.head.appendChild(script);
+  });
+}
+
 const STEPS = [
-  {
-    num: "1",
-    label: "Install the CLI",
-    code: "npm i -g antigravity",
-    icon: "Package",
-  },
-  {
-    num: "2",
-    label: "Authenticate with Google",
-    code: "agy auth",
-    note: "Opens your browser for Google sign-in",
-    icon: "Chrome",
-  },
+  { num: "1", label: "Install the CLI", code: "npm i -g antigravity", icon: "Package" },
+  { num: "2", label: "Authenticate with Google", code: "agy auth", note: "Opens your browser for Google sign-in", icon: "Chrome" },
   {
     num: "3",
-    label: "Copy your token",
-    code: "cat ~/.antigravity/credentials",
-    note: 'Copy the "accessToken" value from the output',
+    label: "Copy your token (Windows)",
+    code: String.raw`type %USERPROFILE%\.antigravity\credentials`,
+    note: 'Or open the file in Notepad — copy the "accessToken" value',
     icon: "Terminal",
   },
 ];
@@ -41,24 +67,21 @@ export function ConnectAntigravityDialog() {
   const [token, setToken] = useState("");
   const [errorMsg, setErrorMsg] = useState("");
   const [copiedStep, setCopiedStep] = useState<number | null>(null);
+  const [gisLoading, setGisLoading] = useState(false);
 
-  // Sync state with store on mount and when store changes
+  // Sync state from store
   useEffect(() => {
-    if (isAuthorizedInStore) {
-      setState("authorized");
-    } else if (state === "authorized") {
-      setState("idle");
-    }
+    if (isAuthorizedInStore) setState("authorized");
+    else if (state === "authorized") setState("idle");
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isAuthorizedInStore]);
 
-  // Restore saved session on mount
+  // Restore session on mount
   useEffect(() => {
     (async () => {
       try {
         const { getAntigravityProvider } = await import("@/lib/providers/antigravity-provider");
-        const provider = getAntigravityProvider();
-        const session = await provider.restore();
+        const session = await getAntigravityProvider().restore();
         if (session?.authenticated) {
           setState("authorized");
           const sp = useApp.getState().providers.find((p: any) => p.id === "p_antigravity");
@@ -74,6 +97,58 @@ export function ConnectAntigravityDialog() {
     })();
   }, []);
 
+  // ── In-browser Google OAuth (GIS token model — no redirect URI) ────────────
+  const handleGoogleSignIn = useCallback(async () => {
+    setGisLoading(true);
+    setErrorMsg("");
+    try {
+      await loadGISScript();
+
+      const client = window.google!.accounts.oauth2.initTokenClient({
+        client_id: ANTIGRAVITY_CLIENT_ID,
+        scope: ANTIGRAVITY_SCOPES.join(" "),
+        callback: async (resp) => {
+          if (resp.error || !resp.access_token) {
+            setState("error");
+            setErrorMsg(resp.error || "Google sign-in was cancelled or failed.");
+            setGisLoading(false);
+            return;
+          }
+
+          const accessToken = resp.access_token;
+          setState("connecting");
+          try {
+            const { getAntigravityProvider } = await import("@/lib/providers/antigravity-provider");
+            await getAntigravityProvider().login(accessToken);
+            useApp.getState().updateProvider("p_antigravity", {
+              isActive: true,
+              apiKey: accessToken,
+              status: "healthy",
+            });
+            setState("authorized");
+            toast.success("Antigravity connected via Google sign-in!");
+          } catch (e: any) {
+            setState("error");
+            setErrorMsg(e?.message || "Failed to save token after Google sign-in.");
+          }
+          setGisLoading(false);
+        },
+        error_callback: (err: any) => {
+          setState("error");
+          setErrorMsg(err?.message || "Google sign-in failed.");
+          setGisLoading(false);
+        },
+      });
+
+      client.requestAccessToken();
+    } catch (e: any) {
+      setState("error");
+      setErrorMsg(e?.message || "Failed to initialise Google sign-in.");
+      setGisLoading(false);
+    }
+  }, []);
+
+  // ── Manual token paste ─────────────────────────────────────────────────────
   const handlePasteToken = async () => {
     const trimmed = token.trim();
     if (!trimmed) {
@@ -81,20 +156,17 @@ export function ConnectAntigravityDialog() {
       setState("error");
       return;
     }
-
     setState("connecting");
     setErrorMsg("");
-
     try {
       const { getAntigravityProvider } = await import("@/lib/providers/antigravity-provider");
-      const provider = getAntigravityProvider();
-      await provider.login(trimmed);
-      setState("authorized");
+      await getAntigravityProvider().login(trimmed);
       useApp.getState().updateProvider("p_antigravity", {
         isActive: true,
         apiKey: trimmed,
         status: "healthy",
       });
+      setState("authorized");
       setToken("");
       toast.success("Antigravity CLI connected successfully!");
     } catch (e: any) {
@@ -106,12 +178,8 @@ export function ConnectAntigravityDialog() {
   const handleDisconnect = async () => {
     try {
       const { getAntigravityProvider } = await import("@/lib/providers/antigravity-provider");
-      const provider = getAntigravityProvider();
-      await provider.logout();
-      useApp.getState().updateProvider("p_antigravity", {
-        isActive: false,
-        apiKey: "",
-      });
+      await getAntigravityProvider().logout();
+      useApp.getState().updateProvider("p_antigravity", { isActive: false, apiKey: "" });
     } catch {}
     setState("idle");
     setToken("");
@@ -131,11 +199,11 @@ export function ConnectAntigravityDialog() {
           <Icon name="Terminal" className="w-5 h-5 text-brand" /> Antigravity CLI
         </CardTitle>
         <CardDescription>
-          Connect using your local Antigravity CLI token. Run the 3 commands below and paste the token.
+          Connect using Google sign-in or paste your CLI token.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
-        {/* Status badge */}
+        {/* Status */}
         <div className="flex items-center gap-2">
           <Badge variant={state === "authorized" ? "success" : state === "error" ? "danger" : "default"}>
             {state === "idle" && <><Icon name="Plug" className="w-3 h-3 mr-1" />Not connected</>}
@@ -158,14 +226,42 @@ export function ConnectAntigravityDialog() {
           </div>
         )}
 
-        {/* Not connected — show setup steps + token input */}
         {state !== "authorized" && (
           <div className="space-y-4">
-            {/* Step-by-step instructions */}
+
+            {/* ── Option A: In-browser Google Sign-In (no terminal needed) ── */}
+            <div className="rounded-xl border border-brand/30 bg-brand/5 p-4 space-y-3">
+              <p className="text-xs font-semibold text-brand flex items-center gap-1.5">
+                <Icon name="Star" className="w-3.5 h-3.5" />
+                Recommended — Sign in with Google (no terminal needed)
+              </p>
+              <p className="text-[11px] text-muted-foreground">
+                Uses Google Identity Services directly in your browser. Your already-signed-in Google session will be reused — one click, no commands.
+              </p>
+              <Button
+                onClick={handleGoogleSignIn}
+                disabled={gisLoading || state === "connecting"}
+                className="gap-2 w-full bg-brand hover:bg-brand-dark text-white font-semibold shadow-premium"
+              >
+                {gisLoading
+                  ? <><Icon name="Loader2" className="w-4 h-4 animate-spin" />Opening Google Sign-In…</>
+                  : <><Icon name="LogIn" className="w-4 h-4" />Sign in with Google</>
+                }
+              </Button>
+            </div>
+
+            {/* Divider */}
+            <div className="relative flex py-1 items-center">
+              <div className="flex-grow border-t border-border" />
+              <span className="flex-shrink mx-3 text-[10px] text-muted-foreground uppercase tracking-wider">or use CLI token</span>
+              <div className="flex-grow border-t border-border" />
+            </div>
+
+            {/* ── Option B: Manual token (if CLI already installed) ── */}
             <div className="rounded-xl border border-border bg-muted/30 p-4 space-y-3">
               <p className="text-xs font-semibold text-foreground/80 flex items-center gap-1.5">
-                <Icon name="BookOpen" className="w-3.5 h-3.5 text-brand" />
-                3 steps to connect
+                <Icon name="Terminal" className="w-3.5 h-3.5" />
+                Already have the CLI installed? Get your token:
               </p>
               {STEPS.map((step, idx) => (
                 <div key={idx} className="flex items-start gap-3">
@@ -181,61 +277,59 @@ export function ConnectAntigravityDialog() {
                       <button
                         onClick={() => copyToClipboard(step.code, idx)}
                         className="text-muted-foreground hover:text-brand transition-colors shrink-0"
-                        title="Copy command"
+                        title="Copy"
                       >
                         <Icon name={copiedStep === idx ? "Check" : "Copy"} className="w-3.5 h-3.5" />
                       </button>
                     </div>
-                    {step.note && (
-                      <p className="text-[11px] text-muted-foreground mt-0.5">{step.note}</p>
-                    )}
+                    {step.note && <p className="text-[11px] text-muted-foreground mt-0.5">{step.note}</p>}
                   </div>
                 </div>
               ))}
+
+              <div className="space-y-2 pt-1">
+                <label className="text-xs font-medium text-foreground/80 flex items-center gap-1.5">
+                  <Icon name="Key" className="w-3.5 h-3.5 text-brand" />
+                  Paste accessToken
+                </label>
+                <Textarea
+                  placeholder='ya29.a0AfB_byC… (paste the "accessToken" from the credentials file)'
+                  value={token}
+                  onChange={(e) => { setToken(e.target.value); if (state === "error") setState("idle"); }}
+                  className="font-mono text-xs h-20 resize-none"
+                  disabled={state === "connecting"}
+                />
+                <Button
+                  onClick={handlePasteToken}
+                  disabled={state === "connecting" || !token.trim()}
+                  variant="outline"
+                  className="gap-2 w-full"
+                >
+                  {state === "connecting"
+                    ? <><Icon name="Loader2" className="w-4 h-4 animate-spin" />Connecting…</>
+                    : <><Icon name="Plug" className="w-4 h-4" />Connect with Token</>
+                  }
+                </Button>
+              </div>
             </div>
 
-            {/* Token paste */}
-            <div className="space-y-2">
-              <label className="text-xs font-medium text-foreground/80 flex items-center gap-1.5">
-                <Icon name="Key" className="w-3.5 h-3.5 text-brand" />
-                Paste your accessToken here
-              </label>
-              <Textarea
-                placeholder='ya29.a0AfB_byC... (paste the "accessToken" value from the credentials file)'
-                value={token}
-                onChange={(e) => { setToken(e.target.value); if (state === "error") setState("idle"); }}
-                className="font-mono text-xs h-20 resize-none"
-                disabled={state === "connecting"}
-              />
-              <Button
-                onClick={handlePasteToken}
-                disabled={state === "connecting" || !token.trim()}
-                className="gap-2 w-full bg-brand hover:bg-brand-dark text-white"
-              >
-                {state === "connecting"
-                  ? <><Icon name="Loader2" className="w-4 h-4 animate-spin" />Connecting…</>
-                  : <><Icon name="Plug" className="w-4 h-4" />Connect Antigravity CLI</>
-                }
-              </Button>
-            </div>
-
-            {/* Info note */}
+            {/* Info */}
             <div className="flex items-start gap-2 p-2.5 rounded-lg bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800/50">
               <Icon name="Info" className="w-3.5 h-3.5 text-blue-500 shrink-0 mt-0.5" />
               <p className="text-[11px] text-blue-700 dark:text-blue-300">
-                The Antigravity CLI authenticates via your Google account locally. The token is stored securely in your browser and never sent to any third-party server.
+                Your Google token is stored only in your browser session and never sent to any third-party server.
               </p>
             </div>
           </div>
         )}
 
-        {/* Connected state */}
+        {/* Connected */}
         {state === "authorized" && (
           <div className="space-y-3">
             <div className="p-3 rounded-lg bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800/50 flex items-center gap-2">
               <Icon name="CheckCircle2" className="w-4 h-4 text-emerald-600 shrink-0" />
               <p className="text-xs text-emerald-700 dark:text-emerald-300">
-                Antigravity CLI is connected. AI features are now using your account.
+                Antigravity CLI is connected. AI features are now using your Google account.
               </p>
             </div>
             <div className="flex gap-2">
@@ -246,7 +340,7 @@ export function ConnectAntigravityDialog() {
                   useApp.getState().updateProvider("p_antigravity", { enabledModels: models });
                   toast.success(`Models synced: ${models.length} model(s)`);
                 } catch {
-                  toast.error("Model sync failed — provider not authenticated");
+                  toast.error("Model sync failed.");
                 }
               }} className="gap-2 flex-1">
                 <Icon name="RefreshCw" className="w-4 h-4" /> Sync Models
