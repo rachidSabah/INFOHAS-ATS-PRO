@@ -49,7 +49,7 @@ export const SEED_PROVIDERS: AIProvider[] = [
     applicationId: "resumeai-pro-app",
     clientId: "resumeai-pro-client",
     redirectUri: "https://resumeai.pro/auth/puter/callback",
-    enabledModels: ["gpt-5.4-nano", "gpt-5-nano", "gpt-4o-mini", "gpt-4o", "claude-sonnet-4-5", "claude-3-5-sonnet", "gemini-2.5-flash", "deepseek-chat", "mistral-large-latest"],
+    enabledModels: ["gpt-5.4-nano", "gpt-5-nano", "gpt-4o-mini", "gpt-4o", "claude-sonnet-4-5", "claude-3-5-sonnet", "gemini-2.5-flash", "deepseek-chat", "deepseek-reasoner", "meta-llama/Llama-3.3-70B-Instruct", "mistral-large-latest"],
     modelName: "gpt-5.4-nano",
     streamingEnabled: false,
     authType: "none",
@@ -86,10 +86,18 @@ export const SEED_PROVIDERS: AIProvider[] = [
     rateLimitPerMinute: 20,
     modelName: "mimo-v2.5-free",
     enabledModels: [
+      // ── Less congested — try first ──
       "mimo-v2.5-free",
-      "nemotron-3-ultra-free",
+      "minimax-m2.5-free",
+      "nemotron-3-super-free",
       "north-mini-code-free",
+      // ── Good fallbacks ──
       "big-pickle",
+      "qwen3-30b-a3b-free",
+      "llama-4-scout-free",
+      "llama-4-maverick-free",
+      "gemma-3-27b-free",
+      // ── Often congested — last resort ──
       "deepseek-v4-flash-free"
     ],
     streamingEnabled: true,
@@ -128,6 +136,12 @@ export const SEED_PROVIDERS: AIProvider[] = [
     retryAttempts: 3,
     rateLimitPerMinute: 50,
     modelName: "gpt-4o-mini",
+    enabledModels: [
+      "gpt-4o-mini",
+      "gpt-4o",
+      "o1-mini",
+      "o3-mini"
+    ],
     streamingEnabled: true,
     authType: "bearer",
     costPerInputToken: 0.00000015,
@@ -159,6 +173,12 @@ export const SEED_PROVIDERS: AIProvider[] = [
     retryAttempts: 3,
     rateLimitPerMinute: 40,
     modelName: "claude-3-5-sonnet-20241022",
+    enabledModels: [
+      "claude-3-5-sonnet-20241022",
+      "claude-3-5-haiku-20241022",
+      "claude-3-haiku-20240307",
+      "claude-3-opus-20240229"
+    ],
     streamingEnabled: true,
     authType: "header",
     costPerInputToken: 0.000003,
@@ -190,6 +210,10 @@ export const SEED_PROVIDERS: AIProvider[] = [
     retryAttempts: 3,
     rateLimitPerMinute: 60,
     modelName: "deepseek-chat",
+    enabledModels: [
+      "deepseek-chat",
+      "deepseek-reasoner"
+    ],
     streamingEnabled: true,
     authType: "bearer",
     costPerInputToken: 0.00000014,
@@ -221,6 +245,11 @@ export const SEED_PROVIDERS: AIProvider[] = [
     retryAttempts: 3,
     rateLimitPerMinute: 30,
     modelName: "llama-3.3-70b-versatile",
+    enabledModels: [
+      "llama-3.3-70b-versatile",
+      "llama-3.1-8b-instant",
+      "mixtral-8x7b-32768"
+    ],
     streamingEnabled: true,
     authType: "bearer",
     costPerInputToken: 0,
@@ -253,41 +282,65 @@ export const SEED_PROVIDERS: AIProvider[] = [
     rateLimitPerMinute: 20,
     modelName: "openai/gpt-oss-120b:free",
     enabledModels: [
+      // ── OpenAI OSS ──
       "openai/gpt-oss-120b:free",
       "openai/gpt-oss-20b:free",
-      "meta-llama/llama-3.3-70b-instruct:free",
-      "nousresearch/hermes-3-llama-3.1-405b:free",
-      "nvidia/nemotron-3-ultra-550b-a55b:free",
-      "nvidia/nemotron-3-super-120b-a12b:free",
-      "google/gemma-4-31b-it:free",
-      "google/gemma-4-26b-a4b-it:free",
-      "cohere/north-mini-code:free",
-      "cognitivecomputations/dolphin-mistral-24b-venice-edition:free",
+      // ── xAI Grok ──
+      "x-ai/grok-3-mini:free",
+      "x-ai/grok-3-mini-beta:free",
+      // ── DeepSeek ──
       "deepseek/deepseek-chat-v3-0324:free",
       "deepseek/deepseek-r1:free",
-      "liquid/lfm-2.5-1.2b-instruct:free",
-      "liquid/lfm-2.5-1.2b-thinking:free",
-      "meta-llama/llama-3.2-3b-instruct:free",
+      "deepseek/deepseek-r1-0528:free",
+      "tngtech/deepseek-r1t2-chimera:free",
+      // ── Meta Llama ──
       "meta-llama/llama-4-maverick:free",
       "meta-llama/llama-4-scout:free",
-      "moonshotai/kimi-k2:free",
+      "meta-llama/llama-3.3-70b-instruct:free",
+      "meta-llama/llama-3.2-3b-instruct:free",
+      // ── Qwen ──
+      "qwen/qwen3-235b-a22b:free",
+      "qwen/qwen3-30b-a3b:free",
+      "qwen/qwen3-32b:free",
+      "qwen/qwen3-14b:free",
+      "qwen/qwen3-8b:free",
+      "qwen/qwen3-coder:free",
+      "qwen/qwen3-next-80b-a3b-instruct:free",
+      // ── Google ──
+      "google/gemma-4-31b-it:free",
+      "google/gemma-4-26b-a4b-it:free",
+      "google/gemma-3-27b-it:free",
+      // ── NVIDIA Nemotron ──
+      "nvidia/nemotron-3-ultra-550b-a55b:free",
+      "nvidia/nemotron-3-super-120b-a12b:free",
       "nvidia/nemotron-3-nano-30b-a3b:free",
       "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free",
       "nvidia/nemotron-nano-12b-v2-vl:free",
       "nvidia/nemotron-nano-9b-v2:free",
       "nvidia/nemotron-3.5-content-safety:free",
-      "openrouter/free",
-      "poolside/laguna-m.1:free",
-      "poolside/laguna-xs.2:free",
-      "qwen/qwen3-coder:free",
-      "qwen/qwen3-next-80b-a3b-instruct:free",
-      "google/gemma-3-27b-it:free",
+      // ── MoonshotAI ──
+      "moonshotai/kimi-k2:free",
+      // ── Mistral ──
       "mistralai/mistral-7b-instruct:free",
+      "mistralai/mistral-small-3.2-24b-instruct:free",
+      // ── Cohere / NousResearch ──
+      "cohere/north-mini-code:free",
+      "nousresearch/hermes-3-llama-3.1-405b:free",
+      // ── StepFun ──
       "stepfun/step-3.5-flash:free",
       "stepfun/step-3.7-flash",
-      "tngtech/deepseek-r1t2-chimera:free",
+      // ── Liquid / Poolside ──
+      "liquid/lfm-2.5-1.2b-instruct:free",
+      "liquid/lfm-2.5-1.2b-thinking:free",
+      "poolside/laguna-m.1:free",
+      "poolside/laguna-xs.2:free",
+      // ── Others ──
+      "cognitivecomputations/dolphin-mistral-24b-venice-edition:free",
       "sarvamai/sarvam-m:free",
-      "featherless/qwerky-72b:free"
+      "featherless/qwerky-72b:free",
+      "bytedance-research/ui-tars-72b:free",
+      "shisa-ai/shisa-v2-llama3.3-70b:free",
+      "openrouter/free"
     ],
     streamingEnabled: true,
     authType: "bearer",

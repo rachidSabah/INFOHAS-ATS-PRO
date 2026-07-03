@@ -23,25 +23,39 @@ const MODEL_CATALOG: Record<string, { name: string; contextWindow: string; input
     { name: "claude-3-opus-20240229", contextWindow: "200K", inputCost: 0.000015, outputCost: 0.000075 },
   ],
   gemini: [
-    { name: "gemini-2.0-flash", contextWindow: "1M", inputCost: 0.0000001, outputCost: 0.0000004, tags: ["fast", "vision"] },
-    { name: "gemini-1.5-pro", contextWindow: "2M", inputCost: 0.00000125, outputCost: 0.000005 },
-    { name: "gemini-1.5-flash", contextWindow: "1M", inputCost: 0.000000075, outputCost: 0.0000003 },
+    { name: "gemini-2.5-flash", contextWindow: "1M", inputCost: 0, outputCost: 0, tags: ["free", "fast"] },
+    { name: "gemini-2.5-flash-lite", contextWindow: "1M", inputCost: 0, outputCost: 0, tags: ["free", "fastest"] },
+    { name: "gemini-2.5-pro", contextWindow: "2M", inputCost: 0, outputCost: 0, tags: ["free", "reasoning"] },
+    { name: "gemini-2.0-flash", contextWindow: "1M", inputCost: 0, outputCost: 0, tags: ["free", "fast", "vision"] },
+    { name: "gemini-2.0-flash-lite", contextWindow: "1M", inputCost: 0, outputCost: 0, tags: ["free", "fastest"] },
+    { name: "gemini-1.5-pro", contextWindow: "2M", inputCost: 0, outputCost: 0, tags: ["free", "reasoning"] },
+    { name: "gemini-1.5-flash", contextWindow: "1M", inputCost: 0, outputCost: 0, tags: ["free", "fast"] },
+    { name: "models/gemini-2.5-flash", contextWindow: "1M", tags: ["free"] },
+    { name: "models/gemini-2.5-flash-lite", contextWindow: "1M", tags: ["free"] },
+    { name: "models/gemini-2.5-pro", contextWindow: "2M", tags: ["free"] },
+    { name: "models/gemini-2.0-flash", contextWindow: "1M", tags: ["free"] },
+    { name: "models/gemini-2.0-flash-lite", contextWindow: "1M", tags: ["free"] },
+    { name: "models/gemini-1.5-flash", contextWindow: "1M", tags: ["free"] },
+    { name: "models/gemini-1.5-pro", contextWindow: "2M", tags: ["free"] },
   ],
   deepseek: [
-    { name: "deepseek-chat", contextWindow: "64K", inputCost: 0.00000014, outputCost: 0.00000028 },
-    { name: "deepseek-reasoner", contextWindow: "64K", inputCost: 0.00000055, outputCost: 0.00000219, tags: ["reasoning"] },
+    { name: "deepseek-chat", contextWindow: "64K", inputCost: 0.00000014, outputCost: 0.00000028, tags: ["cheap", "fast"] },
+    { name: "deepseek-reasoner", contextWindow: "64K", inputCost: 0.00000055, outputCost: 0.00000219, tags: ["reasoning", "cheap"] },
   ],
   groq: [
     { name: "llama-3.3-70b-versatile", contextWindow: "128K", tags: ["fast", "free"] },
-    { name: "llama-3.1-8b-instant", contextWindow: "128K", tags: ["fastest"] },
-    { name: "mixtral-8x7b-32768", contextWindow: "32K" },
+    { name: "llama-3.1-8b-instant", contextWindow: "128K", tags: ["fastest", "free"] },
+    { name: "mixtral-8x7b-32768", contextWindow: "32K", tags: ["free"] },
   ],
   puter: [
-    { name: "claude-sonnet-4", contextWindow: "200K", tags: ["free", "flagship"] },
+    { name: "claude-sonnet-4-5", contextWindow: "200K", tags: ["free", "flagship"] },
+    { name: "gpt-5.4-nano", contextWindow: "128K", tags: ["free"] },
     { name: "gpt-4o", contextWindow: "128K", tags: ["free"] },
-    { name: "gemini-2.0-flash", contextWindow: "1M", tags: ["free"] },
-    { name: "llama-3.3-70b", contextWindow: "128K", tags: ["free"] },
-    { name: "mistral-large", contextWindow: "128K", tags: ["free"] },
+    { name: "gpt-4o-mini", contextWindow: "128K", tags: ["free", "fast"] },
+    { name: "gemini-2.5-flash", contextWindow: "1M", tags: ["free", "fast"] },
+    { name: "deepseek-chat", contextWindow: "64K", tags: ["free"] },
+    { name: "deepseek-reasoner", contextWindow: "64K", tags: ["free", "reasoning"] },
+    { name: "meta-llama/Llama-3.3-70B-Instruct", contextWindow: "128K", tags: ["free"] },
   ],
   ollama: [
     { name: "llama3.3:70b", contextWindow: "128K", tags: ["self-hosted"] },
@@ -52,9 +66,16 @@ const MODEL_CATALOG: Record<string, { name: string; contextWindow: string; input
   opencode: [
     { name: "deepseek-v4-flash-free", contextWindow: "64K", tags: ["free", "fast"] },
     { name: "mimo-v2.5-free", contextWindow: "32K", tags: ["free"] },
+    { name: "minimax-m2.5-free", contextWindow: "32K", tags: ["free"] },
     { name: "minimax-m3-free", contextWindow: "32K", tags: ["free"] },
+    { name: "nemotron-3-super-free", contextWindow: "32K", tags: ["free"] },
     { name: "nemotron-3-ultra-free", contextWindow: "32K", tags: ["free"] },
     { name: "north-mini-code-free", contextWindow: "32K", tags: ["free", "code"] },
+    { name: "big-pickle", contextWindow: "32K", tags: ["free"] },
+    { name: "qwen3-30b-a3b-free", contextWindow: "32K", tags: ["free"] },
+    { name: "llama-4-scout-free", contextWindow: "32K", tags: ["free"] },
+    { name: "llama-4-maverick-free", contextWindow: "32K", tags: ["free"] },
+    { name: "gemma-3-27b-free", contextWindow: "32K", tags: ["free"] },
     { name: "claude-sonnet-4", contextWindow: "200K", tags: ["premium"] },
     { name: "claude-opus-4-8", contextWindow: "200K", tags: ["premium"] },
     { name: "gpt-5", contextWindow: "128K", tags: ["premium"] },
@@ -66,6 +87,77 @@ const MODEL_CATALOG: Record<string, { name: string; contextWindow: string; input
     { name: "kimi-k2.6", contextWindow: "128K", tags: ["premium"] },
     { name: "qwen3.6-plus", contextWindow: "128K", tags: ["premium"] },
   ],
+  openrouter: [
+    { name: "openai/gpt-oss-120b:free", contextWindow: "128K", tags: ["free"] },
+    { name: "openai/gpt-oss-20b:free", contextWindow: "128K", tags: ["free"] },
+    { name: "x-ai/grok-3-mini:free", contextWindow: "128K", tags: ["free", "fast"] },
+    { name: "x-ai/grok-3-mini-beta:free", contextWindow: "128K", tags: ["free"] },
+    { name: "deepseek/deepseek-chat-v3-0324:free", contextWindow: "64K", tags: ["free", "fast"] },
+    { name: "deepseek/deepseek-r1:free", contextWindow: "64K", tags: ["free", "reasoning"] },
+    { name: "deepseek/deepseek-r1-0528:free", contextWindow: "64K", tags: ["free"] },
+    { name: "tngtech/deepseek-r1t2-chimera:free", contextWindow: "64K", tags: ["free"] },
+    { name: "meta-llama/llama-4-maverick:free", contextWindow: "128K", tags: ["free"] },
+    { name: "meta-llama/llama-4-scout:free", contextWindow: "128K", tags: ["free"] },
+    { name: "meta-llama/llama-3.3-70b-instruct:free", contextWindow: "128K", tags: ["free"] },
+    { name: "meta-llama/llama-3.2-3b-instruct:free", contextWindow: "128K", tags: ["free", "fastest"] },
+    { name: "qwen/qwen3-235b-a22b:free", contextWindow: "128K", tags: ["free"] },
+    { name: "qwen/qwen3-30b-a3b-free", contextWindow: "128K", tags: ["free"] },
+    { name: "qwen/qwen3-32b:free", contextWindow: "128K", tags: ["free"] },
+    { name: "qwen/qwen3-14b:free", contextWindow: "128K", tags: ["free"] },
+    { name: "qwen/qwen3-8b:free", contextWindow: "128K", tags: ["free"] },
+    { name: "qwen/qwen3-coder:free", contextWindow: "128K", tags: ["free"] },
+    { name: "qwen/qwen3-next-80b-a3b-instruct:free", contextWindow: "128K", tags: ["free"] },
+    { name: "google/gemma-4-31b-it:free", contextWindow: "1M", tags: ["free"] },
+    { name: "google/gemma-4-26b-a4b-it:free", contextWindow: "1M", tags: ["free"] },
+    { name: "google/gemma-3-27b-it:free", contextWindow: "1M", tags: ["free"] },
+    { name: "nvidia/nemotron-3-ultra-550b-a55b:free", contextWindow: "128K", tags: ["free"] },
+    { name: "nvidia/nemotron-3-super-120b-a12b:free", contextWindow: "128K", tags: ["free"] },
+    { name: "nvidia/nemotron-3-nano-30b-a3b:free", contextWindow: "128K", tags: ["free"] },
+    { name: "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free", contextWindow: "128K", tags: ["free", "reasoning"] },
+    { name: "nvidia/nemotron-nano-12b-v2-vl:free", contextWindow: "128K", tags: ["free"] },
+    { name: "nvidia/nemotron-nano-9b-v2:free", contextWindow: "128K", tags: ["free"] },
+    { name: "nvidia/nemotron-3.5-content-safety:free", contextWindow: "128K", tags: ["free"] },
+    { name: "moonshotai/kimi-k2:free", contextWindow: "128K", tags: ["free"] },
+    { name: "mistralai/mistral-7b-instruct:free", contextWindow: "128K", tags: ["free"] },
+    { name: "mistralai/mistral-small-3.2-24b-instruct:free", contextWindow: "32K", tags: ["free"] },
+    { name: "cohere/north-mini-code:free", contextWindow: "128K", tags: ["free"] },
+    { name: "nousresearch/hermes-3-llama-3.1-405b:free", contextWindow: "128K", tags: ["free"] },
+    { name: "stepfun/step-3.5-flash:free", contextWindow: "128K", tags: ["free", "fast"] },
+    { name: "liquid/lfm-2.5-1.2b-instruct:free", contextWindow: "128K", tags: ["free"] },
+    { name: "liquid/lfm-2.5-1.2b-thinking:free", contextWindow: "128K", tags: ["free", "reasoning"] },
+    { name: "poolside/laguna-m.1:free", contextWindow: "128K", tags: ["free"] },
+    { name: "poolside/laguna-xs.2:free", contextWindow: "128K", tags: ["free"] },
+    { name: "cognitivecomputations/dolphin-mistral-24b-venice-edition:free", contextWindow: "128K", tags: ["free"] },
+    { name: "sarvamai/sarvam-m:free", contextWindow: "128K", tags: ["free"] },
+    { name: "featherless/qwerky-72b:free", contextWindow: "128K", tags: ["free"] },
+    { name: "bytedance-research/ui-tars-72b:free", contextWindow: "128K", tags: ["free"] },
+    { name: "shisa-ai/shisa-v2-llama3.3-70b:free", contextWindow: "128K", tags: ["free"] },
+    { name: "openrouter/owl-alpha:free", contextWindow: "1M", tags: ["free", "agentic"] },
+    { name: "openrouter/free", contextWindow: "128K", tags: ["free", "router"] },
+  ],
+  nvidia: [
+    { name: "stepfun-ai/step-3.7-flash", contextWindow: "32K", tags: ["free", "fast"] },
+    { name: "deepseek-ai/deepseek-v4-flash", contextWindow: "64K", tags: ["free", "fast"] },
+    { name: "deepseek-ai/deepseek-v4-pro", contextWindow: "64K", tags: ["free", "reasoning"] },
+    { name: "minimaxai/minimax-m3", contextWindow: "32K", tags: ["free"] },
+    { name: "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning", contextWindow: "32K", tags: ["free", "reasoning"] },
+    { name: "nvidia/nemotron-3-super-120b-a12b", contextWindow: "32K", tags: ["free"] },
+    { name: "nvidia/nemotron-3-ultra-550b-a55b", contextWindow: "32K", tags: ["free"] },
+  ],
+  mistral: [
+    { name: "mistral-small-latest", contextWindow: "32K", tags: ["free", "fast"] },
+    { name: "codestral-latest", contextWindow: "32K", tags: ["free", "code"] },
+    { name: "ministral-8b-latest", contextWindow: "32K", tags: ["free", "fastest"] },
+    { name: "pixtral-large-latest", contextWindow: "32K", tags: ["free", "vision"] },
+    { name: "open-mistral-nemo", contextWindow: "128K", tags: ["free"] },
+  ],
+  antigravity: [
+    { name: "gemini-2.5-flash", contextWindow: "1M", tags: ["free", "fast"] },
+    { name: "gemini-2.5-pro", contextWindow: "2M", tags: ["free", "reasoning"] },
+    { name: "claude-sonnet-4", contextWindow: "200K", tags: ["free", "flagship"] },
+    { name: "gpt-4.1", contextWindow: "128K", tags: ["free"] },
+    { name: "deepseek-v4", contextWindow: "64K", tags: ["free"] },
+  ],
 };
 
 export function AIModels() {
@@ -75,6 +167,7 @@ export function AIModels() {
   const [customModel, setCustomModel] = useState("");
   const [fetching, setFetching] = useState(false);
   const [liveModels, setLiveModels] = useState<string[]>([]);
+  const [freeOnly, setFreeOnly] = useState(false);
 
   const selected = providers.find((p) => p.id === selectedProviderId);
   const catalog = selected ? (MODEL_CATALOG[selected.type] ?? []) : [];
@@ -170,18 +263,32 @@ export function AIModels() {
                       <Icon name="Plus" className="w-4 h-4" /> Add
                     </Button>
                   </div>
-                  <div className="flex items-center gap-2 pt-2 border-t border-border">
+                  <div className="flex items-center gap-2 pt-2 border-t border-border flex-wrap">
                     <Button onClick={fetchLiveModels} disabled={fetching || !selected} variant="outline" className="gap-2">
                       {fetching ? <Icon name="Loader2" className="w-4 h-4 animate-spin" /> : <Icon name="DownloadCloud" className="w-4 h-4" />}
                       {fetching ? "Fetching…" : "Fetch live models from API"}
                     </Button>
+                    <button
+                      onClick={() => setFreeOnly((v) => !v)}
+                      className={`flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-md border transition ${freeOnly ? "border-brand bg-brand text-white" : "border-border text-muted-foreground hover:border-brand/50"}`}
+                      title="Show only models with ':free' suffix"
+                    >
+                      <Icon name="Sparkles" className="w-3.5 h-3.5" />
+                      Free only
+                    </button>
                     <span className="text-xs text-muted-foreground">Calls GET /v1/models on the provider's API</span>
                   </div>
                   {liveModels.length > 0 && (
                     <div className="space-y-2">
-                      <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{liveModels.length} live models from {selected?.name}</div>
-                      <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-2 max-h-60 overflow-y-auto p-1">
-                        {liveModels.map((m) => {
+                      {(() => {
+                        const displayed = freeOnly ? liveModels.filter((m) => m.endsWith(":free") || m.includes("/free") || m.toLowerCase().includes("-free")) : liveModels;
+                        return (
+                          <>
+                            <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                              {displayed.length}{freeOnly && liveModels.length !== displayed.length ? ` of ${liveModels.length}` : ""} live models from {selected?.name}{freeOnly ? " (free only)" : ""}
+                            </div>
+                            <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-2 max-h-60 overflow-y-auto p-1">
+                        {displayed.map((m) => {
                           const isEnabled = enabledModels.includes(m);
                           const isDefault = selected?.modelName === m;
                           return (
@@ -201,7 +308,10 @@ export function AIModels() {
                             </div>
                           );
                         })}
-                      </div>
+                            </div>
+                          </>
+                        );
+                      })()}
                     </div>
                   )}
                 </CardContent>
