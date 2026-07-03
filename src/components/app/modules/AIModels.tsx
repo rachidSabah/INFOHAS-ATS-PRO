@@ -168,20 +168,48 @@ export function AIModels() {
   const [fetching, setFetching] = useState(false);
   const [liveModels, setLiveModels] = useState<string[]>([]);
   const [freeOnly, setFreeOnly] = useState(false);
+  const [autoAddFree, setAutoAddFree] = useState(true);
+  const [newlyDiscovered, setNewlyDiscovered] = useState<string[]>([]);
 
   const selected = providers.find((p) => p.id === selectedProviderId);
   const catalog = selected ? (MODEL_CATALOG[selected.type] ?? []) : [];
   const enabledModels = selected?.enabledModels ?? [];
 
+  /** Returns true if a model ID looks like a free-tier model based on naming conventions. */
+  const isFreeModel = (id: string) =>
+    id.endsWith(":free") ||
+    id.includes("/free") ||
+    /(^|-|_)free($|-|_)/i.test(id.split("/").pop() ?? id);
+
   const fetchLiveModels = async () => {
     if (!selected) return;
     setFetching(true);
     setLiveModels([]);
+    setNewlyDiscovered([]);
     const result = await ProviderManager.fetchModels(selected);
     setFetching(false);
     if (result.ok && result.models.length > 0) {
       setLiveModels(result.models);
-      toast.success(`Fetched ${result.models.length} live models from ${selected.name}.`);
+
+      // Auto-discover: find free models not yet in enabledModels and add them automatically
+      if (autoAddFree) {
+        const currentEnabled = selected.enabledModels ?? [];
+        const discovered = result.models.filter(
+          (m) => isFreeModel(m) && !currentEnabled.includes(m)
+        );
+        if (discovered.length > 0) {
+          updateProvider(selected.id, { enabledModels: [...currentEnabled, ...discovered] });
+          setNewlyDiscovered(discovered);
+          toast.success(
+            `✨ Auto-added ${discovered.length} new free model${discovered.length > 1 ? "s" : ""} from ${selected.name}.`,
+            { duration: 5000 }
+          );
+        } else {
+          toast.success(`Fetched ${result.models.length} live models — no new free models discovered.`);
+        }
+      } else {
+        toast.success(`Fetched ${result.models.length} live models from ${selected.name}.`);
+      }
     } else {
       toast.error(result.error || "Failed to fetch models. Check the provider's API key and Base URL.");
     }
@@ -269,9 +297,17 @@ export function AIModels() {
                       {fetching ? "Fetching…" : "Fetch live models from API"}
                     </Button>
                     <button
+                      onClick={() => setAutoAddFree((v) => !v)}
+                      className={`flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-md border transition ${autoAddFree ? "border-green-500 bg-green-500 text-white" : "border-border text-muted-foreground hover:border-green-500/50"}`}
+                      title="Automatically enable any new free-tier models discovered from the live API"
+                    >
+                      <Icon name="Zap" className="w-3.5 h-3.5" />
+                      Auto-add free
+                    </button>
+                    <button
                       onClick={() => setFreeOnly((v) => !v)}
                       className={`flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-md border transition ${freeOnly ? "border-brand bg-brand text-white" : "border-border text-muted-foreground hover:border-brand/50"}`}
-                      title="Show only models with ':free' suffix"
+                      title="Show only free models in the live results below"
                     >
                       <Icon name="Sparkles" className="w-3.5 h-3.5" />
                       Free only
@@ -291,11 +327,15 @@ export function AIModels() {
                         {displayed.map((m) => {
                           const isEnabled = enabledModels.includes(m);
                           const isDefault = selected?.modelName === m;
+                          const isNew = newlyDiscovered.includes(m);
                           return (
-                            <div key={m} className={`rounded-md border p-2 ${isEnabled ? "border-brand bg-brand-light/30" : "border-border"}`}>
+                            <div key={m} className={`rounded-md border p-2 ${isNew ? "border-green-500 bg-green-500/10" : isEnabled ? "border-brand bg-brand-light/30" : "border-border"}`}>
                               <div className="flex items-center justify-between gap-1">
                                 <span className="font-mono text-[11px] truncate">{m}</span>
-                                {isDefault && <Badge variant="gold" className="text-[8px] shrink-0">DEFAULT</Badge>}
+                                <div className="flex gap-1 shrink-0">
+                                  {isNew && <Badge className="text-[8px] bg-green-500 text-white border-0">NEW</Badge>}
+                                  {isDefault && <Badge variant="gold" className="text-[8px]">DEFAULT</Badge>}
+                                </div>
                               </div>
                               <div className="flex gap-1 mt-1">
                                 <button onClick={() => toggleModel(m)} className={`text-[10px] px-1.5 py-0.5 rounded ${isEnabled ? "bg-brand text-white" : "bg-secondary"}`}>
