@@ -76,15 +76,11 @@ export async function exportResumePDFRenderDoc(
     const fontName = getPdfFont(L.fontFamily || "Times New Roman");
 
     const sectionHeader = (title: string) => {
-      doc.setDrawColor(sectionRgb[0], sectionRgb[1], sectionRgb[2]);
-      doc.setLineWidth(0.15);
-      doc.line(left, y, right, y);
-      advanceMm(0.3);
       doc.setFont(fontName, "bold");
       doc.setFontSize(currentSectionTitleSize);
       doc.setTextColor(sectionRgb[0], sectionRgb[1], sectionRgb[2]);
       doc.text(title.toUpperCase(), left, textY(currentSectionTitleSize));
-      advanceMm(ptToMm(currentSectionTitleSize) * 0.6 + 0.3);
+      advanceMm(ptToMm(currentSectionTitleSize) * 0.8 + 1.0);
     };
 
     const drawWrapped = (text: string, w: number) => {
@@ -106,8 +102,12 @@ export async function exportResumePDFRenderDoc(
       doc.setFont(fontName, "normal");
       doc.setFontSize(currentBodyFontSize);
       doc.setTextColor(bodyRgb[0], bodyRgb[1], bodyRgb[2]);
-      const bulletX = left + indent;
-      const wrapW = w - indent;
+      
+      const bulletIndent = L.bulletIndentMm ?? 6.4;
+      const bulletX = left + bulletIndent + indent;
+      const textXPos = bulletX + 3.5;
+      const wrapW = w - bulletIndent - indent - 3.5;
+      
       const lines = doc.splitTextToSize(text, wrapW);
       for (let i = 0; i < lines.length; i++) {
         if (y > maxY - 10) {
@@ -116,9 +116,9 @@ export async function exportResumePDFRenderDoc(
         }
         if (i === 0) {
           doc.text("•", bulletX, textY(currentBodyFontSize));
-          doc.text(lines[i], bulletX + 3, textY(currentBodyFontSize));
+          doc.text(lines[i], textXPos, textY(currentBodyFontSize));
         } else {
-          doc.text(lines[i], bulletX + 3, textY(currentBodyFontSize));
+          doc.text(lines[i], textXPos, textY(currentBodyFontSize));
         }
         advanceLine();
       }
@@ -129,7 +129,7 @@ export async function exportResumePDFRenderDoc(
     doc.setFontSize(currentNameSize);
     doc.setTextColor(nameRgb[0], nameRgb[1], nameRgb[2]);
     doc.text((rd.contact.name || "YOUR NAME").toUpperCase(), left, textY(currentNameSize));
-    advanceMm(ptToMm(currentNameSize) * 0.8);
+    advanceMm(ptToMm(currentNameSize) * 0.8 + 1.0);
 
     if (rd.contact.headline) {
       doc.setFont(fontName, "normal");
@@ -144,23 +144,20 @@ export async function exportResumePDFRenderDoc(
     if (rd.contact.email) contactParts.push(rd.contact.email);
     if (rd.contact.location) contactParts.push(rd.contact.location);
     if (contactParts.length) {
-      doc.setTextColor(100, 100, 100);
+      const contactRgb = hexToRgb(L.contactColor || L.bodyTextColor);
+      doc.setTextColor(contactRgb[0], contactRgb[1], contactRgb[2]);
       doc.setFontSize(currentBodyFontSize);
       doc.text(contactParts.join(" | "), left, textY(currentBodyFontSize));
       advanceLine();
     }
 
     if (rd.contact.dateOfBirth) {
-      doc.setTextColor(100, 100, 100);
+      doc.setTextColor(bodyRgb[0], bodyRgb[1], bodyRgb[2]);
       doc.setFontSize(currentBodyFontSize);
       doc.text(`Date Of Birth: ${rd.contact.dateOfBirth}`, left, textY(currentBodyFontSize));
       advanceLine();
     }
 
-    advanceMm(0.3);
-    doc.setDrawColor(180, 180, 180);
-    doc.setLineWidth(0.15);
-    doc.line(left, y, right, y);
     advanceMm(1.5);
 
     // Render sections
@@ -202,24 +199,29 @@ export async function exportResumePDFRenderDoc(
               doc.setFont(fontName, "bold");
               doc.setFontSize(currentBodyFontSize);
               doc.setTextColor(bodyRgb[0], bodyRgb[1], bodyRgb[2]);
+              
+              const bulletIndent = L.bulletIndentMm ?? 6.4;
+              const bulletX = left + bulletIndent;
               const labelPart = `• ${group.label}: `;
               const labelW = doc.getTextWidth(labelPart);
-              doc.text(labelPart, left, textY(currentBodyFontSize));
+              doc.text(labelPart, bulletX, textY(currentBodyFontSize));
+              
               doc.setFont(fontName, "normal");
               const itemsText = group.items.join(", ");
-              const itemsLines = doc.splitTextToSize(itemsText, contentW - labelW);
+              const itemsLines = doc.splitTextToSize(itemsText, contentW - bulletIndent - labelW);
+              
               if (itemsLines.length <= 1) {
-                doc.text(itemsLines[0], left + labelW, textY(currentBodyFontSize));
+                doc.text(itemsLines[0], bulletX + labelW, textY(currentBodyFontSize));
                 advanceLine();
               } else {
-                doc.text(itemsLines[0], left + labelW, textY(currentBodyFontSize));
+                doc.text(itemsLines[0], bulletX + labelW, textY(currentBodyFontSize));
                 advanceLine();
                 for (let i = 1; i < itemsLines.length; i++) {
                   if (y > maxY - 10) {
                     hasTruncated = true;
                     break;
                   }
-                  doc.text(itemsLines[i], left + 4, textY(currentBodyFontSize));
+                  doc.text(itemsLines[i], bulletX + 4, textY(currentBodyFontSize));
                   advanceLine();
                 }
               }
