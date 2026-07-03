@@ -1475,3 +1475,8 @@ export const useApp = create<AppState>()(
 
 export { BRAND };
 export { uid };
+
+if (typeof window !== "undefined") {
+  (window as any).useApp = useApp;
+}
+

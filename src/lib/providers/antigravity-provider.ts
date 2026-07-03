@@ -133,6 +133,36 @@ export class AntigravityProvider implements OAuthAIProvider {
     return this.session;
   }
 
+  private syncSessionFromStore(): boolean {
+    if (typeof window !== "undefined") {
+      const useApp = (window as any).useApp;
+      if (useApp) {
+        try {
+          const storeProvider = useApp.getState().providers.find((p: any) => p.id === "p_antigravity");
+          if (storeProvider && storeProvider.apiKey && storeProvider.apiKey.trim() !== "") {
+            this.session = {
+              provider: "antigravity",
+              authenticated: true,
+              email: this.session.email || null,
+              userId: null,
+              accessToken: storeProvider.apiKey,
+              refreshToken: this.session.refreshToken || null,
+              expiresAt: this.session.expiresAt || null,
+              connectedAt: this.session.connectedAt || Date.now(),
+              models: storeProvider.enabledModels || this.session.models || [],
+              sharedAdminAccount: false,
+              authMethod: "api_key",
+              googleUserId: null,
+              googlePicture: null,
+            };
+            return true;
+          }
+        } catch {}
+      }
+    }
+    return false;
+  }
+
   async logout(): Promise<void> {
     this.session = createEmptySession("antigravity");
     await clearSession("antigravity");
@@ -151,6 +181,8 @@ export class AntigravityProvider implements OAuthAIProvider {
         }
         return this.session;
       }
+      this.syncSessionFromStore();
+      if (this.session.authenticated) return this.session;
     } catch (e) {
       console.warn("[Antigravity] Session restore failed:", e);
     }
@@ -158,6 +190,9 @@ export class AntigravityProvider implements OAuthAIProvider {
   }
 
   async listModels(): Promise<string[]> {
+    if (!this.session.authenticated || !this.session.accessToken) {
+      this.syncSessionFromStore();
+    }
     if (!this.session.authenticated || !this.session.accessToken) {
       throw new ProviderAuthenticationError("auth_required", "Antigravity not authenticated", "antigravity");
     }
@@ -178,6 +213,9 @@ export class AntigravityProvider implements OAuthAIProvider {
     temperature?: number;
     model?: string;
   }): Promise<{ text: string; provider: string; latencyMs: number }> {
+    if (!this.session.authenticated || !this.session.accessToken) {
+      this.syncSessionFromStore();
+    }
     if (!this.session.authenticated || !this.session.accessToken) {
       throw new ProviderAuthenticationError("auth_required", "Antigravity not authenticated. Please connect Antigravity CLI.", "antigravity");
     }
@@ -205,6 +243,7 @@ export class AntigravityProvider implements OAuthAIProvider {
   }
 
   getStatus(): ProviderAuthStatus {
+    this.syncSessionFromStore();
     return {
       connected: this.session.authenticated,
       authenticated: this.session.authenticated,
@@ -222,9 +261,10 @@ export class AntigravityProvider implements OAuthAIProvider {
   }
 
   isAuthenticated(): boolean {
-    if (!this.session.authenticated) return false;
-    if (this.session.expiresAt && this.session.expiresAt < Date.now()) return false;
-    return true;
+    if (this.session.authenticated && (!this.session.expiresAt || this.session.expiresAt > Date.now())) return true;
+    this.syncSessionFromStore();
+    if (this.session.authenticated && (!this.session.expiresAt || this.session.expiresAt > Date.now())) return true;
+    return false;
   }
 
   async tryRefresh(): Promise<boolean> {
@@ -235,7 +275,8 @@ export class AntigravityProvider implements OAuthAIProvider {
       await this.refresh();
       return this.session.authenticated;
     }
-    return false;
+    this.syncSessionFromStore();
+    return this.session.authenticated;
   }
 }
 

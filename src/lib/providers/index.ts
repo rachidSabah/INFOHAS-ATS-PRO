@@ -49,8 +49,10 @@ export async function restoreAllProviderSessions(): Promise<ProviderSession[]> {
  */
 export async function isAnyProviderAuthenticated(): Promise<boolean> {
   const puterProvider = getPuterProvider();
-  // Try refresh first — if session is expired, tryRefresh will attempt to renew it
-  return await puterProvider.tryRefresh();
+  if (await puterProvider.tryRefresh()) return true;
+
+  const antigravityProvider = getAntigravityProvider();
+  return await antigravityProvider.tryRefresh();
 }
 
 /**
@@ -59,7 +61,10 @@ export async function isAnyProviderAuthenticated(): Promise<boolean> {
  */
 export function isAnyProviderAuthenticatedSync(): boolean {
   const puterProvider = getPuterProvider();
-  return puterProvider.isAuthenticated();
+  if (puterProvider.isAuthenticated()) return true;
+
+  const antigravityProvider = getAntigravityProvider();
+  return antigravityProvider.isAuthenticated();
 }
 
 /**

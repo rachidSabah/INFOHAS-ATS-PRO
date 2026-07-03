@@ -14,7 +14,7 @@ export function ConnectAntigravityDialog() {
   const [token, setToken] = useState("");
   const [errorMsg, setErrorMsg] = useState("");
 
-  // Restore saved session on mount
+  // Restore saved session on mount + listen for OAuth callback
   useEffect(() => {
     (async () => {
       try {
@@ -23,7 +23,6 @@ export function ConnectAntigravityDialog() {
         const session = await provider.restore();
         if (session?.authenticated) {
           setState("authorized");
-          // Activate the Antigravity provider in the Zustand store
           try {
             const { useApp } = await import("@/lib/store");
             const storeProvider = useApp.getState().providers.find((p: any) => p.id === "p_antigravity");
@@ -38,7 +37,66 @@ export function ConnectAntigravityDialog() {
         }
       } catch {}
     })();
+
+    // Listen for postMessage from the Google OAuth callback popup
+    const handleMessage = async (event: MessageEvent) => {
+      if (event.data?.type === "antigravity-auth") {
+        if (event.data.status === "success") {
+          const { accessToken, refreshToken, expiresIn } = event.data;
+          setState("connecting");
+          try {
+            const { getAntigravityProvider } = await import("@/lib/providers/antigravity-provider");
+            const provider = getAntigravityProvider();
+            await provider.login(accessToken);
+            if (refreshToken) {
+              await provider.saveRefreshToken(refreshToken, expiresIn);
+            }
+            const { useApp } = await import("@/lib/store");
+            useApp.getState().updateProvider("p_antigravity", {
+              isActive: true,
+              apiKey: accessToken,
+              status: "healthy",
+            });
+            setState("authorized");
+            toast.success("Antigravity connected via Google OAuth!");
+          } catch (err: any) {
+            setState("error");
+            setErrorMsg(err?.message || "Failed to log in after Google OAuth exchange.");
+          }
+        } else if (event.data.status === "error") {
+          setState("error");
+          setErrorMsg(event.data.error || "Google authentication failed.");
+        }
+      }
+    };
+
+    window.addEventListener("message", handleMessage);
+    return () => window.removeEventListener("message", handleMessage);
   }, []);
+
+  const handleConnectOAuth = async () => {
+    setState("connecting");
+    setErrorMsg("");
+    try {
+      const { getAntigravityProvider } = await import("@/lib/providers/antigravity-provider");
+      const provider = getAntigravityProvider();
+      const redirectUri = `${window.location.origin}/api/providers/antigravity/callback`;
+      const { url } = await provider.buildAuthUrl(redirectUri);
+
+      const width = 500;
+      const height = 650;
+      const left = window.screen.width / 2 - width / 2;
+      const top = window.screen.height / 2 - height / 2;
+      window.open(
+        url,
+        "Antigravity Google OAuth",
+        `width=${width},height=${height},left=${left},top=${top},status=no,resizable=yes,scrollbars=yes`
+      );
+    } catch (e: any) {
+      setState("error");
+      setErrorMsg(e?.message || "Failed to launch Google OAuth popup.");
+    }
+  };
 
   const handlePasteToken = async () => {
     const trimmed = token.trim();
@@ -52,13 +110,11 @@ export function ConnectAntigravityDialog() {
     setErrorMsg("");
 
     try {
-      // Import dynamically to avoid circular dependencies
       const { getAntigravityProvider } = await import("@/lib/providers/antigravity-provider");
       const provider = getAntigravityProvider();
       await provider.login(trimmed);
       setState("authorized");
       toast.success("Antigravity connected successfully!");
-      // Activate the Antigravity provider in the Zustand store so the AI router can use it
       try {
         const { useApp } = await import("@/lib/store");
         useApp.getState().updateProvider("p_antigravity", {
@@ -78,7 +134,6 @@ export function ConnectAntigravityDialog() {
       const { getAntigravityProvider } = await import("@/lib/providers/antigravity-provider");
       const provider = getAntigravityProvider();
       await provider.logout();
-      // Deactivate the Antigravity provider in the Zustand store
       try {
         const { useApp } = await import("@/lib/store");
         useApp.getState().updateProvider("p_antigravity", {
@@ -99,7 +154,7 @@ export function ConnectAntigravityDialog() {
           <Icon name="Terminal" className="w-5 h-5 text-brand" /> Antigravity CLI
         </CardTitle>
         <CardDescription>
-          Connect your own Antigravity CLI access token to unlock high-quality AI models.
+          Connect your Antigravity credentials to unlock high-quality AI models.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
@@ -126,27 +181,39 @@ export function ConnectAntigravityDialog() {
 
         {/* Token paste area (when not connected) */}
         {state !== "authorized" && (
-          <div className="space-y-3">
-            <div className="p-3 rounded-lg bg-muted/40 border text-xs space-y-2">
-              <p className="font-semibold text-sm flex items-center gap-1.5">
-                <Icon name="Terminal" className="w-3.5 h-3.5" /> How to get your token
-              </p>
-              <ol className="list-decimal list-inside space-y-1 text-muted-foreground">
-                <li><code className="bg-muted px-1 py-0.5 rounded text-[11px]">npm i -g antigravity</code></li>
-                <li><code className="bg-muted px-1 py-0.5 rounded text-[11px]">agy auth</code> — opens Google sign-in</li>
-                <li>Run <code className="bg-muted px-1 py-0.5 rounded text-[11px]">cat ~/.antigravity/credentials</code></li>
-                <li>Copy the <strong>accessToken</strong> value and paste it below</li>
-              </ol>
-            </div>
-            <Textarea
-              placeholder="Paste your Antigravity access token here..."
-              value={token}
-              onChange={(e) => setToken(e.target.value)}
-              className="font-mono text-xs h-24 resize-none"
-            />
-            <Button onClick={handlePasteToken} className="gap-2 w-full">
-              <Icon name="Terminal" className="w-4 h-4" /> Connect with Token
+          <div className="space-y-4">
+            <Button onClick={handleConnectOAuth} className="gap-2 w-full bg-brand hover:bg-brand-dark text-white font-semibold shadow-premium">
+              <Icon name="LogIn" className="w-4 h-4" /> Connect with Google (One-Click Popup)
             </Button>
+            
+            <div className="relative flex py-2 items-center">
+              <div className="flex-grow border-t border-border"></div>
+              <span className="flex-shrink mx-3 text-[10px] text-muted-foreground uppercase tracking-wider">or</span>
+              <div className="flex-grow border-t border-border"></div>
+            </div>
+
+            <div className="space-y-3">
+              <div className="p-3 rounded-lg bg-muted/40 border text-xs space-y-2">
+                <p className="font-semibold text-xs flex items-center gap-1.5">
+                  <Icon name="Terminal" className="w-3.5 h-3.5" /> How to get your token manually
+                </p>
+                <ol className="list-decimal list-inside space-y-1 text-muted-foreground">
+                  <li><code className="bg-muted px-1 py-0.5 rounded text-[11px]">npm i -g antigravity</code></li>
+                  <li><code className="bg-muted px-1 py-0.5 rounded text-[11px]">agy auth</code> — opens Google sign-in</li>
+                  <li>Run <code className="bg-muted px-1 py-0.5 rounded text-[11px]">cat ~/.antigravity/credentials</code></li>
+                  <li>Copy the <strong>accessToken</strong> value and paste it below</li>
+                </ol>
+              </div>
+              <Textarea
+                placeholder="Paste your Antigravity access token here..."
+                value={token}
+                onChange={(e) => setToken(e.target.value)}
+                className="font-mono text-xs h-20 resize-none"
+              />
+              <Button onClick={handlePasteToken} variant="outline" className="gap-2 w-full text-xs">
+                <Icon name="Terminal" className="w-3.5 h-3.5" /> Connect with Token Manually
+              </Button>
+            </div>
           </div>
         )}
 
@@ -157,7 +224,6 @@ export function ConnectAntigravityDialog() {
               try {
                 const { getAntigravityProvider } = await import("@/lib/providers/antigravity-provider");
                 const models = await getAntigravityProvider().listModels();
-                // Also update the store provider's enabledModels
                 try {
                   const { useApp } = await import("@/lib/store");
                   useApp.getState().updateProvider("p_antigravity", {
@@ -169,7 +235,7 @@ export function ConnectAntigravityDialog() {
                 toast.error("Model sync failed — provider not authenticated");
               }
             }} className="gap-2">
-              <Icon name="Refresh" className="w-4 h-4" /> Sync Models
+              <Icon name="RefreshCw" className="w-4 h-4" /> Sync Models
             </Button>
             <Button variant="destructive" onClick={handleDisconnect} className="gap-2">
               <Icon name="LogOut" className="w-4 h-4" /> Disconnect

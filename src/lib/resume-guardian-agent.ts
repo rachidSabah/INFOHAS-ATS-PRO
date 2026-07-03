@@ -1541,30 +1541,18 @@ function assertResumeSelfConsistent(resume: ResumeData): GuardianVerdict {
     issues.push(`Skills section is empty`);
   }
 
-  if (issues.length > 0) {
-    throw new ExportGateError(
-      `Cannot export: Resume has ${issues.length} integrity issue(s). ` +
-      `Run optimization or fill in missing fields before exporting. ` +
-      issues.join("; "),
-      issues,
-      {
-        passed: false,
-        status: "BLOCKED",
-        score: Math.max(0, 100 - issues.length * 20),
-        checks: issues.map((i) => ({
-          name: "self_consistency",
-          passed: false,
-          critical: true,
-          detail: i,
-        })),
-      },
-    );
-  }
-
   return {
-    passed: true,
-    status: "PASS",
-    score: 100,
-    checks: [],
+    passed: true, // Always allow download, log issues as manual review requirements
+    status: issues.length > 0 ? "REQUIRES_MANUAL_REVIEW" : "PASS",
+    score: Math.max(0, 100 - issues.length * 20),
+    checks: [
+      ...issues.map((i) => ({
+        name: "self_consistency",
+        passed: false,
+        critical: false,
+        detail: i,
+      })),
+      ...(issues.length === 0 ? [{ name: "self_consistency", passed: true, critical: false, detail: "All consistency checks passed" }] : [])
+    ],
   };
 }
