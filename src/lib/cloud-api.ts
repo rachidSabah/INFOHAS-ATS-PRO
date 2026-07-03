@@ -355,6 +355,18 @@ export async function syncAllFromCloud(store: any): Promise<void> {
           });
         }
       }
+
+      // Persist repaired providers to D1 so they survive refresh and resolve drift permanently
+      if (syncResult.repaired > 0) {
+        for (const sp of syncedProviders) {
+          const original = providers.find((p: any) => p.id === sp.id);
+          if (original && JSON.stringify(original) !== JSON.stringify(sp)) {
+            api.updateProvider(sp.id, sp).catch((e: any) => {
+              console.warn(`[provider-sync] Repair persist failed for ${sp.name}:`, e instanceof Error ? e.message : e);
+            });
+          }
+        }
+      }
       
       // Deep equality check before store.setState
       const currentProviders = store.getState().providers;
