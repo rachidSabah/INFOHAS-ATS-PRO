@@ -14,7 +14,7 @@ const ALLOWED_PROVIDER_HOSTS = new Set([
   "openrouter.ai", "api.opencode.com", "opencode.ai",
   "api.perplexity.ai", "api.mistral.ai", "api.cohere.com",
   "api.together.xyz", "api.z.ai", "api.aimlapi.com", "api.azure.com",
-  "api-inference.huggingface.co", "api.puter.com", "api.antigravity.io", "api.cohere.ai",
+  "api-inference.huggingface.co", "api.puter.com", "api.antigravity.io", "cloudcode-pa.googleapis.com", "api.cohere.ai",
   "bedrock-runtime.us-east-1.amazonaws.com", "bedrock-runtime.us-west-2.amazonaws.com",
 ]);
 
@@ -44,10 +44,15 @@ export async function POST(req: NextRequest) {
   try {
     const raw = await req.text().catch(() => "");
     const body = raw ? JSON.parse(raw) : {};
-    const { baseUrl, apiKey, authType, headersJson, model, messages, maxTokens, temperature, responsePath, timeoutMs } = body;
+    let { baseUrl, apiKey, authType, headersJson, model, messages, maxTokens, temperature, responsePath, timeoutMs } = body;
 
     if (!baseUrl) {
       return NextResponse.json({ ok: false, error: "baseUrl is required" }, { status: 400 });
+    }
+
+    // Rewrite Antigravity CLI to Google Cloud Code Assist endpoint
+    if (baseUrl.includes("api.antigravity.io")) {
+      baseUrl = "https://cloudcode-pa.googleapis.com/v1";
     }
 
     if (!isAllowedProviderUrl(baseUrl)) {

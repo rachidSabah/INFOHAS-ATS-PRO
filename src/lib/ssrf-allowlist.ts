@@ -23,6 +23,7 @@ export const ALLOWED_PROVIDER_HOSTS = new Set([
   "api-inference.huggingface.co",
   "api.puter.com",
   "api.antigravity.io",
+  "cloudcode-pa.googleapis.com",
   "api.cohere.ai",
   "bedrock-runtime.us-east-1.amazonaws.com",
   "bedrock-runtime.us-west-2.amazonaws.com",

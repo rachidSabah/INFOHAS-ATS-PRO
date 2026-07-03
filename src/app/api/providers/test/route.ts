@@ -28,6 +28,7 @@ const ALLOWED_PROVIDER_HOSTS = new Set([
   "api-inference.huggingface.co",
   "api.puter.com",
   "api.antigravity.io",
+  "cloudcode-pa.googleapis.com",
   "api.cohere.ai",
   "bedrock-runtime.us-east-1.amazonaws.com",
   "bedrock-runtime.us-west-2.amazonaws.com",
@@ -60,10 +61,15 @@ function isAllowedProviderUrl(urlStr: string): boolean {
 export async function POST(req: NextRequest) {
   try {
     const body = ((await req.json().catch(() => ({}))) as any) as any;
-    const { baseUrl, apiKey, authType, headersJson, model, testPrompt, timeout } = body;
+    let { baseUrl, apiKey, authType, headersJson, model, testPrompt, timeout } = body;
 
     if (!baseUrl) {
       return NextResponse.json({ ok: false, message: "baseUrl is required" }, { status: 400 });
+    }
+
+    // Rewrite Antigravity CLI to Google Cloud Code Assist endpoint
+    if (baseUrl.includes("api.antigravity.io")) {
+      baseUrl = "https://cloudcode-pa.googleapis.com/v1";
     }
 
     // SSRF check — reject requests to non-allowed hosts
