@@ -317,6 +317,7 @@ interface BulkJobEntry {
   atsScore?: number;
   matchScore?: number;
   industry?: string;
+  outreachMessage?: string;
 }
 
 export function BulkGenerator() {
@@ -332,7 +333,53 @@ export function BulkGenerator() {
   const [newJobText, setNewJobText] = useState("");
   const [newJobUrl, setNewJobUrl] = useState("");
   const [processing, setProcessing] = useState(false);
+  const [selectedJobForModal, setSelectedJobForModal] = useState<BulkJobEntry | null>(null);
+  const [activeModalTab, setActiveModalTab] = useState<"resume" | "cover-letter" | "outreach" | "interview">("resume");
   const fileRef = useRef<HTMLInputElement>(null);
+
+  const downloadAllFiles = async (job: BulkJobEntry) => {
+    if (job.optimizedResumeId) {
+      const r = resumes.find((r) => r.id === job.optimizedResumeId);
+      if (r) {
+        await exportResumePDF(r);
+        incUsage("downloads");
+      }
+    }
+    if (job.coverLetterId) {
+      const cl = useApp.getState().coverLetters.find((c: any) => c.id === job.coverLetterId);
+      if (cl) {
+        const blob = new Blob([cl.content], { type: "text/plain;charset=utf-8" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = `Cover_Letter_${job.company || "Company"}.txt`;
+        a.click();
+        URL.revokeObjectURL(url);
+        incUsage("downloads");
+      }
+    }
+    if (job.interviewId) {
+      const iv = useApp.getState().interviews.find((i: any) => i.id === job.interviewId);
+      if (iv) {
+        const text = `# Interview Prep for ${job.title} at ${job.company}\n\n` +
+          iv.questions.map((q: any, idx: number) => 
+            `## ${idx + 1}. [${q.category.toUpperCase()}] ${q.question} (Difficulty: ${q.difficulty})\n` +
+            `**Recommended Answer:**\n${q.recommendedAnswer}\n\n` +
+            `**Talking Points:**\n${q.talkingPoints.map((tp: string) => `- ${tp}`).join("\n")}\n\n` +
+            `**Follow Up Questions:**\n${q.followUps.map((f: string) => `- ${f}`).join("\n")}\n\n`
+          ).join("\n---\n\n");
+        const blob = new Blob([text], { type: "text/markdown;charset=utf-8" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = `Interview_Prep_${job.company || "Company"}.md`;
+        a.click();
+        URL.revokeObjectURL(url);
+        incUsage("downloads");
+      }
+    }
+    toast.success("All package files triggered for download.");
+  };
 
   const addJobFromText = () => {
     if (!newJobText.trim() || newJobText.trim().length < 30) { toast.error("Paste a full job description (at least 30 characters)."); return; }
@@ -458,7 +505,17 @@ export function BulkGenerator() {
       });
       const cl = { id: uid("cl"), title: `Cover Letter — ${company}`, template: "modern" as const, content: clResult.text, resumeId: optimized.id, company, role: title, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
       addCoverLetter(cl);
-      updateJob(job.id, { status: "interview", statusLabel: "Generating interview prep…", coverLetterId: cl.id });
+
+      // Step 4.5: Generate outreach message
+      updateJob(job.id, { status: "cover-letter", statusLabel: "Generating outreach message…", coverLetterId: cl.id });
+      const outreachResult = await callAI({
+        systemPrompt: "You are a professional networking expert. Write a highly personalized cold outreach message for LinkedIn or Email (max 120 words). Plain text only. Sound professional, concise, and response-driven.",
+        userPrompt: `Candidate: ${optimized.name}, ${optimized.headline}\nJob: ${title} at ${company}\n\nWrite the networking message now.`,
+        maxTokens: 400, taskCategory: "document",
+      });
+      const outreachMessage = outreachResult.text;
+
+      updateJob(job.id, { status: "interview", statusLabel: "Generating interview prep…", outreachMessage });
 
       // Step 5: Generate interview prep (condensed — 9 questions)
       const ivResult = await callAI({
@@ -657,14 +714,17 @@ export function BulkGenerator() {
                       <div className="text-xs text-muted-foreground">ATS: {job.atsScore} · Match: {job.matchScore}% · {job.industry}</div>
                     </div>
                     <div className="flex gap-1.5">
+                      <Button size="sm" onClick={() => { setSelectedJobForModal(job); setActiveModalTab("resume"); }} className="bg-brand hover:bg-brand-dark text-white gap-1 text-xs"><Icon name="Eye" className="w-3.5 h-3.5" /> View Package</Button>
                       {job.optimizedResumeId && resumes.find((r) => r.id === job.optimizedResumeId) && (
                         <Button size="sm" variant="outline" onClick={async () => { const r = resumes.find((r) => r.id === job.optimizedResumeId)!; await exportResumePDF(r); incUsage("downloads"); toast.success("Resume PDF exported."); }} className="gap-1 text-xs"><Icon name="Download" className="w-3 h-3" /> Resume</Button>
                       )}
+                      <Button size="sm" variant="outline" onClick={() => downloadAllFiles(job)} className="gap-1 text-xs"><Icon name="Download" className="w-3 h-3" /> All Files</Button>
                     </div>
                   </div>
                   <div className="flex flex-wrap gap-1.5 text-[10px]">
                     {job.optimizedResumeId && <Badge variant="success" className="gap-1"><Icon name="CheckCircle2" className="w-2.5 h-2.5" /> Resume</Badge>}
                     {job.coverLetterId && <Badge variant="success" className="gap-1"><Icon name="CheckCircle2" className="w-2.5 h-2.5" /> Cover Letter</Badge>}
+                    {job.outreachMessage && <Badge variant="success" className="gap-1"><Icon name="CheckCircle2" className="w-2.5 h-2.5" /> Cold Outreach</Badge>}
                     {job.interviewId && <Badge variant="success" className="gap-1"><Icon name="CheckCircle2" className="w-2.5 h-2.5" /> Interview Prep</Badge>}
                   </div>
                 </div>
@@ -672,6 +732,135 @@ export function BulkGenerator() {
             </div>
           </CardContent>
         </Card>
+      )}
+
+      {/* === Package Details Modal === */}
+      {selectedJobForModal && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-card border rounded-xl shadow-premium w-full max-w-4xl max-h-[85vh] flex flex-col overflow-hidden">
+            {/* Header */}
+            <div className="p-4 border-b flex justify-between items-center bg-muted/30">
+              <div>
+                <h3 className="font-semibold text-lg">{selectedJobForModal.company} — {selectedJobForModal.title}</h3>
+                <p className="text-xs text-muted-foreground mt-0.5">Application Package Details</p>
+              </div>
+              <button onClick={() => setSelectedJobForModal(null)} className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground transition">
+                <Icon name="X" className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Tabs */}
+            <div className="flex border-b bg-muted/10 px-4">
+              {[
+                { id: "resume", label: "Resume Details", icon: "FileText" },
+                { id: "cover-letter", label: "Cover Letter", icon: "Mail" },
+                { id: "outreach", label: "Cold Outreach", icon: "Send" },
+                { id: "interview", label: "Interview Prep", icon: "Users" },
+              ].map((t) => (
+                <button
+                  key={t.id}
+                  onClick={() => setActiveModalTab(t.id as any)}
+                  className={`flex items-center gap-1.5 px-4 py-3 text-xs font-semibold border-b-2 -mb-px transition ${activeModalTab === t.id ? "border-brand text-brand" : "border-transparent text-muted-foreground hover:text-foreground"}`}
+                >
+                  <Icon name={t.icon} className="w-3.5 h-3.5" /> {t.label}
+                </button>
+              ))}
+            </div>
+
+            {/* Content area */}
+            <div className="flex-1 overflow-y-auto p-5 space-y-4">
+              {activeModalTab === "resume" && (
+                <div className="space-y-4">
+                  <div className="grid sm:grid-cols-2 gap-4">
+                    <Card><CardContent className="p-3 bg-muted/20">
+                      <div className="text-[10px] uppercase font-semibold text-muted-foreground">Match Metrics</div>
+                      <div className="text-2xl font-bold mt-1 text-brand">ATS {selectedJobForModal.atsScore ?? 0}</div>
+                      <div className="text-xs text-muted-foreground mt-0.5">Overall ATS Compatibility Score</div>
+                    </CardContent></Card>
+                    <Card><CardContent className="p-3 bg-muted/20">
+                      <div className="text-[10px] uppercase font-semibold text-muted-foreground">Keyword Relevance</div>
+                      <div className="text-2xl font-bold mt-1 text-emerald-600">{selectedJobForModal.matchScore ?? 0}%</div>
+                      <div className="text-xs text-muted-foreground mt-0.5">Semantic Match Percentage</div>
+                    </CardContent></Card>
+                  </div>
+                  <div className="space-y-2">
+                    <h4 className="font-semibold text-sm">Optimized Resume Details</h4>
+                    <p className="text-xs text-muted-foreground">The base resume was tailored with the correct keyword density for {selectedJobForModal.industry || "this industry"}. You can download the PDF copy directly from the dashboard list.</p>
+                  </div>
+                </div>
+              )}
+
+              {activeModalTab === "cover-letter" && (
+                <div className="space-y-3">
+                  <div className="flex justify-between items-center">
+                    <h4 className="font-semibold text-sm">Generated Cover Letter</h4>
+                    <Button size="sm" variant="outline" onClick={() => {
+                      const cl = useApp.getState().coverLetters.find((c: any) => c.id === selectedJobForModal.coverLetterId);
+                      if (cl) {
+                        navigator.clipboard.writeText(cl.content);
+                        toast.success("Cover letter copied to clipboard!");
+                      }
+                    }} className="text-xs gap-1.5"><Icon name="Copy" className="w-3.5 h-3.5" /> Copy</Button>
+                  </div>
+                  <pre className="p-4 rounded-lg border bg-muted/30 font-mono text-xs whitespace-pre-wrap leading-relaxed max-h-[40vh] overflow-y-auto">
+                    {useApp.getState().coverLetters.find((c: any) => c.id === selectedJobForModal.coverLetterId)?.content || "No cover letter generated for this job."}
+                  </pre>
+                </div>
+              )}
+
+              {activeModalTab === "outreach" && (
+                <div className="space-y-3">
+                  <div className="flex justify-between items-center">
+                    <h4 className="font-semibold text-sm">LinkedIn / Email Cold Outreach Message</h4>
+                    <Button size="sm" variant="outline" onClick={() => {
+                      if (selectedJobForModal.outreachMessage) {
+                        navigator.clipboard.writeText(selectedJobForModal.outreachMessage);
+                        toast.success("Outreach message copied!");
+                      }
+                    }} className="text-xs gap-1.5"><Icon name="Copy" className="w-3.5 h-3.5" /> Copy</Button>
+                  </div>
+                  <p className="text-xs text-muted-foreground">A concise, conversational message customized for reaching out to recruiters or hiring team members on LinkedIn or email.</p>
+                  <pre className="p-4 rounded-lg border bg-brand/5 border-brand/20 font-mono text-xs whitespace-pre-wrap leading-relaxed max-h-[30vh] overflow-y-auto text-foreground">
+                    {selectedJobForModal.outreachMessage || "No outreach message generated."}
+                  </pre>
+                </div>
+              )}
+
+              {activeModalTab === "interview" && (
+                <div className="space-y-4">
+                  <h4 className="font-semibold text-sm">Targeted Prep Questions (9 questions)</h4>
+                  <div className="space-y-3">
+                    {(useApp.getState().interviews.find((i: any) => i.id === selectedJobForModal.interviewId)?.questions || []).map((q: any, index: number) => (
+                      <div key={q.id || index} className="p-3 rounded-lg border bg-muted/10 space-y-2">
+                        <div className="flex justify-between items-start gap-2 flex-wrap">
+                          <span className="text-xs font-semibold text-brand">{index + 1}. [{q.category.toUpperCase()}] {q.question}</span>
+                          <Badge variant={q.difficulty === "hard" ? "danger" : q.difficulty === "medium" ? "warning" : "success"} className="text-[9px]">{q.difficulty}</Badge>
+                        </div>
+                        <p className="text-xs text-muted-foreground bg-card p-2 rounded border border-border/50"><strong className="text-foreground">Answer Guide: </strong>{q.recommendedAnswer}</p>
+                        {q.talkingPoints && q.talkingPoints.length > 0 && (
+                          <div className="text-[10px] text-muted-foreground/90 pl-2">
+                            <strong>Key Talking Points:</strong>
+                            <ul className="list-disc list-inside mt-0.5 space-y-0.5">
+                              {q.talkingPoints.map((tp: string, idx: number) => <li key={idx}>{tp}</li>)}
+                            </ul>
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Footer */}
+            <div className="p-4 border-t bg-muted/20 flex justify-end gap-2">
+              <Button variant="outline" onClick={() => setSelectedJobForModal(null)}>Close</Button>
+              <Button onClick={() => downloadAllFiles(selectedJobForModal)} className="bg-brand hover:bg-brand-dark text-white gap-1.5">
+                <Icon name="Download" className="w-4 h-4" /> Download Full Package
+              </Button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );
