@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useEffect, useMemo } from "react";
+import { useState, useRef, useEffect, useMemo, useCallback } from "react";
 import { motion } from "framer-motion";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -13,6 +13,7 @@ import { useAutoSave, useUndoRedo, useLiveATSScore } from "@/lib/builder-hooks";
 import { TEMPLATES } from "@/lib/brand";
 import { SmartTextarea } from "@/components/shared/SmartTextarea";
 import { SpellCheckPanel } from "@/components/shared/SpellCheckPanel";
+import { scanResume, totalMisspelled } from "@/lib/spellchecker";
 import { UndoRedoPanel } from "@/components/shared/UndoRedoPanel";
 import { ATSScoreInline } from "@/components/shared/ATSScorePreview";
 import { useSectionCompleteness } from "@/lib/builder-extras";
@@ -46,6 +47,7 @@ export function Builder() {
   const sectionScores = useSectionCompleteness(resume);
 
   const patch = (p: Partial<ResumeData>) => updateResume(resume.id, p);
+
   const updateOptimizerDirective = useApp((s) => s.updateOptimizerDirective);
 
   const [tab, setTab] = useState<"basics" | "experience" | "education" | "skills" | "extra" | "design">("basics");
@@ -495,6 +497,61 @@ ${JSON.stringify({
     patch({ skills: resume.skills.map((s) => (s.id === id ? { ...s, ...p } : s)) });
   const removeSkill = (id: string) => patch({ skills: resume.skills.filter((s) => s.id !== id) });
 
+  const handleFixWord = useCallback((path: string, oldWord: string, newWord: string) => {
+    const parts = path.split(".");
+    const section = parts[0];
+    
+    if (section === "summary") {
+      const current = resume.summary ?? "";
+      const regex = new RegExp(`\\b${oldWord}\\b`, "g");
+      const updated = current.replace(regex, newWord);
+      patch({ summary: updated });
+      toast.success(`Corrected "${oldWord}" to "${newWord}"`);
+    } else if (section === "headline") {
+      const current = resume.headline ?? "";
+      const regex = new RegExp(`\\b${oldWord}\\b`, "g");
+      const updated = current.replace(regex, newWord);
+      patch({ headline: updated });
+      toast.success(`Corrected "${oldWord}" to "${newWord}"`);
+    } else if (section === "experience") {
+      const idx = parseInt(parts[1], 10);
+      const subfield = parts[2];
+      const exp = resume.experience[idx];
+      if (exp) {
+        if (subfield === "bullets") {
+          const bulletIdx = parseInt(parts[3], 10);
+          const current = exp.bullets[bulletIdx] ?? "";
+          const regex = new RegExp(`\\b${oldWord}\\b`, "g");
+          const updated = current.replace(regex, newWord);
+          const newBullets = [...exp.bullets];
+          newBullets[bulletIdx] = updated;
+          updateExperience(exp.id, { bullets: newBullets });
+          toast.success(`Corrected "${oldWord}" to "${newWord}"`);
+        } else if (subfield === "title") {
+          const current = exp.title ?? "";
+          const regex = new RegExp(`\\b${oldWord}\\b`, "g");
+          const updated = current.replace(regex, newWord);
+          updateExperience(exp.id, { title: updated });
+          toast.success(`Corrected "${oldWord}" to "${newWord}"`);
+        } else if (subfield === "company") {
+          const current = exp.company ?? "";
+          const regex = new RegExp(`\\b${oldWord}\\b`, "g");
+          const updated = current.replace(regex, newWord);
+          updateExperience(exp.id, { company: updated });
+          toast.success(`Corrected "${oldWord}" to "${newWord}"`);
+        }
+      }
+    }
+  }, [resume, patch, updateExperience]);
+
+  const spellingIssuesCount = useMemo(() => {
+    try {
+      return totalMisspelled(scanResume(resume));
+    } catch {
+      return 0;
+    }
+  }, [resume]);
+
   const onExportPDF = async () => {
     assertResumeExportable(resume);
     setExporting(true);
@@ -608,11 +665,24 @@ ${JSON.stringify({
             <button onClick={() => { const d = redo(); if (d) patch(d); }} disabled={!canRedo} className="text-[10px] text-muted-foreground hover:text-foreground disabled:opacity-30 p-1" title="Redo (Ctrl+Shift+Z)">
               <Icon name="Redo2" className="w-3 h-3" />
             </button>
-            <SpellCheckPanel
-              resume={resume}
-              open={spellCheckOpen}
-              onToggle={() => setSpellCheckOpen(v => !v)}
-            />
+            <Button
+              variant={spellingIssuesCount > 0 ? "outline" : "ghost"}
+              size="sm"
+              onClick={() => setSpellCheckOpen(v => !v)}
+              className={`gap-1.5 h-8 relative ${spellingIssuesCount > 0 ? "border-amber-400 text-amber-600 hover:bg-amber-50" : ""}`}
+              title={spellingIssuesCount > 0 ? `${spellingIssuesCount} spelling issues found` : "No spelling issues found"}
+            >
+              <Icon name="SpellCheck2" className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">Spelling</span>
+              {spellingIssuesCount > 0 && (
+                <span className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-amber-400 text-white text-[10px] font-bold leading-none">
+                  {spellingIssuesCount}
+                </span>
+              )}
+              {spellingIssuesCount === 0 && (
+                <Icon name="Check" className="w-3 h-3 text-emerald-500" />
+              )}
+            </Button>
             <button
               onClick={() => setHistoryOpen(v => !v)}
               className={`text-[10px] p-1 ${historyOpen ? "text-brand" : "text-muted-foreground hover:text-foreground"}`}
@@ -691,11 +761,14 @@ ${JSON.stringify({
         </div>
       </div>
 
-      <SpellCheckPanel
-        resume={resume}
-        open={spellCheckOpen}
-        onToggle={() => setSpellCheckOpen(v => !v)}
-      />
+      {spellCheckOpen && (
+        <SpellCheckPanel
+          resume={resume}
+          open={true}
+          onToggle={() => setSpellCheckOpen(false)}
+          onFixWord={handleFixWord}
+        />
+      )}
 
       <UndoRedoPanel
         undoStack={undoStack}
