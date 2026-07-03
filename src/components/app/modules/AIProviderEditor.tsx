@@ -29,6 +29,8 @@ const PROVIDER_TYPES: { type: AIProviderType; label: string; icon: string; defau
   { type: "openrouter", label: "OpenRouter", icon: "Network", defaultUrl: "https://openrouter.ai/api/v1", defaultModel: "anthropic/claude-3.5-sonnet", authType: "bearer" },
   { type: "together", label: "Together AI", icon: "Users", defaultUrl: "https://api.together.xyz/v1", defaultModel: "meta-llama/Llama-3.3-70B-Instruct-Turbo", authType: "bearer" },
   { type: "huggingface", label: "HuggingFace", icon: "Box", defaultUrl: "https://api-inference.huggingface.co/models", defaultModel: "meta-llama/Llama-3.3-70B-Instruct", authType: "bearer" },
+  { type: "cerebras", label: "Cerebras (Free)", icon: "Zap", defaultUrl: "https://api.cerebras.ai/v1", defaultModel: "qwen-3-235b", authType: "bearer" },
+  { type: "sambanova", label: "SambaNova (Free)", icon: "Zap", defaultUrl: "https://api.sambanova.ai/v1", defaultModel: "Meta-Llama-4-Maverick-17B-128E-Instruct", authType: "bearer" },
   { type: "ollama", label: "Ollama (self-hosted)", icon: "HardDrive", defaultUrl: "http://localhost:11434", defaultModel: "llama3.3:70b", authType: "none" },
   { type: "azure-openai", label: "Azure OpenAI", icon: "Cloud", defaultUrl: "https://{resource}.openai.azure.com/openai/deployments/{deployment}", defaultModel: "gpt-4o", authType: "header" },
   { type: "bedrock", label: "AWS Bedrock", icon: "Cloud", defaultUrl: "https://bedrock-runtime.us-east-1.amazonaws.com", defaultModel: "anthropic.claude-3-5-sonnet-20241022-v1:0", authType: "bearer" },
