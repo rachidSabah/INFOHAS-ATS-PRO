@@ -35,11 +35,13 @@ export function Builder() {
   const incUsage = useApp((s) => s.incUsage);
   const log = useApp((s) => s.log);
   const jobDescriptions = useApp((s) => s.jobDescriptions);
+  const activeJdId = useApp((s) => s.activeJdId);
+  const setActiveJD = useApp((s) => s.setActiveJD);
 
   const resume = useMemo(() => resumes.find((r) => r.id === activeId) ?? resumes[0], [resumes, activeId]);
   const autoSave = useAutoSave(resume);
   const undoRedo = useUndoRedo(resume);
-  const activeJD = jobDescriptions.find(j => j.id === useApp.getState().activeJdId);
+  const activeJD = useMemo(() => jobDescriptions.find(j => j.id === activeJdId), [jobDescriptions, activeJdId]);
   const atsScore = useLiveATSScore(resume, activeJD);
   const sectionScores = useSectionCompleteness(resume);
 
@@ -295,10 +297,22 @@ export function Builder() {
           <select
             value={resume.id}
             onChange={(e) => setActiveResume(e.target.value)}
-            className="h-8 px-2 rounded-md border border-input bg-background text-xs sm:text-sm max-w-[140px] sm:max-w-none"
+            className="h-8 px-2 rounded-md border border-input bg-background text-xs sm:text-sm max-w-[140px] sm:max-w-none font-semibold text-brand"
           >
             {resumes.map((r) => (
               <option key={r.id} value={r.id}>{r.name}</option>
+            ))}
+          </select>
+          <select
+            value={activeJdId || ""}
+            onChange={(e) => setActiveJD(e.target.value || null)}
+            className="h-8 px-2 rounded-md border border-input bg-background text-xs sm:text-sm max-w-[150px] sm:max-w-none font-semibold text-muted-foreground"
+          >
+            <option value="">🎯 General (No Job Target)</option>
+            {jobDescriptions.map((j) => (
+              <option key={j.id} value={j.id}>
+                🎯 {j.company ? `${j.company} - ` : ""}{j.title}
+              </option>
             ))}
           </select>
           {/* Import button — accepts PDF/DOCX/DOC/TXT, parses into all fields */}
@@ -345,7 +359,7 @@ export function Builder() {
 
       <ATSScoreInline
         resume={resume}
-        jd={jobDescriptions.length > 0 ? jobDescriptions[jobDescriptions.length - 1] : null}
+        jd={activeJD || null}
         onAddKeyword={(keyword, section) => {
           toast.info(`Consider adding "${keyword}" to ${section}`);
         }}

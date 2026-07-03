@@ -161,6 +161,7 @@ export function SmartTextarea({ value, onChange, section, placeholder, className
       const gen = await callAI(
         (ctx ? `Context:\n${ctx}\n\n` : "") +
         `Generate a professional resume summary (60-80 words) for the candidate. ` +
+        (jobDescriptionText ? `Naturally weave in relevant keywords and skills from the target job description. ` : "") +
         `Highlight years of experience, key skills, and measurable outcomes. Return ONLY the summary.`
       );
       if (gen) { onChange(gen); toast.success("Summary generated"); }
@@ -168,12 +169,15 @@ export function SmartTextarea({ value, onChange, section, placeholder, className
       const gen = await callAI(
         (ctx ? `Context:\n${ctx}\n\n` : "") +
         `Generate an achievement bullet for: "${context||''}". ` +
+        (jobDescriptionText ? `Naturally weave in relevant keywords and skills from the target job description. ` : "") +
         `Start with a strong action verb, include a specific metric, 10-20 words. Return ONLY the bullet.`
       );
       if (gen) { onChange(gen); toast.success("Bullet generated"); }
     } else {
       const gen = await callAI(
-        `Generate content for ${section} section. ${ctx}. Return ONLY the text.`
+        `Generate content for ${section} section. ${ctx}. ` +
+        (jobDescriptionText ? `Make it highly relevant to the target job description. ` : "") +
+        `Return ONLY the text.`
       );
       if (gen) { onChange(gen); toast.success(`${sectionLabel(section)} generated`); }
     }
@@ -189,6 +193,7 @@ export function SmartTextarea({ value, onChange, section, placeholder, className
     const gen = await callAI(
       (ctxMemo ? `Context:\n${ctxMemo}\n\n` : "") +
       `Rewrite this to be more impactful and ATS-friendly: "${value}". ` +
+      (jobDescriptionText ? `Naturally weave in relevant keywords and skills from the target job description. ` : "") +
       `Keep same length. Use active voice and specific metrics. Return ONLY the rewritten text.`
     );
     if (gen) { onChange(gen); toast.success(`${sectionLabel(section)} regenerated`); }
