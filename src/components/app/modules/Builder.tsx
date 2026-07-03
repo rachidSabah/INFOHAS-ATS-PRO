@@ -321,7 +321,11 @@ Guidelines:
    - Use active voice only (e.g. 'Spearheaded', 'Engineered', 'Optimized' instead of passive forms like 'Responsible for' or 'Was managing').
    - Integrate natural transition words to ensure high readability and flow.
    - Choose bullet points for structured lists (achievements, core tasks) and unified paragraphs for summaries.
-   - For emphasis, place key metrics, action words, or credentials at the beginning of bullet points/sentences rather than using markdown formatting.`;
+   - For emphasis, place key metrics, action words, or credentials at the beginning of bullet points/sentences rather than using markdown formatting.
+9. ATS OPTIMIZATION & JOB DESCRIPTION BUCKLE:
+   - Carefully analyze the provided TARGET JOB description (title, company, keywords).
+   - Calibrate all generated resume fields (summary, experience bullets, skills) to incorporate key phrases, required methodologies, and matching keywords from the job description.
+   - Seamlessly weave these keywords into the content to achieve a high ATS compatibility score without keyword stuffing.`;
 
       // Detect placeholder / demo summaries — covers blankResume defaults, quality-gate clichés, and any AI-generated filler
       const PLACEHOLDER_PATTERNS = [
