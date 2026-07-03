@@ -469,6 +469,8 @@ export interface PipelineInput {
   checkExport?: boolean;
   /** Optional: enable the Reflection Agent (triggers when QA confidence < 75 or ATS improvement < 5). Default: true. */
   enableReflection?: boolean;
+  /** Optional: run in Deep Agentic Mode (autonomous self-correction loop). Default: false. */
+  deepAgenticMode?: boolean;
   /** Optional: real-time progress callback. Fired after each step completes. */
   onProgress?: (progress: PipelineProgress) => void;
 }
@@ -626,7 +628,7 @@ export async function runOptimizationPipeline(input: PipelineInput): Promise<Pip
  * the 120s timeout and watchdog lifecycle management.
  */
 async function _runOptimizationPipelineInner(input: PipelineInput, watchdog: OptimizationWatchdog): Promise<PipelineResult> {
-  const { resume, jd, userDirectives, aviationMode, checkExport = false, enableReflection = true } = input;
+  const { resume, jd, userDirectives, aviationMode, checkExport = false, enableReflection = true, deepAgenticMode = false } = input;
 
   // ============================================================
   // Load Optimizer Directive — Single Source of Truth
@@ -666,6 +668,8 @@ async function _runOptimizationPipelineInner(input: PipelineInput, watchdog: Opt
     charCount: 0,
     metCharTarget: false,
   };
+
+  let intelligenceContext = "";
 
   const log = (stepName: string, message: string) => {
     const step = steps.find((s) => s.name === stepName);
@@ -956,7 +960,7 @@ INDUSTRY CONTEXT:
 ${jobMemory.industry}`);
           }
 
-          const intelligenceContext = intelligenceBlocks.join("\n\n");
+          intelligenceContext = intelligenceBlocks.join("\n\n");
 
           // Check if parallel pipeline is enabled via env var
           const useParallel = process.env.NEXT_PUBLIC_USE_PARALLEL_PIPELINE === "true";
@@ -1519,6 +1523,94 @@ ${jobMemory.industry}`);
     const afterLog = `After-optimization ATS score: ${afterScore}/100 (was ${beforeScore}, +${afterScore - beforeScore} pts).`;
     log("Quality Assurance", afterLog);
     emitProgress(4, afterLog);
+
+    // ========================================================================
+    // [Deep Agentic Mode] Autonomous Self-Correction Loop
+    // ========================================================================
+    if (deepAgenticMode && result.optimizedResume && result.status !== "failed") {
+      const qaVerdict = result.qa;
+      const needsCorrection = qaVerdict && (
+        qaVerdict.confidence < 95 || 
+        (qaVerdict.factualConsistency && !qaVerdict.factualConsistency.passed)
+      );
+
+      if (needsCorrection) {
+        log("Quality Assurance", `[Deep Agentic Mode] QA score (${qaVerdict.confidence}/100) or factual integrity needs improvement. Initiating self-correction loop…`);
+        emitProgress(4, "Deep Agentic Mode: Running self-correction loop…");
+        
+        // Compile feedback critique from QA failed checks and factual issues
+        const failedChecks = qaVerdict.checks.filter(c => !c.passed).map(c => `- ${c.name}: ${c.details || "failed validation"}`);
+        const factualIssues = qaVerdict.factualConsistency 
+          ? [
+              ...qaVerdict.factualConsistency.fabricatedEmployers.map(x => `- Fabricated Employer detected: ${x}`),
+              ...qaVerdict.factualConsistency.fabricatedEducation.map(x => `- Fabricated Education detected: ${x}`),
+              ...qaVerdict.factualConsistency.fabricatedCertifications.map(x => `- Fabricated Certification detected: ${x}`),
+            ]
+          : [];
+        
+        const critique = [
+          "Your previous optimization attempt had the following quality and factual consistency issues.",
+          "You MUST fix these issues in this correction round. Do NOT fabricate any experiences or omit required items.",
+          "FAILED CHECKS:",
+          ...failedChecks,
+          "FACTUAL ISSUES:",
+          ...factualIssues
+        ].join("\n");
+
+        console.info("[Deep Agentic Mode] Re-optimizing with critique:\n", critique);
+
+        // Re-run optimizer with critique feedback
+        try {
+          const { runLockedPipeline } = await import("../locked-pipeline");
+          // Re-build standard policy and directives config
+          let directiveConfig: OptimizerDirectiveConfig | null = null;
+          try {
+            directiveConfig = (useApp.getState() as any)?.optimizerDirective ?? null;
+          } catch {}
+          let optimizationPolicy: string | null = null;
+          try {
+            const policy = buildOptimizationPolicy(directiveConfig);
+            optimizationPolicy = formatPolicyForPrompt(policy);
+          } catch {}
+
+          const correctedResult = await runLockedPipeline(
+            resume,
+            jd,
+            intelligenceContext,
+            directiveConfig,
+            optimizationPolicy,
+            critique
+          );
+
+          if (correctedResult.resume) {
+            result.optimizedResume = correctedResult.resume;
+            result.charCount = correctedResult.charCount;
+
+            // Re-run QA validation on the corrected resume
+            const newQA = await runQA(
+              result.optimizedResume,
+              jd,
+              result.jobIntelligence,
+              resume,
+              { checkExport },
+              null as any
+            );
+            
+            result.qa = newQA;
+            result.afterATS = analyzeATS(result.optimizedResume, jd);
+
+            const passedChecks = newQA.checks.filter((c) => c.passed).length;
+            const totalChecks = newQA.checks.length;
+            const newQALog = `[Self-Correction] QA Score: ${newQA.confidence}/100. Passed: ${passedChecks}/${totalChecks}. ATS Score: ${result.afterATS.scores.ats}/100.`;
+            log("Quality Assurance", newQALog);
+            emitProgress(4, newQALog);
+          }
+        } catch (err: any) {
+          console.error("[Deep Agentic Mode] Self-correction turn failed:", err?.message);
+          log("Quality Assurance", `[Deep Agentic Mode] Self-correction turn failed: ${err?.message}. Using initial optimization.`);
+        }
+      }
+    }
   } catch (e: any) {
     steps[4].status = "failed";
     steps[4].error = e?.message ?? "QA failed";

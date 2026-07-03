@@ -57,6 +57,7 @@ export function buildOptimizerInput(
   intelligenceContext: string,
   directiveConfig?: OptimizerDirectiveConfig | null,
   optimizationPolicy?: string | null,
+  feedback?: string,
 ): { systemPrompt: string; userPrompt: string } {
   const agentDirectives = directiveConfig?.agentDirectives;
   // The source resume sent to the LLM — includes IDs for experience entries
@@ -100,7 +101,7 @@ export function buildOptimizerInput(
   })}
 
 ${agentDirectives ? buildAgentDirectiveSection(agentDirectives) : ""}`;
-  const userPrompt = `SOURCE RESUME (be truthful to this — never invent employers, dates, or metrics):
+  let userPrompt = `SOURCE RESUME (be truthful to this — never invent employers, dates, or metrics):
 
 ${JSON.stringify(sourceForLLM, null, 2)}
 
@@ -121,6 +122,10 @@ Return ONLY the JSON object with this EXACT shape:
 }
 
 No prose. No markdown fences. No HTML. Only JSON.`;
+
+  if (feedback) {
+    userPrompt += `\n\nCRITICAL FEEDBACK FROM PREVIOUS ATTEMPT (YOU MUST FIX THESE ISSUES):\n${feedback}`;
+  }
 
   // Enforce AI contract at prompt-construction time: ensure critical directives
   // are present in the prompt before it's sent to any AI provider.
@@ -265,8 +270,9 @@ export async function runBulletOnlyOptimizer(
   directiveConfig?: OptimizerDirectiveConfig | null,
   excludeProviderIds?: string[],
   optimizationPolicy?: string | null,
+  feedback?: string,
 ): Promise<BulletOnlyOptimizerResult> {
-  const { systemPrompt, userPrompt } = buildOptimizerInput(sourceResume, jd, intelligenceContext, directiveConfig, optimizationPolicy);
+  const { systemPrompt, userPrompt } = buildOptimizerInput(sourceResume, jd, intelligenceContext, directiveConfig, optimizationPolicy, feedback);
 
   // FAST-FAIL: Structural validation before any AI call
   const structuralWarnings: string[] = [];

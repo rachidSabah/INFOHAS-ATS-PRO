@@ -781,10 +781,11 @@ export async function handleOptimizationRequested(
     userDirectives?: string;
     aviationMode?: any;
     enableReflection?: boolean;
+    deepAgenticMode?: boolean;
     onProgress?: (progress: PipelineProgress) => void;
   },
 ): Promise<PipelineResult | null> {
-  const { resume, jd, userDirectives, aviationMode, enableReflection = true, onProgress } = inputs;
+  const { resume, jd, userDirectives, aviationMode, enableReflection = true, deepAgenticMode = false, onProgress } = inputs;
 
   // === CONCURRENT EXECUTION GUARD ===
   // Prevent double-clicks or rapid re-submissions from running two
@@ -884,6 +885,7 @@ export async function handleOptimizationRequested(
       userDirectives: plan.userDirectives ?? userDirectives,
       aviationMode: planAviationMode,
       enableReflection: planReflection,
+      deepAgenticMode,
       checkExport: false,
       onProgress,
     });

@@ -81,6 +81,7 @@ export function Optimizer() {
   const [pipelineResult, setPipelineResult] = useState<AgentPipelineResult | null>(null);
   // Interview prep mode — shows when user clicks "Prepare for Interview"
   const [showInterviewPrep, setShowInterviewPrep] = useState(false);
+  const [deepAgenticMode, setDeepAgenticMode] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
 
   const [pasteText, setPasteText] = useState("");
@@ -478,6 +479,7 @@ export function Optimizer() {
           ? { airlineProfile: industryId, settings: industrySettings }
           : undefined,
         enableReflection: true,
+        deepAgenticMode,
         onProgress: (progress) => {
           if (controller.signal.aborted) return;
           setPipelineProgress(progress);
@@ -1029,6 +1031,23 @@ export function Optimizer() {
                       </div>
                     </div>
                   )}
+                </div>
+
+                {/* === Deep Agentic Mode Toggle === */}
+                <div className="mt-4 flex items-center justify-between p-3 rounded-lg border border-input bg-card/50">
+                  <div className="flex gap-2">
+                    <Icon name="Sparkles" className="w-5 h-5 text-brand shrink-0" />
+                    <div>
+                      <div className="text-xs font-semibold">Deep Agentic Mode</div>
+                      <div className="text-[10px] text-muted-foreground">Runs autonomous self-correction loops to maximize QA score and factual integrity.</div>
+                    </div>
+                  </div>
+                  <input
+                    type="checkbox"
+                    checked={deepAgenticMode}
+                    onChange={(e) => setDeepAgenticMode(e.target.checked)}
+                    className="w-4 h-4 rounded text-brand focus:ring-brand border-input bg-background"
+                  />
                 </div>
 
                 <div className="mt-5 flex gap-2">
