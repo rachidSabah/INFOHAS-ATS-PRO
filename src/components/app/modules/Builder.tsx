@@ -60,7 +60,197 @@ export function Builder() {
   const importFileRef = useRef<HTMLInputElement>(null);
 
   const [shrinking, setShrinking] = useState(false);
-  const [rightPanelTab, setRightPanelTab] = useState<"preview" | "copilot">("preview");
+  const [rightPanelTab, setRightPanelTab] = useState<"preview" | "copilot" | "audit">("preview");
+  const [translateLang, setTranslateLang] = useState("en");
+  const [translating, setTranslating] = useState(false);
+  const [fixingIssueId, setFixingIssueId] = useState<string | null>(null);
+
+  const translateResume = async () => {
+    setTranslating(true);
+    const toastId = toast.loading("Translating resume with AI...");
+    try {
+      const { ProviderRouter } = await import("@/lib/ai/services/router");
+      const targetLangName = ({ en: "English", fr: "French", es: "Spanish", de: "German", ar: "Arabic" } as any)[translateLang] || "English";
+      
+      const payload = {
+        headline: resume.headline,
+        summary: resume.summary,
+        experience: resume.experience.map((e) => ({ id: e.id, title: e.title, company: e.company, bullets: e.bullets })),
+        skills: resume.skills.map((s) => ({ id: s.id, name: s.name, category: s.category })),
+        education: resume.education.map((ed) => ({ id: ed.id, degree: ed.degree, institution: ed.institution, highlights: ed.highlights })),
+      };
+
+      const prompt = `You are a professional translator. Translate all text fields in this resume payload into ${targetLangName}:
+${JSON.stringify(payload)}
+
+Guidelines:
+1. Translate titles, descriptions, categories, degrees, and bullets accurately.
+2. Keep all 'id' fields identical (do not change or translate the IDs).
+3. Preserve the exact structure. Return ONLY valid JSON matching the payload format.`;
+
+      const res = await ProviderRouter.chat({
+        messages: [{ role: "user", content: prompt }], maxTokens: 1500, temperature: 0.3
+      }, { agentTask: "summary" });
+
+      const parsed = JSON.parse(res.text.trim());
+      if (parsed) {
+        const next = { ...resume };
+        if (parsed.headline) next.headline = parsed.headline;
+        if (parsed.summary) next.summary = parsed.summary;
+        if (Array.isArray(parsed.experience)) {
+          next.experience = resume.experience.map((e) => {
+            const match = parsed.experience.find((pe: any) => pe.id === e.id);
+            return match ? { ...e, title: match.title, company: match.company, bullets: match.bullets } : e;
+          });
+        }
+        if (Array.isArray(parsed.skills)) {
+          next.skills = resume.skills.map((s) => {
+            const match = parsed.skills.find((ps: any) => ps.id === s.id);
+            return match ? { ...s, name: match.name, category: match.category } : s;
+          });
+        }
+        if (Array.isArray(parsed.education)) {
+          next.education = resume.education.map((ed) => {
+            const match = parsed.education.find((ped: any) => ped.id === ed.id);
+            return match ? { ...ed, degree: match.degree, institution: match.institution, highlights: match.highlights } : ed;
+          });
+        }
+        patch(next);
+        toast.success(`Resume translated to ${targetLangName}!`, { id: toastId });
+      }
+    } catch (err: any) {
+      toast.error(`Translation failed: ${err?.message}`, { id: toastId });
+    } finally {
+      setTranslating(false);
+    }
+  };
+
+  const auditIssues = useMemo(() => {
+    const issues: Array<{
+      id: string;
+      title: string;
+      description: string;
+      type: "summary" | "experience" | "skills";
+      severity: "warning" | "info" | "success";
+      actionLabel?: string;
+      meta?: any;
+    }> = [];
+
+    // 1. Summary Check
+    const summaryWords = (resume.summary ?? "").split(/\s+/).filter(Boolean).length;
+    if (summaryWords < 50) {
+      issues.push({
+        id: "summary_short",
+        title: "Summary is too short",
+        description: `Your professional summary is only ${summaryWords} words. Aim for 80-120 words to highlight your expertise.`,
+        type: "summary",
+        severity: "warning",
+        actionLabel: "Optimize Summary",
+      });
+    } else if (summaryWords > 150) {
+      issues.push({
+        id: "summary_long",
+        title: "Summary is too long",
+        description: `Your summary has ${summaryWords} words, which can crowd a 1-page A4 layout. Try to condense it.`,
+        type: "summary",
+        severity: "info",
+        actionLabel: "Condense Summary",
+      });
+    } else if (resume.summary) {
+      issues.push({
+        id: "summary_ok",
+        title: "Summary length is ideal",
+        description: `Great! Your summary is ${summaryWords} words, fitting the standard resume density guidelines.`,
+        type: "summary",
+        severity: "success",
+      });
+    }
+
+    // 2. Metrics check in experiences
+    const experiencesWithoutMetrics = resume.experience.filter((e) => {
+      return e.bullets.length > 0 && !e.bullets.some((b) => /\d+/.test(b));
+    });
+    experiencesWithoutMetrics.forEach((e) => {
+      issues.push({
+        id: `exp_metric_${e.id}`,
+        title: `Add metrics to ${e.company || "Experience"}`,
+        description: `None of the bullet points for "${e.title}" contain measurable metrics. Recruiters look for specific outcomes (%, $, numbers).`,
+        type: "experience",
+        severity: "warning",
+        actionLabel: "Add AI Metrics",
+        meta: { expId: e.id },
+      });
+    });
+
+    // 3. Skill gap check
+    if (activeJD) {
+      const resumeSkillNames = resume.skills.map((s) => s.name.toLowerCase());
+      const missingSkills = (activeJD.keywords || []).filter((kw) => !resumeSkillNames.includes(kw.toLowerCase())).slice(0, 8);
+      
+      missingSkills.forEach((skill) => {
+        issues.push({
+          id: `skill_gap_${skill}`,
+          title: `Missing keyword: "${skill}"`,
+          description: `This target keyword from the job description is missing in your resume skills and experiences.`,
+          type: "skills",
+          severity: "info",
+          actionLabel: "Weave Keyword",
+          meta: { skill },
+        });
+      });
+    }
+
+    return issues;
+  }, [resume, activeJD]);
+
+  const fixIssue = async (issue: any) => {
+    setFixingIssueId(issue.id);
+    const toastId = toast.loading(`AI is fixing: "${issue.title}"...`);
+    try {
+      const { ProviderRouter } = await import("@/lib/ai/services/router");
+      if (issue.type === "summary") {
+        const prompt = `Rewrite this resume summary to be highly professional, impactful, and about 90 words: "${resume.summary ?? ""}". ` +
+          (activeJD ? `Ensure you align it with the target job: "${activeJD.title} at ${activeJD.company || 'Target Employer'}". ` : "") +
+          `Return ONLY the summary text.`;
+        const res = await ProviderRouter.chat({
+          messages: [{ role: "user", content: prompt }], maxTokens: 250, temperature: 0.6
+        }, { agentTask: "summary" });
+        if (res.text) {
+          patch({ summary: res.text.trim() });
+          toast.success("Summary optimized successfully!", { id: toastId });
+        }
+      } else if (issue.type === "experience") {
+        const exp = resume.experience.find((e) => e.id === issue.meta.expId);
+        if (exp) {
+          const prompt = `Rewrite the bullet points for the role "${exp.title} at ${exp.company}" to include realistic metrics and measurable achievements (e.g. increase efficiency by X%, save hours, grow revenue):
+${JSON.stringify(exp.bullets)}
+Return ONLY a valid JSON array of string bullets, NO formatting, NO markdown.`;
+          const res = await ProviderRouter.chat({
+            messages: [{ role: "user", content: prompt }], maxTokens: 400, temperature: 0.7
+          }, { agentTask: "experience" });
+          try {
+            const parsedBullets = JSON.parse(res.text.trim());
+            if (Array.isArray(parsedBullets)) {
+              patch({
+                experience: resume.experience.map((e) => e.id === exp.id ? { ...e, bullets: parsedBullets } : e)
+              });
+              toast.success("Metrics added successfully!", { id: toastId });
+            }
+          } catch {
+            toast.error("Failed to parse AI metrics.", { id: toastId });
+          }
+        }
+      } else if (issue.type === "skills") {
+        const newSkills = [...resume.skills, { id: uid("s"), name: issue.meta.skill, category: "Core Competencies" }];
+        patch({ skills: newSkills });
+        toast.success(`Weaved "${issue.meta.skill}" into your skills list!`, { id: toastId });
+      }
+    } catch (err: any) {
+      toast.error(`Failed to apply fix: ${err?.message}`, { id: toastId });
+    } finally {
+      setFixingIssueId(null);
+    }
+  };
   const [messages, setMessages] = useState<Array<{ role: "user" | "assistant"; content: string }>>([
     {
       role: "assistant",
@@ -455,6 +645,30 @@ ${JSON.stringify({
               </option>
             ))}
           </select>
+          <div className="flex items-center gap-1.5 border border-border rounded-md px-1.5 bg-secondary/35 h-8">
+            <select
+              value={translateLang}
+              onChange={(e) => setTranslateLang(e.target.value)}
+              className="h-6 px-1 rounded bg-transparent text-[11px] font-semibold text-muted-foreground focus:outline-none"
+            >
+              <option value="en">🇺🇸 English</option>
+              <option value="fr">🇫🇷 French</option>
+              <option value="es">🇪🇸 Spanish</option>
+              <option value="de">🇩🇪 German</option>
+              <option value="ar">🇲🇦 Arabic</option>
+            </select>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={translateResume}
+              disabled={translating}
+              className="h-6 px-1.5 text-[10px] gap-1 text-brand hover:bg-brand-light"
+              title="Translate entire resume with AI"
+            >
+              {translating ? <Icon name="Loader2" className="w-3 h-3 animate-spin" /> : <Icon name="Languages" className="w-3 h-3" />}
+              Translate
+            </Button>
+          </div>
           {/* Import button — accepts PDF/DOCX/DOC/TXT, parses into all fields */}
           <input ref={importFileRef} type="file" accept=".pdf,.docx,.doc,.txt" className="hidden" onChange={(e) => onImport(e.target.files)} />
           <Button variant="outline" size="sm" onClick={() => importFileRef.current?.click()} disabled={importing} className="gap-1.5 border-brand text-brand hover:bg-brand-light h-8" title="Import a resume from PDF, DOCX, or TXT — extracts all fields automatically">
@@ -832,6 +1046,16 @@ ${JSON.stringify({
                 >
                   <Icon name="Sparkles" className="w-3.5 h-3.5" /> AI Copilot
                 </button>
+                <button
+                  onClick={() => setRightPanelTab("audit")}
+                  className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-semibold transition ${
+                    rightPanelTab === "audit"
+                      ? "bg-card shadow-sm text-brand"
+                      : "text-muted-foreground hover:text-foreground"
+                  }`}
+                >
+                  <Icon name="CheckSquare" className="w-3.5 h-3.5" /> ATS Audit
+                </button>
               </div>
               {rightPanelTab === "preview" && (
                 <Badge variant={onePageStatus.ok ? "success" : "warning"} className="text-[10px]">
@@ -855,7 +1079,7 @@ ${JSON.stringify({
                   <span className="sm:hidden">1-page enforced on export</span>
                 </div>
               </>
-            ) : (
+            ) : rightPanelTab === "copilot" ? (
               <div className="flex flex-col h-[calc(100vh-220px)] border border-border rounded-xl bg-card">
                 {/* Chat messages */}
                 <div className="flex-1 p-3 overflow-y-auto space-y-2.5 scrollbar-thin">
@@ -908,6 +1132,70 @@ ${JSON.stringify({
                   >
                     <Icon name="Send" className="w-3.5 h-3.5" />
                   </Button>
+                </div>
+              </div>
+            ) : (
+              /* ATS Audit panel UI */
+              <div className="flex flex-col h-[calc(100vh-220px)] border border-border rounded-xl bg-card p-4 overflow-y-auto space-y-3.5 scrollbar-thin">
+                <div className="flex items-center justify-between border-b border-border pb-2">
+                  <span className="text-xs font-bold text-foreground flex items-center gap-1.5">
+                    <Icon name="AlertCircle" className="w-4 h-4 text-brand" /> ATS Recommendation Center
+                  </span>
+                  <Badge variant="outline" className="text-[10px] text-brand font-mono">
+                    {auditIssues.filter(i => i.severity === "warning").length} Warnings
+                  </Badge>
+                </div>
+                <div className="space-y-2.5">
+                  {auditIssues.map((issue) => (
+                    <div
+                      key={issue.id}
+                      className={`p-3 rounded-lg border text-xs flex flex-col gap-2 transition ${
+                        issue.severity === "warning"
+                          ? "bg-amber-50/40 border-amber-200 dark:bg-amber-950/10 dark:border-amber-900/30"
+                          : issue.severity === "success"
+                          ? "bg-emerald-50/40 border-emerald-200 dark:bg-emerald-950/10 dark:border-emerald-900/30"
+                          : "bg-secondary/40 border-border"
+                      }`}
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="flex-1">
+                          <div className="font-semibold text-foreground flex items-center gap-1">
+                            {issue.severity === "success" ? (
+                              <Icon name="Check" className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                            ) : issue.severity === "warning" ? (
+                              <Icon name="AlertTriangle" className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+                            ) : (
+                              <Icon name="Info" className="w-3.5 h-3.5 text-blue-600 shrink-0" />
+                            )}
+                            {issue.title}
+                          </div>
+                          <div className="text-muted-foreground text-[10px] mt-1 leading-relaxed">
+                            {issue.description}
+                          </div>
+                        </div>
+                        {issue.actionLabel && (
+                          <Button
+                            size="sm"
+                            disabled={fixingIssueId === issue.id}
+                            onClick={() => fixIssue(issue)}
+                            className="bg-brand hover:bg-brand-dark text-white text-[10px] h-7 px-2 shrink-0 gap-1"
+                          >
+                            {fixingIssueId === issue.id ? (
+                              <Icon name="Loader2" className="w-3 h-3 animate-spin" />
+                            ) : (
+                              <Icon name="Sparkles" className="w-3 h-3" />
+                            )}
+                            <span>{issue.actionLabel}</span>
+                          </Button>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                  {auditIssues.length === 0 && (
+                    <div className="text-center py-8 text-muted-foreground text-xs font-semibold">
+                      ✓ No issues found. Your resume structure and keyword density are optimal!
+                    </div>
+                  )}
                 </div>
               </div>
             )}
