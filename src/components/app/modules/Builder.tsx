@@ -313,13 +313,32 @@ Guidelines:
 1. Do NOT invent false experiences, employers, dates, or credentials.
 2. Maintain clean, professional language.
 3. When referencing experience or skills, ensure you map them using the exact 'id' values provided in the current resume.
-4. Keep the text concise and suitable for a 1-page A4 format.`;
+4. Keep the text concise and suitable for a 1-page A4 format.
+5. CRITICAL — when the candidate's summary is marked as "(empty — user has not written a summary yet)", do NOT fabricate a generic summary (e.g. 'Results-driven professional with a passion for...'). Instead, ask the user to share their actual background so you can write something real and personalised.`;
 
+      // Detect placeholder / demo summaries — covers blankResume defaults, quality-gate clichés, and any AI-generated filler
+      const PLACEHOLDER_PATTERNS = [
+        "write a 2-3 line",
+        "revise and enhance",
+        "maximise clarity",
+        "maximize clarity",
+        "results-driven professional",
+        "passionate professional",
+        "results-oriented professional",
+        "dynamic professional",
+        "highly motivated professional",
+        "dedicated professional",
+        "optimizing processes, enhancing clarity",
+        "maximizing impact",
+        "your professional title",
+        "your name",
+        "company name",
+        "job title",
+      ];
+      const summaryLower = (resume?.summary ?? "").toLowerCase().trim();
       const isPlaceholderSummary = !resume?.summary ||
-        resume.summary.trim().length < 30 ||
-        resume.summary.toLowerCase().includes("revise and enhance") ||
-        resume.summary.toLowerCase().includes("maximise clarity") ||
-        resume.summary.toLowerCase().includes("maximize clarity");
+        summaryLower.length < 30 ||
+        PLACEHOLDER_PATTERNS.some(p => summaryLower.includes(p));
 
       const resumeContext = resume ? JSON.stringify({
         name: resume.name,
