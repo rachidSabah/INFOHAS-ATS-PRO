@@ -1164,19 +1164,38 @@ export function Optimizer() {
                 <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
                   <div>
                     <h3 className="font-display text-lg font-bold flex items-center gap-2">
-                      <Icon name="FileText" className="w-4 h-4 text-brand" /> Optimized resume — InfoHAS Pro layout
+                      <Icon name="FileText" className="w-4 h-4 text-brand" /> Optimized resume
                     </h3>
                     <p className="text-xs text-muted-foreground mt-0.5">
                       <span className="inline-flex items-center">
                         <Icon name="Pencil" className="w-3 h-3 inline text-brand" />
-                        {/* Mobile instruction */}
                         <span className="md:hidden"> Tap any section (or the pencil badge) to edit live. Tap the photo frame to upload your photo. Final step before export.</span>
-                        {/* Desktop instruction */}
                         <span className="hidden md:inline"> Hover any section to see a pencil — click to edit live. Click the photo frame to upload your photo. Final step before export.</span>
                       </span>
                     </p>
                   </div>
-                  <Badge variant="brand"><Icon name="Lock" className="w-3 h-3" /> One A4 page · validated</Badge>
+                  <div className="flex items-center gap-2">
+                    <label className="text-xs text-muted-foreground font-semibold">Template:</label>
+                    <select
+                      value={optimizedResume.template || "infohas-pro"}
+                      onChange={(e) => {
+                        const newTemplate = e.target.value as any;
+                        const next = { ...optimizedResume, template: newTemplate, updatedAt: new Date().toISOString() };
+                        setOptimizedResume(next);
+                        updateResume(next.id, { template: newTemplate });
+                      }}
+                      className="h-8 px-2 rounded-md border border-input bg-background text-xs font-semibold"
+                    >
+                      <option value="infohas-pro">InfoHAS Pro Layout</option>
+                      <option value="ats-professional">ATS Professional Layout</option>
+                      <option value="executive">Executive Layout</option>
+                      <option value="modern">Modern Layout</option>
+                      <option value="minimal">Minimal Layout</option>
+                      <option value="corporate">Corporate Layout</option>
+                      <option value="tech">Tech Layout</option>
+                    </select>
+                    <Badge variant="brand"><Icon name="Lock" className="w-3 h-3" /> One A4 page · validated</Badge>
+                  </div>
                 </div>
                 <div className="rounded-xl bg-secondary/60 p-2 sm:p-4 overflow-auto" style={{ maxHeight: "calc(100vh - 240px)" }}>
                   <div className="flex justify-center">
@@ -1271,6 +1290,58 @@ export function Optimizer() {
                 </CardContent>
               </Card>
             </div>
+
+            {/* === ATS Keyword Audit & Optimization Panel === */}
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-base flex items-center gap-2">
+                  <Icon name="CheckSquare" className="w-4 h-4 text-brand" /> ATS Keyword Audit & Optimization Panel
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="space-y-4">
+                  <div>
+                    <div className="text-xs font-semibold text-muted-foreground mb-2">
+                      MATCHED KEYWORDS ({(pipelineResult?.afterATS?.matchedKeywords.length ?? afterReport.matchedKeywords.length)})
+                    </div>
+                    <div className="flex flex-wrap gap-1.5">
+                      {((pipelineResult?.afterATS?.matchedKeywords ?? afterReport.matchedKeywords) || []).map((kw: string) => (
+                        <Badge key={kw} variant="outline" className="bg-emerald-50 text-emerald-700 border-emerald-200 gap-1 text-xs py-0.5 px-2">
+                          <Icon name="Check" className="w-3 h-3" /> {kw}
+                        </Badge>
+                      ))}
+                      {((pipelineResult?.afterATS?.matchedKeywords ?? afterReport.matchedKeywords) || []).length === 0 && (
+                        <div className="text-xs text-muted-foreground">No matched keywords found yet. Try refining your content.</div>
+                      )}
+                    </div>
+                  </div>
+                  <div>
+                    <div className="text-xs font-semibold text-muted-foreground mb-2">
+                      MISSING KEYWORDS ({(pipelineResult?.afterATS?.missingKeywords.length ?? afterReport.missingKeywords.length)}) — Click to copy
+                    </div>
+                    <div className="flex flex-wrap gap-1.5">
+                      {((pipelineResult?.afterATS?.missingKeywords ?? afterReport.missingKeywords) || []).map((kw: string) => (
+                        <span
+                          key={kw}
+                          className="inline-flex items-center rounded-full border border-border px-2 py-0.5 text-xs font-semibold bg-secondary text-secondary-foreground gap-1 cursor-pointer hover:bg-brand-light/30 transition-all duration-200"
+                          onClick={() => {
+                            navigator.clipboard.writeText(kw);
+                            toast.success(`Copied "${kw}" to clipboard!`);
+                          }}
+                        >
+                          <Icon name="Plus" className="w-3 h-3 text-muted-foreground" /> {kw}
+                        </span>
+                      ))}
+                      {((pipelineResult?.afterATS?.missingKeywords ?? afterReport.missingKeywords) || []).length === 0 && (
+                        <div className="text-xs text-emerald-600 font-medium flex items-center gap-1">
+                          <Icon name="CheckCircle2" className="w-3.5 h-3.5" /> ✓ Perfect match! All job description keywords are present in the optimized resume.
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
 
           </motion.div>
           )
