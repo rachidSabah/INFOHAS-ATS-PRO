@@ -26,7 +26,8 @@ import type { ResumeData } from "@/lib/types";
 
 function useResume() {
   const resumes = useApp((s) => s.resumes);
-  return resumes[0] || null;
+  const activeResumeId = useApp((s) => s.activeResumeId);
+  return resumes.find((r) => r.id === activeResumeId) || resumes[0] || null;
 }
 
 function AIOutput({ output, loading }: { output: string; loading: boolean }) {
@@ -2342,6 +2343,7 @@ export function AiAchievement() {
 export function Integrations() {
   const resume = useResume();
   const [emailTo, setEmailTo] = useState("");
+  const [qrOpen, setQrOpen] = useState(false);
 
   const emailExport = () => {
     if (!resume) { toast.error("Create a resume first"); return; }
@@ -2383,6 +2385,53 @@ export function Integrations() {
     toast.success("Resume backup downloaded — upload to Google Drive");
   };
 
+  const markdownExport = () => {
+    if (!resume) { toast.error("Create a resume first"); return; }
+    const text = `# ${resume.name}\n${resume.headline ? `**${resume.headline}**\n` : ""}\n${resume.contact.email ? `Email: ${resume.contact.email} | ` : ""}${resume.contact.phone ? `Phone: ${resume.contact.phone}` : ""}\n\n## Summary\n${resume.summary || ""}\n\n## Experience\n${resume.experience.map((e) => `### ${e.title} — ${e.company}\n_${e.startDate} - ${e.endDate}_\n\n${e.bullets.map((b) => `- ${b}`).join("\n")}`).join("\n\n")}\n\n## Education\n${resume.education.map((ed) => `### ${ed.degree} — ${ed.institution}\n_${ed.startDate} - ${ed.endDate}_`).join("\n\n")}\n\n## Skills\n${resume.skills.map((s) => `- ${s.name}`).join("\n")}`;
+    const blob = new Blob([text], { type: "text/markdown" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a"); a.href = url; a.download = `${resume.name.replace(/\s+/g, "_")}_resume.md`; a.click();
+    URL.revokeObjectURL(url);
+    toast.success("Markdown resume downloaded!");
+  };
+
+  const jsonResumeExport = () => {
+    if (!resume) { toast.error("Create a resume first"); return; }
+    const jResume = {
+      basics: {
+        name: resume.name,
+        label: resume.headline || "",
+        email: resume.contact.email || "",
+        phone: resume.contact.phone || "",
+        summary: resume.summary || "",
+      },
+      work: resume.experience.map((e) => ({
+        name: e.company,
+        position: e.title,
+        startDate: e.startDate,
+        endDate: e.endDate,
+        highlights: e.bullets,
+      })),
+      education: resume.education.map((ed) => ({
+        institution: ed.institution,
+        area: ed.degree,
+        startDate: ed.startDate,
+        endDate: ed.endDate,
+      })),
+      skills: resume.skills.map((s) => ({
+        name: s.name,
+      })),
+      languages: resume.languages.map((l) => ({
+        language: l.name,
+        fluency: l.proficiency || "",
+      })),
+    };
+    navigator.clipboard.writeText(JSON.stringify(jResume, null, 2));
+    toast.success("Copied to clipboard in JSON Resume Schema!");
+  };
+
+  const shareUrl = typeof window !== "undefined" ? `${window.location.origin}/r/${resume?.id || ""}` : "";
+
   return (
     <div className="space-y-6">
       <div><h1 className="font-display text-2xl font-bold flex items-center gap-2"><Icon name="Plug" className="w-6 h-6 text-brand" /> Integrations</h1><p className="text-sm text-muted-foreground mt-1">Export and share your resume across platforms.</p></div>
@@ -2393,7 +2442,36 @@ export function Integrations() {
         <Card><CardContent className="p-4"><div className="flex items-center gap-3 mb-3"><Icon name="FileText" className="w-8 h-8 text-[#000000]" /><div><div className="font-semibold text-sm">Notion Sync</div><div className="text-xs text-muted-foreground">Format for Notion</div></div></div><Button size="sm" variant="outline" onClick={notionExport} className="w-full gap-2"><Icon name="Copy" className="w-3.5 h-3.5" /> Copy for Notion</Button></CardContent></Card>
         <Card><CardContent className="p-4"><div className="flex items-center gap-3 mb-3"><Icon name="HardDrive" className="w-8 h-8 text-[#4285F4]" /><div><div className="font-semibold text-sm">Google Drive</div><div className="text-xs text-muted-foreground">Backup as JSON</div></div></div><Button size="sm" variant="outline" onClick={gdriveBackup} className="w-full gap-2"><Icon name="Download" className="w-3.5 h-3.5" /> Download Backup</Button></CardContent></Card>
         <Card><CardContent className="p-4"><div className="flex items-center gap-3 mb-3"><Icon name="Calendar" className="w-8 h-8 text-[#4285F4]" /><div><div className="font-semibold text-sm">Calendar</div><div className="text-xs text-muted-foreground">Schedule interview</div></div></div><Button size="sm" variant="outline" onClick={() => { window.open("https://calendar.google.com/calendar/render?action=TEMPLATE&text=Interview&dates=20260620T100000Z/20260620T110000Z&details=Interview%20scheduled%20from%20ResumeAI%20Pro"); toast.success("Calendar opened"); }} className="w-full gap-2"><Icon name="Plus" className="w-3.5 h-3.5" /> Add to Calendar</Button></CardContent></Card>
+        <Card><CardContent className="p-4"><div className="flex items-center gap-3 mb-3"><Icon name="QrCode" className="w-8 h-8 text-[#9333EA]" /><div><div className="font-semibold text-sm">QR Code Share</div><div className="text-xs text-muted-foreground">Mobile access code</div></div></div><Button size="sm" variant="outline" onClick={() => { if (!resume) { toast.error("Create a resume first"); return; } setQrOpen(true); }} className="w-full gap-2"><Icon name="QrCode" className="w-3.5 h-3.5" /> Show QR Code</Button></CardContent></Card>
+        <Card><CardContent className="p-4"><div className="flex items-center gap-3 mb-3"><Icon name="Code" className="w-8 h-8 text-[#059669]" /><div><div className="font-semibold text-sm">JSON Resume</div><div className="text-xs text-muted-foreground">jsonresume.org Schema</div></div></div><Button size="sm" variant="outline" onClick={jsonResumeExport} className="w-full gap-2"><Icon name="Copy" className="w-3.5 h-3.5" /> Copy JSON Schema</Button></CardContent></Card>
+        <Card><CardContent className="p-4"><div className="flex items-center gap-3 mb-3"><Icon name="FileDown" className="w-8 h-8 text-[#DC2626]" /><div><div className="font-semibold text-sm">Markdown Export</div><div className="text-xs text-muted-foreground">Download as .md file</div></div></div><Button size="sm" variant="outline" onClick={markdownExport} className="w-full gap-2"><Icon name="Download" className="w-3.5 h-3.5" /> Download Markdown</Button></CardContent></Card>
       </div>
+
+      {qrOpen && resume && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-in fade-in duration-200">
+          <Card className="max-w-sm w-full p-6 text-center space-y-4 animate-in zoom-in-95 duration-200 shadow-premium relative bg-card border border-border">
+            <Button
+              variant="ghost"
+              size="icon"
+              className="absolute right-3 top-3"
+              onClick={() => setQrOpen(false)}
+            >
+              <Icon name="X" className="w-4 h-4" />
+            </Button>
+            <div className="font-display text-lg font-bold">QR Code Share</div>
+            <p className="text-xs text-muted-foreground">Scan this code with a mobile device to view and download your resume instantly.</p>
+            <div className="bg-white p-4 rounded-xl border border-border inline-block mx-auto">
+              <img
+                src={`https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(shareUrl)}`}
+                alt="Resume QR Code"
+                className="w-[200px] h-[200px]"
+              />
+            </div>
+            <div className="text-xs font-mono bg-muted p-2 rounded truncate select-all">{shareUrl}</div>
+            <Button size="sm" className="w-full bg-brand text-white" onClick={() => { navigator.clipboard.writeText(shareUrl); toast.success("Share link copied!"); }}>Copy Link</Button>
+          </Card>
+        </div>
+      )}
     </div>
   );
 }
