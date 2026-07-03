@@ -996,7 +996,7 @@ export interface AIDevAgentHistory {
 /** Scan report — stored result of an audit/scan. */
 export interface AIDevReport {
   id: string;
-  type: "code_audit" | "error_analysis" | "route_inspector" | "database_inspector" | "security_scan" | "performance" | "deployment_validation";
+  type: "code_audit" | "error_analysis" | "route_inspector" | "database_inspector" | "security_scan" | "performance" | "deployment_validation" | "compliance_audit";
   title: string;
   summary: string;
   issues: AIDevIssue[];

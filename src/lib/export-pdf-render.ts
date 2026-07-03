@@ -298,7 +298,7 @@ export async function exportResumePDFRenderDoc(
     keywords: "resume, cv, career, pdf/a, ats",
     creator: "ATS Premium Optimizer",
     producer: "jsPDF + ATS Premium"
-  });
+  } as any);
 
   const xmpMetadata = `<?xpacket begin="" id="W5M0MpCehiHzreSzNTczkc9d"?>
 <x:xmpmeta xmlns:x="adobe:ns:meta/">

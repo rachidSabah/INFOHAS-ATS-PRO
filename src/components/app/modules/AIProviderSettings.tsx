@@ -247,7 +247,7 @@ export function AIProviderSettings() {
           {defaultProvider && (
             <div className="flex items-center justify-between p-2.5 rounded-lg bg-secondary/30 text-xs border border-border">
               <div className="flex items-center gap-2">
-                <Badge variant="secondary">Primary</Badge>
+                <Badge variant="outline">Primary</Badge>
                 <span className="font-semibold">{defaultProvider.name}</span>
                 <span className="text-muted-foreground font-mono">({form.defaultModel || "no model"})</span>
               </div>

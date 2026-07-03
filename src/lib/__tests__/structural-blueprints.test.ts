@@ -3,7 +3,7 @@ import { alignResumeToBlueprint } from "../unified-pipeline";
 import type { ResumeData } from "../types";
 
 describe("Structural Blueprints Alignment", () => {
-  const mockResume: ResumeData = {
+  const mockResume = {
     name: "ADAM BOUDKIK",
     headline: "Hospitality Professional",
     contact: {
@@ -15,7 +15,7 @@ describe("Structural Blueprints Alignment", () => {
     experience: [
       {
         id: "exp-1",
-        role: "Cabin Crew",
+        title: "Cabin Crew",
         company: "Qatar Airways",
         location: "Doha",
         startDate: "2024-01",
@@ -24,7 +24,7 @@ describe("Structural Blueprints Alignment", () => {
       },
       {
         id: "exp-2",
-        role: "Intern",
+        title: "Intern",
         company: "Hotel",
         location: "Bahrain",
         startDate: "2023-01",
@@ -66,12 +66,12 @@ describe("Structural Blueprints Alignment", () => {
       { id: "s2", name: "First Aid", category: "Safety" },
     ],
     languages: [
-      { language: "Arabic", proficiency: "Native" },
-      { language: "English", proficiency: "Fluent" },
+      { id: "l1", name: "Arabic", proficiency: "native" },
+      { id: "l2", name: "English", proficiency: "fluent" },
     ],
     certifications: [],
     dynamicSections: [],
-  };
+  } as unknown as ResumeData;
 
   it("should sort INFOHAS and OFPPT education rows to the top of the list", () => {
     const aligned = alignResumeToBlueprint(mockResume, "infohas_aviation");

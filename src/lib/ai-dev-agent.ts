@@ -1006,6 +1006,7 @@ function makeErrorReport(type: AIDevReport["type"], title: string, errorMsg: str
       status: "open",
     }],
     createdAt: new Date().toISOString(),
+    createdBy: "system",
   };
 }
 

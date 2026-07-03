@@ -1050,7 +1050,7 @@ Languages: Preserve all. Max ${c.languagesMaxEntries} entries.
 Summary: ${c.summaryMinWords}-${c.summaryMaxWords} words. ATS: ${c.agentDirectives.summary.atsAggressiveness}/100. No hallucinations. No parentheses.
 Guardian: Min score ${c.agentDirectives.guardian.minimumScore}. VETO: entities=${c.agentDirectives.guardian.enforceEntityIntegrity}, duplicates=${c.agentDirectives.guardian.enforceNoDuplicates}.
 ` : ""}
-\`;
+`;
 }
 
 function PageDensityVisualizer({ draft }: { draft: OptimizerDirectiveConfig }) {
@@ -1129,12 +1129,12 @@ function PageDensityVisualizer({ draft }: { draft: OptimizerDirectiveConfig }) {
           <div>
             <div className="flex justify-between items-center mb-1.5">
               <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Estimated Page Fill</span>
-              <span className={`text-sm font-bold \${statusColor}`}>{density}% ({statusText})</span>
+              <span className={`text-sm font-bold ${statusColor}`}>{density}% ({statusText})</span>
             </div>
             <div className="w-full bg-secondary rounded-full h-3 overflow-hidden border">
               <div 
-                className={`h-full transition-all duration-300 \${progressColor}`}
-                style={{ width: `\${Math.min(100, density)}%` }}
+                className={`h-full transition-all duration-300 ${progressColor}`}
+                style={{ width: `${Math.min(100, density)}%` }}
               />
             </div>
           </div>
@@ -1166,7 +1166,7 @@ function PageDensityVisualizer({ draft }: { draft: OptimizerDirectiveConfig }) {
 
         {/* Right Column: Stylized Live Page Render */}
         <div className="flex justify-center items-center">
-          <div className="relative border border-border/80 shadow-premium rounded bg-white dark:bg-zinc-950 overflow-hidden flex flex-col items-center justify-center p-2" style={{ width: `\${svgWidth + 16}px`, height: `\${svgHeight + 16}px` }}>
+          <div className="relative border border-border/80 shadow-premium rounded bg-white dark:bg-zinc-950 overflow-hidden flex flex-col items-center justify-center p-2" style={{ width: `${svgWidth + 16}px`, height: `${svgHeight + 16}px` }}>
             {/* SVG Page Representation */}
             <svg width={svgWidth} height={svgHeight} className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800">
               {/* Margins indicator (faint gray rect) */}
@@ -1178,18 +1178,18 @@ function PageDensityVisualizer({ draft }: { draft: OptimizerDirectiveConfig }) {
               <line x1={ml + 10} y1={mt + 10} x2={ml + 50} y2={mt + 10} stroke="#71717a" strokeWidth="1" />
 
               {/* Summary Block */}
-              <g transform={`translate(\${ml}, \${mt + hH + gap})`}>
+              <g transform={`translate(${ml}, ${mt + hH + gap})`}>
                 <rect x="2" y="2" width={contentWidth - 4} height={sH} fill="#f4f4f5" className="dark:fill-zinc-800" rx="1" />
                 <line x1="5" y1="6" x2={contentWidth - 10} y2="6" stroke="#d4d4d8" strokeWidth="1" className="dark:stroke-zinc-700" />
                 <line x1="5" y1="10" x2={contentWidth - 25} y2="10" stroke="#d4d4d8" strokeWidth="1" className="dark:stroke-zinc-700" />
               </g>
 
               {/* Experience Block */}
-              <g transform={`translate(\${ml}, \${mt + hH + sH + gap * 2})`}>
+              <g transform={`translate(${ml}, ${mt + hH + sH + gap * 2})`}>
                 <rect x="2" y="2" width={contentWidth - 4} height={eH} fill="#f4f4f5" className="dark:fill-zinc-800" rx="1" />
                 <line x1="5" y1="6" x2={contentWidth - 40} y2="6" stroke="#a1a1aa" strokeWidth="1.5" className="dark:stroke-zinc-600" />
                 {Array.from({ length: Math.min(4, draft.experienceMaxEntries || 3) }).map((_, idx) => (
-                  <g key={idx} transform={`translate(0, \${8 + idx * 12})`}>
+                  <g key={idx} transform={`translate(0, ${8 + idx * 12})`}>
                     <line x1="8" y1="4" x2={contentWidth - 15} y2="4" stroke="#e4e4e7" strokeWidth="1" className="dark:stroke-zinc-700" />
                     <line x1="8" y1="7" x2={contentWidth - 30} y2="7" stroke="#e4e4e7" strokeWidth="1" className="dark:stroke-zinc-700" />
                   </g>
@@ -1197,13 +1197,13 @@ function PageDensityVisualizer({ draft }: { draft: OptimizerDirectiveConfig }) {
               </g>
 
               {/* Education Block */}
-              <g transform={`translate(\${ml}, \${mt + hH + sH + eH + gap * 3})`}>
+              <g transform={`translate(${ml}, ${mt + hH + sH + eH + gap * 3})`}>
                 <rect x="2" y="2" width={contentWidth - 4} height={edH} fill="#f4f4f5" className="dark:fill-zinc-800" rx="1" />
                 <line x1="5" y1="6" x2={contentWidth - 50} y2="6" stroke="#a1a1aa" strokeWidth="1.5" className="dark:stroke-zinc-600" />
               </g>
 
               {/* Skills Block */}
-              <g transform={`translate(\${ml}, \${mt + hH + sH + eH + edH + gap * 4})`}>
+              <g transform={`translate(${ml}, ${mt + hH + sH + eH + edH + gap * 4})`}>
                 <rect x="2" y="2" width={contentWidth - 4} height={skH} fill="#f4f4f5" className="dark:fill-zinc-800" rx="1" />
                 <line x1="5" y1="4" x2={contentWidth - 20} y2="4" stroke="#a1a1aa" strokeWidth="1" className="dark:stroke-zinc-600" />
               </g>
@@ -1217,6 +1217,7 @@ function PageDensityVisualizer({ draft }: { draft: OptimizerDirectiveConfig }) {
             )}
           </div>
         </div>
-      </Card>
-    );
-  }
+      </CardContent>
+    </Card>
+  );
+}
