@@ -55,6 +55,12 @@ export async function POST(req: NextRequest) {
       baseUrl = "https://cloudcode-pa.googleapis.com/v1";
     }
 
+    if (baseUrl.includes("cloudcode-pa.googleapis.com")) {
+      if (!model || model === "claude-sonnet-4") {
+        model = "gemini-2.5-flash";
+      }
+    }
+
     if (!isAllowedProviderUrl(baseUrl)) {
       return NextResponse.json(
         { ok: false, error: "Provider URL not allowed. Only known AI provider APIs are supported." },

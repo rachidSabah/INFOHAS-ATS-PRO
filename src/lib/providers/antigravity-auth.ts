@@ -276,6 +276,7 @@ export async function generateAntigravity(
   if (opts.systemPrompt) messages.push({ role: "system", content: opts.systemPrompt });
   messages.push({ role: "user", content: opts.userPrompt });
 
+  const model = opts.model === "claude-sonnet-4" ? "gemini-2.5-flash" : opts.model;
   const res = await fetch(`${ANTIGRAVITY_API_BASE}/v1/chat/completions`, {
     method: "POST",
     headers: {
@@ -283,7 +284,7 @@ export async function generateAntigravity(
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
-      model: opts.model,
+      model,
       messages,
       max_tokens: opts.maxTokens ?? 4096,
       temperature: opts.temperature ?? 0.7,
