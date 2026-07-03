@@ -22,6 +22,7 @@ import type { ResumeData } from "./types";
 import { cleanupResumeGrammar, stripMarkdown, repairMalformedJSON, filterForbiddenSkills, isForbiddenSkill } from "./ai-response-processor";
 import { extractJSON } from "./ai";
 import { extractLockedFacts, computeFactDiff, computeFactualIntegrityScore } from "./locked-facts";
+import { STRUCTURAL_BLUEPRINTS } from "./structural-blueprints";
 import {
   findMatchingSourceEducation,
   findMatchingSourceLanguage,
@@ -842,6 +843,23 @@ export function finalizeResume(optimizedResume: ResumeData, sourceResume: Resume
     console.info(`[finalizeResume] Complete — ${entities.length} entities restored, ${duplicatesRemoved} duplicates removed`);
   }
 
+  // Step 6: Align to selected Structural Blueprint (e.g. InfoHAS Aviation or OFPPT Technician)
+  try {
+    let blueprintId = "infohas_aviation";
+    if (typeof window !== "undefined") {
+      const useAppGlobal = (window as any).useApp;
+      if (useAppGlobal) {
+        const storeBlueprintId = useAppGlobal.getState()?.optimizerDirective?.selectedStructuralBlueprintId;
+        if (storeBlueprintId) {
+          blueprintId = storeBlueprintId;
+        }
+      }
+    }
+    result = alignResumeToBlueprint(result, blueprintId);
+  } catch (blueprintErr: any) {
+    console.warn("[finalizeResume] Structural blueprint alignment failed (non-fatal):", blueprintErr?.message);
+  }
+
   // === GUARDIAN VALIDATION (Dynamic Section Preservation) ===
   // Reject or alert if section counts don't match original blueprint
   const finalValidation = validateImmutableEntities(result, sourceResume);
@@ -849,6 +867,73 @@ export function finalizeResume(optimizedResume: ResumeData, sourceResume: Resume
     console.error("[Guardian] Final validation failed after all restoration attempts!", finalValidation.violations);
     // In a strict production environment, we might throw an error here.
     // For now, we log it clearly for the observability system.
+  }
+
+  return result;
+}
+
+export function alignResumeToBlueprint(resume: ResumeData, blueprintId?: string): ResumeData {
+  const bid = blueprintId || "infohas_aviation";
+  const blueprint = STRUCTURAL_BLUEPRINTS[bid] || STRUCTURAL_BLUEPRINTS.infohas_aviation;
+  const result = JSON.parse(JSON.stringify(resume)) as ResumeData;
+
+  // 1. Align Education:
+  // Sort Moroccan vocational centers (INFOHAS/OFPPT) to the top of the education list
+  if (result.education && result.education.length > 0) {
+    const isVocational = (inst: string) => {
+      const lower = (inst || "").toLowerCase();
+      return lower.includes("infohas") || lower.includes("ofppt") || lower.includes("vocational") || lower.includes("aviation") || lower.includes("académie") || lower.includes("institut");
+    };
+    result.education.sort((a, b) => {
+      const aVoc = isVocational(a.institution);
+      const bVoc = isVocational(b.institution);
+      if (aVoc && !bVoc) return -1;
+      if (!aVoc && bVoc) return 1;
+      return 0;
+    });
+
+    // Enforce max education entries limit
+    const eduSection = blueprint.sections.find(s => s.id === "education");
+    if (eduSection?.maxEntries && result.education.length > eduSection.maxEntries) {
+      result.education = result.education.slice(0, eduSection.maxEntries);
+    }
+  }
+
+  // 2. Align Experience:
+  const expSection = blueprint.sections.find(s => s.id === "experience");
+  if (result.experience && result.experience.length > 0) {
+    // Enforce max experience entries limit
+    if (expSection?.maxEntries && result.experience.length > expSection.maxEntries) {
+      result.experience = result.experience.slice(0, expSection.maxEntries);
+    }
+    // Enforce max bullets per entry limit
+    if (expSection?.maxBulletsPerEntry) {
+      result.experience = result.experience.map(exp => {
+        if (exp.bullets && exp.bullets.length > expSection.maxBulletsPerEntry!) {
+          return {
+            ...exp,
+            bullets: exp.bullets.slice(0, expSection.maxBulletsPerEntry!)
+          };
+        }
+        return exp;
+      });
+    }
+  }
+
+  // 3. Align Skills limit:
+  const skillsSection = blueprint.sections.find(s => s.id === "skills");
+  if (result.skills && result.skills.length > 0) {
+    if (skillsSection?.maxEntries && result.skills.length > skillsSection.maxEntries) {
+      result.skills = result.skills.slice(0, skillsSection.maxEntries);
+    }
+  }
+
+  // 4. Align Languages limit:
+  const langSection = blueprint.sections.find(s => s.id === "languages");
+  if (result.languages && result.languages.length > 0) {
+    if (langSection?.maxEntries && result.languages.length > langSection.maxEntries) {
+      result.languages = result.languages.slice(0, langSection.maxEntries);
+    }
   }
 
   return result;

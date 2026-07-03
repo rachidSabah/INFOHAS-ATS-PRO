@@ -747,6 +747,7 @@ export const SEED_FLAGS: FeatureFlags = {
  * settings page. The values are stored in D1 and synced to all clients.
  */
 export const SEED_OPTIMIZER_DIRECTIVE: OptimizerDirectiveConfig = {
+  selectedStructuralBlueprintId: "infohas_aviation",
   // === PAGE ===
   pageSize: "A4",
   marginTopMm: 6.35,       // 0.25 inch

@@ -13,6 +13,7 @@ import { SEED_OPTIMIZER_DIRECTIVE } from "@/lib/mock-data";
 import { toast } from "sonner";
 import type { OptimizerDirectiveConfig, AgentDirectives } from "@/lib/types";
 import { BUILT_IN_PROFILES, applyProfileToConfig } from "@/lib/directive-profiles";
+import { STRUCTURAL_BLUEPRINTS } from "@/lib/structural-blueprints";
 
 export function OptimizerDirective() {
   const config = useApp((s) => s.optimizerDirective);
@@ -115,6 +116,92 @@ export function OptimizerDirective() {
           <p className="text-xs text-muted-foreground">
             Selecting a profile modifies all applicable fields above. You can then fine-tune individual settings before saving.
           </p>
+        </CardContent>
+      </Card>
+
+      {/* STRUCTURAL BLUEPRINT SKELETON REFERENCE LIBRARY */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-lg flex items-center gap-2">
+            <Icon name="GitBranch" className="w-4 h-4 text-brand" /> Structural Blueprint Reference Library
+          </CardTitle>
+          <CardDescription>
+            Select a target layout blueprint. Optimization agents and the Supervisor will automatically format, reorder sections, and enforce strict limits matching this exact structural blueprint.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="grid md:grid-cols-3 gap-3">
+            {Object.values(STRUCTURAL_BLUEPRINTS).map((bp) => {
+              const isSelected = (draft.selectedStructuralBlueprintId || "infohas_aviation") === bp.id;
+              return (
+                <button
+                  key={bp.id}
+                  onClick={() => {
+                    patch({ selectedStructuralBlueprintId: bp.id });
+                    toast.info(`Target blueprint switched to "${bp.name}" — save changes to apply.`);
+                  }}
+                  className={`relative flex flex-col items-start p-3.5 rounded-lg border text-left transition-all ${
+                    isSelected
+                      ? "border-brand bg-brand/5 dark:bg-brand/10 ring-1 ring-brand"
+                      : "border-input bg-background hover:bg-secondary/40 hover:border-brand/40"
+                  }`}
+                >
+                  <div className="flex items-center justify-between w-full">
+                    <span className="text-sm font-semibold">{bp.name}</span>
+                    {isSelected && (
+                      <span className="flex h-2 w-2 relative">
+                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-brand opacity-75"></span>
+                        <span className="relative inline-flex rounded-full h-2 w-2 bg-brand"></span>
+                      </span>
+                    )}
+                  </div>
+                  <span className="text-xs text-muted-foreground mt-1 line-clamp-2">{bp.description}</span>
+                </button>
+              );
+            })}
+          </div>
+
+          {/* Blueprint Details */}
+          {(() => {
+            const activeBp = STRUCTURAL_BLUEPRINTS[draft.selectedStructuralBlueprintId || "infohas_aviation"];
+            if (!activeBp) return null;
+            return (
+              <div className="rounded-lg bg-muted/40 border p-4 space-y-3 text-xs leading-normal">
+                <div className="flex justify-between items-center border-b pb-2">
+                  <span className="font-semibold text-foreground">Active Blueprint: {activeBp.name}</span>
+                  <span className="text-[10px] uppercase font-bold text-muted-foreground">Guidelines</span>
+                </div>
+                <div className="grid sm:grid-cols-2 gap-4">
+                  <div>
+                    <span className="text-muted-foreground font-medium block mb-1">Target Section Order:</span>
+                    <ol className="list-decimal list-inside space-y-0.5 text-[11px] text-foreground/80">
+                      {activeBp.sections.map((sec) => (
+                        <li key={sec.id}>
+                          <span className="font-medium text-foreground">{sec.name}</span>
+                          {sec.maxEntries && ` (Max ${sec.maxEntries} entries)`}
+                          {sec.maxBulletsPerEntry && ` (Max ${sec.maxBulletsPerEntry} bullets)`}
+                        </li>
+                      ))}
+                    </ol>
+                  </div>
+                  <div className="space-y-2">
+                    <div>
+                      <span className="text-muted-foreground font-medium block">Date Representation Format:</span>
+                      <p className="text-[11px] text-foreground/80 font-mono mt-0.5">{activeBp.formattingHints.datesFormat}</p>
+                    </div>
+                    <div>
+                      <span className="text-muted-foreground font-medium block">Bullet Writing Style:</span>
+                      <p className="text-[11px] text-foreground/80 mt-0.5">{activeBp.formattingHints.bulletStyle}</p>
+                    </div>
+                    <div>
+                      <span className="text-muted-foreground font-medium block">Sorting & Hierarchy Rules:</span>
+                      <p className="text-[11px] text-foreground/80 mt-0.5">{activeBp.formattingHints.entityOrder}</p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            );
+          })()}
         </CardContent>
       </Card>
 

@@ -599,6 +599,7 @@ export interface FeatureFlags {
  * pt for font sizes, etc.).
  */
 export interface OptimizerDirectiveConfig {
+  selectedStructuralBlueprintId?: string;
   // === PAGE ===
   pageSize: "A4" | "Letter";
   marginTopMm: number;       // top margin in mm
