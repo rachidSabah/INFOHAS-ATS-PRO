@@ -286,6 +286,9 @@ export function OptimizerDirective() {
       {/* PER-AGENT DIRECTIVES */}
       <AgentDirectivesSection draft={draft} patch={patch} />
 
+      {/* Live Page Density Balance visualizer */}
+      <PageDensityVisualizer draft={draft} />
+
       {/* Live preview of generated directive */}
       <Card>
         <CardHeader>
@@ -957,7 +960,176 @@ Skills: Max ${c.skillsMaxGroups} groups. Never Targeted Keywords. No company/loc
 Experience: ${c.agentDirectives.experience.rewriteBulletsOnly ? "Rewrite bullets ONLY." : ""} Role | Company | Date format. Preserve chronology.
 Education: Diploma | School | Date format. Never remove schools.
 Languages: Preserve all. Max ${c.languagesMaxEntries} entries.
+Summary: ${c.summaryMinWords}-${c.summaryMaxWords} words. ATS: ${c.agentDirectives.summary.atsAggressiveness}/100. No hallucinations. No parentheses.
 Guardian: Min score ${c.agentDirectives.guardian.minimumScore}. VETO: entities=${c.agentDirectives.guardian.enforceEntityIntegrity}, duplicates=${c.agentDirectives.guardian.enforceNoDuplicates}.
 ` : ""}
-`;
+\`;
 }
+
+function PageDensityVisualizer({ draft }: { draft: OptimizerDirectiveConfig }) {
+  // A4 height is 297mm. Printable height = 297 - marginTop - marginBottom
+  const pageHeightMm = draft.pageSize === "A4" ? 297 : 279;
+  const printableHeightMm = pageHeightMm - (draft.marginTopMm || 15) - (draft.marginBottomMm || 15);
+  
+  // Estimate consumed height in mm
+  let headerHeight = 35 + ((draft.nameSizePt || 24) - 24) * 0.4;
+  let summaryHeight = ((draft.summaryMaxWords || 80) / 12) * 5 * (draft.lineHeight || 1.2) * ((draft.bodyFontSizePt || 10) / 10);
+  let expHeight = (draft.experienceMaxEntries || 3) * (8 + (draft.experienceBulletsPerEntry || 3) * 5 * (draft.lineHeight || 1.2) * ((draft.bodyFontSizePt || 10) / 10));
+  let eduHeight = (draft.educationMaxEntries || 2) * 7 * (draft.lineHeight || 1.2) * ((draft.bodyFontSizePt || 10) / 10);
+  let skillsHeight = (draft.skillsMaxGroups || 3) * 6 * (draft.lineHeight || 1.2) * ((draft.bodyFontSizePt || 10) / 10);
+  let totalSectionGaps = 4 * (draft.sectionGapMm || 5);
+  
+  let consumedHeight = headerHeight + summaryHeight + expHeight + eduHeight + skillsHeight + totalSectionGaps;
+  const density = Math.round((consumedHeight / printableHeightMm) * 100);
+
+  // Status mapping
+  let statusText = "Optimal Single Page Fit";
+  let statusColor = "text-emerald-600 dark:text-emerald-400";
+  let progressColor = "bg-emerald-500";
+  let warningText = "";
+
+  if (density < 80) {
+    statusText = "Sparse Layout";
+    statusColor = "text-blue-500";
+    progressColor = "bg-blue-500";
+    warningText = "Your resume has too much empty space. Consider increasing font sizes, summary length, or margins to fill the page.";
+  } else if (density > 100 && density <= 110) {
+    statusText = "Potential Two-Page Spill";
+    statusColor = "text-amber-500";
+    progressColor = "bg-amber-500";
+    warningText = "High risk of spilling onto page 2. Try reducing line height, body font size, or margins slightly to compress it.";
+  } else if (density > 110) {
+    statusText = "Definite Two-Page Overflow";
+    statusColor = "text-red-500";
+    progressColor = "bg-red-500";
+    warningText = "Your content will overflow to a second page. If you want a strict one-page resume, apply compression or reduce entry counts.";
+  }
+
+  // Margin scaling for SVG page preview
+  const scale = 0.6; // Scale A4 to fit the preview card
+  const svgWidth = 210 * scale;
+  const svgHeight = pageHeightMm * scale;
+  
+  const mt = (draft.marginTopMm || 15) * scale;
+  const mb = (draft.marginBottomMm || 15) * scale;
+  const ml = (draft.marginLeftMm || 15) * scale;
+  const mr = (draft.marginRightMm || 15) * scale;
+  
+  // Calculate relative sizes for drawing
+  const contentWidth = svgWidth - ml - mr;
+  const contentHeight = svgHeight - mt - mb;
+  
+  const hH = Math.min(contentHeight * 0.15, headerHeight * scale);
+  const sH = Math.min(contentHeight * 0.15, summaryHeight * scale);
+  const eH = Math.min(contentHeight * 0.45, expHeight * scale);
+  const edH = Math.min(contentHeight * 0.15, eduHeight * scale);
+  const skH = Math.min(contentHeight * 0.1, skillsHeight * scale);
+  const gap = totalSectionGaps * scale * 0.2;
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-lg flex items-center gap-2">
+          <Icon name="Gauge" className="w-5 h-5 text-brand" /> Page Density & Balance Simulator
+        </CardTitle>
+        <CardDescription>
+          Visualize how font sizes, line heights, margins, and content limits affect A4/Letter page boundaries.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="grid md:grid-cols-3 gap-6">
+        {/* Left/Middle Column: Gauge & Warnings */}
+        <div className="md:col-span-2 space-y-4 flex flex-col justify-center">
+          <div>
+            <div className="flex justify-between items-center mb-1.5">
+              <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Estimated Page Fill</span>
+              <span className={`text-sm font-bold \${statusColor}`}>{density}% ({statusText})</span>
+            </div>
+            <div className="w-full bg-secondary rounded-full h-3 overflow-hidden border">
+              <div 
+                className={`h-full transition-all duration-300 \${progressColor}`}
+                style={{ width: `\${Math.min(100, density)}%` }}
+              />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3 text-xs bg-muted/30 p-3 rounded-lg border">
+            <div>
+              <span className="text-muted-foreground block">Printable Height:</span>
+              <span className="font-semibold text-foreground">{printableHeightMm.toFixed(0)}mm</span>
+            </div>
+            <div>
+              <span className="text-muted-foreground block">Content Height (Est):</span>
+              <span className="font-semibold text-foreground">{consumedHeight.toFixed(0)}mm</span>
+            </div>
+            <div className="col-span-2 border-t pt-1.5 mt-1 text-[11px] text-muted-foreground leading-normal">
+              {warningText ? (
+                <p className="flex items-start gap-1.5 text-foreground/80">
+                  <Icon name="Info" className="w-3.5 h-3.5 text-brand shrink-0 mt-0.5" />
+                  {warningText}
+                </p>
+              ) : (
+                <p className="text-emerald-700 dark:text-emerald-400 font-medium flex items-start gap-1.5">
+                  <Icon name="CheckCircle2" className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+                  Your layout parameters are optimal! This resume will fit comfortably on a single page.
+                </p>
+              )}
+            </div>
+          </div>
+        </div>
+
+        {/* Right Column: Stylized Live Page Render */}
+        <div className="flex justify-center items-center">
+          <div className="relative border border-border/80 shadow-premium rounded bg-white dark:bg-zinc-950 overflow-hidden flex flex-col items-center justify-center p-2" style={{ width: `\${svgWidth + 16}px`, height: `\${svgHeight + 16}px` }}>
+            {/* SVG Page Representation */}
+            <svg width={svgWidth} height={svgHeight} className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800">
+              {/* Margins indicator (faint gray rect) */}
+              <rect x={ml} y={mt} width={contentWidth} height={contentHeight} fill="none" stroke="#e4e4e7" strokeDasharray="2,2" strokeWidth="0.5" className="dark:stroke-zinc-800" />
+              
+              {/* Header Box (stylized lines) */}
+              <rect x={ml + 5} y={mt + 2} width={contentWidth - 10} height={hH} fill="#1154a320" rx="1" />
+              <line x1={ml + 10} y1={mt + 6} x2={ml + 35} y2={mt + 6} stroke="#1154a3" strokeWidth="2" />
+              <line x1={ml + 10} y1={mt + 10} x2={ml + 50} y2={mt + 10} stroke="#71717a" strokeWidth="1" />
+
+              {/* Summary Block */}
+              <g transform={`translate(\${ml}, \${mt + hH + gap})`}>
+                <rect x="2" y="2" width={contentWidth - 4} height={sH} fill="#f4f4f5" className="dark:fill-zinc-800" rx="1" />
+                <line x1="5" y1="6" x2={contentWidth - 10} y2="6" stroke="#d4d4d8" strokeWidth="1" className="dark:stroke-zinc-700" />
+                <line x1="5" y1="10" x2={contentWidth - 25} y2="10" stroke="#d4d4d8" strokeWidth="1" className="dark:stroke-zinc-700" />
+              </g>
+
+              {/* Experience Block */}
+              <g transform={`translate(\${ml}, \${mt + hH + sH + gap * 2})`}>
+                <rect x="2" y="2" width={contentWidth - 4} height={eH} fill="#f4f4f5" className="dark:fill-zinc-800" rx="1" />
+                <line x1="5" y1="6" x2={contentWidth - 40} y2="6" stroke="#a1a1aa" strokeWidth="1.5" className="dark:stroke-zinc-600" />
+                {Array.from({ length: Math.min(4, draft.experienceMaxEntries || 3) }).map((_, idx) => (
+                  <g key={idx} transform={`translate(0, \${8 + idx * 12})`}>
+                    <line x1="8" y1="4" x2={contentWidth - 15} y2="4" stroke="#e4e4e7" strokeWidth="1" className="dark:stroke-zinc-700" />
+                    <line x1="8" y1="7" x2={contentWidth - 30} y2="7" stroke="#e4e4e7" strokeWidth="1" className="dark:stroke-zinc-700" />
+                  </g>
+                ))}
+              </g>
+
+              {/* Education Block */}
+              <g transform={`translate(\${ml}, \${mt + hH + sH + eH + gap * 3})`}>
+                <rect x="2" y="2" width={contentWidth - 4} height={edH} fill="#f4f4f5" className="dark:fill-zinc-800" rx="1" />
+                <line x1="5" y1="6" x2={contentWidth - 50} y2="6" stroke="#a1a1aa" strokeWidth="1.5" className="dark:stroke-zinc-600" />
+              </g>
+
+              {/* Skills Block */}
+              <g transform={`translate(\${ml}, \${mt + hH + sH + eH + edH + gap * 4})`}>
+                <rect x="2" y="2" width={contentWidth - 4} height={skH} fill="#f4f4f5" className="dark:fill-zinc-800" rx="1" />
+                <line x1="5" y1="4" x2={contentWidth - 20} y2="4" stroke="#a1a1aa" strokeWidth="1" className="dark:stroke-zinc-600" />
+              </g>
+            </svg>
+
+            {/* Overflow Overlay warning indicator */}
+            {density > 100 && (
+              <div className="absolute inset-x-0 bottom-0 bg-red-500/90 text-white text-[9px] font-bold py-1 text-center backdrop-blur-xs flex items-center justify-center gap-1">
+                <Icon name="AlertTriangle" className="w-3 h-3 animate-pulse" /> Page boundary spill!
+              </div>
+            )}
+          </div>
+        </div>
+      </Card>
+    );
+  }
