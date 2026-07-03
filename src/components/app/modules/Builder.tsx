@@ -60,6 +60,146 @@ export function Builder() {
   const importFileRef = useRef<HTMLInputElement>(null);
 
   const [shrinking, setShrinking] = useState(false);
+  const [rightPanelTab, setRightPanelTab] = useState<"preview" | "copilot">("preview");
+  const [messages, setMessages] = useState<Array<{ role: "user" | "assistant"; content: string }>>([
+    {
+      role: "assistant",
+      content: "Hi! I am your AI Resume Copilot. Ask me to rewrite your summary, polish experience bullet points, or optimize sections for your target job!",
+    },
+  ]);
+  const [inputMessage, setInputMessage] = useState("");
+  const [sendingMessage, setSendingMessage] = useState(false);
+
+  const sendMessage = async () => {
+    if (!inputMessage.trim() || sendingMessage) return;
+    const userText = inputMessage;
+    setInputMessage("");
+    setMessages((prev) => [...prev, { role: "user", content: userText }]);
+    setSendingMessage(true);
+
+    try {
+      const { ProviderRouter } = await import("@/lib/ai/services/router");
+      const systemPrompt = `You are a professional AI Resume Copilot.
+Your job is to help the candidate optimize their resume for their target job.
+You can suggest changes to their resume. If you decide to make updates to the resume fields, you MUST append a special [PATCH] block at the very end of your response, followed by a valid JSON object representing a partial ResumeData structure.
+
+Example 1 (updating professional summary):
+I have updated your professional summary to emphasize your leadership skills.
+[PATCH]
+{
+  "summary": "Strategic and outcomes-driven manager with..."
+}
+
+Example 2 (updating experience bullets):
+I have polished your experience bullet points to be more impact-oriented.
+[PATCH]
+{
+  "experience": [
+    {
+      "id": "e_1", // You MUST use the correct experience entry ID from the context
+      "bullets": [
+        "Spearheaded cloud migration of 12 critical services, improving availability to 99.99%.",
+        "Managed a team of 4 engineers to deliver the product v2 2 weeks ahead of schedule."
+      ]
+    }
+  ]
+}
+
+Example 3 (updating skills):
+I've updated your skills list to include key missing technical proficiencies.
+[PATCH]
+{
+  "skills": [
+    { "id": "s_1", "name": "React", "category": "Frontend" },
+    { "id": "s_2", "name": "TypeScript", "category": "Languages" }
+  ]
+}
+
+Guidelines:
+1. Do NOT invent false experiences, employers, dates, or credentials.
+2. Maintain clean, professional language.
+3. When referencing experience or skills, ensure you map them using the exact 'id' values provided in the current resume.
+4. Keep the text concise and suitable for a 1-page A4 format.`;
+
+      const contextPrompt = `
+TARGET JOB DETAILS:
+${activeJD ? JSON.stringify({ title: activeJD.title, company: activeJD.company, keywords: activeJD.keywords }) : "General Optimization (No specific job selected)"}
+
+CURRENT RESUME DATA:
+${JSON.stringify({
+  name: resume.name,
+  headline: resume.headline,
+  summary: resume.summary,
+  experience: resume.experience.map(e => ({ id: e.id, company: e.company, title: e.title, bullets: e.bullets })),
+  skills: resume.skills
+})}
+`;
+
+      const response = await ProviderRouter.chat({
+        messages: [
+          { role: "system", content: systemPrompt },
+          { role: "user", content: contextPrompt },
+          ...messages.map((m) => ({ role: m.role, content: m.content })),
+          { role: "user", content: userText }
+        ],
+        maxTokens: 800,
+        temperature: 0.5
+      }, { agentTask: "summary" });
+
+      const reply = response.text || "";
+      let cleanReply = reply;
+      let patchData: any = null;
+
+      if (reply.includes("[PATCH]")) {
+        const parts = reply.split("[PATCH]");
+        cleanReply = parts[0].trim();
+        const jsonStr = parts[1].trim();
+        try {
+          patchData = JSON.parse(jsonStr);
+        } catch (err) {
+          console.warn("[Copilot] Failed to parse patch JSON:", err);
+        }
+      }
+
+      setMessages((prev) => [...prev, { role: "assistant", content: cleanReply }]);
+
+      if (patchData) {
+        const updatedResume: Partial<ResumeData> = {};
+        
+        if (typeof patchData.summary === "string") {
+          updatedResume.summary = patchData.summary;
+        }
+        if (typeof patchData.headline === "string") {
+          updatedResume.headline = patchData.headline;
+        }
+        if (Array.isArray(patchData.skills)) {
+          updatedResume.skills = patchData.skills;
+        }
+        if (Array.isArray(patchData.experience)) {
+          updatedResume.experience = resume.experience.map((e) => {
+            const match = patchData.experience.find((pe: any) => pe.id === e.id);
+            if (match) {
+              return {
+                ...e,
+                bullets: Array.isArray(match.bullets) ? match.bullets : e.bullets,
+                title: typeof match.title === "string" ? match.title : e.title,
+                company: typeof match.company === "string" ? match.company : e.company,
+              };
+            }
+            return e;
+          });
+        }
+
+        patch(updatedResume);
+        toast.success("AI Copilot updated your resume!");
+      }
+    } catch (err: any) {
+      console.error("[Copilot] Chat request failed:", err);
+      setMessages((prev) => [...prev, { role: "assistant", content: "Sorry, I encountered an error trying to process your request. Please try again." }]);
+    } finally {
+      setSendingMessage(false);
+    }
+  };
   const handleAutoShrink = () => {
     setShrinking(true);
     let attempts = 0;
@@ -668,29 +808,109 @@ export function Builder() {
             {/* ATS Match Meter — real-time keyword scoring */}
             <ATSMatchMeter
               resume={resume}
-              jd={jobDescriptions.length > 0 ? jobDescriptions[jobDescriptions.length - 1] : null}
+              jd={activeJD || null}
             />
             <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <Icon name="Eye" className="w-4 h-4 text-brand" />
-                <span className="text-sm font-semibold">Live A4 preview</span>
+              <div className="flex gap-1 bg-secondary p-0.5 rounded-lg">
+                <button
+                  onClick={() => setRightPanelTab("preview")}
+                  className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-semibold transition ${
+                    rightPanelTab === "preview"
+                      ? "bg-card shadow-sm text-brand"
+                      : "text-muted-foreground hover:text-foreground"
+                  }`}
+                >
+                  <Icon name="Eye" className="w-3.5 h-3.5" /> Preview
+                </button>
+                <button
+                  onClick={() => setRightPanelTab("copilot")}
+                  className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-semibold transition ${
+                    rightPanelTab === "copilot"
+                      ? "bg-card shadow-sm text-brand"
+                      : "text-muted-foreground hover:text-foreground"
+                  }`}
+                >
+                  <Icon name="Sparkles" className="w-3.5 h-3.5" /> AI Copilot
+                </button>
               </div>
-              <Badge variant={onePageStatus.ok ? "success" : "warning"} className="text-[10px]">
-                <Icon name={onePageStatus.ok ? "CheckCircle2" : "AlertTriangle"} className="w-3 h-3" />
-                <span className="hidden sm:inline">{onePageStatus.msg}</span>
-                <span className="sm:hidden">{onePageStatus.ok ? "OK" : "Tight"}</span>
-              </Badge>
+              {rightPanelTab === "preview" && (
+                <Badge variant={onePageStatus.ok ? "success" : "warning"} className="text-[10px]">
+                  <Icon name={onePageStatus.ok ? "CheckCircle2" : "AlertTriangle"} className="w-3.5 h-3.5" />
+                  <span className="hidden sm:inline">{onePageStatus.msg}</span>
+                  <span className="sm:hidden">{onePageStatus.ok ? "OK" : "Tight"}</span>
+                </Badge>
+              )}
             </div>
-            <div className="rounded-xl bg-secondary/60 p-2 sm:p-4 overflow-auto" style={{ maxHeight: "calc(100vh - 160px)" }}>
-              <div className="flex justify-center">
-                <A4Preview resume={resume} scale={scale} ref={previewRef} />
+
+            {rightPanelTab === "preview" ? (
+              <>
+                <div className="rounded-xl bg-secondary/60 p-2 sm:p-4 overflow-auto" style={{ maxHeight: "calc(100vh - 160px)" }}>
+                  <div className="flex justify-center">
+                    <A4Preview resume={resume} scale={scale} ref={previewRef} />
+                  </div>
+                </div>
+                <div className="flex items-center justify-center gap-2 text-xs text-muted-foreground">
+                  <Icon name="Lock" className="w-3 h-3" />
+                  <span className="hidden sm:inline">Export enforces <code className="px-1 rounded bg-muted">maxPages = 1</code> — auto-compresses if needed.</span>
+                  <span className="sm:hidden">1-page enforced on export</span>
+                </div>
+              </>
+            ) : (
+              <div className="flex flex-col h-[calc(100vh-220px)] border border-border rounded-xl bg-card">
+                {/* Chat messages */}
+                <div className="flex-1 p-3 overflow-y-auto space-y-2.5 scrollbar-thin">
+                  {messages.map((msg, i) => (
+                    <div
+                      key={i}
+                      className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}
+                    >
+                      <div
+                        className={`max-w-[85%] rounded-lg p-2.5 text-xs leading-relaxed ${
+                          msg.role === "user"
+                            ? "bg-brand text-white"
+                            : "bg-secondary text-foreground"
+                        }`}
+                      >
+                        {msg.content}
+                      </div>
+                    </div>
+                  ))}
+                  {sendingMessage && (
+                    <div className="flex justify-start">
+                      <div className="bg-secondary text-muted-foreground max-w-[85%] rounded-lg p-2.5 text-xs flex items-center gap-1.5">
+                        <Icon name="Loader2" className="w-3.5 h-3.5 animate-spin text-brand" />
+                        AI Copilot is thinking...
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* Input box */}
+                <div className="p-2 border-t border-border flex gap-1.5 bg-background/50">
+                  <Input
+                    value={inputMessage}
+                    onChange={(e) => setInputMessage(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" && !e.shiftKey) {
+                        e.preventDefault();
+                        sendMessage();
+                      }
+                    }}
+                    placeholder="e.g. Optimize summary for target job..."
+                    className="text-xs h-9"
+                    disabled={sendingMessage}
+                  />
+                  <Button
+                    size="sm"
+                    onClick={sendMessage}
+                    disabled={sendingMessage || !inputMessage.trim()}
+                    className="h-9 px-3 bg-brand text-white hover:bg-brand-dark"
+                  >
+                    <Icon name="Send" className="w-3.5 h-3.5" />
+                  </Button>
+                </div>
               </div>
-            </div>
-            <div className="flex items-center justify-center gap-2 text-xs text-muted-foreground">
-              <Icon name="Lock" className="w-3 h-3" />
-              <span className="hidden sm:inline">Export enforces <code className="px-1 rounded bg-muted">maxPages = 1</code> — auto-compresses if needed.</span>
-              <span className="sm:hidden">1-page enforced on export</span>
-            </div>
+            )}
           </div>
         </div>
       </div>
