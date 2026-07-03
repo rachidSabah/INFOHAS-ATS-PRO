@@ -27,6 +27,9 @@ export const ALLOWED_PROVIDER_HOSTS = new Set([
   "api.cohere.ai",
   "bedrock-runtime.us-east-1.amazonaws.com",
   "bedrock-runtime.us-west-2.amazonaws.com",
+  // New free-tier providers
+  "api.cerebras.ai",
+  "api.sambanova.ai",
 ]);
 
 /**

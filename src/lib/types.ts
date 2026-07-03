@@ -396,6 +396,8 @@ export type AIProviderType =
   | "openrouter"
   | "together"
   | "huggingface"
+  | "cerebras"
+  | "sambanova"
   | "ollama"
   | "azure-openai"
   | "bedrock"

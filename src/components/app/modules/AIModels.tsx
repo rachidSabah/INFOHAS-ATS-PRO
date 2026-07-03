@@ -158,7 +158,52 @@ const MODEL_CATALOG: Record<string, { name: string; contextWindow: string; input
     { name: "gpt-4.1", contextWindow: "128K", tags: ["free"] },
     { name: "deepseek-v4", contextWindow: "64K", tags: ["free"] },
   ],
+  cerebras: [
+    { name: "qwen-3-235b", contextWindow: "128K", tags: ["free", "flagship"] },
+    { name: "qwen-3-32b", contextWindow: "128K", tags: ["free"] },
+    { name: "llama-3.3-70b", contextWindow: "128K", tags: ["free", "fast"] },
+    { name: "llama-4-scout-17b", contextWindow: "128K", tags: ["free"] },
+    { name: "llama-4-maverick-17b", contextWindow: "128K", tags: ["free"] },
+    { name: "deepseek-r1", contextWindow: "64K", tags: ["free", "reasoning"] },
+  ],
+  huggingface: [
+    { name: "meta-llama/Llama-3.3-70B-Instruct", contextWindow: "128K", tags: ["free"] },
+    { name: "meta-llama/Llama-4-Scout-17B-16E-Instruct", contextWindow: "128K", tags: ["free"] },
+    { name: "Qwen/Qwen3-235B-A22B", contextWindow: "128K", tags: ["free", "flagship"] },
+    { name: "Qwen/Qwen3-32B", contextWindow: "128K", tags: ["free"] },
+    { name: "deepseek-ai/DeepSeek-R1-Distill-Qwen-32B", contextWindow: "64K", tags: ["free", "reasoning"] },
+    { name: "deepseek-ai/DeepSeek-R1-0528", contextWindow: "64K", tags: ["free", "reasoning"] },
+    { name: "mistralai/Mistral-7B-Instruct-v0.3", contextWindow: "32K", tags: ["free", "fast"] },
+    { name: "microsoft/phi-4", contextWindow: "16K", tags: ["free", "small"] },
+    { name: "google/gemma-2-27b-it", contextWindow: "8K", tags: ["free"] },
+  ],
+  together: [
+    { name: "meta-llama/Llama-3.3-70B-Instruct-Turbo-Free", contextWindow: "128K", tags: ["free", "fast"] },
+    { name: "meta-llama/Llama-4-Scout-17B-16E-Instruct-Free", contextWindow: "128K", tags: ["free"] },
+    { name: "meta-llama/Llama-4-Maverick-17B-128E-Instruct-FP8-Free", contextWindow: "128K", tags: ["free"] },
+    { name: "deepseek-ai/DeepSeek-R1-Distill-Llama-70B-free", contextWindow: "64K", tags: ["free", "reasoning"] },
+    { name: "Qwen/Qwen3-235B-A22B-fp8-tbo-free", contextWindow: "128K", tags: ["free"] },
+    { name: "Qwen/Qwen3-30B-A3B-fp8-tbo-free", contextWindow: "128K", tags: ["free"] },
+    { name: "moonshotai/Kimi-K2-Instruct-free", contextWindow: "128K", tags: ["free"] },
+  ],
+  sambanova: [
+    { name: "Meta-Llama-4-Maverick-17B-128E-Instruct", contextWindow: "128K", tags: ["free"] },
+    { name: "Meta-Llama-4-Scout-17B-16E-Instruct", contextWindow: "128K", tags: ["free"] },
+    { name: "Meta-Llama-3.3-70B-Instruct", contextWindow: "128K", tags: ["free", "fast"] },
+    { name: "DeepSeek-R1-671B", contextWindow: "64K", tags: ["free", "reasoning"] },
+    { name: "DeepSeek-V3-0324", contextWindow: "64K", tags: ["free"] },
+    { name: "Qwen3-32B", contextWindow: "128K", tags: ["free"] },
+    { name: "QwQ-32B", contextWindow: "128K", tags: ["free", "reasoning"] },
+  ],
+  perplexity: [
+    { name: "sonar", contextWindow: "128K", tags: ["free", "search"] },
+    { name: "sonar-pro", contextWindow: "200K", tags: ["search"] },
+    { name: "sonar-reasoning", contextWindow: "128K", tags: ["free", "reasoning", "search"] },
+    { name: "sonar-reasoning-pro", contextWindow: "200K", tags: ["reasoning", "search"] },
+    { name: "r1-1776", contextWindow: "128K", tags: ["free", "reasoning"] },
+  ],
 };
+
 
 export function AIModels() {
   const providers = useApp((s) => s.providers);
