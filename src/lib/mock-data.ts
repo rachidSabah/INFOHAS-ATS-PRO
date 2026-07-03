@@ -82,15 +82,15 @@ export const SEED_PROVIDERS: AIProvider[] = [
     timeout: 60000,
     maxTokens: 4096,
     temperature: 0.7,
-    retryAttempts: 2,
-    rateLimitPerMinute: 60,
-    modelName: "deepseek-v4-flash-free",
+    retryAttempts: 1,
+    rateLimitPerMinute: 20,
+    modelName: "mimo-v2.5-free",
     enabledModels: [
-      "deepseek-v4-flash-free",
-      "big-pickle",
       "mimo-v2.5-free",
       "nemotron-3-ultra-free",
-      "north-mini-code-free"
+      "north-mini-code-free",
+      "big-pickle",
+      "deepseek-v4-flash-free"
     ],
     streamingEnabled: true,
     authType: "bearer",

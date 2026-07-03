@@ -1301,7 +1301,50 @@ export async function callAI(opts: AICallOptions): Promise<AICallResult> {
             console.warn(`[PROVIDER] All ${alternateKeys.length} alternate keys exhausted for ${provider.name}. Marking as rate-limited.`);
           }
         }
-        
+
+        // ── Model rotation: try other enabledModels on 429 before giving up ──
+        // Useful for providers like OpenCode Zen where one free model is overloaded
+        // but others on the same key still work.
+        const enabledModels = (provider as any).enabledModels as string[] | undefined;
+        const currentModel = (provider as any).modelName || (provider as any).model || "";
+        if (enabledModels && enabledModels.length > 1) {
+          const otherModels = enabledModels.filter((m: string) => m !== currentModel);
+          for (const altModel of otherModels) {
+            console.log(`[PROVIDER] 429 on model "${currentModel}" — trying model "${altModel}" for ${provider.name}...`);
+            try {
+              const altProvider = { ...provider, modelName: altModel, model: altModel };
+              const text = await withTimeout(
+                callUserProvider(altProvider, finalOpts),
+                callTimeoutMs,
+                `${provider.name}.generate (model ${altModel})`
+              );
+              if (text && text.length > 0) {
+                console.log(`[PROVIDER] Model rotation succeeded: "${altModel}" for ${provider.name}.`);
+                // Update the store's modelName so next call uses this model directly
+                try {
+                  const { useApp: _useApp } = await import("./store");
+                  _useApp.getState().updateProvider(provider.id, { modelName: altModel });
+                } catch {}
+                circuitBreakerSuccess(primaryCooldownId, Math.round(performance.now() - t0));
+                return {
+                  text,
+                  provider: `${provider.name} (${altModel})`,
+                  latencyMs: Math.round(performance.now() - t0),
+                  tokensEstimate: estTokens(finalOpts.userPrompt + (finalOpts.systemPrompt ?? "")),
+                };
+              }
+            } catch (modelErr: any) {
+              const modelErrMsg = modelErr?.message || String(modelErr);
+              if (/429/.test(modelErrMsg) || /rate.?limit/i.test(modelErrMsg)) {
+                console.warn(`[PROVIDER] Model "${altModel}" also rate-limited for ${provider.name}.`);
+              } else {
+                console.warn(`[PROVIDER] Model "${altModel}" failed for ${provider.name}: ${modelErrMsg}`);
+              }
+            }
+          }
+          console.warn(`[PROVIDER] All ${enabledModels.length} models rate-limited for ${provider.name}. Marking provider on cooldown.`);
+        }
+
         markProvider429Cooldown(primaryCooldownId);
       } else if (e?.statusCode === 401 || /401/.test(eMsg) || /billing/i.test(eMsg) || /payment/i.test(eMsg) || /CreditsError/i.test(eMsg)) {
         circuitBreakerFailure(primaryCooldownId, "auth");
