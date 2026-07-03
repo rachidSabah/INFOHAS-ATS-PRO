@@ -81,6 +81,106 @@ export function getDefaultResumeLayout(): ResumeLayoutModel {
   };
 }
 
+/**
+ * Returns a ResumeLayoutModel tailored to the chosen template.
+ * Merges template-specific overrides on top of the base layout so the
+ * downloaded PDF/DOCX actually reflects what the user sees in the preview.
+ */
+export function getLayoutForTemplate(template: string, accentColor?: string): ResumeLayoutModel {
+  const base = getDefaultResumeLayout();
+  const accent = accentColor || "#1154A3";
+
+  switch (template) {
+    case "executive":
+      return { ...base, fontFamily: "Times New Roman", nameSizePt: 18, sectionTitleSizePt: 11,
+        bodyFontSizePt: 10.5, nameColor: "#1a1a1a", sectionTitleColor: "#1a1a1a",
+        bodyTextColor: "#222222", contactColor: "#444444",
+        marginTopMm: 12, marginLeftMm: 15, marginRightMm: 15,
+        lineHeightMm: 10.5 * 0.352778 * 1.25, sectionGapMm: 4 };
+
+    case "modern":
+      return { ...base, fontFamily: "Helvetica", nameSizePt: 20, sectionTitleSizePt: 10,
+        bodyFontSizePt: 9.5, nameColor: accent, sectionTitleColor: accent,
+        bodyTextColor: "#1a1a1a", contactColor: "#555555",
+        marginTopMm: 10, marginLeftMm: 12, marginRightMm: 12,
+        lineHeightMm: 9.5 * 0.352778 * 1.3, sectionGapMm: 3.5 };
+
+    case "corporate":
+      return { ...base, fontFamily: "Times New Roman", nameSizePt: 16, sectionTitleSizePt: 11,
+        bodyFontSizePt: 10, nameColor: "#003366", sectionTitleColor: "#003366",
+        bodyTextColor: "#000000", contactColor: "#333333",
+        marginTopMm: 10, marginLeftMm: 14, marginRightMm: 14,
+        lineHeightMm: 10 * 0.352778 * 1.2, sectionGapMm: 3.5 };
+
+    case "minimal":
+      return { ...base, fontFamily: "Helvetica", nameSizePt: 22, sectionTitleSizePt: 9,
+        bodyFontSizePt: 9.5, nameColor: "#111111", sectionTitleColor: "#888888",
+        bodyTextColor: "#111111", contactColor: "#666666",
+        marginTopMm: 14, marginLeftMm: 18, marginRightMm: 18,
+        lineHeightMm: 9.5 * 0.352778 * 1.4, sectionGapMm: 5 };
+
+    case "compact":
+      return { ...base, fontFamily: "Helvetica", nameSizePt: 13, sectionTitleSizePt: 9,
+        bodyFontSizePt: 8.5, nameColor: "#1a1a1a", sectionTitleColor: "#1a1a1a",
+        bodyTextColor: "#000000", contactColor: "#333333",
+        marginTopMm: 5, marginLeftMm: 8, marginRightMm: 8,
+        lineHeightMm: 8.5 * 0.352778 * 1.1, sectionGapMm: 2 };
+
+    case "creative":
+      return { ...base, fontFamily: "Helvetica", nameSizePt: 24, sectionTitleSizePt: 11,
+        bodyFontSizePt: 9.5, nameColor: accent, sectionTitleColor: accent,
+        bodyTextColor: "#1a1a1a", contactColor: "#ffffff",
+        marginTopMm: 8, marginLeftMm: 10, marginRightMm: 10,
+        lineHeightMm: 9.5 * 0.352778 * 1.3, sectionGapMm: 3 };
+
+    case "tech":
+      return { ...base, fontFamily: "Courier", nameSizePt: 16, sectionTitleSizePt: 10,
+        bodyFontSizePt: 9, nameColor: accent, sectionTitleColor: accent,
+        bodyTextColor: "#0d1117", contactColor: "#444444",
+        marginTopMm: 8, marginLeftMm: 10, marginRightMm: 10,
+        lineHeightMm: 9 * 0.352778 * 1.3, sectionGapMm: 3 };
+
+    case "academic":
+      return { ...base, fontFamily: "Times New Roman", nameSizePt: 16, sectionTitleSizePt: 11,
+        bodyFontSizePt: 10, nameColor: "#000000", sectionTitleColor: "#000000",
+        bodyTextColor: "#000000", contactColor: "#333333",
+        marginTopMm: 15, marginLeftMm: 20, marginRightMm: 20,
+        lineHeightMm: 10 * 0.352778 * 1.3, sectionGapMm: 4 };
+
+    case "consulting":
+      return { ...base, fontFamily: "Times New Roman", nameSizePt: 15, sectionTitleSizePt: 10,
+        bodyFontSizePt: 9.5, nameColor: "#00205c", sectionTitleColor: "#00205c",
+        bodyTextColor: "#000000", contactColor: "#333333",
+        marginTopMm: 10, marginLeftMm: 12, marginRightMm: 12,
+        lineHeightMm: 9.5 * 0.352778 * 1.2, sectionGapMm: 3 };
+
+    case "startup":
+      return { ...base, fontFamily: "Helvetica", nameSizePt: 22, sectionTitleSizePt: 10,
+        bodyFontSizePt: 9.5, nameColor: accent, sectionTitleColor: accent,
+        bodyTextColor: "#1a1a1a", contactColor: "#555555",
+        marginTopMm: 9, marginLeftMm: 11, marginRightMm: 11,
+        lineHeightMm: 9.5 * 0.352778 * 1.3, sectionGapMm: 3.5 };
+
+    case "classic":
+      return { ...base, fontFamily: "Times New Roman", nameSizePt: 18, sectionTitleSizePt: 11,
+        bodyFontSizePt: 10, nameColor: "#1a1a1a", sectionTitleColor: "#1a1a1a",
+        bodyTextColor: "#000000", contactColor: "#333333",
+        marginTopMm: 12, marginLeftMm: 16, marginRightMm: 16,
+        lineHeightMm: 10 * 0.352778 * 1.3, sectionGapMm: 4 };
+
+    case "europass":
+      return { ...base, fontFamily: "Times New Roman", nameSizePt: 16, sectionTitleSizePt: 11,
+        bodyFontSizePt: 10, nameColor: "#003399", sectionTitleColor: "#003399",
+        bodyTextColor: "#000000", contactColor: "#333333",
+        marginTopMm: 10, marginLeftMm: 14, marginRightMm: 14,
+        lineHeightMm: 10 * 0.352778 * 1.2, sectionGapMm: 3 };
+
+    // ats-professional and any unknown template → InfoHAS default
+    default:
+      return base;
+  }
+}
+
 // Convert pt → mm
 function ptToMm(pt: number) { return pt * 0.352778; }
 
@@ -344,8 +444,11 @@ export async function exportResumePDF(resume: ResumeData, opts: PDFOptions = {},
     throw new Error(`Export cancelled: data-loss detected.\n${msg}`);
   }
 
-  const L = layout ?? getDefaultResumeLayout();
-  if (resume.template === "infohas-pro" || opts.template === "infohas-pro") {
+  // Resolve layout: caller-supplied > template-specific > default
+  const templateKey = (opts.template ?? resume.template ?? "ats-professional") as string;
+  const L = layout ?? getLayoutForTemplate(templateKey, resume.accentColor);
+
+  if (templateKey === "infohas-pro") {
     return exportInfohasProPDF(resume, opts, L);
   }
 
@@ -354,7 +457,7 @@ export async function exportResumePDF(resume: ResumeData, opts: PDFOptions = {},
   // languages, education highlights, and additional info.
   const { toRenderDocument } = await import("./render-document");
   const { exportResumePDFRenderDoc } = await import("./export-pdf-render");
-  const rd = toRenderDocument(resume, layout);
+  const rd = toRenderDocument(resume, L);
   return exportResumePDFRenderDoc(rd);
 }
 
@@ -1258,7 +1361,11 @@ export async function exportResumeDOCX(resume: ResumeData, layout?: ResumeLayout
   // are all consistent with the Preview.
   const { toRenderDocument } = await import("./render-document");
   const { exportResumeDOCXRenderDoc } = await import("./export-docx-render");
-  const rd = toRenderDocument(resume, layout);
+  const resolvedLayout = layout ?? getLayoutForTemplate(
+    (resume.template ?? "ats-professional") as string,
+    resume.accentColor
+  );
+  const rd = toRenderDocument(resume, resolvedLayout);
   const blob = await exportResumeDOCXRenderDoc(rd);
   // Download the blob
   // For browser: create download link
