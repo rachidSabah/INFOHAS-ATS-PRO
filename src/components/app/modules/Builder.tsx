@@ -314,7 +314,9 @@ Guidelines:
 2. Maintain clean, professional language.
 3. When referencing experience or skills, ensure you map them using the exact 'id' values provided in the current resume.
 4. Keep the text concise and suitable for a 1-page A4 format.
-5. CRITICAL — when the candidate's summary is marked as "(empty — user has not written a summary yet)", do NOT fabricate a generic summary (e.g. 'Results-driven professional with a passion for...'). Instead, ask the user to share their actual background so you can write something real and personalised.`;
+5. CRITICAL — when the candidate's summary is marked as "(empty — user has not written a summary yet)", do NOT fabricate a generic summary (e.g. 'Results-driven professional with a passion for...'). Instead, ask the user to share their actual background so you can write something real and personalised.
+6. ALWAYS append a [PATCH] block containing the updated fields automatically at the end of your response whenever you suggest or generate any edits. Do NOT wait for the user to ask you to "insert" or "apply" it.
+7. CRITICAL — Do NOT use markdown bold/italic formatting (e.g. **word** or *word*) inside any fields in the [PATCH] block or inside your text suggestions. All resume fields must contain plain text only without asterisks, as the system does not support inline markdown formatting.`;
 
       // Detect placeholder / demo summaries — covers blankResume defaults, quality-gate clichés, and any AI-generated filler
       const PLACEHOLDER_PATTERNS = [
@@ -390,20 +392,39 @@ ${resumeContext}
       setMessages((prev) => [...prev, { role: "assistant", content: cleanReply }]);
 
       if (patchData) {
+        // Programmatic helper to recursively strip asterisks from patch strings
+        const stripAst = (val: any): any => {
+          if (typeof val === "string") {
+            return val.replace(/\*\*|\*/g, "");
+          }
+          if (Array.isArray(val)) {
+            return val.map(stripAst);
+          }
+          if (val !== null && typeof val === "object") {
+            const res: any = {};
+            for (const k of Object.keys(val)) {
+              res[k] = stripAst(val[k]);
+            }
+            return res;
+          }
+          return val;
+        };
+
+        const cleanedPatch = stripAst(patchData);
         const updatedResume: Partial<ResumeData> = {};
         
-        if (typeof patchData.summary === "string") {
-          updatedResume.summary = patchData.summary;
+        if (typeof cleanedPatch.summary === "string") {
+          updatedResume.summary = cleanedPatch.summary;
         }
-        if (typeof patchData.headline === "string") {
-          updatedResume.headline = patchData.headline;
+        if (typeof cleanedPatch.headline === "string") {
+          updatedResume.headline = cleanedPatch.headline;
         }
-        if (Array.isArray(patchData.skills)) {
-          updatedResume.skills = patchData.skills;
+        if (Array.isArray(cleanedPatch.skills)) {
+          updatedResume.skills = cleanedPatch.skills;
         }
-        if (Array.isArray(patchData.experience)) {
+        if (Array.isArray(cleanedPatch.experience)) {
           updatedResume.experience = resume.experience.map((e) => {
-            const match = patchData.experience.find((pe: any) => pe.id === e.id);
+            const match = cleanedPatch.experience.find((pe: any) => pe.id === e.id);
             if (match) {
               return {
                 ...e,
