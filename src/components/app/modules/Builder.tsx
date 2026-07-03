@@ -46,7 +46,7 @@ export function Builder() {
   const atsScore = useLiveATSScore(resume, activeJD);
   const sectionScores = useSectionCompleteness(resume);
 
-  const patch = (p: Partial<ResumeData>) => updateResume(resume.id, p);
+  const patch = (p: Partial<ResumeData>) => resume && updateResume(resume.id, p);
 
   const updateOptimizerDirective = useApp((s) => s.updateOptimizerDirective);
 
@@ -137,6 +137,8 @@ Guidelines:
       actionLabel?: string;
       meta?: any;
     }> = [];
+
+    if (!resume) return issues;
 
     // 1. Summary Check
     const summaryWords = (resume.summary ?? "").split(/\s+/).filter(Boolean).length;
@@ -318,13 +320,13 @@ TARGET JOB DETAILS:
 ${activeJD ? JSON.stringify({ title: activeJD.title, company: activeJD.company, keywords: activeJD.keywords }) : "General Optimization (No specific job selected)"}
 
 CURRENT RESUME DATA:
-${JSON.stringify({
+${resume ? JSON.stringify({
   name: resume.name,
   headline: resume.headline,
   summary: resume.summary,
   experience: resume.experience.map(e => ({ id: e.id, company: e.company, title: e.title, bullets: e.bullets })),
   skills: resume.skills
-})}
+}) : "{}"}
 `;
 
       const response = await ProviderRouter.chat({
@@ -465,18 +467,7 @@ ${JSON.stringify({
     return () => window.removeEventListener("resize", onResize);
   }, []);
 
-  if (!resume) {
-    return (
-      <div className="text-center py-20">
-        <Icon name="FileText" className="w-12 h-12 text-muted-foreground/40 mx-auto" />
-        <h2 className="mt-3 text-lg font-semibold">No resume selected</h2>
-        <p className="text-sm text-muted-foreground mt-1">Start a new resume to begin.</p>
-        <Button className="mt-4 bg-brand hover:bg-brand-dark text-white gap-2" onClick={() => { const r = blankResume(); addResume(r); setActiveResume(r.id); }}>
-          <Icon name="Plus" className="w-4 h-4" /> New resume
-        </Button>
-      </div>
-    );
-  }
+
 
   const addExperience = () => patch({
     experience: [...resume.experience, { id: uid("e"), company: "", title: "", startDate: "", endDate: "Present", bullets: [""] }],
@@ -545,6 +536,7 @@ ${JSON.stringify({
   }, [resume, patch, updateExperience]);
 
   const spellingIssuesCount = useMemo(() => {
+    if (!resume) return 0;
     try {
       return totalMisspelled(scanResume(resume));
     } catch {
@@ -634,12 +626,25 @@ ${JSON.stringify({
   };
 
   // Rough one-page estimate based on content volume
-  const contentLen = (resume.summary?.length || 0) +
+  const contentLen = resume ? ((resume.summary?.length || 0) +
     resume.experience.reduce((n, e) => n + e.bullets.join(" ").length, 0) +
-    resume.skills.length * 8;
+    resume.skills.length * 8) : 0;
   const onePageStatus = contentLen < 2200 ? { ok: true, msg: "Comfortably fits one A4 page" } :
     contentLen < 3000 ? { ok: true, msg: "Fits one A4 page (tight)" } :
     { ok: false, msg: "May overflow — auto-compress will activate on export" };
+
+  if (!resume) {
+    return (
+      <div className="text-center py-20">
+        <Icon name="FileText" className="w-12 h-12 text-muted-foreground/40 mx-auto" />
+        <h2 className="mt-3 text-lg font-semibold">No resume selected</h2>
+        <p className="text-sm text-muted-foreground mt-1">Start a new resume to begin.</p>
+        <Button className="mt-4 bg-brand hover:bg-brand-dark text-white gap-2" onClick={() => { const r = blankResume(); addResume(r); setActiveResume(r.id); }}>
+          <Icon name="Plus" className="w-4 h-4" /> New resume
+        </Button>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-4">
