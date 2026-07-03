@@ -718,88 +718,81 @@ async function _runOptimizationPipelineInner(input: PipelineInput, watchdog: Opt
   }
 
   // ========================================================================
-  // Step 1: Job Intelligence Agent
+  // Step 1 & 2: Parallel Job Intelligence & Company Intelligence
   // ========================================================================
+  const step0 = steps[0];
+  const step1 = steps[1];
+  step0.status = "running";
+  step0.startedAt = new Date().toISOString();
+  step1.status = "running";
+  step1.startedAt = new Date().toISOString();
+
+  log("Job Intelligence", "Analyzing job description for skills, keywords, and industry context in parallel…");
+  log("Company + Skill Gap (parallel)", "Generating company intelligence in parallel with job analysis…");
+  emitProgress(0, "Analyzing job description & company in parallel…");
+
+  const watchdogHandle = watchdog.startStep("Parallel Intelligence Phase");
+
   try {
-    const step = steps[0];
-    step.status = "running";
-    step.startedAt = new Date().toISOString();
-    log("Job Intelligence", "Analyzing job description for skills, keywords, and industry context…");
-    emitProgress(0, "Analyzing job description…");
-    const jiHandle = watchdog.startStep("Job Intelligence");
-    try {
-      result.jobIntelligence = await analyzeJobIntelligence(jd);
-      jiHandle.complete();
-    } catch (jiErr: any) {
-      jiHandle.fail(jiErr);
-      throw jiErr;
+    const [jiRes, ciRes] = await Promise.allSettled([
+      analyzeJobIntelligence(jd),
+      analyzeCompanyIntelligence(jd, null),
+    ]);
+
+    watchdogHandle.complete();
+
+    // Process Job Intelligence result
+    if (jiRes.status === "fulfilled") {
+      result.jobIntelligence = jiRes.value;
+      step0.completedAt = new Date().toISOString();
+      step0.durationMs = Date.now() - new Date(step0.startedAt).getTime();
+      step0.status = "completed";
+      const jiLog = `Extracted ${result.jobIntelligence.priorityKeywords.length} priority keywords, ${result.jobIntelligence.requiredSkills.length} required skills. Industry: ${result.jobIntelligence.industry ?? "unknown"}.`;
+      log("Job Intelligence", jiLog);
+      emitProgress(0, jiLog);
+    } else {
+      step0.status = "failed";
+      step0.error = jiRes.reason?.message ?? "Job Intelligence failed";
+      log("Job Intelligence", `⚠ Job Intelligence failed: ${step0.error}. Continuing without JI.`);
+      emitProgress(0, `Job Intelligence failed. Continuing…`);
     }
 
-    step.completedAt = new Date().toISOString();
-    step.durationMs = Date.now() - new Date(step.startedAt).getTime();
-    step.status = "completed";
-    const jiLog = `Extracted ${result.jobIntelligence.priorityKeywords.length} priority keywords, ${result.jobIntelligence.requiredSkills.length} required skills. Industry: ${result.jobIntelligence.industry ?? "unknown"}.`;
-    log("Job Intelligence", jiLog);
-    emitProgress(0, jiLog);
-  } catch (e: any) {
-    steps[0].status = "failed";
-    steps[0].error = e?.message ?? "Job Intelligence failed";
-    log("Job Intelligence", `⚠ Job Intelligence failed: ${e?.message}. Continuing without JI.`);
-    emitProgress(0, `Job Intelligence failed: ${e?.message}. Continuing…`);
-    // Non-fatal — continue without JI
+    // Process Company Intelligence result
+    if (ciRes.status === "fulfilled" && ciRes.value) {
+      result.companyIntelligence = ciRes.value;
+      const ciLog = `Company: ${result.companyIntelligence.companyName} · ${result.companyIntelligence.valuedCompetencies.length} valued competencies · ATS: ${result.companyIntelligence.likelyAtsSystem}`;
+      log("Company + Skill Gap (parallel)", `Company Intel: ${ciLog}`);
+    } else {
+      const errReason = ciRes.status === "rejected" ? ciRes.reason?.message : "returned null";
+      log("Company + Skill Gap (parallel)", `Company Intel bypassed: ${errReason}. Continuing without it.`);
+    }
+  } catch (err: any) {
+    watchdogHandle.fail(err);
+    log("Job Intelligence", `⚠ Parallel intelligence failed: ${err.message}.`);
   }
 
   // ========================================================================
-  // Step 2: Company Intelligence + Skill Gap (PARALLEL)
+  // Step 2b: Skill Gap Analysis (Requires Job Intelligence to proceed)
   // ========================================================================
-  // These two agents run concurrently via Promise.all — they're independent
-  // (Company Intel uses JD + JI; Skill Gap uses Resume + JD + JI + Company).
-  // We pass Company Intel into Skill Gap via a sequential dependency inside
-  // the parallel block (Company first, then Skill Gap with Company result).
-  // In practice both still complete in ~1 AI round-trip each since Skill Gap
-  // can proceed even if Company Intel is null.
-  try {
-    const step = steps[1];
-    step.status = "running";
-    step.startedAt = new Date().toISOString();
-    log("Company + Skill Gap (parallel)", "Generating company intelligence + skill gap analysis in parallel…");
-    emitProgress(1, "Analyzing company + skill gaps in parallel…");
-
-    // Run Company Intelligence first (Skill Gap depends on Company result).
-    // NOTE: These are sequential by design — analyzeSkillGap takes companyIntelligence
-    // as a parameter. True parallelization would require decoupling the dependency.
+  if (result.jobIntelligence) {
     try {
-      result.companyIntelligence = await analyzeCompanyIntelligence(jd, result.jobIntelligence);
-      const ciLog = result.companyIntelligence
-        ? `Company: ${result.companyIntelligence.companyName} · ${result.companyIntelligence.valuedCompetencies.length} valued competencies · ATS: ${result.companyIntelligence.likelyAtsSystem} · ${result.companyIntelligence.companySpecificPriorities.length} company-specific priorities`
-        : "No company identifiable — skipping company-specific optimization.";
-      log("Company + Skill Gap (parallel)", `Company Intel: ${ciLog}`);
-    } catch (e: any) {
-      log("Company + Skill Gap (parallel)", `⚠ Company Intel failed: ${e?.message}. Continuing without it.`);
-    }
-
-    // Run Skill Gap (uses Company Intel if available)
-    try {
+      emitProgress(1, "Analyzing skill gaps…");
       result.skillGap = await analyzeSkillGap(resume, jd, result.jobIntelligence, result.companyIntelligence);
       const sgLog = result.skillGap
-        ? `Skill Gap: ${result.skillGap.overallMatch}% overall match · ${result.skillGap.missingSkills.critical.length} critical / ${result.skillGap.missingSkills.important.length} important / ${result.skillGap.missingSkills.optional.length} optional gaps · ${result.skillGap.transferableSkills.length} transferable · ${result.skillGap.adjacentSkills.length} adjacent`
-        : "Skill Gap analysis unavailable — continuing without it.";
+        ? `Skill Gap: ${result.skillGap.overallMatch}% overall match · ${result.skillGap.missingSkills.critical.length} critical / ${result.skillGap.missingSkills.important.length} important gaps`
+        : "Skill Gap analysis unavailable.";
       log("Company + Skill Gap (parallel)", `Skill Gap: ${sgLog}`);
       emitProgress(1, result.skillGap ? `Skill match: ${result.skillGap.overallMatch}%. Bridging ${result.skillGap.missingSkills.critical.length} critical gaps.` : "Skill gap analysis done.");
     } catch (e: any) {
       log("Company + Skill Gap (parallel)", `⚠ Skill Gap failed: ${e?.message}. Continuing without it.`);
     }
-
-    step.completedAt = new Date().toISOString();
-    step.durationMs = Date.now() - new Date(step.startedAt).getTime();
-    step.status = "completed";
-  } catch (e: any) {
-    steps[1].status = "failed";
-    steps[1].error = e?.message ?? "Company + Skill Gap failed";
-    log("Company + Skill Gap (parallel)", `⚠ Both failed: ${e?.message}. Continuing without intelligence.`);
-    emitProgress(1, `Company + Skill Gap failed: ${e?.message}. Continuing…`);
-    // Non-fatal — optimizer will work with just JI + ATS
+  } else {
+    log("Company + Skill Gap (parallel)", "Bypassed Skill Gap analysis (Job Intelligence was not available).");
   }
+
+  step1.completedAt = new Date().toISOString();
+  step1.durationMs = Date.now() - new Date(step1.startedAt).getTime();
+  step1.status = result.jobIntelligence ? "completed" : "failed";
 
   // ========================================================================
   // Step 3: ATS Analysis Agent (Before)

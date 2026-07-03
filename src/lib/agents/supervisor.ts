@@ -71,12 +71,33 @@ const MAX_CACHE_SIZE = 50; // Prevent unbounded memory growth
 
 function getCached<T>(key: string): T | null {
   const entry = cache.get(key);
-  if (!entry) return null;
-  if (Date.now() - entry.timestamp > CACHE_TTL_MS) {
-    cache.delete(key);
-    return null;
+  if (entry) {
+    if (Date.now() - entry.timestamp > CACHE_TTL_MS) {
+      cache.delete(key);
+    } else {
+      return entry.result as T;
+    }
   }
-  return entry.result as T;
+
+  // Fallback to localStorage for persistence
+  if (typeof window !== "undefined") {
+    try {
+      const localStr = localStorage.getItem(`opt_cache_${key}`);
+      if (localStr) {
+        const localEntry = JSON.parse(localStr);
+        if (Date.now() - localEntry.timestamp <= CACHE_TTL_MS) {
+          // Warm up in-memory cache
+          cache.set(key, localEntry);
+          return localEntry.result as T;
+        } else {
+          localStorage.removeItem(`opt_cache_${key}`);
+        }
+      }
+    } catch (e) {
+      console.warn("[Cache] failed to read from localStorage:", e);
+    }
+  }
+  return null;
 }
 
 function setCached<T>(key: string, result: T): void {
@@ -85,7 +106,17 @@ function setCached<T>(key: string, result: T): void {
     const oldest = cache.keys().next().value;
     if (oldest) cache.delete(oldest);
   }
-  cache.set(key, { key, result, timestamp: Date.now() });
+  const entry = { key, result, timestamp: Date.now() };
+  cache.set(key, entry);
+
+  // Persist to localStorage
+  if (typeof window !== "undefined") {
+    try {
+      localStorage.setItem(`opt_cache_${key}`, JSON.stringify(entry));
+    } catch (e) {
+      console.warn("[Cache] failed to write to localStorage:", e);
+    }
+  }
 }
 
 function cacheKey(prefix: string, ...parts: (string | undefined | null)[]): string {
@@ -102,6 +133,26 @@ function directiveHash(directives?: string): string {
     hash |= 0;
   }
   return Math.abs(hash).toString(36);
+}
+
+function resumeHash(resume: ResumeData): string {
+  const payload = JSON.stringify({
+    summary: resume.summary,
+    skills: resume.skills.map((s) => s.name),
+    experience: resume.experience.map((e) => ({ title: e.title, company: e.company, bullets: e.bullets })),
+    education: resume.education.map((ed) => ({ degree: ed.degree, field: ed.field, institution: ed.institution })),
+    languages: resume.languages.map((l) => ({ name: l.name, proficiency: l.proficiency })),
+  });
+  return directiveHash(payload);
+}
+
+function jdHash(jd: JobDescription): string {
+  const payload = JSON.stringify({
+    title: jd.title,
+    company: jd.company,
+    rawText: jd.rawText,
+  });
+  return directiveHash(payload);
 }
 
 // ============================================================================
@@ -761,7 +812,9 @@ export async function handleOptimizationRequested(
   const activeProvider = appState?.providerSettings?.defaultProviderId ?? "none";
   const activeModel = appState?.providers?.find((p: any) => p.id === activeProvider)?.modelName ?? "";
   const dHash = directiveHash(userDirectives || JSON.stringify(appState?.optimizerDirective || {}));
-  const cacheK = cacheKey("optimization", resume.id, jd.id, activeProvider, activeModel, dHash);
+  const rHash = resumeHash(resume);
+  const jHash = jdHash(jd);
+  const cacheK = cacheKey("optimization", resume.id, rHash, jd.id, jHash, activeProvider, activeModel, dHash);
   const cachedResult = getCached<PipelineResult>(cacheK);
   if (cachedResult) {
     // === SYNC CORE AGENT STATUSES FROM CACHE ===
