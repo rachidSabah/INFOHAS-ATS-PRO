@@ -50,7 +50,7 @@ export function Builder() {
 
   const updateOptimizerDirective = useApp((s) => s.updateOptimizerDirective);
 
-  const [tab, setTab] = useState<"basics" | "experience" | "education" | "skills" | "extra" | "design">("basics");
+  const [tab, setTab] = useState<"basics" | "experience" | "education" | "skills" | "extra" | "design" | "copilot">("basics");
   const [scale, setScale] = useState(0.6);
   const [exporting, setExporting] = useState(false);
   const [importing, setImporting] = useState(false);
@@ -817,11 +817,19 @@ ${resume ? JSON.stringify({
               ["education", "Education", "GraduationCap"],
               ["skills", "Skills", "Wrench"],
               ["extra", "Extra", "Sparkles"],
+              ["copilot", "AI Copilot", "Sparkles"],
               ["design", "Design", "Palette"],
             ].map(([k, label, icon]) => (
               <button
                 key={k}
-                onClick={() => setTab(k as any)}
+                onClick={() => {
+                  setTab(k as any);
+                  if (k === "copilot") {
+                    setRightPanelTab("copilot");
+                  } else {
+                    setRightPanelTab("preview");
+                  }
+                }}
                 className={`flex items-center justify-center gap-1.5 px-3 py-2 rounded-md text-xs font-medium transition whitespace-nowrap shrink-0 ${tab === k ? "bg-card shadow-sm text-brand" : "text-muted-foreground hover:text-foreground"}`}
               >
                 <Icon name={icon} className="w-3.5 h-3.5" /> {label}
@@ -1027,6 +1035,70 @@ ${resume ? JSON.stringify({
                       placeholder="English — native&#10;Spanish — conversational"
                     />
                   </Field>
+                </div>
+              )}
+
+              {tab === "copilot" && (
+                <div className="space-y-4">
+                  <div className="flex items-center justify-between">
+                    <h3 className="font-semibold flex items-center gap-2">
+                      <Icon name="Sparkles" className="w-4 h-4 text-brand" /> AI Resume Copilot
+                    </h3>
+                  </div>
+                  <div className="flex flex-col h-[400px] border border-border rounded-xl bg-card">
+                    {/* Chat messages */}
+                    <div className="flex-1 p-3 overflow-y-auto space-y-2.5 scrollbar-thin">
+                      {messages.map((msg, i) => (
+                        <div
+                          key={i}
+                          className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}
+                        >
+                          <div
+                            className={`max-w-[85%] rounded-lg p-2.5 text-xs leading-relaxed ${
+                              msg.role === "user"
+                                ? "bg-brand text-white"
+                                : "bg-secondary text-foreground"
+                            }`}
+                          >
+                            {msg.content}
+                          </div>
+                        </div>
+                      ))}
+                      {sendingMessage && (
+                        <div className="flex justify-start">
+                          <div className="bg-secondary text-muted-foreground max-w-[85%] rounded-lg p-2.5 text-xs flex items-center gap-1.5">
+                            <Icon name="Loader2" className="w-3.5 h-3.5 animate-spin text-brand" />
+                            AI Copilot is thinking...
+                          </div>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Input box */}
+                    <div className="p-2 border-t border-border flex gap-1.5 bg-background/50">
+                      <Input
+                        value={inputMessage}
+                        onChange={(e) => setInputMessage(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter" && !e.shiftKey) {
+                            e.preventDefault();
+                            sendMessage();
+                          }
+                        }}
+                        placeholder="e.g. Optimize summary for target job..."
+                        className="text-xs h-9"
+                        disabled={sendingMessage}
+                      />
+                      <Button
+                        size="sm"
+                        onClick={sendMessage}
+                        disabled={sendingMessage || !inputMessage.trim()}
+                        className="h-9 px-3 bg-brand text-white hover:bg-brand-dark"
+                      >
+                        <Icon name="Send" className="w-3.5 h-3.5" />
+                      </Button>
+                    </div>
+                  </div>
                 </div>
               )}
 
