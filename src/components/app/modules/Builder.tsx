@@ -23,6 +23,7 @@ import { assertResumeExportable } from "@/lib/resume-guardian-agent";
 import { A4Preview } from "@/components/resume/A4Preview";
 import { ATSMatchMeter } from "@/components/optimizer/ATSMatchMeter";
 import { toast } from "sonner";
+import { extractJSON } from "@/lib/ai";
 import type { ResumeData, ResumeExperience, ResumeEducation, ResumeSkill, ResumeTemplate } from "@/lib/types";
 
 const ACCENT_PRESETS = ["#1154A3", "#0B1F3A", "#10B981", "#F59E0B", "#8B5CF6", "#EC4899", "#0EA5E9", "#DC2626"];
@@ -541,14 +542,12 @@ ${resumeContext}
         } catch (err) {
           console.warn("[Copilot] Failed to parse patch JSON after [PATCH]:", err);
           try {
-            const { extractJSON } = require("@/lib/ai");
             patchData = extractJSON(jsonStr);
           } catch {}
         }
       } else {
         // Fallback: try to extract JSON from anywhere in the response if [PATCH] tag is missing
         try {
-          const { extractJSON } = require("@/lib/ai");
           patchData = extractJSON(reply);
           // If JSON was found in the text, let's remove it from the chat bubble cleanReply so it doesn't clutter the UI
           const firstBrace = reply.indexOf("{");
