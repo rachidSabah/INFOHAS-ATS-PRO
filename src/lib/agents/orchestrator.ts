@@ -471,6 +471,8 @@ export interface PipelineInput {
   enableReflection?: boolean;
   /** Optional: run in Deep Agentic Mode (autonomous self-correction loop). Default: false. */
   deepAgenticMode?: boolean;
+  /** Optional: force a specific provider for optimization (e.g. for Model Variant Arena) */
+  providerId?: string;
   /** Optional: real-time progress callback. Fired after each step completes. */
   onProgress?: (progress: PipelineProgress) => void;
 }

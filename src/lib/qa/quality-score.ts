@@ -129,8 +129,9 @@ export function evaluateDeployment(
   };
 }
 
-export default {
+const qualityScore = {
   calculateQualityScore,
   evaluateDeployment,
   QUALITY_THRESHOLD,
 };
+export default qualityScore;

@@ -1266,7 +1266,7 @@ export function similarity(a: string, b: string): number {
   return (2 * intersection) / (aBigrams.size + bBigrams.size);
 }
 
-export default {
+const industryKnowledgeEngine = {
   detectIndustry,
   getIndustryProfile,
   getSkillGraph,
@@ -1278,3 +1278,4 @@ export default {
   findMissingSkills,
   similarity,
 };
+export default industryKnowledgeEngine;

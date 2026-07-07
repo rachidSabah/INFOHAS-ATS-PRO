@@ -277,8 +277,9 @@ export function computeKeywordMatchScore(
   return Math.round((matchedWeight / totalWeight) * 100);
 }
 
-export default {
+const semanticMatchingEngine = {
   computeSkillSimilarity,
   analyzeSemanticMatch,
   computeKeywordMatchScore,
 };
+export default semanticMatchingEngine;

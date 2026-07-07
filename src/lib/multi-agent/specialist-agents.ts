@@ -150,7 +150,8 @@ Return an empty array [] if no changes are needed.`;
 async function callAgentAI(
   prompt: string,
   agentId: string,
-  agentType: SpecialistAgentType
+  agentType: SpecialistAgentType,
+  providerId?: string
 ): Promise<{ patches: AgentPatch[]; error?: string }> {
   try {
     const response = await callAI({
@@ -158,6 +159,7 @@ async function callAgentAI(
       temperature: 0.3,
       maxTokens: 4000,
       systemPrompt: `You are the ${agentType} specialist agent. Return ONLY a valid JSON array of patches.`,
+      providerId,
     });
 
     let text: string;
@@ -222,7 +224,7 @@ Your analysis is stored in the reasons of a single metadata patch.`,
       this.agentType
     );
 
-    const { patches } = await callAgentAI(prompt, this.agentId, this.agentType);
+    const { patches } = await callAgentAI(prompt, this.agentId, this.agentType, context.providerId);
 
     return {
       agentId: this.agentId,
@@ -264,7 +266,7 @@ You DO NOT edit the resume.`,
       this.agentType
     );
 
-    const { patches } = await callAgentAI(prompt, this.agentId, this.agentType);
+    const { patches } = await callAgentAI(prompt, this.agentId, this.agentType, context.providerId);
 
     return {
       agentId: this.agentId,
@@ -306,7 +308,7 @@ Return [] if no improvements needed.`,
       this.agentType
     );
 
-    const startResult = await callAgentAI(prompt, this.agentId, this.agentType);
+    const startResult = await callAgentAI(prompt, this.agentId, this.agentType, context.providerId);
     const patches = startResult.patches || [];
 
     return {
@@ -355,7 +357,7 @@ Return [] if text is already professional.`,
       this.agentType
     );
 
-    const startResult = await callAgentAI(prompt, this.agentId, this.agentType);
+    const startResult = await callAgentAI(prompt, this.agentId, this.agentType, context.providerId);
     const patches = startResult.patches || [];
 
     return {
@@ -408,7 +410,7 @@ Return [] if terminology is already appropriate.`,
       this.agentType
     );
 
-    const startResult = await callAgentAI(prompt, this.agentId, this.agentType);
+    const startResult = await callAgentAI(prompt, this.agentId, this.agentType, context.providerId);
     const patches = startResult.patches || [];
 
     return {
@@ -458,7 +460,7 @@ Return [] if skills are already optimal.`,
       this.agentType
     );
 
-    const startResult = await callAgentAI(prompt, this.agentId, this.agentType);
+    const startResult = await callAgentAI(prompt, this.agentId, this.agentType, context.providerId);
     const patches = startResult.patches || [];
 
     return {
@@ -510,7 +512,7 @@ Return [] if all bullets are already excellent.`,
       this.agentType
     );
 
-    const startResult = await callAgentAI(prompt, this.agentId, this.agentType);
+    const startResult = await callAgentAI(prompt, this.agentId, this.agentType, context.providerId);
     const patches = startResult.patches || [];
 
     return {
@@ -560,7 +562,7 @@ Return [] if already optimal.`,
       this.agentType
     );
 
-    const startResult = await callAgentAI(prompt, this.agentId, this.agentType);
+    const startResult = await callAgentAI(prompt, this.agentId, this.agentType, context.providerId);
     const patches = startResult.patches || [];
 
     return {
@@ -621,7 +623,7 @@ Return [] if no sections need improvement.`,
       this.agentType
     );
 
-    const startResult = await callAgentAI(prompt, this.agentId, this.agentType);
+    const startResult = await callAgentAI(prompt, this.agentId, this.agentType, context.providerId);
     const patches = startResult.patches || [];
 
     return {

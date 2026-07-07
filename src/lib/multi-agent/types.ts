@@ -60,6 +60,7 @@ export interface AgentContext {
   editableFields: EditableFields;
   dynamicSections: DynamicSectionInfo[];
   previousPatches: AgentPatch[];
+  providerId?: string;
 }
 
 export interface IndustryContext {

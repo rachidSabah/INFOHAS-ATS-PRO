@@ -526,10 +526,11 @@ export function getAllGoldenIndustries(): string[] {
   return industries;
 }
 
-export default {
+const goldenCorpus = {
   GOLDEN_CORPUS,
   getGoldenResume,
   getGoldenResumesByIndustry,
   getGoldenResumesByTag,
   getAllGoldenIndustries,
 };
+export default goldenCorpus;

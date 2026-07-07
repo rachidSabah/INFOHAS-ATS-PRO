@@ -421,6 +421,7 @@ function extractEmploymentType(textLower: string): string | null {
   return null;
 }
 
-export default {
+const jdEngine = {
   analyzeJD,
 };
+export default jdEngine;

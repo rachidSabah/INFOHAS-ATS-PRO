@@ -619,6 +619,7 @@ export interface AICallOptions {
   enableRetries?: boolean;
   enableProviderSwitch?: boolean;
   agentType?: "optimizer" | "supervisor" | "guardian" | "assembler" | "emergency";
+  providerId?: string;
 }
 
 export interface AICallResult {
@@ -1121,10 +1122,20 @@ export async function callAI(opts: AICallOptions): Promise<AICallResult> {
   }
 
   // Select provider using selectProviderForAgent if agentType is determined, else selectProvider()
-  const provider = agentType
-    ? await selectProviderForAgent(agentType, opts.excludeProviderIds)
-    : await selectProvider(opts.excludeProviderIds);
+  // eslint-disable-next-line prefer-const
+  let provider: any = null;
+  if (opts.providerId) {
+    const state: any = useApp.getState();
+    const providers: any[] = state?.providers || [];
+    provider = providers.find((p: any) => p.id === opts.providerId) ?? null;
+  }
+  if (!provider) {
+    provider = agentType
+      ? await selectProviderForAgent(agentType, opts.excludeProviderIds)
+      : await selectProvider(opts.excludeProviderIds);
+  }
   assert(provider !== null, "Provider is null");
+  const resolvedProvider: any = provider;
 
   // Logging selected provider
   console.log(`[ROUTER]\nProvider selected: ${provider.name === "Puter.js" ? "Puter" : provider.name}`);
