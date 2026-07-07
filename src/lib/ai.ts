@@ -618,6 +618,7 @@ export interface AICallOptions {
   excludeProviderIds?: string[];
   enableRetries?: boolean;
   enableProviderSwitch?: boolean;
+  agentType?: "optimizer" | "supervisor" | "guardian" | "assembler" | "emergency";
 }
 
 export interface AICallResult {
@@ -1105,8 +1106,24 @@ export async function callAI(opts: AICallOptions): Promise<AICallResult> {
     return opts.excludeProviderIds.includes(pId);
   };
 
-  // Select provider using selectProvider()
-  const provider = await selectProvider(opts.excludeProviderIds);
+  // Deduce agentType to implement agent-aware model routing
+  let agentType = opts.agentType;
+  if (!agentType) {
+    if (opts.isOptimizerCall) {
+      agentType = "optimizer";
+    } else if (systemText.toLowerCase().includes("quality assurance") || systemText.toLowerCase().includes("qa") || systemText.toLowerCase().includes("reflection")) {
+      agentType = "supervisor";
+    } else if (systemText.toLowerCase().includes("guardian") || systemText.toLowerCase().includes("anti-fabrication")) {
+      agentType = "guardian";
+    } else if (systemText.toLowerCase().includes("format") || systemText.toLowerCase().includes("assemble")) {
+      agentType = "assembler";
+    }
+  }
+
+  // Select provider using selectProviderForAgent if agentType is determined, else selectProvider()
+  const provider = agentType
+    ? await selectProviderForAgent(agentType, opts.excludeProviderIds)
+    : await selectProvider(opts.excludeProviderIds);
   assert(provider !== null, "Provider is null");
 
   // Logging selected provider

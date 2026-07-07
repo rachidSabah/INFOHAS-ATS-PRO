@@ -14,6 +14,7 @@
 import type { ResumeData, JobDescription } from "../types";
 import { scoreATS, scoreLabel } from "../ats";
 import { COMMON_ATS_KEYWORDS, WEAK_VERBS, STRONG_ACTION_VERBS, getIndustryKeywords } from "../keyword-banks";
+import { mapToIndustryMode } from "../industry-mapper";
 
 // ============================================================================
 // Types
@@ -36,6 +37,24 @@ export interface ATSScoreBreakdown {
   readability: number;
   /** Completeness (0-100) — all expected sections present */
   completeness: number;
+  /** Skills match (0-100) — JD requested skills present in resume */
+  skillsMatch: number;
+  /** Job title match (0-100) — alignment of headline/experience with target role */
+  jobTitleMatch: number;
+  /** Industry terminology match (0-100) — use of industry-specific buzzwords */
+  industryMatch: number;
+  /** Achievement density (0-100) — proportion of bullets that are quantified */
+  achievementDensity: number;
+  /** Parsing quality (0-100) — structural validity, valid emails/phones */
+  parsingQuality: number;
+  /** Power words (0-100) — count of strong action verbs utilized */
+  powerWords: number;
+  /** Structural consistency (0-100) — date chronology, format standardization */
+  consistency: number;
+  /** Overall recruiter score (0-100) — visual scan & recruiter appeal */
+  recruiterScore: number;
+  /** Confidence score (0-100) — engine parsing confidence */
+  confidenceScore: number;
 }
 
 export interface ATSAnalysisResult {
@@ -101,17 +120,45 @@ export function analyzeATS(resume: ResumeData, jd?: JobDescription | null): ATSA
   // === Enhanced grammar (combines base grammar + readability) ===
   const enhancedGrammar = Math.round((base.scores.grammar * 0.5 + readabilityScore * 0.5));
 
-  // === Build the unified score breakdown ===
-  // Weights: formatting 15%, keywordMatch 20%, semanticSimilarity 15%, content 15%,
-  //          grammar 10%, readability 10%, completeness 15%
-  const overall = Math.round(
+  // === Expanded ATS & Recruiter Metrics ===
+  const skillsMatchVal = calculateSkillsMatch(resume, jd);
+  const jobTitleMatchVal = calculateJobTitleMatch(resume, jd);
+  const industryMatchVal = calculateIndustryMatch(resume, jd);
+  const achievementDensityVal = calculateAchievementDensity(resume);
+  const parsingQualityVal = calculateParsingQuality(resume);
+  const powerWordsVal = calculatePowerWords(resume);
+  const consistencyVal = calculateConsistency(resume);
+
+  // Recruiter score: blend of readability, content, formatting, achievements, powerWords
+  const recruiterScoreVal = Math.round(
+    readabilityScore * 0.15 +
+    base.scores.content * 0.25 +
     base.scores.formatting * 0.15 +
-    base.scores.keywords * 0.20 +
-    semanticScore * 0.15 +
-    base.scores.content * 0.15 +
-    enhancedGrammar * 0.10 +
-    readabilityScore * 0.10 +
-    base.scores.completeness * 0.15
+    achievementDensityVal * 0.25 +
+    powerWordsVal * 0.10 +
+    base.scores.completeness * 0.10
+  );
+
+  // Confidence score: blend of parsingQuality and consistency
+  const confidenceScoreVal = Math.round(
+    parsingQualityVal * 0.60 +
+    consistencyVal * 0.40
+  );
+
+  // === Build the unified score breakdown ===
+  // Weights: formatting 10%, keywordMatch 15%, semanticSimilarity 10%, content 10%,
+  //          completeness 10%, skillsMatch 15%, jobTitleMatch 10%, industryMatch 10%,
+  //          consistency 10%
+  const overall = Math.round(
+    base.scores.formatting * 0.10 +
+    base.scores.keywords * 0.15 +
+    semanticScore * 0.10 +
+    base.scores.content * 0.10 +
+    base.scores.completeness * 0.10 +
+    skillsMatchVal * 0.15 +
+    jobTitleMatchVal * 0.10 +
+    industryMatchVal * 0.10 +
+    consistencyVal * 0.10
   );
 
   const scores: ATSScoreBreakdown = {
@@ -123,6 +170,15 @@ export function analyzeATS(resume: ResumeData, jd?: JobDescription | null): ATSA
     grammar: enhancedGrammar,
     readability: readabilityScore,
     completeness: base.scores.completeness,
+    skillsMatch: skillsMatchVal,
+    jobTitleMatch: jobTitleMatchVal,
+    industryMatch: industryMatchVal,
+    achievementDensity: achievementDensityVal,
+    parsingQuality: parsingQualityVal,
+    powerWords: powerWordsVal,
+    consistency: consistencyVal,
+    recruiterScore: recruiterScoreVal,
+    confidenceScore: confidenceScoreVal,
   };
 
   // === Explainable recommendations ===
@@ -145,6 +201,15 @@ export function analyzeATS(resume: ResumeData, jd?: JobDescription | null): ATSA
       grammar: `Grammar + readability: ${scores.grammar}/100. Combines basic grammar checks with Flesch Reading Ease. ${scores.grammar >= 80 ? "Clean and readable." : "Grammar or readability issues detected."}`,
       readability: readabilityExplanation,
       completeness: `Section completeness: ${scores.completeness}/100. Checks for presence of summary, experience, education, skills, languages. ${scores.completeness >= 90 ? "All key sections present." : `Missing or weak sections: ${base.weakSections.join(", ") || "none"}`}`,
+      skillsMatch: `Skills matching score: ${scores.skillsMatch}/100. Measures presence of core and nice-to-have JD skills within your skills list.`,
+      jobTitleMatch: `Job title alignment: ${scores.jobTitleMatch}/100. Evaluates how closely your resume headline and recent titles map to the target role.`,
+      industryMatch: `Industry terminology matching: ${scores.industryMatch}/100. Checks for alignment of professional buzzwords and domain context.`,
+      achievementDensity: `Achievement density: ${scores.achievementDensity}/100. Proportion of quantified accomplishments vs responsibilities.`,
+      parsingQuality: `ATS parsing structural quality: ${scores.parsingQuality}/100. Verifies contact formatting, section delimiters, and syntax correctness.`,
+      powerWords: `Power verbs usage: ${scores.powerWords}/100. Measures density of active, high-impact verbs compared to passive placeholders.`,
+      consistency: `Format and chronology consistency: ${scores.consistency}/100. Audits chronological ordering of dates and syntax patterns.`,
+      recruiterScore: `Overall recruiter review score: ${scores.recruiterScore}/100. Predicts recruiter visual appeal, plain readability, and overall impact.`,
+      confidenceScore: `System parsing confidence: ${scores.confidenceScore}/100. Evaluates robustness of data extraction and match metrics.`,
     },
   };
 
@@ -529,6 +594,94 @@ function buildRecommendations(
   }
 
   return recs;
+}
+
+function calculateSkillsMatch(resume: ResumeData, jd?: JobDescription | null): number {
+  if (!jd) return 80;
+  const jdSkills = [...(jd.requiredSkills || []), ...(jd.preferredSkills || [])];
+  if (jdSkills.length === 0) {
+    const jdKeywords = jd.keywords || [];
+    if (jdKeywords.length === 0) return 80;
+    const matched = jdKeywords.filter(k => resume.skills.some(s => s.name.toLowerCase().includes(k.toLowerCase())));
+    return Math.round((matched.length / jdKeywords.length) * 100);
+  }
+  const matched = jdSkills.filter(js => resume.skills.some(s => s.name.toLowerCase().includes(js.toLowerCase()) || js.toLowerCase().includes(s.name.toLowerCase())));
+  return Math.round((matched.length / jdSkills.length) * 100);
+}
+
+function calculateJobTitleMatch(resume: ResumeData, jd?: JobDescription | null): number {
+  if (!jd || !jd.title) return 85;
+  const cleanJdTitle = jd.title.toLowerCase().replace(/[^a-z0-9]/g, " ").trim();
+  const cleanHeadline = (resume.headline || "").toLowerCase().replace(/[^a-z0-9]/g, " ").trim();
+  const cleanLastJobTitle = (resume.experience[0]?.title || "").toLowerCase().replace(/[^a-z0-9]/g, " ").trim();
+  
+  if (cleanHeadline.includes(cleanJdTitle) || cleanJdTitle.includes(cleanHeadline)) return 100;
+  if (cleanLastJobTitle.includes(cleanJdTitle) || cleanJdTitle.includes(cleanLastJobTitle)) return 95;
+  
+  const jdTokens = cleanJdTitle.split(/\s+/).filter(Boolean);
+  const resumeTokens = [...cleanHeadline.split(/\s+/), ...cleanLastJobTitle.split(/\s+/)].filter(Boolean);
+  if (jdTokens.length === 0) return 85;
+  
+  const matched = jdTokens.filter(t => resumeTokens.includes(t));
+  const score = Math.round((matched.length / jdTokens.length) * 100);
+  return Math.max(20, score);
+}
+
+function calculateIndustryMatch(resume: ResumeData, jd?: JobDescription | null): number {
+  const resumeText = resumeToText(resume).toLowerCase();
+  const jdText = jd ? (jd.rawText || (jd.keywords || []).join(" ")).toLowerCase() : "";
+  
+  const mapResult = mapToIndustryMode(jdText, resumeText);
+  const detected = mapResult.detection.industryId;
+  if (detected && detected !== "generic") {
+    return 95;
+  }
+  
+  const industryKeywords = getIndustryKeywords(detected || "generic");
+  const matched = industryKeywords.filter(k => resumeText.includes(k.toLowerCase()));
+  if (matched.length >= 3) return 90;
+  if (matched.length >= 1) return 70;
+  return 50;
+}
+
+function calculateAchievementDensity(resume: ResumeData): number {
+  const bullets = resume.experience.flatMap(e => e.bullets);
+  if (bullets.length === 0) return 0;
+  const quantified = bullets.filter(b => /\d+%|\$\d|\d+x|\d{2,}/.test(b)).length;
+  return Math.round((quantified / bullets.length) * 100);
+}
+
+function calculateParsingQuality(resume: ResumeData): number {
+  let score = 100;
+  if (!resume.name || resume.name.length < 3) score -= 30;
+  if (!resume.contact.email || !resume.contact.email.includes("@")) score -= 20;
+  if (!resume.contact.phone) score -= 15;
+  if (resume.experience.length === 0) score -= 20;
+  if (resume.education.length === 0) score -= 15;
+  return Math.max(0, score);
+}
+
+function calculatePowerWords(resume: ResumeData): number {
+  const text = resumeToText(resume).toLowerCase();
+  const matches = STRONG_ACTION_VERBS.filter(v => text.includes(v.toLowerCase()));
+  if (matches.length >= 8) return 100;
+  if (matches.length >= 5) return 85;
+  if (matches.length >= 3) return 70;
+  if (matches.length >= 1) return 50;
+  return 20;
+}
+
+function calculateConsistency(resume: ResumeData): number {
+  let score = 100;
+  const bullets = resume.experience.flatMap(e => e.bullets);
+  if (bullets.some(b => b.includes(".."))) score -= 10;
+  if (resume.contact.phone && /[\(\)]/.test(resume.contact.phone)) score -= 5;
+  for (const exp of resume.experience) {
+    if (!exp.startDate || !exp.endDate) {
+      score -= 5;
+    }
+  }
+  return Math.max(20, score);
 }
 
 /**

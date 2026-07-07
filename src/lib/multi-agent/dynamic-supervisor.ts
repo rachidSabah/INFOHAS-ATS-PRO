@@ -41,6 +41,7 @@ import {
   resolveConflict,
   computeQualityScore as computeAggregateScore,
 } from "./patch-engine";
+import { analyzeATS } from "../agents/ats-analysis";
 
 // ── Default configuration ────────────────────────────────────────────────
 const DEFAULT_CONFIG: SupervisorConfig = {
@@ -113,8 +114,8 @@ export class DynamicMultiAgentSupervisor {
     rounds++;
 
     // Resolve conflicts
-    const resolved = this.resolveAllConflicts();
-    const finalPatches = [...resolved.approved];
+    let resolved = this.resolveAllConflicts();
+    let finalPatches = [...resolved.approved];
 
     // Apply approved patches
     if (finalPatches.length > 0) {
@@ -125,17 +126,113 @@ export class DynamicMultiAgentSupervisor {
       }
     }
 
-    // Update memory
-    this.memory.acceptedPatches.push(...finalPatches);
-    this.memory.agentConfidence = this.aggregateAgentConfidence(optimizationResult.results);
-
-    // Compute final quality score
-    const qualityScore = this.computeFinalQualityScore(
+    // === TARGETED REGENERATION / SELF-CRITIQUE LOOP ===
+    // If the quality validation fails or is low, we run targeted regeneration for weak sections!
+    let qualityScore = this.computeFinalQualityScore(
       currentResume,
       finalPatches,
       canonicalResume,
       industryContext
     );
+
+    // Run a real ATS check to compute quality fields
+    let atsReport: any = null;
+    try {
+      atsReport = analyzeATS(currentResume, jobDescription ? { rawText: jobDescription } as any : null);
+      qualityScore.ats = atsReport.scores.ats;
+      qualityScore.overall = Math.round(
+        atsReport.scores.ats * 0.4 +
+        qualityScore.preservation * 0.3 +
+        qualityScore.professionalism * 0.3
+      );
+    } catch (e) {
+      console.warn("[Supervisor] ATS Analysis failed in dynamic supervisor:", e);
+    }
+
+    if (qualityScore.overall < this.config.qualityThreshold) {
+      console.info(`[Supervisor] Initial quality score is low (${qualityScore.overall}/${this.config.qualityThreshold}). Requesting targeted regeneration…`);
+      
+      // Identify weak agents to regenerate
+      const weakAgents: SpecialistAgentType[] = [];
+      if (atsReport && atsReport.scores.keywordMatch < 85) {
+        weakAgents.push("ats-optimization");
+      }
+      if (atsReport && atsReport.scores.content < 85) {
+        weakAgents.push("experience-enhancement");
+        weakAgents.push("professional-writing");
+      }
+      if (atsReport && atsReport.scores.completeness < 90) {
+        weakAgents.push("skills-enhancement");
+      }
+
+      if (weakAgents.length > 0) {
+        console.info(`[Supervisor] Regenerating weak agents: ${weakAgents.join(", ")}`);
+        const regenCtx: AgentContext = {
+          ...agentContext,
+          canonicalResume,
+          previousPatches: finalPatches, // build on top of previous approved patches
+        };
+
+        const regenPatches: AgentPatch[] = [];
+        await Promise.all(
+          weakAgents.map(async (agentType) => {
+            try {
+              const agent = getSpecialistAgent(agentType);
+              const res = await agent.run(regenCtx);
+              if (res.success) {
+                regenPatches.push(...res.patches.filter(p => p.confidence >= this.config.confidenceThreshold));
+              }
+            } catch (err) {
+              console.warn(`[Supervisor] Targeted regen agent failed: ${agentType}`, err);
+            }
+          })
+        );
+
+        if (regenPatches.length > 0) {
+          // Merge and deduplicate, preferring newer regenerated patches
+          const combinedPatches = [...finalPatches, ...regenPatches];
+          const finalCombined: AgentPatch[] = [];
+          const seen = new Set<string>();
+          // Walk backwards to let new regenerated patches override older ones
+          for (let i = combinedPatches.length - 1; i >= 0; i--) {
+            const p = combinedPatches[i];
+            const key = `${p.sectionId}|${p.field}`;
+            if (!seen.has(key)) {
+              finalCombined.push(p);
+              seen.add(key);
+            }
+          }
+          finalCombined.reverse();
+
+          finalPatches = finalCombined;
+          const applyResult = applyPatches(canonicalResume, finalPatches);
+          currentResume = applyResult.resume;
+          
+          // Recompute quality
+          qualityScore = this.computeFinalQualityScore(
+            currentResume,
+            finalPatches,
+            canonicalResume,
+            industryContext
+          );
+          try {
+            atsReport = analyzeATS(currentResume, jobDescription ? { rawText: jobDescription } as any : null);
+            qualityScore.ats = atsReport.scores.ats;
+            qualityScore.overall = Math.round(
+              atsReport.scores.ats * 0.4 +
+              qualityScore.preservation * 0.3 +
+              qualityScore.professionalism * 0.3
+            );
+          } catch {}
+          console.info(`[Supervisor] Quality after targeted regeneration: ${qualityScore.overall}/${this.config.qualityThreshold}`);
+          rounds++;
+        }
+      }
+    }
+
+    // Update memory
+    this.memory.acceptedPatches.push(...finalPatches);
+    this.memory.agentConfidence = this.aggregateAgentConfidence(optimizationResult.results);
 
     const success = qualityScore.overall >= this.config.qualityThreshold;
 
@@ -206,19 +303,72 @@ export class DynamicMultiAgentSupervisor {
     ];
 
     for (const group of parallelGroups) {
-      if (this.config.enableParallelExecution && group.length > 1) {
-        // Run group in parallel
+      // Filter the group to run only required agents
+      const requiredGroup = group.filter(agentType => this.isAgentRequired(agentType, context));
+      if (requiredGroup.length === 0) continue;
+
+      if (this.config.enableParallelExecution && requiredGroup.length > 1) {
+        // Run group in parallel with retry on failure
+        const runAgentWithRetry = async (agentType: SpecialistAgentType, attempt = 1): Promise<AgentResult> => {
+          try {
+            const agent = getSpecialistAgent(agentType);
+            const ctx: AgentContext = {
+              ...context,
+              previousPatches: patches,
+            };
+            const res = await agent.run(ctx);
+            if (!res.success && attempt < 2) {
+              console.warn(`[Supervisor] Parallel agent "${agentType}" failed. Retrying (attempt ${attempt + 1})…`);
+              return await runAgentWithRetry(agentType, attempt + 1);
+            }
+            return res;
+          } catch (err: any) {
+            if (attempt < 2) {
+              console.warn(`[Supervisor] Parallel agent "${agentType}" threw error. Retrying (attempt ${attempt + 1}):`, err.message);
+              return await runAgentWithRetry(agentType, attempt + 1);
+            }
+            return {
+              agentId: agentType,
+              agentType,
+              taskId: uid(),
+              patches: [],
+              confidence: 0,
+              qualityScore: { overall: 0, ats: 0, grammar: 0, readability: 0, preservation: 0, industryMatch: 0, professionalism: 0 },
+              success: false,
+              error: err.message || "Agent failed",
+              durationMs: 0,
+            } as AgentResult;
+          }
+        };
+
         const groupResults = await Promise.all(
-          group.map(async (agentType) => {
+          requiredGroup.map((agentType) => runAgentWithRetry(agentType))
+        );
+
+        for (const result of groupResults) {
+          results.push(result);
+          if (result.success) {
+            const validPatches = result.patches.filter(
+              (p) => p.confidence >= this.config.confidenceThreshold
+            );
+            patches.push(...validPatches);
+          }
+        }
+      } else {
+        // Run group sequentially with retry on failure
+        for (const agentType of requiredGroup) {
+          let result: AgentResult | null = null;
+          for (let attempt = 1; attempt <= 2; attempt++) {
             try {
               const agent = getSpecialistAgent(agentType);
               const ctx: AgentContext = {
                 ...context,
                 previousPatches: patches,
               };
-              return await agent.run(ctx);
+              result = await agent.run(ctx);
+              if (result.success) break;
             } catch (err: any) {
-              return {
+              result = {
                 agentId: agentType,
                 agentType,
                 taskId: uid(),
@@ -230,29 +380,11 @@ export class DynamicMultiAgentSupervisor {
                 durationMs: 0,
               } as AgentResult;
             }
-          })
-        );
-
-        for (const result of groupResults) {
-          results.push(result);
-          if (result.success) {
-            // Filter patches through confidence threshold
-            const validPatches = result.patches.filter(
-              (p) => p.confidence >= this.config.confidenceThreshold
-            );
-            patches.push(...validPatches);
+            if (attempt < 2) {
+              console.warn(`[Supervisor] Sequential agent "${agentType}" failed/threw. Retrying…`);
+            }
           }
-        }
-      } else {
-        // Run group sequentially
-        for (const agentType of group) {
-          try {
-            const agent = getSpecialistAgent(agentType);
-            const ctx: AgentContext = {
-              ...context,
-              previousPatches: patches,
-            };
-            const result = await agent.run(ctx);
+          if (result) {
             results.push(result);
             if (result.success) {
               const validPatches = result.patches.filter(
@@ -260,18 +392,6 @@ export class DynamicMultiAgentSupervisor {
               );
               patches.push(...validPatches);
             }
-          } catch (err: any) {
-            results.push({
-              agentId: agentType,
-              agentType,
-              taskId: uid(),
-              patches: [],
-              confidence: 0,
-              qualityScore: { overall: 0, ats: 0, grammar: 0, readability: 0, preservation: 0, industryMatch: 0, professionalism: 0 },
-              success: false,
-              error: err.message || "Agent failed",
-              durationMs: 0,
-            } as AgentResult);
           }
         }
       }
@@ -281,6 +401,26 @@ export class DynamicMultiAgentSupervisor {
     const conflicts = detectConflicts(patches);
 
     return { patches, conflicts, results };
+  }
+
+  private isAgentRequired(agentType: SpecialistAgentType, context: AgentContext): boolean {
+    const resume = context.canonicalResume;
+    if (agentType === "dynamic-section") {
+      return (resume.dynamicSections?.length ?? 0) > 0;
+    }
+    if (agentType === "education-enhancement") {
+      return (resume.education?.length ?? 0) > 0;
+    }
+    if (agentType === "skills-enhancement") {
+      return (resume.skills?.length ?? 0) > 0;
+    }
+    if (agentType === "experience-enhancement") {
+      return (resume.experience?.length ?? 0) > 0;
+    }
+    if (agentType === "ats-optimization" && !context.jobDescription) {
+      return false; // skip ATS if no JD
+    }
+    return true;
   }
 
   // ── Conflict Resolution ────────────────────────────────────────────────

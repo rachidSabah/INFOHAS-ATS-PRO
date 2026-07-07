@@ -14,6 +14,8 @@ import { saveAs } from "file-saver";
 import type { ResumeData, CoverLetter, InterviewPackage, ResumeLayoutModel } from "./types";
 import { getDocxHtml, resumeToDirectiveHtml } from "./ats-directives";
 import { useApp } from "./store";
+import { analyzeATS } from "./agents/ats-analysis";
+import { computePageFillTarget, computeResumeCharCount } from "./agents/page-balancer";
 
 /**
  * Check if the resume's headline contains duplicate contact info
@@ -1296,6 +1298,46 @@ export function validateExportCompleteness(
         `Export blocked: "${check.label}" dropped from ${srcCount} to ${optCount} entries ` +
         `(lost >50%). This likely indicates a pipeline data-loss bug.`
       );
+    }
+  }
+
+  // ── Quality Gates Check (ATS > 95, Recruiter Score > 95, Grammar = 100%, One Page = TRUE, no overflow) ──
+  if (source && (optimized.source === "ai-optimized" || optimized.source === "ai-optimized-aviation")) {
+    let activeJd = null;
+    try {
+      const state: any = useApp.getState();
+      const activeJdId = state?.activeJdId;
+      activeJd = state?.jobDescriptions?.find((j: any) => j.id === activeJdId) || null;
+    } catch (e) {
+      console.warn("Failed to retrieve active JD in validateExportCompleteness:", e);
+    }
+
+    try {
+      const analysis = analyzeATS(optimized, activeJd);
+      
+      if (analysis.scores.ats < 95) {
+        errors.push(`Quality Gate: ATS score is ${analysis.scores.ats}/100, which is below the required 95/100 threshold.`);
+      }
+      if (analysis.scores.recruiterScore < 95) {
+        errors.push(`Quality Gate: Recruiter score is ${analysis.scores.recruiterScore}/100, which is below the required 95/100 threshold.`);
+      }
+      if (analysis.scores.grammar < 100) {
+        errors.push(`Quality Gate: Grammar/readability score is ${analysis.scores.grammar}/100, which must be 100% perfect.`);
+      }
+      
+      // One Page constraint check
+      let directiveConfig: any = null;
+      try {
+        directiveConfig = useApp.getState()?.optimizerDirective ?? null;
+      } catch {}
+      const target = computePageFillTarget(directiveConfig);
+      const chars = computeResumeCharCount(optimized);
+      const pageUsage = target.estimatePageUsage(chars);
+      if (pageUsage > 100 || chars > target.maxChars) {
+        errors.push(`Quality Gate: Document overflows one page (estimated capacity usage: ${pageUsage}%).`);
+      }
+    } catch (err) {
+      console.warn("Failed to check Quality Gates in validateExportCompleteness:", err);
     }
   }
 
