@@ -47,7 +47,8 @@ function computeAgentQualityScore(
 function buildAgentPrompt(
   role: string,
   instructions: string,
-  context: AgentContext
+  context: AgentContext,
+  agentType: SpecialistAgentType
 ): string {
   const {
     canonicalResume,
@@ -62,15 +63,51 @@ function buildAgentPrompt(
     previousPatches,
   } = context;
 
+  // Dynamically filter context items to only include what is actually needed
+  let resumeContextStr = "";
+  if (agentType === "jd-analyzer") {
+    // Does not need the resume at all!
+    resumeContextStr = "Not required for Job Description analysis.";
+  } else if (agentType === "skills-enhancement") {
+    // Only needs skills list
+    resumeContextStr = JSON.stringify({
+      skills: canonicalResume.skills,
+    }, null, 2);
+  } else if (agentType === "experience-enhancement") {
+    // Only needs experience
+    resumeContextStr = JSON.stringify({
+      experience: canonicalResume.experience,
+    }, null, 2);
+  } else if (agentType === "education-enhancement") {
+    // Only needs education
+    resumeContextStr = JSON.stringify({
+      education: canonicalResume.education,
+    }, null, 2);
+  } else if (agentType === "dynamic-section") {
+    // Only needs dynamic sections
+    resumeContextStr = JSON.stringify({
+      dynamicSections: canonicalResume.dynamicSections,
+    }, null, 2);
+  } else if (agentType === "professional-writing") {
+    // Only needs summary and experience headlines/bullets
+    resumeContextStr = JSON.stringify({
+      summary: canonicalResume.summary,
+      experience: canonicalResume.experience.map(e => ({ id: e.id, title: e.title, company: e.company, bullets: e.bullets })),
+    }, null, 2);
+  } else {
+    // Fallback: full resume context
+    resumeContextStr = JSON.stringify(canonicalResume, null, 2);
+  }
+
   return `You are the ${role} — a specialist agent in ResumeAI Pro.
 
 ## YOUR ROLE
 ${instructions}
 
-## CANONICAL RESUME (source of truth)
-${JSON.stringify(canonicalResume, null, 2)}
+## RESUME CONTEXT (source of truth)
+${resumeContextStr}
 
-${jobDescription ? `## JOB DESCRIPTION\n${jobDescription}\n` : ""}
+${jobDescription && agentType !== "resume-preservation" && agentType !== "guardian" ? `## JOB DESCRIPTION\n${jobDescription}\n` : ""}
 ${atsDirective ? `## ATS DIRECTIVE\n${atsDirective}\n` : ""}
 
 ## INDUSTRY CONTEXT
@@ -78,17 +115,17 @@ Detected Industry: ${industryContext.detectedIndustry || "Not detected"}
 Terminology: ${(industryContext.industryTerminology || []).join(", ")}
 Experience Level: ${industryContext.experienceLevel || "Not specified"}
 
-## IMMUTABLE ENTITIES (NEVER modify these)
+${agentType !== "jd-analyzer" ? `## IMMUTABLE ENTITIES (NEVER modify these)
 Companies: ${immutableEntities.companyNames.join(", ")}
 Institutions: ${immutableEntities.institutionNames.join(", ")}
 Degrees: ${immutableEntities.degreeNames.join(", ")}
 Languages: ${immutableEntities.languageNames.join(", ")}
-Key Dates: ${immutableEntities.keyDates.map(d => `${d.id}: ${d.date}`).join(", ")}
+Key Dates: ${immutableEntities.keyDates.map(d => `${d.id}: ${d.date}`).join(", ")}` : ""}
 
-## EDITABLE FIELDS
-${Object.entries(editableFields).filter(([_, v]) => v).map(([k]) => `- ${k}`).join("\n")}
+${agentType !== "jd-analyzer" ? `## EDITABLE FIELDS
+${Object.entries(editableFields).filter(([_, v]) => v).map(([k]) => `- ${k}`).join("\n")}` : ""}
 
-${dynamicSections.length > 0 ? `## DYNAMIC SECTIONS (preserve exactly)\n${dynamicSections.map(d => `- ${d.normalizedTitle}: ${d.contentCount} items`).join("\n")}\n` : ""}
+${dynamicSections.length > 0 && agentType !== "jd-analyzer" ? `## DYNAMIC SECTIONS (preserve exactly)\n${dynamicSections.map(d => `- ${d.normalizedTitle}: ${d.contentCount} items`).join("\n")}\n` : ""}
 ${previousPatches.length > 0 ? `## PREVIOUSLY ACCEPTED PATCHES\n${JSON.stringify(previousPatches, null, 2)}\n` : ""}
 ${memory.atsKeywords.length > 0 ? `## ATS KEYWORDS DETECTED\n${memory.atsKeywords.join(", ")}\n` : ""}
 
@@ -181,7 +218,8 @@ class ResumeAnalyzerAgentImpl implements SpecialistAgent {
 
 You produce ANALYSIS ONLY. You DO NOT edit the resume. Return an empty patches array.
 Your analysis is stored in the reasons of a single metadata patch.`,
-      context
+      context,
+      this.agentType
     );
 
     const { patches } = await callAgentAI(prompt, this.agentId, this.agentType);
@@ -222,7 +260,8 @@ class JDAnalyzerAgentImpl implements SpecialistAgent {
 
 Return this as structured data in a single metadata patch with field="jd_analysis".
 You DO NOT edit the resume.`,
-      context
+      context,
+      this.agentType
     );
 
     const { patches } = await callAgentAI(prompt, this.agentId, this.agentType);
@@ -263,7 +302,8 @@ RULES:
 
 Produce patches ONLY for editable fields.
 Return [] if no improvements needed.`,
-      context
+      context,
+      this.agentType
     );
 
     const startResult = await callAgentAI(prompt, this.agentId, this.agentType);
@@ -311,7 +351,8 @@ RULES:
 
 Produce patches ONLY for editable fields (summary, bullet descriptions, highlights).
 Return [] if text is already professional.`,
-      context
+      context,
+      this.agentType
     );
 
     const startResult = await callAgentAI(prompt, this.agentId, this.agentType);
@@ -363,7 +404,8 @@ Industry terminology to consider: ${(industryContext.industryTerminology || []).
 
 Produce patches ONLY for editable fields.
 Return [] if terminology is already appropriate.`,
-      context
+      context,
+      this.agentType
     );
 
     const startResult = await callAgentAI(prompt, this.agentId, this.agentType);
@@ -412,7 +454,8 @@ IMPORTANT: Languages are NEVER skills. Never move language names into skills.
 
 Produce patches for skill_*.category and skill_*.name fields only.
 Return [] if skills are already optimal.`,
-      context
+      context,
+      this.agentType
     );
 
     const startResult = await callAgentAI(prompt, this.agentId, this.agentType);
@@ -463,7 +506,8 @@ Never fabricate achievements or numbers that don't exist.
 
 Produce patches ONLY for experience_X.bullet_N fields.
 Return [] if all bullets are already excellent.`,
-      context
+      context,
+      this.agentType
     );
 
     const startResult = await callAgentAI(prompt, this.agentId, this.agentType);
@@ -512,7 +556,8 @@ Keep descriptions concise and professional.
 
 Produce patches ONLY for education_X.highlights[N] fields.
 Return [] if already optimal.`,
-      context
+      context,
+      this.agentType
     );
 
     const startResult = await callAgentAI(prompt, this.agentId, this.agentType);
@@ -572,7 +617,8 @@ RULES:
 
 Produce patches for dynamic section content only.
 Return [] if no sections need improvement.`,
-      context
+      context,
+      this.agentType
     );
 
     const startResult = await callAgentAI(prompt, this.agentId, this.agentType);

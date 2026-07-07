@@ -1076,6 +1076,7 @@ ${jobMemory.industry}`);
             result.jobIntelligence,
             result.companyIntelligence,
             result.skillGap,
+            deepAgenticMode,
           );
           optimizeResult = optimizeAttemptResult;
         }
@@ -1965,6 +1966,7 @@ async function optimizeResumeStandard(
   ji: JobIntelligence | null,
   company: CompanyIntelligence | null = null,
   skillGap: SkillGapIntelligence | null = null,
+  deepAgenticMode: boolean = false,
 ): Promise<{ resume: ResumeData; provider: string; charCount: number; keywordsAdded: number }> {
   const cacheKey = getOptimizationCacheKey(resume, jd, directive);
   try {
@@ -1982,7 +1984,35 @@ async function optimizeResumeStandard(
     console.warn("[Optimizer] Failed to read from optimization cache:", cacheErr);
   }
 
-  const result = await optimizeResumeStandardInner(resume, jd, directive, ji, company, skillGap);
+  let result: { resume: ResumeData; provider: string; charCount: number; keywordsAdded: number };
+
+  if (deepAgenticMode) {
+    try {
+      console.info("[Optimizer] Deep Agentic Mode: Orchestrating via DynamicMultiAgentSupervisor.");
+      const { runDynamicMultiAgentOptimization } = await import("../multi-agent/dynamic-supervisor");
+      const supervisorResult = await runDynamicMultiAgentOptimization(
+        resume,
+        jd.rawText || jd.keywords.join("\n"),
+        directive
+      );
+      if (supervisorResult && supervisorResult.success && supervisorResult.resume) {
+        result = {
+          resume: supervisorResult.resume,
+          provider: "Multi-Agent Supervisor",
+          charCount: JSON.stringify(supervisorResult.resume).length,
+          keywordsAdded: supervisorResult.patches.length,
+        };
+      } else {
+        console.warn("[Optimizer] Multi-Agent Supervisor returned unsuccessful result, falling back to standard optimizer.");
+        result = await optimizeResumeStandardInner(resume, jd, directive, ji, company, skillGap);
+      }
+    } catch (e: any) {
+      console.error("[Optimizer] Multi-Agent Supervisor failed, falling back to standard optimizer:", e?.message);
+      result = await optimizeResumeStandardInner(resume, jd, directive, ji, company, skillGap);
+    }
+  } else {
+    result = await optimizeResumeStandardInner(resume, jd, directive, ji, company, skillGap);
+  }
 
   try {
     if (typeof window !== "undefined" && typeof localStorage !== "undefined") {
