@@ -82,6 +82,12 @@ export function Optimizer() {
   // Interview prep mode — shows when user clicks "Prepare for Interview"
   const [showInterviewPrep, setShowInterviewPrep] = useState(false);
   const [deepAgenticMode, setDeepAgenticMode] = useState(false);
+  // === MODEL VARIANT ARENA ===
+  const [arenaMode, setArenaMode] = useState(false);
+  const [arenaProviderIds, setArenaProviderIds] = useState<string[]>([]);
+  const [variantResults, setVariantResults] = useState<Record<string, AgentPipelineResult>>({});
+  const [arenaRunning, setArenaRunning] = useState(false);
+  const allProviders = useApp((s) => s.providers);
   const fileRef = useRef<HTMLInputElement>(null);
 
   const [pasteText, setPasteText] = useState("");
@@ -604,6 +610,103 @@ export function Optimizer() {
   // Now it delegates to runPipeline().
   const optimize = runPipeline;
 
+  // ============================================================================
+  // runArena() — Model Variant Arena
+  //
+  // Runs runOptimizationPipeline in parallel for each selected provider,
+  // storing the results in variantResults keyed by providerId.
+  // The main pipeline result (pipelineResult) is still set from the first
+  // provider to succeed (so the "done" step renders normally).
+  // ============================================================================
+  const runArena = useCallback(async () => {
+    if (!resume || !jdParsed || !beforeReport || arenaProviderIds.length === 0) return;
+    if (abortRef.current) abortRef.current.abort();
+    const controller = new AbortController();
+    abortRef.current = controller;
+
+    setArenaRunning(true);
+    setAiThinking(true);
+    setAiLog([]);
+    setPipelineProgress(null);
+    setPipelineResult(null);
+    setPipelineError(null);
+    setOptimizedResume(null);
+    setAfterReport(null);
+    setVariantResults({});
+    clearAllProviderCooldowns();
+
+    setAiLog((l) => [...l, `🏟️ Model Variant Arena: running ${arenaProviderIds.length} providers in parallel…`]);
+
+    const directiveConfig = useApp.getState().optimizerDirective;
+    const baseInput = {
+      resume,
+      jd: jdParsed,
+      userDirectives: directiveConfig?.customDirectiveOverride?.trim() || undefined,
+      enableReflection: false, // skip reflection in Arena to keep runs fast
+      deepAgenticMode: false,
+      onProgress: undefined as any,
+    };
+
+    // Run all providers concurrently
+    const settled = await Promise.allSettled(
+      arenaProviderIds.map((pid) =>
+        runOptimizationPipeline({ ...baseInput, providerId: pid })
+          .then((r) => ({ pid, result: r }))
+          .catch((e) => ({ pid, error: String(e) }))
+      )
+    );
+
+    if (controller.signal.aborted) { setArenaRunning(false); setAiThinking(false); return; }
+
+    const newVariants: Record<string, AgentPipelineResult> = {};
+    let firstSuccess: AgentPipelineResult | null = null;
+
+    for (const s of settled) {
+      if (s.status === "fulfilled") {
+        const { pid, result, error } = s.value as any;
+        if (result && result.status !== "failed") {
+          newVariants[pid] = result;
+          if (!firstSuccess) firstSuccess = result;
+          setAiLog((l) => [
+            ...l,
+            `✓ ${allProviders.find((p) => p.id === pid)?.name ?? pid}: ATS ${result.afterATS?.scores.ats ?? "?"}`,
+          ]);
+        } else {
+          setAiLog((l) => [
+            ...l,
+            `✗ ${allProviders.find((p) => p.id === pid)?.name ?? pid}: ${error ?? result?.error ?? "failed"}`,
+          ]);
+        }
+      }
+    }
+
+    setVariantResults(newVariants);
+
+    if (firstSuccess) {
+      setPipelineResult(firstSuccess);
+      if (firstSuccess.optimizedResume) {
+        setOptimizedResume(firstSuccess.optimizedResume);
+        addResume(firstSuccess.optimizedResume);
+      }
+      if (firstSuccess.afterATS && firstSuccess.optimizedResume) {
+        const after = scoreATS(firstSuccess.optimizedResume, jdParsed);
+        after.scores.ats = firstSuccess.afterATS.scores.ats;
+        after.scores.keywords = firstSuccess.afterATS.scores.keywordMatch;
+        setAfterReport(after);
+        addATS(after);
+      }
+      incUsage("resumesGenerated");
+      setStep("done");
+      toast.success(`Arena complete — ${Object.keys(newVariants).length} variants ready!`);
+    } else {
+      setPipelineError("All Arena providers failed. Please check your API keys and try again.");
+      toast.error("Arena: all providers failed.");
+    }
+
+    setArenaRunning(false);
+    setAiThinking(false);
+  }, [resume, jdParsed, beforeReport, arenaProviderIds, allProviders, addResume, addATS, incUsage]);
+
   // Cancel any in-flight pipeline when the component unmounts
   useEffect(() => {
     return () => {
@@ -1050,12 +1153,76 @@ export function Optimizer() {
                   />
                 </div>
 
+                {/* === Model Variant Arena Toggle === */}
+                <div className="mt-3 rounded-lg border border-input bg-card/50 overflow-hidden">
+                  <div className="flex items-center justify-between p-3">
+                    <div className="flex gap-2">
+                      <Icon name="Trophy" className="w-5 h-5 text-amber-500 shrink-0" />
+                      <div>
+                        <div className="text-xs font-semibold">Model Variant Arena</div>
+                        <div className="text-[10px] text-muted-foreground">Run multiple AI providers in parallel and compare ATS scores side-by-side.</div>
+                      </div>
+                    </div>
+                    <input
+                      type="checkbox"
+                      checked={arenaMode}
+                      onChange={(e) => { setArenaMode(e.target.checked); if (!e.target.checked) setArenaProviderIds([]); }}
+                      className="w-4 h-4 rounded text-amber-500 focus:ring-amber-400 border-input bg-background"
+                    />
+                  </div>
+                  {arenaMode && (
+                    <div className="px-3 pb-3 border-t border-input/50 pt-2">
+                      <div className="text-[10px] text-muted-foreground mb-2 font-semibold uppercase tracking-wide">Select providers to compare (up to 3)</div>
+                      <div className="flex flex-wrap gap-1.5">
+                        {allProviders
+                          .filter((p) => p.isActive)
+                          .slice(0, 8)
+                          .map((p) => {
+                            const selected = arenaProviderIds.includes(p.id);
+                            return (
+                              <button
+                                key={p.id}
+                                type="button"
+                                onClick={() => {
+                                  setArenaProviderIds((prev) =>
+                                    selected
+                                      ? prev.filter((id) => id !== p.id)
+                                      : prev.length < 3
+                                      ? [...prev, p.id]
+                                      : prev
+                                  );
+                                }}
+                                className={`px-2.5 py-1 rounded-full text-[11px] font-semibold border transition-all duration-150 ${
+                                  selected
+                                    ? "bg-amber-500 text-white border-amber-500 shadow-sm"
+                                    : "bg-secondary text-secondary-foreground border-input hover:border-amber-400 hover:text-amber-600"
+                                } ${!selected && arenaProviderIds.length >= 3 ? "opacity-40 cursor-not-allowed" : "cursor-pointer"}`}
+                              >
+                                {p.name}
+                              </button>
+                            );
+                          })}
+                      </div>
+                      {arenaProviderIds.length === 0 && (
+                        <p className="text-[10px] text-muted-foreground mt-1.5 italic">Select at least one provider to enable Arena mode.</p>
+                      )}
+                    </div>
+                  )}
+                </div>
+
                 <div className="mt-5 flex gap-2">
                   <Button variant="outline" onClick={() => setStep("analyze")} className="gap-1.5"><Icon name="ArrowLeft" className="w-4 h-4" /> Back</Button>
-                  <Button onClick={optimize} disabled={aiThinking} className="bg-brand hover:bg-brand-dark text-white gap-2 flex-1">
-                    {aiThinking ? <Icon name="Loader2" className="w-4 h-4 animate-spin" /> : industryMode ? <Icon name="Building2" className="w-4 h-4" /> : <Icon name="Wand2" className="w-4 h-4" />}
-                    {aiThinking ? "Optimizing…" : industryMode ? `Run ${INDUSTRY_PROFILES[industryId]?.label ?? "Industry"} ATS optimizer` : "Run AI optimizer"}
-                  </Button>
+                  {arenaMode && arenaProviderIds.length > 0 ? (
+                    <Button onClick={runArena} disabled={aiThinking || arenaRunning} className="bg-amber-500 hover:bg-amber-600 text-white gap-2 flex-1">
+                      {arenaRunning ? <Icon name="Loader2" className="w-4 h-4 animate-spin" /> : <Icon name="Trophy" className="w-4 h-4" />}
+                      {arenaRunning ? `Arena running (${arenaProviderIds.length} providers)…` : `Run Arena (${arenaProviderIds.length} provider${arenaProviderIds.length > 1 ? "s" : ""})`}
+                    </Button>
+                  ) : (
+                    <Button onClick={optimize} disabled={aiThinking} className="bg-brand hover:bg-brand-dark text-white gap-2 flex-1">
+                      {aiThinking ? <Icon name="Loader2" className="w-4 h-4 animate-spin" /> : industryMode ? <Icon name="Building2" className="w-4 h-4" /> : <Icon name="Wand2" className="w-4 h-4" />}
+                      {aiThinking ? "Optimizing…" : industryMode ? `Run ${INDUSTRY_PROFILES[industryId]?.label ?? "Industry"} ATS optimizer` : "Run AI optimizer"}
+                    </Button>
+                  )}
                 </div>
 
                 {/* === 5-agent pipeline progress tracker (shows during run + on error) === */}
@@ -1149,6 +1316,127 @@ export function Optimizer() {
             {/* === 5-agent pipeline results (before/after ATS, keyword improvements, recommendations, confidence, reflection) === */}
             {pipelineResult && (
               <PipelineResults result={pipelineResult} />
+            )}
+
+            {/* === MODEL VARIANT ARENA RESULTS === */}
+            {Object.keys(variantResults).length > 1 && (
+              <Card className="border-amber-300 dark:border-amber-700">
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-base flex items-center gap-2">
+                    <Icon name="Trophy" className="w-4 h-4 text-amber-500" />
+                    Model Variant Arena — Side-by-Side Comparison
+                    <Badge variant="outline" className="ml-auto text-amber-600 border-amber-400 text-[10px]">
+                      {Object.keys(variantResults).length} variants
+                    </Badge>
+                  </CardTitle>
+                  <CardDescription className="text-xs">
+                    Each provider optimized your resume independently. Pick the best result to export.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  {/* Score leaderboard */}
+                  <div className="grid gap-3 mb-4" style={{ gridTemplateColumns: `repeat(${Object.keys(variantResults).length}, minmax(0,1fr))` }}>
+                    {Object.entries(variantResults)
+                      .sort(([, a], [, b]) => (b.afterATS?.scores.ats ?? 0) - (a.afterATS?.scores.ats ?? 0))
+                      .map(([pid, res], idx) => {
+                        const pName = allProviders.find((p) => p.id === pid)?.name ?? pid;
+                        const atsScore = res.afterATS?.scores.ats ?? 0;
+                        const beforeScore = res.beforeATS?.scores.ats ?? (beforeReport?.scores.ats ?? 0);
+                        const delta = atsScore - beforeScore;
+                        const isWinner = idx === 0;
+                        return (
+                          <div
+                            key={pid}
+                            className={`relative rounded-xl p-4 border text-center transition-all ${
+                              isWinner
+                                ? "border-amber-400 bg-amber-50 dark:bg-amber-950/30 shadow-md"
+                                : "border-input bg-card/60"
+                            }`}
+                          >
+                            {isWinner && (
+                              <div className="absolute -top-2.5 left-1/2 -translate-x-1/2 bg-amber-500 text-white text-[9px] font-bold px-2 py-0.5 rounded-full">
+                                🏆 BEST
+                              </div>
+                            )}
+                            <div className={`text-[11px] font-semibold mb-2 truncate ${isWinner ? "text-amber-700 dark:text-amber-400" : "text-muted-foreground"}`}>
+                              {pName}
+                            </div>
+                            <div className={`text-4xl font-bold font-display mb-1 ${isWinner ? "text-amber-600" : ""}`}>
+                              {atsScore}
+                            </div>
+                            <div className="text-[10px] text-muted-foreground mb-2">ATS Score</div>
+                            <Badge
+                              variant={delta >= 0 ? "outline" : "warning"}
+                              className={`text-[10px] ${
+                                isWinner ? "border-amber-400 text-amber-700" : ""
+                              }`}
+                            >
+                              {delta >= 0 ? "+" : ""}{delta} pts vs original
+                            </Badge>
+                            {res.optimizedResume && (
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                className={`mt-3 w-full text-[11px] h-7 ${
+                                  isWinner ? "border-amber-400 text-amber-700 hover:bg-amber-100" : ""
+                                }`}
+                                onClick={() => {
+                                  if (res.optimizedResume) {
+                                    setOptimizedResume(res.optimizedResume);
+                                    toast.success(`Switched to ${pName} variant.`);
+                                  }
+                                }}
+                              >
+                                <Icon name="Check" className="w-3 h-3 mr-1" /> Use this version
+                              </Button>
+                            )}
+                          </div>
+                        );
+                      })}
+                  </div>
+                  {/* Keyword comparison table */}
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-xs border-separate border-spacing-0">
+                      <thead>
+                        <tr>
+                          <th className="text-left text-muted-foreground font-semibold px-3 py-2 bg-secondary/50 rounded-tl-lg">Metric</th>
+                          {Object.entries(variantResults)
+                            .sort(([, a], [, b]) => (b.afterATS?.scores.ats ?? 0) - (a.afterATS?.scores.ats ?? 0))
+                            .map(([pid], idx) => (
+                              <th key={pid} className={`text-center px-3 py-2 font-semibold ${
+                                idx === 0 ? "bg-amber-50 dark:bg-amber-950/20 text-amber-700" : "bg-secondary/50 text-muted-foreground"
+                              } ${idx === Object.keys(variantResults).length - 1 ? "rounded-tr-lg" : ""}`}>
+                                {allProviders.find((p) => p.id === pid)?.name ?? pid}
+                              </th>
+                            ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {[
+                          { label: "Keyword Match", fn: (r: AgentPipelineResult) => r.afterATS?.scores.keywordMatch ?? "—" },
+                          { label: "Content Score", fn: (r: AgentPipelineResult) => r.afterATS?.scores.content ?? "—" },
+                          { label: "Matched Keywords", fn: (r: AgentPipelineResult) => r.afterATS?.matchedKeywords.length ?? "—" },
+                          { label: "Missing Keywords", fn: (r: AgentPipelineResult) => r.afterATS?.missingKeywords.length ?? "—" },
+                          { label: "Provider Used", fn: (r: AgentPipelineResult) => r.provider ?? "—" },
+                        ].map((row, ri) => (
+                          <tr key={row.label} className={ri % 2 === 0 ? "bg-secondary/20" : ""}>
+                            <td className="px-3 py-1.5 text-muted-foreground font-medium">{row.label}</td>
+                            {Object.entries(variantResults)
+                              .sort(([, a], [, b]) => (b.afterATS?.scores.ats ?? 0) - (a.afterATS?.scores.ats ?? 0))
+                              .map(([pid, res], idx) => (
+                                <td key={pid} className={`px-3 py-1.5 text-center font-semibold ${
+                                  idx === 0 ? "text-amber-700 dark:text-amber-400" : ""
+                                }`}>
+                                  {String(row.fn(res))}
+                                </td>
+                              ))}
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </CardContent>
+              </Card>
             )}
 
             {/* === V3: Pipeline Dashboard — shows ALL agent statuses (Supervisor, Memory, CoverLetter, Interview, CareerCoach, etc.) === */}
