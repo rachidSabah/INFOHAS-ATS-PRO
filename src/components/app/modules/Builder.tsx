@@ -276,6 +276,53 @@ Return ONLY a valid JSON array of string bullets, NO formatting, NO markdown, NO
       setFixingIssueId(null);
     }
   };
+  const fixKeywordWithAI = async (keyword: string, target: "summary" | "experience") => {
+    if (!resume) return;
+    const toastId = toast.loading(`AI is weaving "${keyword}" into your ${target}...`);
+    try {
+      const { ProviderRouter } = await import("@/lib/ai/services/router");
+      const cleanKeyword = keyword.replace(/\*\*|\*/g, "");
+
+      if (target === "summary") {
+        const prompt = `Rewrite this resume summary to naturally incorporate the keyword "${cleanKeyword}". Ensure it is highly professional, impactful, and about 90 words: "${resume.summary ?? ""}". Return ONLY the summary text. Do NOT use any asterisks or markdown bold formatting.`;
+        const res = await ProviderRouter.chat({
+          messages: [{ role: "user", content: prompt }], maxTokens: 250, temperature: 0.6
+        }, { agentTask: "summary" });
+        if (res.text) {
+          const cleanSummary = res.text.trim().replace(/\*\*|\*/g, "");
+          patch({ summary: cleanSummary });
+          toast.success(`Weaved "${cleanKeyword}" into Summary!`, { id: toastId });
+        }
+      } else {
+        const exp = resume.experience[0];
+        if (!exp) {
+          toast.error("Add an experience entry first to weave keywords into experience.", { id: toastId });
+          return;
+        }
+        const prompt = `Rewrite the bullet points for the role "${exp.title} at ${exp.company}" to naturally incorporate the keyword/phrase "${cleanKeyword}". Keep the achievements measurable and professional:
+${JSON.stringify(exp.bullets)}
+Return ONLY a valid JSON array of string bullets, NO formatting, NO markdown, NO asterisks.`;
+        const res = await ProviderRouter.chat({
+          messages: [{ role: "user", content: prompt }], maxTokens: 400, temperature: 0.7
+        }, { agentTask: "experience" });
+        try {
+          const parsedBullets = JSON.parse(res.text.trim());
+          if (Array.isArray(parsedBullets)) {
+            const cleanBullets = parsedBullets.map((b) => typeof b === "string" ? b.replace(/\*\*|\*/g, "") : b);
+            patch({
+              experience: resume.experience.map((e) => e.id === exp.id ? { ...e, bullets: cleanBullets } : e)
+            });
+            toast.success(`Weaved "${cleanKeyword}" into "${exp.company}" bullets!`, { id: toastId });
+          }
+        } catch {
+          toast.error("Failed to parse AI experience bullets.", { id: toastId });
+        }
+      }
+    } catch (err: any) {
+      toast.error(`Failed to apply keyword fix: ${err?.message}`, { id: toastId });
+    }
+  };
+
   const [messages, setMessages] = useState<Array<{ role: "user" | "assistant"; content: string }>>([
     {
       role: "assistant",
@@ -1529,7 +1576,7 @@ ${resumeContext}
                           {keywordsList.filter(k => k.matched).length}/{keywordsList.length} Matched
                         </span>
                       </div>
-                      <div className="grid grid-cols-2 gap-1.5 max-h-[160px] overflow-y-auto p-1 border border-border rounded-lg bg-secondary/10 scrollbar-thin">
+                      <div className="grid grid-cols-1 gap-1.5 max-h-[160px] overflow-y-auto p-1 border border-border rounded-lg bg-secondary/10 scrollbar-thin">
                         {keywordsList.map(({ keyword, matched }) => (
                           <div
                             key={keyword}
@@ -1543,13 +1590,29 @@ ${resumeContext}
                             {matched ? (
                               <Icon name="Check" className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
                             ) : (
-                              <button
-                                onClick={() => fixIssue({ type: "skills", meta: { skill: keyword } })}
-                                className="text-brand hover:text-brand-dark cursor-pointer p-0.5 rounded hover:bg-brand/10 transition shrink-0"
-                                title="Weave into skills"
-                              >
-                                <Icon name="Plus" className="w-3 h-3" />
-                              </button>
+                              <div className="flex items-center gap-1.5 shrink-0">
+                                <button
+                                  onClick={() => fixIssue({ type: "skills", meta: { skill: keyword } })}
+                                  className="text-brand hover:text-brand-dark cursor-pointer p-0.5 rounded hover:bg-brand/10 transition shrink-0"
+                                  title="Add keyword as Skill"
+                                >
+                                  <Icon name="Plus" className="w-3.5 h-3.5" />
+                                </button>
+                                <button
+                                  onClick={() => fixKeywordWithAI(keyword, "summary")}
+                                  className="text-amber-500 hover:text-amber-600 cursor-pointer p-0.5 rounded hover:bg-amber-500/10 transition shrink-0"
+                                  title="Weave into Summary via AI"
+                                >
+                                  <Icon name="Sparkles" className="w-3.5 h-3.5" />
+                                </button>
+                                <button
+                                  onClick={() => fixKeywordWithAI(keyword, "experience")}
+                                  className="text-blue-500 hover:text-blue-600 cursor-pointer p-0.5 rounded hover:bg-blue-500/10 transition shrink-0"
+                                  title="Weave into Experience via AI"
+                                >
+                                  <Icon name="Briefcase" className="w-3.5 h-3.5" />
+                                </button>
+                              </div>
                             )}
                           </div>
                         ))}
