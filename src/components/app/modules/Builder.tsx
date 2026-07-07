@@ -8,6 +8,86 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge, Icon } from "@/components/shared";
+
+// ── Lightweight inline Markdown → JSX renderer for Copilot chat ────────────
+// Handles: **bold**, *italic*, `code`, # h1-h3, - bullets, \n newlines.
+// Zero dependencies — no remark/rehype added to the bundle.
+function renderMarkdown(text: string): React.ReactNode[] {
+  const nodes: React.ReactNode[] = [];
+  const lines = text.split("\n");
+  let key = 0;
+
+  const renderInline = (line: string): React.ReactNode => {
+    // Process bold (**...**), italic (*...*), and inline code (`...`)
+    const parts: React.ReactNode[] = [];
+    const pattern = /(\*\*(.+?)\*\*|\*(.+?)\*|`([^`]+?)`)/g;
+    let lastIndex = 0;
+    let match: RegExpExecArray | null;
+    while ((match = pattern.exec(line)) !== null) {
+      if (match.index > lastIndex) {
+        parts.push(line.slice(lastIndex, match.index));
+      }
+      if (match[2]) {
+        parts.push(<strong key={key++} className="font-semibold">{match[2]}</strong>);
+      } else if (match[3]) {
+        parts.push(<em key={key++}>{match[3]}</em>);
+      } else if (match[4]) {
+        parts.push(<code key={key++} className="bg-slate-100 dark:bg-slate-800 rounded px-0.5 font-mono text-[0.85em]">{match[4]}</code>);
+      }
+      lastIndex = pattern.lastIndex;
+    }
+    if (lastIndex < line.length) parts.push(line.slice(lastIndex));
+    return parts.length === 1 && typeof parts[0] === "string" ? parts[0] : <>{parts}</>;
+  };
+
+  let inList = false;
+  const listItems: React.ReactNode[] = [];
+
+  const flushList = () => {
+    if (inList && listItems.length) {
+      nodes.push(<ul key={key++} className="list-disc pl-4 space-y-0.5 my-1">{listItems.splice(0)}</ul>);
+      inList = false;
+    }
+  };
+
+  for (const line of lines) {
+    // Heading
+    const hMatch = line.match(/^(#{1,3})\s+(.+)/);
+    if (hMatch) {
+      flushList();
+      const level = hMatch[1].length;
+      const cls = level === 1 ? "font-bold text-sm mt-2 mb-1" : level === 2 ? "font-semibold text-[0.8rem] mt-1.5 mb-0.5" : "font-medium text-[0.75rem] mt-1";
+      nodes.push(<div key={key++} className={cls}>{renderInline(hMatch[2])}</div>);
+      continue;
+    }
+    // Bullet list item
+    const liMatch = line.match(/^[-*]\s+(.+)/);
+    if (liMatch) {
+      inList = true;
+      listItems.push(<li key={key++}>{renderInline(liMatch[1])}</li>);
+      continue;
+    }
+    // Numbered list
+    const numMatch = line.match(/^\d+\.\s+(.+)/);
+    if (numMatch) {
+      flushList();
+      nodes.push(<div key={key++} className="pl-3">{renderInline(numMatch[1])}</div>);
+      continue;
+    }
+    // Empty line — paragraph break
+    if (line.trim() === "") {
+      flushList();
+      nodes.push(<div key={key++} className="h-1.5" />);
+      continue;
+    }
+    // Normal paragraph line
+    flushList();
+    nodes.push(<div key={key++}>{renderInline(line)}</div>);
+  }
+  flushList();
+  return nodes;
+}
+
 import { useApp, uid } from "@/lib/store";
 import { useAutoSave, useUndoRedo, useLiveATSScore } from "@/lib/builder-hooks";
 import { TEMPLATES } from "@/lib/brand";
@@ -384,13 +464,13 @@ Return ONLY a valid JSON array of string bullets, NO formatting, NO markdown, NO
 
               {/* Bubble */}
               <div
-                className={`max-w-[80%] rounded-2xl px-3 py-2.5 text-xs leading-relaxed shadow-sm whitespace-pre-wrap ${
+                className={`max-w-[80%] rounded-2xl px-3 py-2.5 text-xs leading-relaxed shadow-sm ${
                   msg.role === "user"
-                    ? "bg-slate-900 dark:bg-slate-800 text-slate-100 rounded-tr-sm border border-slate-800"
+                    ? "bg-slate-900 dark:bg-slate-800 text-slate-100 rounded-tr-sm border border-slate-800 whitespace-pre-wrap"
                     : "bg-white dark:bg-slate-950 border border-slate-200/80 dark:border-slate-800 text-slate-800 dark:text-slate-100 rounded-tl-sm"
                 }`}
               >
-                {msg.content}
+                {msg.role === "assistant" ? renderMarkdown(msg.content) : msg.content}
               </div>
             </div>
           ))}

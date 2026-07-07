@@ -7,6 +7,7 @@
 
 import type { ResumeData } from "../types";
 import { callAI, extractJSON } from "../ai";
+import { formatPolicyForPrompt } from "../directive-policy";
 import type {
   AgentPatch,
   AgentContext,
@@ -17,6 +18,35 @@ import type {
   ImmutableEntities,
 } from "./types";
 import { createPatchId } from "./patch-engine";
+
+// ── Per-agent optimization rule categories ──────────────────────────────────
+// Each agent only needs a subset of the global rules to reduce noise and
+// token usage. Deterministic agents (preservation, guardian) get none.
+const AGENT_RULE_KEYWORDS: Partial<Record<SpecialistAgentType, string[]>> = {
+  "ats-optimization": ["keyword", "ats", "density", "skill", "match"],
+  "professional-writing": ["grammar", "tone", "voice", "readab", "professional", "language", "sentence"],
+  "skills-enhancement": ["skill", "group", "categor", "technolog"],
+  "experience-enhancement": ["bullet", "action", "metric", "quantif", "achievement", "impact", "experience"],
+  "education-enhancement": ["education", "academic", "degree", "highlight"],
+  "industry-expert": ["industry", "terminolog", "domain", "sector"],
+  "dynamic-section": ["section", "dynamic", "custom"],
+  "resume-analyzer": ["strength", "weakness", "gap", "keyword", "miss"],
+  "jd-analyzer": ["keyword", "skill", "require"],
+};
+
+function filterRulesForAgent(
+  rules: string[],
+  agentType: SpecialistAgentType
+): string[] {
+  const keywords = AGENT_RULE_KEYWORDS[agentType];
+  // Deterministic agents never make AI calls — skip rules entirely
+  if (agentType === "resume-preservation" || agentType === "guardian") return [];
+  // If no filter defined, send all rules
+  if (!keywords) return rules;
+  return rules.filter((rule) =>
+    keywords.some((kw) => rule.toLowerCase().includes(kw))
+  );
+}
 
 // ── Base Interface ───────────────────────────────────────────────────────
 export interface SpecialistAgent {
@@ -63,7 +93,8 @@ function buildAgentPrompt(
     previousPatches,
   } = context;
 
-  // Dynamically filter context items to only include what is actually needed
+  // Dynamically filter context items to only include what is actually needed.
+  // Each agent gets the minimum required slice to reduce token bloat.
   let resumeContextStr = "";
   if (agentType === "jd-analyzer") {
     // Does not need the resume at all!
@@ -94,6 +125,27 @@ function buildAgentPrompt(
       summary: canonicalResume.summary,
       experience: canonicalResume.experience.map(e => ({ id: e.id, title: e.title, company: e.company, bullets: e.bullets })),
     }, null, 2);
+  } else if (agentType === "ats-optimization") {
+    // Needs summary + experience bullets + skills — education/languages are locked
+    resumeContextStr = JSON.stringify({
+      summary: canonicalResume.summary,
+      experience: canonicalResume.experience.map(e => ({ id: e.id, bullets: e.bullets })),
+      skills: canonicalResume.skills,
+    }, null, 2);
+  } else if (agentType === "industry-expert") {
+    // Needs summary + experience titles/bullets — no education, no languages
+    resumeContextStr = JSON.stringify({
+      summary: canonicalResume.summary,
+      experience: canonicalResume.experience.map(e => ({ id: e.id, title: e.title, bullets: e.bullets })),
+    }, null, 2);
+  } else if (agentType === "resume-analyzer") {
+    // Needs full resume for analysis but NOT previousPatches (it always outputs [])
+    resumeContextStr = JSON.stringify({
+      summary: canonicalResume.summary,
+      experience: canonicalResume.experience,
+      skills: canonicalResume.skills,
+      education: canonicalResume.education,
+    }, null, 2);
   } else {
     // Fallback: full resume context
     resumeContextStr = JSON.stringify(canonicalResume, null, 2);
@@ -107,30 +159,29 @@ ${instructions}
 ## RESUME CONTEXT (source of truth)
 ${resumeContextStr}
 
-${jobDescription && agentType !== "resume-preservation" && agentType !== "guardian" ? `## JOB DESCRIPTION\n${jobDescription}\n` : ""}
-${atsDirective ? `## ATS DIRECTIVE\n${atsDirective}\n` : ""}
+${jobDescription && agentType !== "resume-preservation" && agentType !== "guardian" && agentType !== "jd-analyzer" ? `## JOB DESCRIPTION\n${jobDescription}\n` : ""}
+${agentType === "jd-analyzer" ? `## JOB DESCRIPTION (the ONLY data you need to analyze)\n${jobDescription || ""}\n` : ""}
+${atsDirective && agentType !== "jd-analyzer" && agentType !== "resume-preservation" && agentType !== "guardian" ? `## ATS DIRECTIVE\n${atsDirective}\n` : ""}
 
-## INDUSTRY CONTEXT
+${agentType !== "jd-analyzer" && agentType !== "resume-preservation" && agentType !== "guardian" ? `## INDUSTRY CONTEXT
 Detected Industry: ${industryContext.detectedIndustry || "Not detected"}
 Terminology: ${(industryContext.industryTerminology || []).join(", ")}
-Experience Level: ${industryContext.experienceLevel || "Not specified"}
+Experience Level: ${industryContext.experienceLevel || "Not specified"}` : ""}
 
-${agentType !== "jd-analyzer" ? `## IMMUTABLE ENTITIES (NEVER modify these)
+${agentType !== "jd-analyzer" && agentType !== "resume-preservation" && agentType !== "guardian" ? `## IMMUTABLE ENTITIES (NEVER modify these)
 Companies: ${immutableEntities.companyNames.join(", ")}
 Institutions: ${immutableEntities.institutionNames.join(", ")}
 Degrees: ${immutableEntities.degreeNames.join(", ")}
 Languages: ${immutableEntities.languageNames.join(", ")}
 Key Dates: ${immutableEntities.keyDates.map(d => `${d.id}: ${d.date}`).join(", ")}` : ""}
 
-${agentType !== "jd-analyzer" ? `## EDITABLE FIELDS
-${Object.entries(editableFields).filter(([_, v]) => v).map(([k]) => `- ${k}`).join("\n")}` : ""}
+${agentType !== "jd-analyzer" && agentType !== "resume-preservation" && agentType !== "guardian" ? `## EDITABLE FIELDS\n${Object.entries(editableFields).filter(([_, v]) => v).map(([k]) => `- ${k}`).join("\n")}` : ""}
 
-${dynamicSections.length > 0 && agentType !== "jd-analyzer" ? `## DYNAMIC SECTIONS (preserve exactly)\n${dynamicSections.map(d => `- ${d.normalizedTitle}: ${d.contentCount} items`).join("\n")}\n` : ""}
-${previousPatches.length > 0 ? `## PREVIOUSLY ACCEPTED PATCHES\n${JSON.stringify(previousPatches, null, 2)}\n` : ""}
-${memory.atsKeywords.length > 0 ? `## ATS KEYWORDS DETECTED\n${memory.atsKeywords.join(", ")}\n` : ""}
+${dynamicSections.length > 0 && agentType !== "jd-analyzer" && agentType !== "resume-preservation" && agentType !== "guardian" ? `## DYNAMIC SECTIONS (preserve exactly)\n${dynamicSections.map(d => `- ${d.normalizedTitle}: ${d.contentCount} items`).join("\n")}\n` : ""}
+${previousPatches.length > 0 && agentType !== "jd-analyzer" && agentType !== "resume-analyzer" && agentType !== "resume-preservation" && agentType !== "guardian" ? `## PREVIOUSLY ACCEPTED PATCHES\n${JSON.stringify(previousPatches, null, 2)}\n` : ""}
+${memory.atsKeywords.length > 0 && agentType !== "resume-preservation" && agentType !== "guardian" ? `## ATS KEYWORDS DETECTED\n${memory.atsKeywords.join(", ")}\n` : ""}
 
-## OPTIMIZATION RULES
-${optimizationRules.join("\n")}
+${(() => { const relevantRules = filterRulesForAgent(optimizationRules, agentType); return relevantRules.length > 0 ? `## OPTIMIZATION RULES\n${relevantRules.join("\n")}` : ""; })()}
 
 ## OUTPUT FORMAT
 Return ONLY a JSON array of patch objects. Each patch:
@@ -151,14 +202,20 @@ async function callAgentAI(
   prompt: string,
   agentId: string,
   agentType: SpecialistAgentType,
-  providerId?: string
+  providerId?: string,
+  optimizationPolicy?: ReturnType<typeof formatPolicyForPrompt> extends string ? string : string
 ): Promise<{ patches: AgentPatch[]; error?: string }> {
   try {
+    // Build a rich system prompt: wire the OptimizationPolicy into specialist agents
+    // so they respect the same policy constraints as the locked pipeline.
+    const policyPreamble = optimizationPolicy
+      ? `${optimizationPolicy}\n\n`
+      : "";
     const response = await callAI({
       userPrompt: prompt,
       temperature: 0.3,
       maxTokens: 4000,
-      systemPrompt: `You are the ${agentType} specialist agent. Return ONLY a valid JSON array of patches.`,
+      systemPrompt: `${policyPreamble}You are the ${agentType} specialist agent. Return ONLY a valid JSON array of patch objects. Each patch must have: sectionId, field, oldValue, newValue, confidence (0-1), reason.`,
       providerId,
     });
 
