@@ -88,7 +88,9 @@ function buildExperienceSection(resume: ResumeData): RenderDocumentSection | nul
   for (const exp of resume.experience) {
     // Title line with company, location, dates
     const leftSide = `${exp.title}${exp.company ? ` | ${exp.company}` : ""}${exp.location ? ` | ${exp.location}` : ""}`;
-    const dateStr = exp.startDate || exp.endDate ? `${fmtInfohasRenderDate(exp.startDate)} – ${fmtInfohasRenderDate(exp.endDate)}` : "";
+    const dateStr = exp.startDate && exp.endDate
+      ? `${fmtInfohasRenderDate(exp.startDate)} – ${fmtInfohasRenderDate(exp.endDate)}`
+      : (exp.startDate || exp.endDate ? fmtInfohasRenderDate(exp.startDate || exp.endDate) : "");
     items.push({
       kind: "table-row",
       cells: [
@@ -117,7 +119,9 @@ function buildEducationSection(resume: ResumeData): RenderDocumentSection | null
   const items: RenderContentItem[] = [];
   for (const ed of resume.education) {
     const leftSide = `${ed.degree}${ed.field ? ` in ${ed.field}` : ""}${ed.institution ? ` | ${ed.institution}` : ""}${ed.location ? ` | ${ed.location}` : ""}`;
-    const dateStr = ed.startDate || ed.endDate ? `${fmtInfohasRenderDate(ed.startDate)} – ${fmtInfohasRenderDate(ed.endDate)}` : "";
+    const dateStr = ed.startDate && ed.endDate
+      ? `${fmtInfohasRenderDate(ed.startDate)} – ${fmtInfohasRenderDate(ed.endDate)}`
+      : (ed.startDate || ed.endDate ? fmtInfohasRenderDate(ed.startDate || ed.endDate) : "");
     items.push({
       kind: "table-row",
       cells: [

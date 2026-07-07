@@ -405,6 +405,7 @@ export type AIProviderType =
   | "opencode-zen"
   | "zencode"
   | "nvidia"
+  | "github"
   | "custom";
 
 

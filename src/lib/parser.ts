@@ -1093,7 +1093,9 @@ function parseExperiences(lines: string[], jobDesc?: string): ResumeData["experi
       const dateRange = parseDateRange(dateStr);
 
       let cleanLine = trimmed.replace(dateStr, '').trim();
-      cleanLine = cleanLine.replace(new RegExp("^[:\\s,—–\\-|·•▪◦]+"), '').replace(new RegExp("[:\\s,—–\\-|·•▪◦]+$"), '').trim();
+      // Remove any empty parentheses left behind by removing the date e.g. "Location (Date)" -> "Location ()" -> "Location"
+      cleanLine = cleanLine.replace(/\(\s*\)/g, '').trim();
+      cleanLine = cleanLine.replace(new RegExp("^[:\\s,—–\\-|·•▪◦()]+"), '').replace(new RegExp("[:\\s,—–\\-|·•▪◦()]+$"), '').trim();
 
       let title = cleanLine;
       let company = "";
@@ -1101,9 +1103,13 @@ function parseExperiences(lines: string[], jobDesc?: string): ResumeData["experi
 
       // Existing splitting logic (unchanged) ...
       const pipeParts = cleanLine.split(new RegExp("\\s*\\|\\s*"));
-      if (pipeParts.length >= 2) {
+      if (pipeParts.length >= 3) {
+        title = pipeParts[0].trim();
+        company = pipeParts[1].trim();
+        location = pipeParts.slice(2).join(" | ").trim();
+      } else if (pipeParts.length === 2) {
         const leftSide = pipeParts[0].trim();
-        const rightSide = pipeParts.slice(1).join(" | ").trim();
+        const rightSide = pipeParts[1].trim();
         const split = splitTitleAndCompany(leftSide);
         if (split) {
           title = split.title;
@@ -1147,6 +1153,11 @@ function parseExperiences(lines: string[], jobDesc?: string): ResumeData["experi
           }
         }
       }
+
+      // Clean up empty parentheses in title, company, location fields
+      title = title.replace(/\(\s*\)/g, '').trim();
+      company = company.replace(/\(\s*\)/g, '').trim();
+      location = location.replace(/\(\s*\)/g, '').trim();
 
       title = title.replace(new RegExp("^[:\\s,—–\\-|·•▪◦\\\\.]+"), '').replace(new RegExp("[:\\s,—–\\-|·•▪◦\\\\.]+$"), '').trim();
       company = company.replace(/^(?:at|in|for|with)\s+/i, '').trim();
@@ -1490,8 +1501,9 @@ function parseEducation(lines: string[]): ResumeData["education"] {
           startDate = yrMatch[0];
           endDate = "Ongoing";
           break;
+        } else {
+          endDate = yrMatch[0];
         }
-        // Single year without present/ongoing — don't break yet, keep looking
       }
     }
 

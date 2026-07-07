@@ -42,6 +42,25 @@ export function useAutoSave(resume: ResumeData | undefined, delay = 2000) {
     setRestoreEntry(null);
   }, []);
 
+  const triggerSave = useCallback(async () => {
+    if (!resume?.id) return false;
+    if (timerRef.current) clearTimeout(timerRef.current);
+    try {
+      await saveAutoSave({
+        resumeId: resume.id,
+        resumeData: resume,
+        savedAt: Date.now(),
+        version: Math.floor(Date.now() / 1000),
+      });
+      setLastSaved(Date.now());
+      setSaveCount((c) => c + 1);
+      return true;
+    } catch (e) {
+      console.warn("[useAutoSave] IndexedDB manual write failed:", e);
+      return false;
+    }
+  }, [resume]);
+
   useEffect(() => {
     if (!resume?.id) return;
     if (timerRef.current) clearTimeout(timerRef.current);
@@ -61,7 +80,7 @@ export function useAutoSave(resume: ResumeData | undefined, delay = 2000) {
     }, delay);
   }, [resume, delay]);
 
-  return { lastSaved, saveCount, restoreEntry, dismissRestore };
+  return { lastSaved, saveCount, restoreEntry, dismissRestore, triggerSave };
 }
 
 // ============================================================================

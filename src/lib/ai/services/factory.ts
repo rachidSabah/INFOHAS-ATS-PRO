@@ -14,6 +14,7 @@ const opencodeProvider = new OpenAICompatibleProvider("opencode");
 const opencodeZenProvider = new OpenAICompatibleProvider("opencode-zen");
 const zencodeProvider = new OpenAICompatibleProvider("zencode");
 const nvidiaProvider = new OpenAICompatibleProvider("nvidia");
+const githubProvider = new OpenAICompatibleProvider("github");
 
 const REGISTRY: Record<string, AIProviderAdapter> = {
   openai: openaiProvider,
@@ -21,6 +22,7 @@ const REGISTRY: Record<string, AIProviderAdapter> = {
   "opencode-zen": opencodeZenProvider,
   zencode: zencodeProvider,
   nvidia: nvidiaProvider,
+  github: githubProvider,
   deepseek: deepseekProvider,
   groq: groqProvider,
   openrouter: openrouterProvider,

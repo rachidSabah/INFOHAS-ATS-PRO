@@ -73,7 +73,7 @@ export function Builder() {
   const [importing, setImporting] = useState(false);
   const [spellCheckOpen, setSpellCheckOpen] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
-  const { saveCount, restoreEntry, dismissRestore } = useAutoSave(resume);
+  const { saveCount, restoreEntry, dismissRestore, triggerSave } = useAutoSave(resume);
   const { snapshot, undo, redo, jumpTo, canUndo, canRedo, undoStack, totalUndos, totalRedos } = useUndoRedo(resume);
   const previewRef = useRef<HTMLDivElement>(null);
   const importFileRef = useRef<HTMLInputElement>(null);
@@ -284,9 +284,117 @@ Return ONLY a valid JSON array of string bullets, NO formatting, NO markdown, NO
   const [inputMessage, setInputMessage] = useState("");
   const [sendingMessage, setSendingMessage] = useState(false);
 
-  const sendMessage = async () => {
-    if (!inputMessage.trim() || sendingMessage) return;
-    const userText = inputMessage;
+  const renderCopilotChat = (heightClass: string) => {
+    const suggestions = [
+      { text: "📈 Improve ATS score", prompt: "improve ats score" },
+      { text: "💼 Target Qatar Duty Free", prompt: "optimize for Sales Assistant role at Qatar Duty Free" },
+      { text: "✍️ Polish summary", prompt: "rewrite the professional summary to sound more punchy and outcome-focused" },
+      { text: "🎯 Highlight metrics", prompt: "rewrite my experience bullets to include quantified metrics and achievements" },
+    ];
+
+    return (
+      <div className={`flex flex-col ${heightClass} border border-border dark:border-slate-800 rounded-xl bg-gradient-to-b from-card to-background shadow-md overflow-hidden relative group`}>
+        {/* Suggestion Chips */}
+        {messages.length <= 1 && (
+          <div className="p-3 border-b border-border/50 bg-slate-500/5 space-y-1.5 shrink-0">
+            <span className="text-[10px] uppercase font-bold text-muted-foreground tracking-wider flex items-center gap-1">
+              <Icon name="Lightbulb" className="w-3.5 h-3.5 text-amber-500" /> Quick Suggestions
+            </span>
+            <div className="flex flex-wrap gap-1.5 mt-1">
+              {suggestions.map((s, idx) => (
+                <button
+                  key={idx}
+                  onClick={() => {
+                    sendMessage(s.prompt);
+                  }}
+                  className="text-[10px] px-2.5 py-1 rounded-full border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 hover:border-brand hover:text-brand dark:hover:border-brand dark:hover:text-brand font-medium shadow-sm transition active:scale-95 cursor-pointer"
+                >
+                  {s.text}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Chat messages */}
+        <div className="flex-1 p-3 overflow-y-auto space-y-3.5 scrollbar-thin">
+          {messages.map((msg, i) => (
+            <div
+              key={i}
+              className={`flex items-start gap-2.5 ${msg.role === "user" ? "flex-row-reverse" : "flex-row"}`}
+            >
+              {/* Avatar */}
+              {msg.role === "user" ? (
+                <div className="w-6 h-6 rounded-full bg-slate-200 dark:bg-slate-800 flex items-center justify-center text-[10px] font-bold text-slate-700 dark:text-slate-300 border border-slate-300 dark:border-slate-700 shrink-0">
+                  U
+                </div>
+              ) : (
+                <div className="w-6 h-6 rounded-full bg-gradient-to-tr from-violet-600 via-indigo-600 to-cyan-500 flex items-center justify-center shadow-sm shrink-0">
+                  <Icon name="Sparkles" className="w-3 h-3 text-white" />
+                </div>
+              )}
+
+              {/* Bubble */}
+              <div
+                className={`max-w-[80%] rounded-2xl px-3 py-2.5 text-xs leading-relaxed shadow-sm whitespace-pre-wrap ${
+                  msg.role === "user"
+                    ? "bg-slate-900 dark:bg-slate-800 text-slate-100 rounded-tr-sm border border-slate-800"
+                    : "bg-white dark:bg-slate-950 border border-slate-200/80 dark:border-slate-800 text-slate-800 dark:text-slate-100 rounded-tl-sm"
+                }`}
+              >
+                {msg.content}
+              </div>
+            </div>
+          ))}
+
+          {sendingMessage && (
+            <div className="flex items-start gap-2.5">
+              <div className="w-6 h-6 rounded-full bg-gradient-to-tr from-violet-500 via-indigo-500 to-cyan-500 flex items-center justify-center shrink-0 animate-pulse">
+                <Icon name="Sparkles" className="w-3 h-3 text-white" />
+              </div>
+              <div className="flex-1 space-y-2 max-w-[80%] py-1">
+                <div className="h-3 bg-slate-200 dark:bg-slate-800 rounded animate-pulse w-3/4" />
+                <div className="h-3 bg-slate-200/80 dark:bg-slate-800/80 rounded animate-pulse w-1/2" />
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Input box */}
+        <div className="p-2 border-t border-border flex gap-2 bg-slate-50/50 dark:bg-slate-900/40 relative">
+          {sendingMessage && (
+            <div className="absolute top-0 left-0 right-0 h-0.5 bg-gradient-to-r from-violet-500 via-indigo-500 to-cyan-400 animate-pulse" />
+          )}
+          <Input
+            value={inputMessage}
+            onChange={(e) => setInputMessage(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !e.shiftKey) {
+                e.preventDefault();
+                sendMessage();
+              }
+            }}
+            placeholder="Ask AI to optimize, write or polish..."
+            className="text-xs h-9 bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 focus-visible:ring-1 focus-visible:ring-violet-500"
+            disabled={sendingMessage}
+          />
+          <Button
+            size="sm"
+            onClick={() => sendMessage()}
+            disabled={sendingMessage || !inputMessage.trim()}
+            className="h-9 px-3 bg-gradient-to-tr from-violet-600 to-indigo-600 hover:from-violet-700 hover:to-indigo-700 text-white font-medium shadow-sm transition active:scale-95 shrink-0"
+          >
+            <Icon name="Send" className="w-3.5 h-3.5" />
+          </Button>
+        </div>
+      </div>
+    );
+  };
+
+  const sendMessage = async (overrideText?: string) => {
+    const textToSend = overrideText || inputMessage;
+    if (!textToSend.trim() || sendingMessage) return;
+    const userText = textToSend;
     setInputMessage("");
     setMessages((prev) => [...prev, { role: "user", content: userText }]);
     setSendingMessage(true);
@@ -335,7 +443,7 @@ Guidelines:
 3. When referencing experience or skills, ensure you map them using the exact 'id' values provided in the current resume.
 4. Keep the text concise and suitable for a 1-page A4 format.
 5. CRITICAL — when the candidate's summary is marked as "(empty — user has not written a summary yet)", do NOT fabricate a generic summary (e.g. 'Results-driven professional with a passion for...'). Instead, ask the user to share their actual background so you can write something real and personalised.
-6. ALWAYS append a [PATCH] block containing the updated fields automatically at the end of your response whenever you suggest or generate any edits. Do NOT wait for the user to ask you to "insert" or "apply" it.
+6. ALWAYS append a [PATCH] block containing the updated fields automatically at the end of your response whenever you suggest or generate any edits. Do NOT wait for the user to ask you to "insert" or "apply" it. CRITICAL RULE: You MUST append a [PATCH] block containing a valid JSON object at the very end of your response if you make or suggest ANY edits. If you do not include the [PATCH] block, the system cannot apply your changes to the resume editor and the user's data will not be updated.
 7. CRITICAL — Do NOT use markdown bold/italic formatting (e.g. **word** or *word*) inside any fields in the [PATCH] block or inside your text suggestions. All resume fields must contain plain text only without asterisks, as the system does not support inline markdown formatting.
 8. WRITING STYLE & PREMIUM AGENT CAPABILITIES:
    - Use active voice only (e.g. 'Spearheaded', 'Engineered', 'Optimized' instead of passive forms like 'Responsible for' or 'Was managing').
@@ -375,9 +483,26 @@ Guidelines:
         name: resume.name,
         headline: resume.headline,
         summary: isPlaceholderSummary ? "(empty — user has not written a summary yet)" : resume.summary,
-        experience: resume.experience.map(e => ({ id: e.id, company: e.company, title: e.title, bullets: e.bullets })),
+        experience: resume.experience.map(e => ({
+          id: e.id,
+          company: e.company,
+          title: e.title,
+          location: e.location || "",
+          startDate: e.startDate || "",
+          endDate: e.endDate || "",
+          bullets: e.bullets
+        })),
         skills: resume.skills,
-        education: resume.education,
+        education: resume.education.map(ed => ({
+          id: ed.id,
+          institution: ed.institution,
+          degree: ed.degree,
+          field: ed.field || "",
+          location: ed.location || "",
+          startDate: ed.startDate || "",
+          endDate: ed.endDate || "",
+          highlights: ed.highlights || []
+        })),
         languages: resume.languages,
       }, null, 2) : "{}";
 
@@ -412,9 +537,26 @@ ${resumeContext}
         cleanReply = parts[0].trim();
         const jsonStr = parts[1].trim();
         try {
-          patchData = JSON.parse(jsonStr);
+          patchData = JSON.parse(jsonStr.replace(/```json/gi, "").replace(/```/g, "").trim());
         } catch (err) {
-          console.warn("[Copilot] Failed to parse patch JSON:", err);
+          console.warn("[Copilot] Failed to parse patch JSON after [PATCH]:", err);
+          try {
+            const { extractJSON } = require("@/lib/ai");
+            patchData = extractJSON(jsonStr);
+          } catch {}
+        }
+      } else {
+        // Fallback: try to extract JSON from anywhere in the response if [PATCH] tag is missing
+        try {
+          const { extractJSON } = require("@/lib/ai");
+          patchData = extractJSON(reply);
+          // If JSON was found in the text, let's remove it from the chat bubble cleanReply so it doesn't clutter the UI
+          const firstBrace = reply.indexOf("{");
+          if (firstBrace !== -1) {
+            cleanReply = reply.slice(0, firstBrace).trim();
+          }
+        } catch {
+          // No JSON found, which is fine
         }
       }
 
@@ -449,20 +591,77 @@ ${resumeContext}
           updatedResume.headline = cleanedPatch.headline;
         }
         if (Array.isArray(cleanedPatch.skills)) {
-          updatedResume.skills = cleanedPatch.skills;
+          // Robust mapping of skills supporting strings and objects, preserving or generating ids
+          updatedResume.skills = cleanedPatch.skills.map((s: any) => {
+            if (typeof s === "string") {
+              return { id: uid("s"), name: s, category: "" };
+            }
+            return {
+              id: s.id || uid("s"),
+              name: s.name || "",
+              category: s.category || ""
+            };
+          });
         }
         if (Array.isArray(cleanedPatch.experience)) {
-          updatedResume.experience = resume.experience.map((e) => {
-            const match = cleanedPatch.experience.find((pe: any) => pe.id === e.id);
+          updatedResume.experience = resume.experience.map((e, idx) => {
+            // Find match by exact id, or name/company similarity, or fallback to index
+            let match = cleanedPatch.experience.find((pe: any) => pe.id === e.id);
+            if (!match) {
+              match = cleanedPatch.experience.find((pe: any) => {
+                const peCompany = (pe.company || "").toLowerCase().trim();
+                const peTitle = (pe.title || "").toLowerCase().trim();
+                const eCompany = (e.company || "").toLowerCase().trim();
+                const eTitle = (e.title || "").toLowerCase().trim();
+                return (peCompany && eCompany && peCompany === eCompany) || 
+                       (peTitle && eTitle && peTitle === eTitle);
+              });
+            }
+            if (!match && cleanedPatch.experience[idx]) {
+              match = cleanedPatch.experience[idx];
+            }
+
             if (match) {
               return {
                 ...e,
                 bullets: Array.isArray(match.bullets) ? match.bullets : e.bullets,
                 title: typeof match.title === "string" ? match.title : e.title,
                 company: typeof match.company === "string" ? match.company : e.company,
+                location: typeof match.location === "string" ? match.location : e.location,
+                startDate: typeof match.startDate === "string" ? match.startDate : e.startDate,
+                endDate: typeof match.endDate === "string" ? match.endDate : e.endDate,
               };
             }
             return e;
+          });
+        }
+        if (Array.isArray(cleanedPatch.education)) {
+          updatedResume.education = resume.education.map((ed, idx) => {
+            let match = cleanedPatch.education.find((ped: any) => ped.id === ed.id);
+            if (!match) {
+              match = cleanedPatch.education.find((ped: any) => {
+                const pedInst = (ped.institution || "").toLowerCase().trim();
+                const edInst = (ed.institution || "").toLowerCase().trim();
+                return pedInst && edInst && pedInst === edInst;
+              });
+            }
+            if (!match && cleanedPatch.education[idx]) {
+              match = cleanedPatch.education[idx];
+            }
+
+            if (match) {
+              return {
+                ...ed,
+                institution: typeof match.institution === "string" ? match.institution : ed.institution,
+                degree: typeof match.degree === "string" ? match.degree : ed.degree,
+                field: typeof match.field === "string" ? match.field : ed.field,
+                location: typeof match.location === "string" ? match.location : ed.location,
+                startDate: typeof match.startDate === "string" ? match.startDate : ed.startDate,
+                endDate: typeof match.endDate === "string" ? match.endDate : ed.endDate,
+                highlights: Array.isArray(match.highlights) ? match.highlights : ed.highlights,
+              };
+            }
+            return ed;
           });
         }
 
@@ -746,6 +945,22 @@ ${resumeContext}
             <Badge variant="outline" className="text-[10px] gap-1">
               <Icon name="Save" className="w-3 h-3" /> Saved {saveCount > 0 ? `(${saveCount})` : "now"}
             </Badge>
+            <Button
+              variant="outline"
+              onClick={async () => {
+                const ok = await triggerSave();
+                if (ok) {
+                  toast.success("Resume saved successfully!");
+                } else {
+                  toast.error("Failed to save resume.");
+                }
+              }}
+              className="h-5 px-1.5 text-[9px] gap-1 border-emerald-500/30 hover:bg-emerald-50/50 hover:text-emerald-700 text-emerald-600 bg-emerald-50/10 font-semibold flex items-center"
+              title="Save Changes Now"
+            >
+              <Icon name="Save" className="w-2.5 h-2.5" />
+              Save Now
+            </Button>
             <button onClick={() => { const d = undo(); if (d) patch(d); }} disabled={!canUndo} className="text-[10px] text-muted-foreground hover:text-foreground disabled:opacity-30 p-1" title="Undo (Ctrl+Z)">
               <Icon name="Undo2" className="w-3 h-3" />
             </button>
@@ -1124,63 +1339,10 @@ ${resumeContext}
                 <div className="space-y-4">
                   <div className="flex items-center justify-between">
                     <h3 className="font-semibold flex items-center gap-2">
-                      <Icon name="Sparkles" className="w-4 h-4 text-brand" /> AI Resume Copilot
+                      <Icon name="Sparkles" className="w-4 h-4 text-brand animate-pulse" /> AI Resume Copilot
                     </h3>
                   </div>
-                  <div className="flex flex-col h-[400px] border border-border rounded-xl bg-card">
-                    {/* Chat messages */}
-                    <div className="flex-1 p-3 overflow-y-auto space-y-2.5 scrollbar-thin">
-                      {messages.map((msg, i) => (
-                        <div
-                          key={i}
-                          className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}
-                        >
-                          <div
-                            className={`max-w-[85%] rounded-lg p-2.5 text-xs leading-relaxed ${
-                              msg.role === "user"
-                                ? "bg-brand text-white"
-                                : "bg-secondary text-foreground"
-                            }`}
-                          >
-                            {msg.content}
-                          </div>
-                        </div>
-                      ))}
-                      {sendingMessage && (
-                        <div className="flex justify-start">
-                          <div className="bg-secondary text-muted-foreground max-w-[85%] rounded-lg p-2.5 text-xs flex items-center gap-1.5">
-                            <Icon name="Loader2" className="w-3.5 h-3.5 animate-spin text-brand" />
-                            AI Copilot is thinking...
-                          </div>
-                        </div>
-                      )}
-                    </div>
-
-                    {/* Input box */}
-                    <div className="p-2 border-t border-border flex gap-1.5 bg-background/50">
-                      <Input
-                        value={inputMessage}
-                        onChange={(e) => setInputMessage(e.target.value)}
-                        onKeyDown={(e) => {
-                          if (e.key === "Enter" && !e.shiftKey) {
-                            e.preventDefault();
-                            sendMessage();
-                          }
-                        }}
-                        placeholder="e.g. Optimize summary for target job..."
-                        className="text-xs h-9"
-                        disabled={sendingMessage}
-                      />
-                      <Button
-                        size="sm"
-                        onClick={sendMessage}
-                        disabled={sendingMessage || !inputMessage.trim()}
-                        className="h-9 px-3 bg-brand text-white hover:bg-brand-dark"
-                      >
-                        <Icon name="Send" className="w-3.5 h-3.5" />
-                      </Button>
-                    </div>
-                  </div>
+                  {renderCopilotChat("h-[450px]")}
                 </div>
               )}
 
@@ -1312,60 +1474,7 @@ ${resumeContext}
                 </div>
               </>
             ) : rightPanelTab === "copilot" ? (
-              <div className="flex flex-col h-[calc(100vh-220px)] border border-border rounded-xl bg-card">
-                {/* Chat messages */}
-                <div className="flex-1 p-3 overflow-y-auto space-y-2.5 scrollbar-thin">
-                  {messages.map((msg, i) => (
-                    <div
-                      key={i}
-                      className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}
-                    >
-                      <div
-                        className={`max-w-[85%] rounded-lg p-2.5 text-xs leading-relaxed ${
-                          msg.role === "user"
-                            ? "bg-brand text-white"
-                            : "bg-secondary text-foreground"
-                        }`}
-                      >
-                        {msg.content}
-                      </div>
-                    </div>
-                  ))}
-                  {sendingMessage && (
-                    <div className="flex justify-start">
-                      <div className="bg-secondary text-muted-foreground max-w-[85%] rounded-lg p-2.5 text-xs flex items-center gap-1.5">
-                        <Icon name="Loader2" className="w-3.5 h-3.5 animate-spin text-brand" />
-                        AI Copilot is thinking...
-                      </div>
-                    </div>
-                  )}
-                </div>
-
-                {/* Input box */}
-                <div className="p-2 border-t border-border flex gap-1.5 bg-background/50">
-                  <Input
-                    value={inputMessage}
-                    onChange={(e) => setInputMessage(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter" && !e.shiftKey) {
-                        e.preventDefault();
-                        sendMessage();
-                      }
-                    }}
-                    placeholder="e.g. Optimize summary for target job..."
-                    className="text-xs h-9"
-                    disabled={sendingMessage}
-                  />
-                  <Button
-                    size="sm"
-                    onClick={sendMessage}
-                    disabled={sendingMessage || !inputMessage.trim()}
-                    className="h-9 px-3 bg-brand text-white hover:bg-brand-dark"
-                  >
-                    <Icon name="Send" className="w-3.5 h-3.5" />
-                  </Button>
-                </div>
-              </div>
+              renderCopilotChat("h-[calc(100vh-220px)]")
             ) : (
               /* ATS Audit panel UI */
               <div className="flex flex-col h-[calc(100vh-220px)] border border-border rounded-xl bg-card p-4 overflow-y-auto space-y-4 scrollbar-thin">
