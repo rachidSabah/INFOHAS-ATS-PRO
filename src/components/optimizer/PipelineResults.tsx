@@ -168,18 +168,28 @@ export function PipelineResults({ result }: PipelineResultsProps) {
           <CardTitle className="text-base flex items-center gap-2">
             <Icon name="BarChart3" className="w-4 h-4 text-brand" /> ATS Score Breakdown
           </CardTitle>
-          <CardDescription className="text-xs">7 explainable scores from the ATS Analysis Agent</CardDescription>
+          <CardDescription className="text-xs">Comprehensive 16-dimension analysis from the ATS Analysis Agent</CardDescription>
         </CardHeader>
         <CardContent className="pt-0">
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-            <ScoreTile label="Overall" before={beforeScore} after={afterATS.scores.ats} />
+            <ScoreTile label="Overall ATS" before={beforeScore} after={afterATS.scores.ats} />
             <ScoreTile label="Keywords" before={beforeATS.scores.keywordMatch} after={afterATS.scores.keywordMatch} />
-            <ScoreTile label="Semantic" before={beforeATS.scores.semanticSimilarity} after={afterATS.scores.semanticSimilarity} />
+            <ScoreTile label="Semantic Match" before={beforeATS.scores.semanticSimilarity} after={afterATS.scores.semanticSimilarity} />
             <ScoreTile label="Readability" before={beforeATS.scores.readability} after={afterATS.scores.readability} />
-            <ScoreTile label="Content" before={beforeATS.scores.content} after={afterATS.scores.content} />
+            <ScoreTile label="Content Quality" before={beforeATS.scores.content} after={afterATS.scores.content} />
             <ScoreTile label="Grammar" before={beforeATS.scores.grammar} after={afterATS.scores.grammar} />
             <ScoreTile label="Formatting" before={beforeATS.scores.formatting} after={afterATS.scores.formatting} />
             <ScoreTile label="Completeness" before={beforeATS.scores.completeness} after={afterATS.scores.completeness} />
+            
+            {/* New metrics tiles */}
+            <ScoreTile label="Skills Match" before={beforeATS.scores.skillsMatch ?? 0} after={afterATS.scores.skillsMatch ?? 0} />
+            <ScoreTile label="Job Title Match" before={beforeATS.scores.jobTitleMatch ?? 0} after={afterATS.scores.jobTitleMatch ?? 0} />
+            <ScoreTile label="Industry Terminology" before={beforeATS.scores.industryMatch ?? 0} after={afterATS.scores.industryMatch ?? 0} />
+            <ScoreTile label="Achievement Density" before={beforeATS.scores.achievementDensity ?? 0} after={afterATS.scores.achievementDensity ?? 0} />
+            <ScoreTile label="Power Verbs" before={beforeATS.scores.powerWords ?? 0} after={afterATS.scores.powerWords ?? 0} />
+            <ScoreTile label="Parsing Quality" before={beforeATS.scores.parsingQuality ?? 0} after={afterATS.scores.parsingQuality ?? 0} />
+            <ScoreTile label="Structural Safety" before={beforeATS.scores.consistency ?? 0} after={afterATS.scores.consistency ?? 0} />
+            <ScoreTile label="Recruiter Appeal" before={beforeATS.scores.recruiterScore ?? 0} after={afterATS.scores.recruiterScore ?? 0} />
           </div>
         </CardContent>
       </Card>

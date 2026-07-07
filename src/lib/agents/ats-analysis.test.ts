@@ -194,5 +194,40 @@ describe("ATS Scoring — V3.0.1 regression tests", () => {
       expect(result.scores.semanticSimilarity).toBeGreaterThanOrEqual(20);
       expect(result.scores.readability).toBeGreaterThanOrEqual(30);
     });
+
+    it("evaluates all 9 new metrics properly within logical limits", () => {
+      const resume = makeResume();
+      const jd = makeJD();
+      const result = analyzeATS(resume, jd);
+      const s = result.scores;
+      
+      expect(s.skillsMatch).toBeGreaterThanOrEqual(0);
+      expect(s.skillsMatch).toBeLessThanOrEqual(100);
+
+      expect(s.jobTitleMatch).toBeGreaterThanOrEqual(0);
+      expect(s.jobTitleMatch).toBeLessThanOrEqual(100);
+
+      expect(s.industryMatch).toBeGreaterThanOrEqual(0);
+      expect(s.industryMatch).toBeLessThanOrEqual(100);
+
+      expect(s.achievementDensity).toBeGreaterThanOrEqual(0);
+      expect(s.achievementDensity).toBeLessThanOrEqual(100);
+
+      expect(s.parsingQuality).toBeGreaterThanOrEqual(0);
+      expect(s.parsingQuality).toBeLessThanOrEqual(100);
+
+      expect(s.powerWords).toBeGreaterThanOrEqual(0);
+      expect(s.powerWords).toBeLessThanOrEqual(100);
+
+      expect(s.consistency).toBeGreaterThanOrEqual(0);
+      expect(s.consistency).toBeLessThanOrEqual(100);
+
+      expect(s.recruiterScore).toBeGreaterThanOrEqual(0);
+      expect(s.recruiterScore).toBeLessThanOrEqual(100);
+
+      expect(s.confidenceScore).toBeGreaterThanOrEqual(0);
+      expect(s.confidenceScore).toBeLessThanOrEqual(100);
+    });
   });
 });
+
