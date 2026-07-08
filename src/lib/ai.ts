@@ -355,10 +355,21 @@ export async function selectProviderForAgent(
   agentType: "optimizer" | "supervisor" | "guardian" | "assembler" | "emergency",
   excludeIds?: string[]
 ): Promise<any> {
+  const state: any = useApp.getState();
+  const settings = state?.providerSettings;
+  const providers: any[] = state?.providers || [];
+
+  // Check if there is a custom route configured for this agent
+  if (agentType !== "emergency" && settings?.agentRoutes?.[agentType] && settings.agentRoutes[agentType] !== "default") {
+    const routeId = settings.agentRoutes[agentType];
+    const routedProvider = providers.find((p: any) => p.id === routeId);
+    if (routedProvider && isAvailableForSelection(routedProvider, excludeIds)) {
+      return routedProvider;
+    }
+  }
+
   // Emergency = only Tier 4 (Puter, etc.)
   if (agentType === "emergency") {
-    const state: any = useApp.getState();
-    const providers: any[] = state?.providers || [];
     const emergency = providers.find(
       (p: any) => EMERGENCY_ONLY_PROVIDERS.has(p.id) || EMERGENCY_ONLY_PROVIDERS.has(p.type)
     );
@@ -373,9 +384,6 @@ export async function selectProviderForAgent(
     assembler: 3,
   };
   const maxTier = tierMax[agentType] ?? 3;
-
-  const state: any = useApp.getState();
-  const providers: any[] = state?.providers || [];
 
   const eligible = providers
     .filter((p: any) => isAvailableForSelection(p, excludeIds) && getProviderTier(p) <= maxTier)

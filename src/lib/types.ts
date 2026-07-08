@@ -499,6 +499,7 @@ export interface AIProviderSettings {
   enableFailover: boolean;
   enableCaching: boolean;
   enableCostTracking: boolean;
+  agentRoutes?: Record<string, string>;
 }
 
 // ============================================================================

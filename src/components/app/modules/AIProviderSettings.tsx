@@ -338,6 +338,53 @@ export function AIProviderSettings() {
         </CardContent>
       </Card>
 
+      {/* Agent Routing Matrix */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-lg flex items-center gap-2">
+            <Icon name="Network" className="w-5 h-5 text-brand" /> Agent Routing Matrix
+          </CardTitle>
+          <CardDescription>
+            Bind individual AI agent roles to specific LLM models or API providers.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="grid sm:grid-cols-2 gap-4">
+            {[
+              { key: "optimizer", label: "Optimizer Specialist Agent", desc: "Rewrites and expands experience, skills, and summary sections." },
+              { key: "supervisor", label: "Supervisor QA Agent", desc: "Validates compliance, orchestrates correction cycles, and scores outputs." },
+              { key: "guardian", label: "Guardian Check Agent", desc: "Checks formatting, ensures entity preservation, and prevents hallucinations." },
+              { key: "assembler", label: "Structure Assembler Agent", desc: "Compiles section outputs, removes duplicates, and standardizes layout." }
+            ].map((agent) => {
+              const currentRoute = form.agentRoutes?.[agent.key] ?? "default";
+              return (
+                <div key={agent.key} className="p-3 border border-border rounded-lg space-y-2 bg-secondary/5">
+                  <div>
+                    <Label htmlFor={`route_${agent.key}`} className="font-semibold text-sm">{agent.label}</Label>
+                    <p className="text-[10px] text-muted-foreground leading-normal mt-0.5">{agent.desc}</p>
+                  </div>
+                  <select
+                    id={`route_${agent.key}`}
+                    value={currentRoute}
+                    onChange={(e) => {
+                      const nextRoutes = { ...(form.agentRoutes || {}) };
+                      nextRoutes[agent.key] = e.target.value;
+                      update({ agentRoutes: nextRoutes });
+                    }}
+                    className="w-full h-9 px-2 rounded-md border border-input bg-background text-xs mt-1"
+                  >
+                    <option value="default">Default Fallback Chain (Tier-Limited)</option>
+                    {providers.map((p) => (
+                      <option key={p.id} value={p.id}>{p.name} ({p.modelName || p.type})</option>
+                    ))}
+                  </select>
+                </div>
+              );
+            })}
+          </div>
+        </CardContent>
+      </Card>
+
       {/* Retry & Timeout */}
       <Card>
         <CardHeader><CardTitle className="text-lg flex items-center gap-2"><Icon name="Timer" className="w-4 h-4 text-gold" /> Retry & Timeout</CardTitle></CardHeader>

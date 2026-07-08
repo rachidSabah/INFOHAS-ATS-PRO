@@ -901,6 +901,7 @@ export const SEED_PROVIDER_SETTINGS: AIProviderSettings = {
   enableFailover: true,
   enableCaching: true,
   enableCostTracking: true,
+  agentRoutes: {},
 };
 
 /**
