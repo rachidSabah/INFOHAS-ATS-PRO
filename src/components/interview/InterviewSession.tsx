@@ -62,10 +62,10 @@ export function InterviewSession({ pkg, onClose }: InterviewSessionProps) {
   const synthRef = useRef<SpeechSynthesis | null>(null);
   const utteranceRef = useRef<SpeechSynthesisUtterance | null>(null);
 
-  const questions = pkg.questions;
+  const questions = pkg.questions ?? [];
   const total = questions.length;
-  const current = questions[currentIndex];
-  const currentAnswer = answers[current?.id];
+  const current = questions[currentIndex] ?? questions[0];
+  const currentAnswer = answers[current?.id ?? ""];
 
   const isLastQuestion = currentIndex === total - 1;
   const answeredCount = Object.values(answers).filter((a) => a.submitted).length;

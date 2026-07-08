@@ -232,12 +232,15 @@ Return JSON:
 
   const grouped = (pkg: InterviewPackage) => {
     const g: Record<string, InterviewQuestion[]> = {};
-    for (const q of pkg.questions) (g[q.category] ||= []).push(q);
+    for (const q of (pkg.questions ?? [])) (g[q.category] ||= []).push(q);
     return g;
   };
 
   const latestPkg = interviews[0] ?? null;
-  const prepPercent = latestPkg ? Math.round((completedQuestions.size / latestPkg.questions.length) * 100) : 0;
+  const latestQuestions = latestPkg?.questions ?? [];
+  const prepPercent = latestQuestions.length > 0
+    ? Math.round((completedQuestions.size / latestQuestions.length) * 100)
+    : 0;
 
   // === Practice session mode ===
   if (practiceSession) {
@@ -461,7 +464,7 @@ Return JSON:
                     <Icon name="Package" className="w-4 h-4 text-brand" />
                     {pkg.role ?? "Interview Prep"}{pkg.company ? ` at ${pkg.company}` : ""}
                   </CardTitle>
-                  <CardDescription>{pkg.questions.length} questions · generated {new Date(pkg.createdAt).toLocaleDateString()}</CardDescription>
+                  <CardDescription>{(pkg.questions ?? []).length} questions · generated {new Date(pkg.createdAt).toLocaleDateString()}</CardDescription>
                 </div>
                 <div className="flex gap-2 flex-wrap">
                   <Button size="sm" variant="outline" onClick={() => setPracticeSession(pkg)} className="gap-1.5 border-brand text-brand hover:bg-brand-light" title="Start interactive practice session">
@@ -488,7 +491,7 @@ Return JSON:
               </div>
 
               <div className="space-y-3">
-                {pkg.questions.map((q, i) => {
+                {(pkg.questions ?? []).map((q, i) => {
                   const cat = CATEGORIES.find((c) => c.id === q.category) ?? CATEGORIES[0];
                   const isOpen = expanded === q.id;
                   const isCompleted = completedQuestions.has(q.id);

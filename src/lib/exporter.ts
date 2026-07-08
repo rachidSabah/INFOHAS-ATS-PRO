@@ -999,29 +999,33 @@ function drawSeparator(doc: jsPDF, x1: number, x2: number, y: number, accent: [n
   doc.line(x1, y, x2, y);
 }
 
-function drawWrappedText(doc: jsPDF, text: string, x: number, y: number, maxW: number, size: number, lineGap: number): number {
-  const lines = doc.splitTextToSize(text, maxW);
+function drawWrappedText(doc: jsPDF, text: string, x: number, y: number, maxW: number, sizePt: number, lineGapMm: number): number {
+  if (!text) return y;
+  doc.setFontSize(sizePt);
+  const lineHeightMm = sizePt * 0.352778 * 1.25; // pt → mm with 1.25 leading
+  const lines = doc.splitTextToSize(String(text), maxW);
   for (const line of lines) {
-    doc.text(line, x, y + size * 0.35);
-    y += size * 0.5 + lineGap;
+    doc.text(line, x, y + lineHeightMm * 0.75); // baseline ≈ 75% of line height
+    y += lineHeightMm + lineGapMm;
   }
   return y;
 }
 
-function drawBullet(doc: jsPDF, text: string, x: number, y: number, maxW: number, size: number, lineGap: number): number {
-  const bulletX = x;
-  const textX = x + 3;
-  const innerW = maxW - 3;
+function drawBullet(doc: jsPDF, text: string, x: number, y: number, maxW: number, sizePt: number, lineGapMm: number): number {
+  if (!text) return y;
+  const bulletX = x + 2;
+  const textX = x + 5;
+  const innerW = maxW - 5;
+  const lineHeightMm = sizePt * 0.352778 * 1.25;
   doc.setFont("helvetica", "normal");
   doc.setTextColor(51, 65, 85);
-  doc.setFontSize(size);
-  const lines = doc.splitTextToSize(text, innerW);
-  // bullet
+  doc.setFontSize(sizePt);
+  const lines = doc.splitTextToSize(String(text), innerW);
   doc.setFillColor(115, 134, 165);
-  doc.circle(bulletX + 0.8, y + size * 0.2, 0.6, "F");
+  doc.circle(bulletX, y + lineHeightMm * 0.45, 0.6, "F");
   for (let i = 0; i < lines.length; i++) {
-    doc.text(lines[i], textX, y + size * 0.35);
-    y += size * 0.5 + lineGap;
+    doc.text(lines[i], textX, y + lineHeightMm * 0.75);
+    y += lineHeightMm + lineGapMm;
   }
   return y;
 }
@@ -1538,7 +1542,7 @@ export function exportInterviewPDF(pkg: InterviewPackage) {
   y += 8;
 
   const grouped: Record<string, typeof pkg.questions> = {};
-  for (const q of pkg.questions) (grouped[q.category] ||= []).push(q);
+  for (const q of (pkg.questions ?? [])) (grouped[q.category] ||= []).push(q);
 
   const categoryLabels: Record<string, string> = {
     technical: "Technical Questions",
