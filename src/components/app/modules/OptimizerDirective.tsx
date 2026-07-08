@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useRef } from "react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -11,7 +11,7 @@ import { Badge, Icon } from "@/components/shared";
 import { useApp } from "@/lib/store";
 import { SEED_OPTIMIZER_DIRECTIVE } from "@/lib/mock-data";
 import { toast } from "sonner";
-import type { OptimizerDirectiveConfig, AgentDirectives } from "@/lib/types";
+import type { OptimizerDirectiveConfig, AgentDirectives, ATSSystemTarget, ToneWritingConfig, CustomKeywordsConfig } from "@/lib/types";
 import { BUILT_IN_PROFILES, applyProfileToConfig } from "@/lib/directive-profiles";
 import { STRUCTURAL_BLUEPRINTS } from "@/lib/structural-blueprints";
 
@@ -372,6 +372,18 @@ export function OptimizerDirective() {
 
       {/* PER-AGENT DIRECTIVES */}
       <AgentDirectivesSection draft={draft} patch={patch} />
+
+      {/* TONE & WRITING STYLE */}
+      <ToneWritingSection draft={draft} patch={patch} />
+
+      {/* CUSTOM KEYWORD CONTROLS */}
+      <CustomKeywordsSection draft={draft} patch={patch} />
+
+      {/* TARGET ATS SYSTEM */}
+      <TargetATSSection draft={draft} patch={patch} />
+
+      {/* DIRECTIVE EXPORT / IMPORT */}
+      <DirectiveExportImportSection draft={draft} setDraft={setDraft} setDirty={setDirty} />
 
       {/* Live Page Density Balance visualizer */}
       <PageDensityVisualizer draft={draft} />
@@ -761,6 +773,90 @@ function AgentDirectivesSection({ draft, patch }: { draft: OptimizerDirectiveCon
         </CardContent>
       </Card>
 
+      {/* Headline Agent Directive */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-lg flex items-center gap-2">
+            <Icon name="Heading" className="w-4 h-4 text-brand" /> Headline Agent
+          </CardTitle>
+          <CardDescription>Controls the professional headline/title below the candidate's name.</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <SwitchRow
+            label="Rewrite Headline"
+            description="Allow the AI to rewrite or optimize the professional title based on target job description."
+            checked={draft.agentDirectives.headline?.rewriteHeadline ?? false}
+            onChange={(v) => updateAgent("headline", { rewriteHeadline: v })}
+          />
+          <div className="grid sm:grid-cols-2 gap-4">
+            <div>
+              <Label htmlFor="headlineTone">Headline Alignment Strategy</Label>
+              <select
+                id="headlineTone"
+                value={draft.agentDirectives.headline?.headlineTone ?? "preserve"}
+                onChange={(e) => updateAgent("headline", { headlineTone: e.target.value as any })}
+                className="w-full h-9 px-3 rounded-md border border-input bg-background text-sm mt-1"
+              >
+                <option value="preserve">Preserve Original Title</option>
+                <option value="exact-title-match">Exact JD Title Match</option>
+                <option value="seniority-adjusted">Seniority-Adjusted Match</option>
+                <option value="jd-aligned">JD Contextual Alignment</option>
+              </select>
+            </div>
+            <NumberField
+              label="Max Headline Length (Chars)"
+              value={draft.agentDirectives.headline?.maxHeadlineChars ?? 80}
+              onChange={(v) => updateAgent("headline", { maxHeadlineChars: v })}
+              step={5}
+              min={20}
+              max={200}
+            />
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Certifications Agent Directive */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-lg flex items-center gap-2">
+            <Icon name="Award" className="w-4 h-4 text-brand" /> Certifications Agent
+          </CardTitle>
+          <CardDescription>Configure credentials formatting, limits, and expiration rules.</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <SwitchRow
+            label="Format Only"
+            description="Format existing certifications without suggesting new ones or deleting credentials."
+            checked={draft.agentDirectives.certifications?.formatOnly ?? true}
+            onChange={(v) => updateAgent("certifications", { formatOnly: v })}
+          />
+          <SwitchRow
+            label="Strip Expired Certs"
+            description="Automatically hide or filter out credentials older than the configured threshold."
+            checked={draft.agentDirectives.certifications?.stripExpiredCerts ?? false}
+            onChange={(v) => updateAgent("certifications", { stripExpiredCerts: v })}
+          />
+          <div className="grid sm:grid-cols-2 gap-4">
+            <NumberField
+              label="Max Cert Age (Years, 0 = no limit)"
+              value={draft.agentDirectives.certifications?.maxCertAgeYears ?? 0}
+              onChange={(v) => updateAgent("certifications", { maxCertAgeYears: v })}
+              step={1}
+              min={0}
+              max={30}
+            />
+            <NumberField
+              label="Max Certification Entries"
+              value={draft.agentDirectives.certifications?.maxCertEntries ?? 5}
+              onChange={(v) => updateAgent("certifications", { maxCertEntries: v })}
+              step={1}
+              min={1}
+              max={20}
+            />
+          </div>
+        </CardContent>
+      </Card>
+
       {/* Guardian Agent Directive */}
       <Card>
         <CardHeader>
@@ -976,6 +1072,32 @@ function ImmutableSwitch({ label, checked, onChange }: { label: string; checked:
 // === Directive preview generator (mirrors the logic in ai.ts) ===
 
 function generateDirectivePreview(c: OptimizerDirectiveConfig): string {
+  const toneDesc = c.toneConfig ? `
+═══════════════════════════════════════════════════════════════
+TONE & WRITING STYLE
+═══════════════════════════════════════════════════════════════
+- Profile tone: ${c.toneConfig.tone}
+- Verb tense (experience): ${c.toneConfig.bulletVerbTense}
+- Enforce power verbs: ${c.toneConfig.enforcePowerVerbs ? "YES" : "NO"}
+- Avoid filler phrases: ${c.toneConfig.avoidFillerPhrases ? "YES (avoid 'responsible for', 'helped with', etc.)" : "NO"}
+- Require quantified metrics: ${c.toneConfig.requireQuantification ? "YES (min 1 metric per entry)" : "NO"}
+- Avoid passive voice: ${c.toneConfig.avoidPassiveVoice ? "YES" : "NO"}` : "";
+
+  const keywordsDesc = c.customKeywords ? `
+═══════════════════════════════════════════════════════════════
+CUSTOM KEYWORDS
+═══════════════════════════════════════════════════════════════
+- Forbidden terms: ${c.customKeywords.forbiddenKeywords.length > 0 ? c.customKeywords.forbiddenKeywords.join(", ") : "None"}
+- Required terms: ${c.customKeywords.requiredKeywords.length > 0 ? c.customKeywords.requiredKeywords.join(", ") : "None"}
+- Keyword placement priority: ${c.customKeywords.keywordPlacement}
+- Max keyword density: ${c.customKeywords.maxKeywordDensityPercent > 0 ? `${c.customKeywords.maxKeywordDensityPercent}%` : "No limit"}` : "";
+
+  const targetAtsDesc = c.targetAtsSystem && c.targetAtsSystem !== "generic" ? `
+═══════════════════════════════════════════════════════════════
+TARGET ATS PLATFORM
+═══════════════════════════════════════════════════════════════
+- Optimize for compatibility with: ${c.targetAtsSystem.toUpperCase()}` : "";
+
   return `You are the ResumeAI Pro Optimizer. You MUST preserve the EXACT layout framework described below.
 
 ═══════════════════════════════════════════════════════════════
@@ -986,6 +1108,7 @@ PAGE FORMAT
 - Required pages: EXACTLY 1
 - NEVER generate a second page.
 ${c.enforceOnePage ? "- Validation: assert(pdf.pages === 1)" : ""}
+${targetAtsDesc}
 
 ═══════════════════════════════════════════════════════════════
 MARGINS (very compact)
@@ -1025,6 +1148,8 @@ CONTENT LIMITS
 - Experience: max ${c.experienceMaxEntries} entries, ${c.experienceBulletsPerEntry} bullets each
 - Education: max ${c.educationMaxEntries} entries
 - Languages: max ${c.languagesMaxEntries} entries
+${toneDesc}
+${keywordsDesc}
 
 ═══════════════════════════════════════════════════════════════
 ONE-PAGE COMPRESSION
@@ -1045,12 +1170,294 @@ AGENT RULES (MANDATORY)
 Summary: ${c.summaryMinWords}-${c.summaryMaxWords} words. ATS: ${c.agentDirectives.summary.atsAggressiveness}/100. No hallucinations. No parentheses.
 Skills: Max ${c.skillsMaxGroups} groups. Never Targeted Keywords. No company/location names as skills.
 Experience: ${c.agentDirectives.experience.rewriteBulletsOnly ? "Rewrite bullets ONLY." : ""} Role | Company | Date format. Preserve chronology.
+Headline: Rewrite=${c.agentDirectives.headline?.rewriteHeadline ? "YES" : "NO"}. Strategy=${c.agentDirectives.headline?.headlineTone ?? "preserve"}. MaxChars=${c.agentDirectives.headline?.maxHeadlineChars ?? 80}.
+Certifications: FormatOnly=${c.agentDirectives.certifications?.formatOnly ?? true}. Age limit=${c.agentDirectives.certifications?.maxCertAgeYears ?? 0} years. Max entries=${c.agentDirectives.certifications?.maxCertEntries ?? 5}.
 Education: Diploma | School | Date format. Never remove schools.
 Languages: Preserve all. Max ${c.languagesMaxEntries} entries.
-Summary: ${c.summaryMinWords}-${c.summaryMaxWords} words. ATS: ${c.agentDirectives.summary.atsAggressiveness}/100. No hallucinations. No parentheses.
 Guardian: Min score ${c.agentDirectives.guardian.minimumScore}. VETO: entities=${c.agentDirectives.guardian.enforceEntityIntegrity}, duplicates=${c.agentDirectives.guardian.enforceNoDuplicates}.
 ` : ""}
 `;
+}
+
+// === New configuration components added in P3 ===
+
+function ToneWritingSection({ draft, patch }: { draft: OptimizerDirectiveConfig; patch: (p: Partial<OptimizerDirectiveConfig>) => void }) {
+  const updateTone = (value: Partial<ToneWritingConfig>) => {
+    patch({
+      toneConfig: {
+        ...draft.toneConfig,
+        ...value,
+      } as ToneWritingConfig,
+    });
+  };
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-lg flex items-center gap-2">
+          <Icon name="Smile" className="w-5 h-5 text-brand" /> Tone & Writing Style
+        </CardTitle>
+        <CardDescription>
+          Configure the voice, grammatical tense, and style rules applied across all sections of the resume.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <div className="grid sm:grid-cols-2 gap-4">
+          <div>
+            <Label htmlFor="writingTone">Resume Voice/Tone</Label>
+            <select
+              id="writingTone"
+              value={draft.toneConfig?.tone ?? "confident"}
+              onChange={(e) => updateTone({ tone: e.target.value as any })}
+              className="w-full h-9 px-3 rounded-md border border-input bg-background text-sm mt-1"
+            >
+              <option value="confident">Confident & Professional</option>
+              <option value="formal">Formal & Corporate</option>
+              <option value="action-driven">Action & Results-Driven</option>
+              <option value="humble">Humble & Professional</option>
+              <option value="technical">Highly Technical & Direct</option>
+            </select>
+          </div>
+          <div>
+            <Label htmlFor="bulletTense">Verb Tense (Experience Bullets)</Label>
+            <select
+              id="bulletTense"
+              value={draft.toneConfig?.bulletVerbTense ?? "past-tense"}
+              onChange={(e) => updateTone({ bulletVerbTense: e.target.value as any })}
+              className="w-full h-9 px-3 rounded-md border border-input bg-background text-sm mt-1"
+            >
+              <option value="past-tense">Past Tense (e.g. "Developed", "Managed")</option>
+              <option value="present-tense">Present Tense (e.g. "Develop", "Manage")</option>
+              <option value="auto">Auto (Match role active status)</option>
+            </select>
+          </div>
+        </div>
+
+        <div className="space-y-3 pt-2">
+          <SwitchRow
+            label="Enforce Power Verbs"
+            description="Require every experience bullet point to start with a strong, active industry-recognized power verb."
+            checked={draft.toneConfig?.enforcePowerVerbs ?? true}
+            onChange={(v) => updateTone({ enforcePowerVerbs: v })}
+          />
+          <SwitchRow
+            label="Avoid Filler Phrases"
+            description="Ban passive and redundant phrases such as 'responsible for', 'duties included', 'helped with'."
+            checked={draft.toneConfig?.avoidFillerPhrases ?? true}
+            onChange={(v) => updateTone({ avoidFillerPhrases: v })}
+          />
+          <SwitchRow
+            label="Avoid Passive Voice"
+            description="Rewrite bullets constructed in passive voice into active voice (e.g., convert 'Led by me' to 'I led')."
+            checked={draft.toneConfig?.avoidPassiveVoice ?? true}
+            onChange={(v) => updateTone({ avoidPassiveVoice: v })}
+          />
+          <SwitchRow
+            label="Require Quantification"
+            description="Attempt to force numerical metric placeholders or metrics in every single experience entry."
+            checked={draft.toneConfig?.requireQuantification ?? false}
+            onChange={(v) => updateTone({ requireQuantification: v })}
+          />
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+function CustomKeywordsSection({ draft, patch }: { draft: OptimizerDirectiveConfig; patch: (p: Partial<OptimizerDirectiveConfig>) => void }) {
+  const updateKeywords = (value: Partial<CustomKeywordsConfig>) => {
+    patch({
+      customKeywords: {
+        ...draft.customKeywords,
+        ...value,
+      } as CustomKeywordsConfig,
+    });
+  };
+
+  const parseKeywordsList = (text: string) => {
+    return text.split(",").map((k) => k.trim()).filter(Boolean);
+  };
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-lg flex items-center gap-2">
+          <Icon name="Search" className="w-5 h-5 text-brand" /> Custom Keyword Controls
+        </CardTitle>
+        <CardDescription>
+          Force the optimizer to include specific target keywords or absolutely avoid forbidden industry buzzwords.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <div>
+          <Label htmlFor="requiredKeywords">Required Keywords (comma separated)</Label>
+          <Textarea
+            id="requiredKeywords"
+            placeholder="e.g. React Native, Project Management, Agile, ISO 13485"
+            value={draft.customKeywords?.requiredKeywords?.join(", ") ?? ""}
+            onChange={(e) => updateKeywords({ requiredKeywords: parseKeywordsList(e.target.value) })}
+            rows={2}
+            className="mt-1 font-mono text-xs"
+          />
+          <span className="text-[10px] text-muted-foreground">The optimizer will guarantee these terms are integrated into the content.</span>
+        </div>
+
+        <div>
+          <Label htmlFor="forbiddenKeywords">Forbidden Keywords (comma separated)</Label>
+          <Textarea
+            id="forbiddenKeywords"
+            placeholder="e.g. synergy, utilize, team player, go-getter"
+            value={draft.customKeywords?.forbiddenKeywords?.join(", ") ?? ""}
+            onChange={(e) => updateKeywords({ forbiddenKeywords: parseKeywordsList(e.target.value) })}
+            rows={2}
+            className="mt-1 font-mono text-xs"
+          />
+          <span className="text-[10px] text-muted-foreground">The optimizer will actively prune or replace these words if found.</span>
+        </div>
+
+        <div className="grid sm:grid-cols-2 gap-4">
+          <div>
+            <Label htmlFor="keywordPlacement">Keyword Placement Priority</Label>
+            <select
+              id="keywordPlacement"
+              value={draft.customKeywords?.keywordPlacement ?? "spread-evenly"}
+              onChange={(e) => updateKeywords({ keywordPlacement: e.target.value as any })}
+              className="w-full h-9 px-3 rounded-md border border-input bg-background text-sm mt-1"
+            >
+              <option value="spread-evenly">Spread Evenly Across Sections</option>
+              <option value="summary-first">Prioritize Summary Section</option>
+              <option value="skills-first">Prioritize Skills Section</option>
+            </select>
+          </div>
+          <NumberField
+            label="Max Keyword Density (% per section, 0 = unlimited)"
+            value={draft.customKeywords?.maxKeywordDensityPercent ?? 0}
+            onChange={(v) => updateKeywords({ maxKeywordDensityPercent: v })}
+            step={1}
+            min={0}
+            max={30}
+          />
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+function TargetATSSection({ draft, patch }: { draft: OptimizerDirectiveConfig; patch: (p: Partial<OptimizerDirectiveConfig>) => void }) {
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-lg flex items-center gap-2">
+          <Icon name="Server" className="w-5 h-5 text-brand" /> Target ATS Platform
+        </CardTitle>
+        <CardDescription>
+          Select the specific applicant tracking system used by the employer to customize layout and parsing heuristics.
+        </CardDescription>
+      </CardHeader>
+      <CardContent>
+        <Label htmlFor="targetAtsSelect">Employer ATS Platform</Label>
+        <select
+          id="targetAtsSelect"
+          value={draft.targetAtsSystem ?? "generic"}
+          onChange={(e) => patch({ targetAtsSystem: e.target.value as ATSSystemTarget })}
+          className="w-full h-9 px-3 rounded-md border border-input bg-background text-sm mt-1"
+        >
+          <option value="generic">Generic/Universal ATS Friendly</option>
+          <option value="workday">Workday (Prefers strict table-free, standard margins)</option>
+          <option value="taleo">Taleo (Prefers explicit section headers, simple lists)</option>
+          <option value="greenhouse">Greenhouse (Excellent parsing, supports rich layouts)</option>
+          <option value="icims">iCIMS (Requires clean headings, standard font sizes)</option>
+          <option value="lever">Lever (Prefers raw text streams, clean typography)</option>
+          <option value="successfactors">SAP SuccessFactors (Requires classic section ordering)</option>
+          <option value="bamboohr">BambooHR (Prefers standard body sizing)</option>
+          <option value="smartrecruiters">SmartRecruiters (Prefers bullet-only formats)</option>
+        </select>
+      </CardContent>
+    </Card>
+  );
+}
+
+function DirectiveExportImportSection({
+  draft,
+  setDraft,
+  setDirty,
+}: {
+  draft: OptimizerDirectiveConfig;
+  setDraft: React.Dispatch<React.SetStateAction<OptimizerDirectiveConfig>>;
+  setDirty: (d: boolean) => void;
+}) {
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const handleExport = () => {
+    try {
+      const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(draft, null, 2));
+      const downloadAnchor = document.createElement("a");
+      downloadAnchor.setAttribute("href", dataStr);
+      downloadAnchor.setAttribute("download", `optimizer-directive-v${draft.directiveVersion || 1}.json`);
+      document.body.appendChild(downloadAnchor);
+      downloadAnchor.click();
+      downloadAnchor.remove();
+      toast.success("Directive configuration exported successfully!");
+    } catch (e) {
+      toast.error("Failed to export directive configuration.");
+    }
+  };
+
+  const handleImportClick = () => {
+    fileInputRef.current?.click();
+  };
+
+  const handleImportFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      try {
+        const json = JSON.parse(event.target?.result as string);
+        if (json && typeof json === "object" && "pageSize" in json && "agentDirectives" in json) {
+          setDraft(json);
+          setDirty(true);
+          toast.success("Directive configuration imported! Review and click 'Save directive' to apply.");
+        } else {
+          toast.error("Invalid configuration file. Must be a valid OptimizerDirective JSON.");
+        }
+      } catch (err) {
+        toast.error("Failed to parse JSON configuration file.");
+      }
+    };
+    reader.readAsText(file);
+    // Reset file input value
+    e.target.value = "";
+  };
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-lg flex items-center gap-2">
+          <Icon name="RefreshCw" className="w-5 h-5 text-brand" /> Backup & Portability
+        </CardTitle>
+        <CardDescription>
+          Export the current optimizer configuration to a JSON file or import a saved configuration to duplicate behaviors.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="flex flex-wrap gap-3">
+        <input
+          type="file"
+          ref={fileInputRef}
+          onChange={handleImportFileChange}
+          accept=".json"
+          className="hidden"
+        />
+        <Button onClick={handleExport} variant="outline" className="gap-2">
+          <Icon name="Download" className="w-4 h-4" /> Export Config JSON
+        </Button>
+        <Button onClick={handleImportClick} variant="outline" className="gap-2">
+          <Icon name="Upload" className="w-4 h-4" /> Import Config JSON
+        </Button>
+      </CardContent>
+    </Card>
+  );
 }
 
 function PageDensityVisualizer({ draft }: { draft: OptimizerDirectiveConfig }) {

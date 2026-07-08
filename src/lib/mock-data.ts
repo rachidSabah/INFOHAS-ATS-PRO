@@ -1194,6 +1194,50 @@ export const SEED_OPTIMIZER_DIRECTIVE: OptimizerDirectiveConfig = {
       improveWording: true,
       stripSectionHeaders: true,
     },
+    headline: {
+      rewriteHeadline: false,
+      maxHeadlineChars: 80,
+      headlineTone: "preserve",
+    },
+    certifications: {
+      formatOnly: true,
+      stripExpiredCerts: false,
+      maxCertAgeYears: 0,
+      maxCertEntries: 5,
+    },
+  },
+
+  // === TONE & WRITING STYLE ===
+  toneConfig: {
+    tone: "confident",
+    bulletVerbTense: "past-tense",
+    avoidFillerPhrases: true,
+    enforcePowerVerbs: true,
+    requireQuantification: false,
+    avoidPassiveVoice: true,
+  },
+
+  // === CUSTOM KEYWORD CONTROLS ===
+  customKeywords: {
+    forbiddenKeywords: [],
+    requiredKeywords: [],
+    keywordPlacement: "spread-evenly",
+    maxKeywordDensityPercent: 0,
+  },
+
+  // === TARGET ATS SYSTEM ===
+  targetAtsSystem: "generic",
+
+  // === SECTION VISIBILITY OVERRIDES ===
+  sectionVisibility: {
+    summary: true,
+    skills: true,
+    experience: true,
+    education: true,
+    languages: true,
+    certifications: true,
+    additionalInfo: true,
+    projects: true,
   },
 };
 

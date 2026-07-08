@@ -681,6 +681,18 @@ export interface OptimizerDirectiveConfig {
   // These control what each agent is allowed to do, with what aggressiveness,
   // and with what constraints. They are injected into each agent's prompt.
   agentDirectives: AgentDirectives;
+
+  // === TONE & WRITING STYLE ===
+  toneConfig?: ToneWritingConfig;
+
+  // === CUSTOM KEYWORD CONTROLS ===
+  customKeywords?: CustomKeywordsConfig;
+
+  // === TARGET ATS SYSTEM ===
+  targetAtsSystem?: ATSSystemTarget;
+
+  // === SECTION VISIBILITY OVERRIDES ===
+  sectionVisibility?: SectionVisibilityConfig;
 }
 
 /**
@@ -696,6 +708,8 @@ export interface AgentDirectives {
   languages: LanguagesAgentDirective;
   guardian: GuardianAgentDirective;
   additionalInfo: AdditionalInfoAgentDirective;
+  headline?: HeadlineAgentDirective;
+  certifications?: CertificationsAgentDirective;
 }
 
 /**
@@ -795,6 +809,97 @@ export interface AdditionalInfoAgentDirective {
   improveWording: boolean;
   /** If true, strip section-header text that leaked from other sections */
   stripSectionHeaders: boolean;
+}
+
+/**
+ * Headline Agent Directive — controls the professional title line below the name.
+ */
+export interface HeadlineAgentDirective {
+  /** If true, allow the AI to rewrite the headline/job-title line */
+  rewriteHeadline: boolean;
+  /** Maximum characters for the headline (0 = no limit) */
+  maxHeadlineChars: number;
+  /** How to handle the headline relative to the JD */
+  headlineTone: "exact-title-match" | "seniority-adjusted" | "jd-aligned" | "preserve";
+}
+
+/**
+ * Certifications Agent Directive — controls certification section handling.
+ */
+export interface CertificationsAgentDirective {
+  /** If true, only format certifications (never add/remove entries) */
+  formatOnly: boolean;
+  /** If true, strip certifications older than maxCertAgeYears */
+  stripExpiredCerts: boolean;
+  /** Maximum age (in years) before a cert is considered expired (0 = no limit) */
+  maxCertAgeYears: number;
+  /** Maximum number of certification entries to show */
+  maxCertEntries: number;
+}
+
+/**
+ * Tone & Writing Style configuration — controls the voice and writing style
+ * across all sections of the optimized resume.
+ */
+export interface ToneWritingConfig {
+  /** Overall tone of the resume */
+  tone: "formal" | "confident" | "action-driven" | "humble" | "technical";
+  /** Tense to use for experience bullet points */
+  bulletVerbTense: "past-tense" | "present-tense" | "auto";
+  /** If true, prevent filler phrases like 'responsible for', 'helped with' */
+  avoidFillerPhrases: boolean;
+  /** If true, all experience bullets must start with a strong action verb */
+  enforcePowerVerbs: boolean;
+  /** If true, require at least one quantified metric per experience entry */
+  requireQuantification: boolean;
+  /** If true, flag and remove passive voice constructions */
+  avoidPassiveVoice: boolean;
+}
+
+/**
+ * Custom Keyword Controls — lets the user force-include or force-exclude
+ * specific terms in the optimized output.
+ */
+export interface CustomKeywordsConfig {
+  /** Words the AI must NEVER include in the output (comma-separated values stored as array) */
+  forbiddenKeywords: string[];
+  /** Words that MUST appear at least once in the output */
+  requiredKeywords: string[];
+  /** Which section to prioritize for keyword placement */
+  keywordPlacement: "summary-first" | "skills-first" | "spread-evenly";
+  /** Maximum percentage of words in any single section that can be JD keywords (0 = no limit) */
+  maxKeywordDensityPercent: number;
+}
+
+/**
+ * Target ATS System — which ATS platform the resume is being optimized for.
+ * Different systems have slightly different parsing preferences.
+ */
+export type ATSSystemTarget =
+  | "generic"
+  | "workday"
+  | "taleo"
+  | "greenhouse"
+  | "icims"
+  | "lever"
+  | "successfactors"
+  | "bamboohr"
+  | "smartrecruiters";
+
+/**
+ * Section Visibility — per-section show/hide overrides.
+ * Overrides the selected structural blueprint for sections the user
+ * wants to suppress entirely (e.g., if the resume has no projects).
+ */
+export interface SectionVisibilityConfig {
+  summary: boolean;
+  skills: boolean;
+  experience: boolean;
+  education: boolean;
+  languages: boolean;
+  certifications: boolean;
+  additionalInfo: boolean;
+  projects: boolean;
 }
 
 /**

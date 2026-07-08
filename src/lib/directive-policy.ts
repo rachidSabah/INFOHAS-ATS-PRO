@@ -85,6 +85,25 @@ export interface OptimizationPolicy {
   // === SECTION OWNERSHIP MAP ===
   // Maps each resume section to the agent that owns it
   sectionOwnership: Record<string, string>;
+
+  // === TARGET ATS SYSTEM ===
+  targetAtsSystem?: string;
+
+  // === HEADLINE ===
+  headlineStrategy?: "exact-title-match" | "seniority-adjusted" | "jd-aligned" | "preserve";
+
+  // === TONE & WRITING STYLE ===
+  toneVoice?: string;                  // e.g. "confident"
+  bulletTense?: string;                // "past-tense" | "present-tense" | "auto"
+  forbidPassiveVoice?: boolean;
+  enforcePowerVerbs?: boolean;
+  avoidFillerPhrases?: boolean;
+  requireQuantification?: boolean;
+
+  // === CUSTOM KEYWORDS ===
+  forbiddenKeywords?: string[];        // must never appear in output
+  requiredKeywords?: string[];         // must appear at least once
+  keywordPlacement?: string;           // "summary-first" | "skills-first" | "spread-evenly"
 }
 
 // ============================================================================
@@ -215,6 +234,25 @@ export function buildOptimizationPolicy(
 
     // Section ownership
     sectionOwnership: buildSectionOwnership(),
+
+    // Target ATS system
+    targetAtsSystem: directiveConfig?.targetAtsSystem ?? "generic",
+
+    // Headline
+    headlineStrategy: directiveConfig?.agentDirectives?.headline?.headlineTone ?? "preserve",
+
+    // Tone & writing style
+    toneVoice: directiveConfig?.toneConfig?.tone ?? "confident",
+    bulletTense: directiveConfig?.toneConfig?.bulletVerbTense ?? "past-tense",
+    forbidPassiveVoice: directiveConfig?.toneConfig?.avoidPassiveVoice ?? true,
+    enforcePowerVerbs: directiveConfig?.toneConfig?.enforcePowerVerbs ?? true,
+    avoidFillerPhrases: directiveConfig?.toneConfig?.avoidFillerPhrases ?? true,
+    requireQuantification: directiveConfig?.toneConfig?.requireQuantification ?? false,
+
+    // Custom keywords
+    forbiddenKeywords: directiveConfig?.customKeywords?.forbiddenKeywords ?? [],
+    requiredKeywords: directiveConfig?.customKeywords?.requiredKeywords ?? [],
+    keywordPlacement: directiveConfig?.customKeywords?.keywordPlacement ?? "spread-evenly",
   };
 }
 
@@ -270,6 +308,42 @@ export function formatPolicyForPrompt(policy: OptimizationPolicy): string {
   for (const [section, agent] of Object.entries(policy.sectionOwnership)) {
     lines.push(`  - ${section}: ${agent}`);
   }
+
+  // Tone & writing style
+  lines.push(`Tone Voice: ${policy.toneVoice}`);
+  lines.push(`Bullet Verb Tense: ${policy.bulletTense}`);
+  const writingRules: string[] = [];
+  if (policy.avoidFillerPhrases) writingRules.push("No filler phrases (e.g. 'responsible for', 'helped with')");
+  if (policy.enforcePowerVerbs) writingRules.push("All bullets must start with a strong action verb");
+  if (policy.requireQuantification) writingRules.push("Include at least one quantified metric per experience entry");
+  if (policy.forbidPassiveVoice) writingRules.push("No passive voice");
+  if (writingRules.length > 0) lines.push(`Writing Rules: ${writingRules.join("; ")}`);
+
+  // Target ATS system
+  if (policy.targetAtsSystem && policy.targetAtsSystem !== "generic") {
+    lines.push(`Target ATS: ${policy.targetAtsSystem.toUpperCase()} — optimize parsing compatibility for this platform`);
+  }
+
+  // Headline strategy
+  if (policy.headlineStrategy && policy.headlineStrategy !== "preserve") {
+    lines.push(`Headline Strategy: ${policy.headlineStrategy}`);
+  }
+
+  // Custom forbidden keywords
+  if (policy.forbiddenKeywords && policy.forbiddenKeywords.length > 0) {
+    lines.push(`FORBIDDEN KEYWORDS (never use these): ${policy.forbiddenKeywords.join(", ")}`);
+  }
+
+  // Custom required keywords
+  if (policy.requiredKeywords && policy.requiredKeywords.length > 0) {
+    lines.push(`REQUIRED KEYWORDS (must appear at least once): ${policy.requiredKeywords.join(", ")}`);
+  }
+
+  // Keyword placement preference
+  if (policy.keywordPlacement && policy.keywordPlacement !== "spread-evenly") {
+    lines.push(`Keyword Placement Priority: ${policy.keywordPlacement}`);
+  }
+
   lines.push("=== END SYSTEM POLICY ===");
 
   return lines.join("\n");
@@ -465,8 +539,91 @@ export function checkPolicyCompliance(
     passedCount++;
   }
 
+  // 10. Required keywords check
+  if (policy.requiredKeywords && policy.requiredKeywords.length > 0) {
+    totalChecks++;
+    const serializedText = serializeResumeText(resume);
+    const missing: string[] = [];
+    for (const kw of policy.requiredKeywords) {
+      if (!serializedText.includes(kw.toLowerCase())) {
+        missing.push(kw);
+      }
+    }
+    if (missing.length === 0) {
+      checks.push({ check: "required_keywords_check", passed: true });
+      passedCount++;
+    } else {
+      checks.push({
+        check: "required_keywords_check",
+        passed: false,
+        detail: `Missing required keywords: [${missing.join(", ")}]`,
+      });
+    }
+  }
+
+  // 11. Forbidden keywords check
+  if (policy.forbiddenKeywords && policy.forbiddenKeywords.length > 0) {
+    totalChecks++;
+    const serializedText = serializeResumeText(resume);
+    const found: string[] = [];
+    for (const kw of policy.forbiddenKeywords) {
+      if (serializedText.includes(kw.toLowerCase())) {
+        found.push(kw);
+      }
+    }
+    if (found.length === 0) {
+      checks.push({ check: "forbidden_keywords_check", passed: true });
+      passedCount++;
+    } else {
+      checks.push({
+        check: "forbidden_keywords_check",
+        passed: false,
+        detail: `Found forbidden keywords: [${found.join(", ")}]`,
+      });
+    }
+  }
+
   // Compute score
   const complianceScore = totalChecks > 0 ? Math.round((passedCount / totalChecks) * 100) : 100;
 
   return { complianceScore, checks };
+}
+
+function serializeResumeText(resume: ResumeData): string {
+  const parts: string[] = [];
+  if (resume.name) parts.push(resume.name);
+  if (resume.headline) parts.push(resume.headline);
+  if (resume.summary) parts.push(resume.summary);
+  if (resume.skills) {
+    for (const s of resume.skills) {
+      if (s.name) parts.push(s.name);
+      if (s.category) parts.push(s.category);
+    }
+  }
+  if (resume.experience) {
+    for (const e of resume.experience) {
+      if (e.title) parts.push(e.title);
+      if (e.company) parts.push(e.company);
+      if (e.bullets) parts.push(...e.bullets);
+    }
+  }
+  if (resume.education) {
+    for (const ed of resume.education) {
+      if (ed.degree) parts.push(ed.degree);
+      if (ed.institution) parts.push(ed.institution);
+    }
+  }
+  if (resume.certifications) {
+    for (const c of resume.certifications) {
+      if (c.name) parts.push(c.name);
+      if (c.issuer) parts.push(c.issuer);
+    }
+  }
+  if (resume.projects) {
+    for (const p of resume.projects) {
+      if (p.name) parts.push(p.name);
+      if (p.bullets) parts.push(...p.bullets);
+    }
+  }
+  return parts.join(" ").toLowerCase();
 }

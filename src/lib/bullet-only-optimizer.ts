@@ -479,6 +479,25 @@ function buildAgentDirectiveSection(d: AgentDirectives): string {
   lines.push("LANGUAGES AGENT DIRECTIVE:");
   lines.push(`- ${d.languages.formatOnly ? "FORMAT ONLY — never add, remove, or infer languages" : "Full edit allowed (warning: may corrupt languages)"}`);
 
+  // Headline Agent
+  if (d.headline) {
+    lines.push("");
+    lines.push("HEADLINE AGENT DIRECTIVE:");
+    lines.push(`- Rewrite Headline: ${d.headline.rewriteHeadline ? "ALLOWED" : "FORBIDDEN"}`);
+    lines.push(`- Max Headline Length: ${d.headline.maxHeadlineChars} characters`);
+    lines.push(`- Headline Tone Alignment: ${d.headline.headlineTone}`);
+  }
+
+  // Certifications Agent
+  if (d.certifications) {
+    lines.push("");
+    lines.push("CERTIFICATIONS AGENT DIRECTIVE:");
+    lines.push(`- Format Only: ${d.certifications.formatOnly ? "YES — format existing certs without adding or removing credentials" : "NO"}`);
+    lines.push(`- Strip Expired Certs: ${d.certifications.stripExpiredCerts ? "YES" : "NO"}`);
+    lines.push(`- Max Cert Age: ${d.certifications.maxCertAgeYears} years (0 = no limit)`);
+    lines.push(`- Max Certification Entries: ${d.certifications.maxCertEntries}`);
+  }
+
   // Supervisor
   lines.push("");
   lines.push("SUPERVISOR DIRECTIVE:");

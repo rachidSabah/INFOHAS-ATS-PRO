@@ -148,6 +148,66 @@ describe("DirectiveComplianceService", () => {
     expect(result.checks.find(c => c.name === "languages_preserved")?.passed).toBe(false);
   });
 
+  it("flags missing required keywords", () => {
+    const config = makeConfig({
+      customKeywords: {
+        requiredKeywords: ["React Native", "Kubernetes"],
+        forbiddenKeywords: [],
+        keywordPlacement: "spread-evenly",
+        maxKeywordDensityPercent: 0,
+      },
+    });
+    const original = makeResume();
+    const optimized = makeResume();
+    const result = verifyDirectiveCompliance(original, optimized, config);
+    expect(result.checks.find(c => c.name === "required_keywords_check")?.passed).toBe(false);
+  });
+
+  it("passes when required keywords are present", () => {
+    const config = makeConfig({
+      customKeywords: {
+        requiredKeywords: ["React", "TypeScript"],
+        forbiddenKeywords: [],
+        keywordPlacement: "spread-evenly",
+        maxKeywordDensityPercent: 0,
+      },
+    });
+    const original = makeResume();
+    const optimized = makeResume();
+    const result = verifyDirectiveCompliance(original, optimized, config);
+    expect(result.checks.find(c => c.name === "required_keywords_check")?.passed).toBe(true);
+  });
+
+  it("flags forbidden keywords when present", () => {
+    const config = makeConfig({
+      customKeywords: {
+        requiredKeywords: [],
+        forbiddenKeywords: ["synergy", "TechCorp"],
+        keywordPlacement: "spread-evenly",
+        maxKeywordDensityPercent: 0,
+      },
+    });
+    const original = makeResume();
+    const optimized = makeResume();
+    const result = verifyDirectiveCompliance(original, optimized, config);
+    expect(result.checks.find(c => c.name === "forbidden_keywords_check")?.passed).toBe(false);
+  });
+
+  it("passes when forbidden keywords are absent", () => {
+    const config = makeConfig({
+      customKeywords: {
+        requiredKeywords: [],
+        forbiddenKeywords: ["synergy", "duties included"],
+        keywordPlacement: "spread-evenly",
+        maxKeywordDensityPercent: 0,
+      },
+    });
+    const original = makeResume();
+    const optimized = makeResume();
+    const result = verifyDirectiveCompliance(original, optimized, config);
+    expect(result.checks.find(c => c.name === "forbidden_keywords_check")?.passed).toBe(true);
+  });
+
   it("generates consistent directive hash", () => {
     const config = makeConfig();
     const h1 = getDirectiveVersion(config);
