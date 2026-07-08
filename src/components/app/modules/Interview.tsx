@@ -40,6 +40,7 @@ export function Interview() {
   const [selectedResumeId, setSelectedResumeId] = useState<string>(resumes[0]?.id ?? "");
   const [selectedJdId, setSelectedJdId] = useState<string>(jds[0]?.id ?? "");
   const [selectedAirlineId, setSelectedAirlineId] = useState<string>("generic");
+  const [activeSubTab, setActiveSubTab] = useState<"standard" | "aviation-academy">("standard");
   const [completedQuestions, setCompletedQuestions] = useState<Set<string>>(new Set());
   const [readinessData, setReadinessData] = useState<{ score: number; strengths: string[]; weaknesses: string[]; topicsToReview: string[]; skillsToReview: string[]; focusAreas: string[] } | null>(null);
 
@@ -264,8 +265,6 @@ Return JSON:
       </div>
     );
   }
-
-  const [activeSubTab, setActiveSubTab] = useState<"standard" | "aviation-academy">("standard");
 
   return (
     <div className="space-y-6">
