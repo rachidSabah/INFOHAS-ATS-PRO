@@ -1097,6 +1097,45 @@ function SettingsTab() {
         </CardContent>
       </Card>
 
+      {/* Codebase Scoping */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-lg flex items-center gap-2">
+            <Icon name="FolderSearch" className="w-4 h-4 text-brand" /> Codebase Scoping
+          </CardTitle>
+          <CardDescription>Restrict AI Development Agent audits and code generation to specific directories and exclude files.</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="grid sm:grid-cols-2 gap-4">
+            <div>
+              <Label htmlFor="focus_directories">Focus Directories (Comma-separated)</Label>
+              <Input
+                id="focus_directories"
+                value={(draft.focusDirectories || []).join(", ")}
+                onChange={(e) => {
+                  const dirs = e.target.value.split(",").map((s) => s.trim()).filter(Boolean);
+                  patch({ focusDirectories: dirs });
+                }}
+                className="mt-1 font-mono text-xs"
+                placeholder="src/lib, src/components"
+              />
+              <p className="text-[10px] text-muted-foreground mt-1">E.g., `src/lib, src/components`. If empty, the agent scans the entire repository.</p>
+            </div>
+            <div>
+              <Label htmlFor="exclude_patterns">Exclude Patterns (Comma-separated)</Label>
+              <Input
+                id="exclude_patterns"
+                value={draft.excludeFilesPattern || ""}
+                onChange={(e) => patch({ excludeFilesPattern: e.target.value })}
+                className="mt-1 font-mono text-xs"
+                placeholder="*.test.ts, *.json"
+              />
+              <p className="text-[10px] text-muted-foreground mt-1">Glob patterns to exclude from scans. E.g. `*.test.ts, *.json`.</p>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
       {/* System prompt */}
       <Card>
         <CardHeader>

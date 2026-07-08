@@ -68,13 +68,22 @@ export async function callDevAgent(opts: {
   const settings = getAIDevSettings();
   const { provider, model } = resolveProvider();
 
+  // Append directory scoping configs to the prompt
+  let userPrompt = opts.userPrompt;
+  if (settings.focusDirectories && settings.focusDirectories.length > 0) {
+    userPrompt += `\n\nFocus ONLY on files under the following directories/paths: ${settings.focusDirectories.join(", ")}`;
+  }
+  if (settings.excludeFilesPattern) {
+    userPrompt += `\n\nEXCLUDE all files matching these patterns: ${settings.excludeFilesPattern}`;
+  }
+
   const systemPrompt = opts.systemPromptOverride || settings.systemPrompt;
 
   // Try the primary provider first
   try {
     const result = await callAI({
       systemPrompt,
-      userPrompt: opts.userPrompt,
+      userPrompt,
       maxTokens: opts.maxTokens ?? settings.maxTokens,
       temperature: opts.temperature ?? settings.temperature,
     });
@@ -110,7 +119,7 @@ export async function callDevAgent(opts: {
 
           const result = await callAI({
             systemPrompt,
-            userPrompt: opts.userPrompt,
+            userPrompt,
             maxTokens: opts.maxTokens ?? settings.maxTokens,
             temperature: opts.temperature ?? settings.temperature,
           });

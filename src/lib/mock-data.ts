@@ -1328,6 +1328,8 @@ RULES:
   autoReportEnabled: true,
   safeApplyEnabled: true,
   requireApprovalEnabled: true,
+  focusDirectories: [],
+  excludeFilesPattern: "",
 };
 
 export const SEED_AI_DEV_HISTORY: AIDevAgentHistory[] = [

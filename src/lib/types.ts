@@ -1045,6 +1045,8 @@ export interface AIDevAgentSettings {
   autoReportEnabled: boolean;  // generate reports automatically
   safeApplyEnabled: boolean;   // require staging + approval before applying
   requireApprovalEnabled: boolean; // require super admin approval for changes
+  focusDirectories?: string[]; // new focus directories
+  excludeFilesPattern?: string; // glob patterns to exclude
 }
 
 /** A single issue found during a code audit, security scan, etc. */
