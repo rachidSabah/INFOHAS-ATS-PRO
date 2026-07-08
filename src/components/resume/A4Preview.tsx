@@ -503,11 +503,17 @@ function fmtDate(d?: string) {
 }
 
 function ATSProfessionalTemplate({ resume, accent }: { resume: ResumeData; accent: string }) {
+  // Suppress the headline when it merely duplicates contact fields
+  // already shown in the contact row below (prevents triple-printing).
+  const showHeadline =
+    !!resume.headline &&
+    !headlineIsDuplicateContact(resume.headline, resume.contact) &&
+    !/[|]/.test(resume.headline); // also hide pipe-delimited inline contact strings
   return (
     <div className="p-[14mm] text-[10pt] leading-snug text-slate-800" style={{ fontFamily: "'Inter', 'Helvetica', sans-serif" }}>
       <header className="mb-3">
         <h1 className="text-[22pt] font-bold text-slate-900 leading-tight">{resume.name}</h1>
-        {resume.headline && <div className="text-[11pt] mt-0.5" style={{ color: accent }}>{resume.headline}</div>}
+        {showHeadline && <div className="text-[11pt] mt-0.5" style={{ color: accent }}>{resume.headline}</div>}
         <div className="text-[8.5pt] text-slate-500 mt-1.5 flex flex-wrap gap-x-2 gap-y-0.5">
           {resume.contact.email && <span>{resume.contact.email}</span>}
           {resume.contact.phone && <span>• {resume.contact.phone}</span>}

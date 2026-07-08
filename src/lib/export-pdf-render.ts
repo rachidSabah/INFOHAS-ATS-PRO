@@ -139,15 +139,23 @@ export async function exportResumePDFRenderDoc(
       advanceLine();
     }
 
-    const contactParts: string[] = [];
-    if (rd.contact.phone) contactParts.push(rd.contact.phone);
-    if (rd.contact.email) contactParts.push(rd.contact.email);
-    if (rd.contact.location) contactParts.push(rd.contact.location);
-    if (contactParts.length) {
+    // Contact block: line 1 = location | phone, line 2 = email
+    // This exactly matches EditableA4Preview (InfoHAS Pro template) layout.
+    const locPhone = [rd.contact.location, rd.contact.phone].filter(Boolean);
+    if (locPhone.length) {
       const contactRgb = hexToRgb(L.contactColor || L.bodyTextColor);
       doc.setTextColor(contactRgb[0], contactRgb[1], contactRgb[2]);
+      doc.setFont(fontName, "normal");
       doc.setFontSize(currentBodyFontSize);
-      doc.text(contactParts.join(" | "), left, textY(currentBodyFontSize));
+      doc.text(locPhone.join(" | "), left, textY(currentBodyFontSize));
+      advanceLine();
+    }
+    if (rd.contact.email) {
+      const contactRgb = hexToRgb(L.contactColor || L.bodyTextColor);
+      doc.setTextColor(contactRgb[0], contactRgb[1], contactRgb[2]);
+      doc.setFont(fontName, "normal");
+      doc.setFontSize(currentBodyFontSize);
+      doc.text(rd.contact.email, left, textY(currentBodyFontSize));
       advanceLine();
     }
 
