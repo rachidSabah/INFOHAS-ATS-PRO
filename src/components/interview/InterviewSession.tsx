@@ -101,7 +101,12 @@ export function InterviewSession({ pkg, onClose }: InterviewSessionProps) {
         };
 
         rec.onerror = (e: any) => {
-          console.error("Speech recognition error:", e);
+          // Speech recognition errors are non-fatal; log and reset listening state.
+          const label = e?.error ?? String(e);
+          if (label !== "no-speech") {
+            // "no-speech" is a normal timeout — don't surface it to the user.
+            toast.warning(`Microphone error: ${label}. Please try again.`);
+          }
           setIsListening(false);
         };
 
@@ -120,7 +125,10 @@ export function InterviewSession({ pkg, onClose }: InterviewSessionProps) {
       if (recognitionRef.current) {
         try {
           recognitionRef.current.stop();
-        } catch (_) {}
+        } catch (stopErr) {
+          // stop() can throw "InvalidStateError" if recognition already stopped — safe to ignore
+          console.warn("[InterviewSession] SpeechRecognition.stop() on cleanup:", stopErr instanceof Error ? stopErr.message : stopErr);
+        }
       }
     };
   }, [current?.id]);
@@ -198,7 +206,10 @@ export function InterviewSession({ pkg, onClose }: InterviewSessionProps) {
     if (isListening && recognitionRef.current) {
       try {
         recognitionRef.current.stop();
-      } catch (_) {}
+      } catch (stopErr) {
+        // stop() can throw "InvalidStateError" if recognition already stopped — safe to ignore
+        console.warn("[InterviewSession] SpeechRecognition.stop() before submit:", stopErr instanceof Error ? stopErr.message : stopErr);
+      }
       setIsListening(false);
     }
 

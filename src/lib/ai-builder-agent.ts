@@ -734,8 +734,8 @@ export async function runAutonomousDebug(): Promise<{
       });
     }
 
-    // @ts-ignore (suppressed TypeScript errors)
-    const tsIgnore = await searchRepository("@ts-"+"ignore", { filePattern: "*.{ts,tsx}" });
+    // Split string to prevent this file from matching its own @ts-suppress scan
+    const tsIgnore = await searchRepository("@ts-" + "ignore", { filePattern: "*.{ts,tsx}" } as Parameters<typeof searchRepository>[1]);
     for (const r of tsIgnore.slice(0, 5)) {
       issues.push({
         area: "build",

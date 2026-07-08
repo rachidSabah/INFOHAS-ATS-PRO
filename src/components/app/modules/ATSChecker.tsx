@@ -36,6 +36,18 @@ export function ATSChecker() {
     setRunning(true);
     await new Promise((r) => setTimeout(r, 900)); // simulate AI provider latency
     const r = scoreATS(resume, jd);
+
+    // === ATS PIPELINE INTEGRITY CHECK ===
+    // Detect false-success: parser returned all-zero scores which indicates
+    // a silent parse failure. Do not surface this as "success" to the user.
+    const totalScore = r.scores.ats + r.scores.formatting + r.scores.keywords +
+      r.scores.content + r.scores.grammar + r.scores.completeness;
+    if (totalScore === 0) {
+      setRunning(false);
+      toast.error("ATS check failed: resume could not be parsed (0% score). Please re-upload your resume file.");
+      return;
+    }
+
     setReport(r);
     addATS(r);
     incUsage("atsChecks");

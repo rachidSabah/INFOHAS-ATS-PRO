@@ -306,7 +306,7 @@ describe("exportInterviewPDF — null questions guard", () => {
       company: "Emirates",
       createdAt: new Date().toISOString(),
       questions: [
-        { id: "q1", category: "behavioral", question: "Tell me about yourself.", difficulty: "easy", recommendedAnswer: "I am trilingual..." },
+        { id: "q1", category: "behavioral", question: "Tell me about yourself.", difficulty: "easy", recommendedAnswer: "I am trilingual..." } as any,
       ],
     };
     expect(() => exportInterviewPDF(pkg)).not.toThrow();
@@ -376,8 +376,8 @@ describe("render-document — dynamic section deduplication", () => {
     const { toRenderDocument } = await import("../render-document");
     const resume = makeResume({
       dynamicSections: [
-        { id: "ds1", title: "Professional Experience", content: "duplicate", bullets: [] },
-        { id: "ds2", title: "SKILLS", content: "more skills", bullets: [] },
+        { id: "ds1", title: "Professional Experience", content: "duplicate", bullets: [] } as any,
+        { id: "ds2", title: "SKILLS", content: "more skills", bullets: [] } as any,
       ],
     });
     const rd = toRenderDocument(resume);
@@ -391,7 +391,7 @@ describe("render-document — dynamic section deduplication", () => {
     const { toRenderDocument } = await import("../render-document");
     const resume = makeResume({
       dynamicSections: [
-        { id: "ds3", title: "VOLUNTEER WORK", content: "", bullets: ["Organised charity events."] },
+        { id: "ds3", title: "VOLUNTEER WORK", content: "", bullets: ["Organised charity events."] } as any,
       ],
     });
     const rd = toRenderDocument(resume);
@@ -402,7 +402,7 @@ describe("render-document — dynamic section deduplication", () => {
     const { toRenderDocument } = await import("../render-document");
     const resume = makeResume({
       dynamicSections: [
-        { id: "ds4", title: "CONTACT INFO", content: "email: test@test.com", bullets: [] },
+        { id: "ds4", title: "CONTACT INFO", content: "email: test@test.com", bullets: [] } as any,
       ],
     });
     const rd = toRenderDocument(resume);

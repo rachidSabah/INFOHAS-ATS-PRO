@@ -28,7 +28,7 @@ function getCached(url: string): unknown | null {
   return entry.data;
 }
 
-function setCached(url: string, data: any): void {
+function setCached(url: string, data: unknown): void {
   // Prevent unbounded cache growth
   if (scrapeCache.size > 50) {
     const oldestKey = scrapeCache.keys().next().value;
@@ -82,16 +82,16 @@ async function fetchWithRetry(url: string, maxRetries = 2): Promise<Response> {
 export async function POST(req: NextRequest) {
   try {
     const body = await req.text();
-    let parsedBody: any;
+    let parsedBody: { url?: unknown; [key: string]: unknown };
     try {
-      parsedBody = JSON.parse(body);
+      parsedBody = JSON.parse(body) as { url?: unknown; [key: string]: unknown };
     } catch {
       return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
     }
 
     const { url } = parsedBody;
     if (!url || typeof url !== "string") {
-      return NextResponse.json({ error: "url is required" }, { status: 400 });
+      return NextResponse.json({ error: "url is required and must be a string" }, { status: 400 });
     }
 
     let parsedUrl: URL;

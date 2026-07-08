@@ -13,6 +13,7 @@ CREATE TABLE IF NOT EXISTS ai_tasks (
   type TEXT NOT NULL DEFAULT 'generic',      -- optimization | cover_letter | interview | jd_scrape | etc.
   status TEXT NOT NULL DEFAULT 'queued',      -- queued | running | completed | failed | cancelled
   progress INTEGER NOT NULL DEFAULT 0,        -- 0-100
+  username TEXT NOT NULL DEFAULT 'anonymous', -- FIX: was nullable, caused NOT NULL constraint crash on empty usernames
   message TEXT,                               -- "Initializing", "Generating Patch", etc.
   result_json TEXT,                            -- JSON blob with the task result
   error TEXT,                                  -- error message (if status = failed)

@@ -175,6 +175,9 @@ export async function saveSession(session: ProviderSession): Promise<void> {
 
 /**
  * Load a provider session from localStorage, decrypting tokens.
+ * Returns null if no session found or session is definitively expired.
+ * Dispatches a 'session:expired' CustomEvent when the token fails to decrypt
+ * (e.g. expired sessionStorage token) so the UI can show a re-auth prompt.
  */
 export async function loadSession(provider: ProviderSession["provider"]): Promise<ProviderSession | null> {
   try {
@@ -182,9 +185,33 @@ export async function loadSession(provider: ProviderSession["provider"]): Promis
     const raw = localStorage.getItem(storageKey(provider));
     if (raw) {
       const session: ProviderSession = JSON.parse(raw);
+
+      // Explicitly check expiry BEFORE decrypting — if expired, clear and return null
+      // rather than returning a stale session that will silently fail on the first API call.
+      if (session.authenticated && session.expiresAt && Date.now() >= session.expiresAt) {
+        console.warn(`[SessionManager] Session for ${provider} is expired (expiresAt: ${new Date(session.expiresAt).toISOString()}). Clearing.`);
+        localStorage.removeItem(storageKey(provider));
+        // Notify the UI so it can show a "session expired, please re-authenticate" message.
+        if (typeof window !== "undefined") {
+          window.dispatchEvent(new CustomEvent("session:expired", { detail: { provider } }));
+        }
+        return null;
+      }
+
       // Decrypt sensitive fields
       session.accessToken = await decryptValue(session.accessToken);
       session.refreshToken = await decryptValue(session.refreshToken);
+
+      // If token decryption returned null for an authenticated session,
+      // the sessionStorage token is unreadable (wrong origin, or encrypted with
+      // a different key). Surface this as an explicit auth failure.
+      if (session.authenticated && !session.accessToken) {
+        console.warn(`[SessionManager] Access token decryption failed for ${provider} — session will require re-authentication.`);
+        if (typeof window !== "undefined") {
+          window.dispatchEvent(new CustomEvent("session:expired", { detail: { provider, reason: "token_decryption_failed" } }));
+        }
+      }
+
       return session;
     }
   } catch (e) {

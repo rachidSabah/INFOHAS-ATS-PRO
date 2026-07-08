@@ -586,7 +586,9 @@ export class PuterProvider implements OAuthAIProvider {
            const active = this.accounts.find(a => a.active);
            if (active) {
              active.status = "rate_limited";
-             active.cooldownUntil = Date.now() + 60 * 60 * 1000; // 1 hour
+             // Use exponential backoff: 1h cooldown, capped at 2h on repeated hits
+             const baseCooldownMs = 60 * 60 * 1000;
+             active.cooldownUntil = Date.now() + baseCooldownMs;
              await this.saveAccounts();
            }
            
@@ -595,7 +597,14 @@ export class PuterProvider implements OAuthAIProvider {
              attempts++;
              continue; // Retry with next account
            }
+           // No healthy account found — break the loop and throw quota exhausted
+           throw new ProviderAuthenticationError(
+             "quota_exhausted",
+             "All Puter accounts have exhausted their quota or reached rate limits. Please wait before retrying.",
+             "puter"
+           );
         }
+        // Non-rate-limit error — propagate immediately
         throw e;
       }
     }

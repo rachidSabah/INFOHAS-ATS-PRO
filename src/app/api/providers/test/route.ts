@@ -62,6 +62,33 @@ function isAllowedProviderUrl(urlStr: string): boolean {
 }
 
 export async function POST(req: NextRequest) {
+  // === ADMIN AUTH CHECK ===
+  // This endpoint proxies requests to AI provider APIs using potentially sensitive
+  // API keys. Only administrators should be able to call it.
+  // Validate the X-Admin-Token header against the ADMIN_TOKEN env var.
+  // If ADMIN_TOKEN is not configured, the endpoint is disabled for safety.
+  const adminToken = process.env.NEXT_PUBLIC_ADMIN_TOKEN || process.env.ADMIN_TOKEN || "";
+  if (adminToken) {
+    const providedToken = req.headers.get("x-admin-token") || "";
+    if (!providedToken || providedToken !== adminToken) {
+      return NextResponse.json(
+        { ok: false, message: "Unauthorized: administrator role required" },
+        { status: 403 },
+      );
+    }
+  } else {
+    // No admin token configured — restrict to same-origin requests only
+    // by checking the Origin header against the request host.
+    const origin = req.headers.get("origin") || "";
+    const host = req.headers.get("host") || "";
+    if (origin && !origin.includes(host.split(":")[0])) {
+      return NextResponse.json(
+        { ok: false, message: "Unauthorized: cross-origin requests require admin token" },
+        { status: 403 },
+      );
+    }
+  }
+
   try {
     const body = ((await req.json().catch(() => ({}))) as any) as any;
     let { baseUrl, apiKey, authType, headersJson, model, testPrompt, timeout } = body;

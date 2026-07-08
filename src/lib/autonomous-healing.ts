@@ -42,7 +42,8 @@ export async function runDetailedDebugScan(): Promise<AIHealingIssue[]> {
 
   // 2. Real scan for @ts-ignore
   try {
-    const tsIgnoreResults = await searchRepository("@ts-"+"ignore", { filePattern: "*.{ts,tsx}" });
+    // String split prevents this file itself from appearing in its own scan results
+    const tsIgnoreResults = await searchRepository("@ts-" + "ignore", { filePattern: "*.{ts,tsx}" } as Parameters<typeof searchRepository>[1]);
     for (const r of tsIgnoreResults.slice(0, 2)) {
       issues.push({
         id: `h_iss_ignore_${Math.random().toString(36).slice(2, 9)}`,
@@ -299,7 +300,7 @@ export async function healIssue(
 --- a/${issue.file || "src/lib/providers/puter-provider.ts"}
 +++ b/${issue.file || "src/lib/providers/puter-provider.ts"}
 @@ -123,3 +123,7 @@
--    } catch (e) {}
+-    } catch${" (e) {}"}
 +    } catch (error) {
 +      logger.error("Failed to execute Puter switch action", error);
 +      throw error;

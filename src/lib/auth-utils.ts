@@ -127,28 +127,30 @@ export function canSignIn(user: User | null): { allowed: boolean; reason?: strin
  * The password is resolved in this order:
  *   1. NEXT_PUBLIC_SUPER_ADMIN_PASSWORD env var (if set + ≥ 8 chars) — for
  *      users who want to override the default.
- *   2. A hardcoded default password — so super-admin login ALWAYS works
- *      out of the box without any env var configuration.
+ *   2. If neither is available, the default account is DISABLED — use Puter OAuth.
  *
  * SECURITY NOTE: This is a client-side app on Cloudflare Pages Free.
- * The super-admin account is for the site owner only. The password is
- * inlined into the client bundle, which means anyone who inspects the
- * bundle can read it. This is an inherent limitation of client-side auth.
- * For production-grade security, move auth to a Cloudflare Worker with
- * httpOnly cookies. For the Free tier, this is acceptable — the super-admin
- * account is emergency access only; regular users use Puter OAuth.
+ * The super-admin account is for the site owner only.
  *
- * HARDENING: The default password is no longer hardcoded in plain text.
- * It is derived from an env var if available, or from a configuration
- * check against the server-side Worker API. If neither is available,
- * the default account is DISABLED — use Puter OAuth instead.
+ * CRITICAL — COOKIE SECURITY (must be enforced in any Worker/Edge handler):
+ *   When setting authentication cookies, ALWAYS use:
+ *     Set-Cookie: token=<value>; Path=/; HttpOnly; Secure; SameSite=Strict
+ *   The HttpOnly flag prevents JavaScript (XSS) from reading the cookie.
+ *   The Secure flag prevents the cookie from being sent over plain HTTP.
+ *   Omitting these flags exposes the token to cross-site scripting attacks.
+ *
+ * For production-grade security, move auth to a Cloudflare Worker with
+ * HttpOnly + Secure cookies. For the Free tier, Puter OAuth is preferred.
  */
 const _DEFAULT_SUPER_ADMIN_PASSWORD = process.env.NEXT_PUBLIC_SUPER_ADMIN_PASSWORD || "";
 
+// SECURITY: Never fall back to a hardcoded password — require the env var.
+// If NEXT_PUBLIC_SUPER_ADMIN_PASSWORD is not set, the super-admin password
+// account is disabled; users must authenticate via Puter OAuth.
 const _SUPER_ADMIN_PASSWORD =
   (_DEFAULT_SUPER_ADMIN_PASSWORD.length >= 8)
     ? _DEFAULT_SUPER_ADMIN_PASSWORD
-    : "Santafee@@@@@1972"; // Default password fallback
+    : ""; // No hardcoded fallback — set NEXT_PUBLIC_SUPER_ADMIN_PASSWORD in your .env
 
 export const SUPER_ADMIN_SEED = {
   email: "rachidelsabah@gmail.com",
@@ -161,6 +163,6 @@ export const SUPER_ADMIN_SEED = {
 
 /**
  * Returns true when super-admin email/password login is configured.
- * Always true now — the default password is always available.
+ * Only enabled when NEXT_PUBLIC_SUPER_ADMIN_PASSWORD env var is set.
  */
-export const isSuperAdminLoginEnabled = (): boolean => true;
+export const isSuperAdminLoginEnabled = (): boolean => _SUPER_ADMIN_PASSWORD.length >= 8;

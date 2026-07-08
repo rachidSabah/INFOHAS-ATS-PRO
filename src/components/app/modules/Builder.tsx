@@ -838,7 +838,9 @@ ${resumeContext}
         toast.success("AI Copilot updated your resume!");
       }
     } catch (err: any) {
-      console.error("[Copilot] Chat request failed:", err);
+      // Error is surfaced to the user via the chat UI \u2014 use warn not error to avoid
+      // polluting error telemetry with non-fatal copilot request failures.
+      console.warn("[Copilot] Chat request failed:", err instanceof Error ? err.message : err);
       setMessages((prev) => [...prev, { role: "assistant", content: "Sorry, I encountered an error trying to process your request. Please try again." }]);
     } finally {
       setSendingMessage(false);
