@@ -103,6 +103,27 @@ export function AviationAcademy() {
   const [evaluating, setEvaluating] = useState(false);
   const [evalResult, setEvalResult] = useState<{ score: number; review: string; detectedKeywords: string[]; recommendations: string[] } | null>(null);
 
+  // Audio/Speech States
+  const [isSimulatingAudio, setIsSimulatingAudio] = useState(false);
+  const [fillerCount, setFillerCount] = useState(0);
+  const [wpmSpeed, setWpmSpeed] = useState(0);
+
+  // Stress Mode States
+  const [stressModeActive, setStressModeActive] = useState(false);
+  const [stressFollowUp, setStressFollowUp] = useState<string | null>(null);
+  const [stressResponse, setStressResponse] = useState("");
+  const [answeringStress, setAnsweringStress] = useState(false);
+  const [stressVerdict, setStressVerdict] = useState<string | null>(null);
+
+  // STAR Builder States
+  const [starStep, setStarStep] = useState<"idle" | "situation" | "task" | "action" | "result" | "review">("idle");
+  const [starSituation, setStarSituation] = useState("");
+  const [starTask, setStarTask] = useState("");
+  const [starAction, setStarAction] = useState("");
+  const [starResultText, setStarResultText] = useState("");
+  const [starAnalysis, setStarAnalysis] = useState<{ score: number; feedback: string; finalOutput: string } | null>(null);
+  const [analyzingStar, setAnalyzingStar] = useState(false);
+
   // Group Task States
   const [selectedScenario, setSelectedScenario] = useState(GROUP_SCENARIOS[0].id);
   const [userContribution, setUserContribution] = useState("");
@@ -150,6 +171,11 @@ export function AviationAcademy() {
     setTimerMode("prep");
     setTimerActive(true);
     setEvalResult(null);
+    setStressFollowUp(null);
+    setStressVerdict(null);
+    setIsSimulatingAudio(false);
+    setWpmSpeed(0);
+    setFillerCount(0);
   };
 
   const stopSonruPractice = () => {
@@ -166,11 +192,12 @@ export function AviationAcademy() {
     try {
       const qText = SONRU_QUESTIONS.find((q) => q.id === selectedSonruQ)?.text || "";
       const result = await callAI({
-        systemPrompt: `You are an Expert Airline Interview Coach. Evaluate the candidate's script response to a Sonru asynchronous video interview question. Score out of 100 based on CRM awareness, Passenger Safety (SEP), Service Recovery, and professional vocabulary. Return ONLY JSON: {"score": 85, "review": "...", "detectedKeywords": ["...", "..."], "recommendations": ["...", "..."]}`,
+        systemPrompt: `You are an Expert Airline Interview Coach. Evaluate the candidate's script response to a Sonru asynchronous video interview question. Score out of 100 based on CRM awareness, Passenger Safety (SEP), Service Recovery, and professional vocabulary. If stress mode is active, include a critical, demanding stress follow-up question. Return ONLY JSON: {"score": 85, "review": "...", "detectedKeywords": ["...", "..."], "recommendations": ["...", "..."] ${stressModeActive ? ', "stressFollowUp": "..."' : ""}}`,
         userPrompt: `QUESTION: ${qText}
 RESPONSE SCRIPT: ${responseScript}
 TARGET SECTOR: ${selectedSector}
 AIRCRAFT FLEET: ${selectedFleet}
+STRESS MODE IS: ${stressModeActive ? "ACTIVE" : "INACTIVE"}
 Return only JSON.`,
         temperature: 0.3
       });
@@ -189,6 +216,12 @@ Return only JSON.`,
         detectedKeywords: data.detectedKeywords ?? [],
         recommendations: data.recommendations ?? []
       });
+
+      if (stressModeActive && data.stressFollowUp) {
+        setStressFollowUp(data.stressFollowUp);
+        toast.info("🚨 Panel Stress Mode follow-up generated!");
+      }
+
       toast.success("Evaluation complete!");
     } catch (e) {
       toast.error("Evaluation failed.");
@@ -197,11 +230,110 @@ Return only JSON.`,
     }
   };
 
+  // Simulated Voice Input Analyzer
+  const startVoiceSimulation = () => {
+    if (!responseScript.trim()) {
+      toast.error("Please draft a response script to simulate voice recording.");
+      return;
+    }
+    setIsSimulatingAudio(true);
+    toast.info("🎙️ Simulating speech-to-text recording... speak now.");
+
+    setTimeout(() => {
+      // Analyze fillers count
+      const text = responseScript.toLowerCase();
+      const fillers = ["um", "ah", "like", "so", "basically", "you know"];
+      let count = 0;
+      fillers.forEach((f) => {
+        const matches = text.match(new RegExp(`\\b${f}\\b`, "g"));
+        if (matches) count += matches.length;
+      });
+      setFillerCount(count);
+
+      // Compute words per minute (typical target: 130-150 WPM)
+      const words = responseScript.split(/\s+/).length;
+      setWpmSpeed(Math.round(words / 1.5)); // simulated duration of 1.5 minutes
+      setIsSimulatingAudio(false);
+      toast.success("Voice analysis complete! See details below.");
+    }, 3000);
+  };
+
+  // Submit Stress Response
+  const submitStressResponse = async () => {
+    if (!stressResponse.trim()) {
+      toast.error("Please type your response to the follow-up.");
+      return;
+    }
+    setAnsweringStress(true);
+    try {
+      const result = await callAI({
+        systemPrompt: `You are a demanding airline recruitment panel interviewer. Evaluate the candidate's defensive response to your tough follow-up. Grade out of 100 based on safety compliance, operational maturity, and composure. Return ONLY JSON: {"verdict": "..."}`,
+        userPrompt: `TIGHT FOLLOW-UP: ${stressFollowUp}
+CANDIDATE'S DEFENSIVE RESPONSE: ${stressResponse}
+Return only JSON.`,
+        temperature: 0.4
+      });
+
+      let data;
+      try {
+        data = JSON.parse(result.text);
+      } catch {
+        const clean = result.text.match(/\{[\s\S]*\}/)?.[0] || "{}";
+        data = JSON.parse(clean);
+      }
+      setStressVerdict(data.verdict || "Composed response.");
+      toast.success("Stress response graded!");
+    } catch (e) {
+      toast.error("Grading failed.");
+    } finally {
+      setAnsweringStress(false);
+    }
+  };
+
+  // STAR Builder Analyzer
+  const analyzeStarStory = async () => {
+    if (!starSituation || !starTask || !starAction || !starResultText) {
+      toast.error("Please fill in all STAR phases to analyze.");
+      return;
+    }
+    setAnalyzingStar(true);
+    try {
+      const result = await callAI({
+        systemPrompt: `You are an Expert Interview Coach. Analyze the step-by-step STAR method entries. Assemble them into one cohesive, high-quality interview answer. Score out of 100. Return ONLY JSON: {"score": 88, "feedback": "...", "finalOutput": "..."}`,
+        userPrompt: `SITUATION: ${starSituation}
+TASK: ${starTask}
+ACTION: ${starAction}
+RESULT: ${starResultText}
+Return only JSON.`,
+        temperature: 0.3
+      });
+
+      let data;
+      try {
+        data = JSON.parse(result.text);
+      } catch {
+        const clean = result.text.match(/\{[\s\S]*\}/)?.[0] || "{}";
+        data = JSON.parse(clean);
+      }
+
+      setStarAnalysis({
+        score: data.score ?? 75,
+        feedback: data.feedback ?? "Solid STAR structure.",
+        finalOutput: data.finalOutput ?? `${starSituation} ${starTask} ${starAction} ${starResultText}`
+      });
+      setStarStep("review");
+      toast.success("STAR analysis complete!");
+    } catch (e) {
+      toast.error("Failed to analyze STAR story.");
+    } finally {
+      setAnalyzingStar(false);
+    }
+  };
+
   // Group Task logic
   const activeScenario = GROUP_SCENARIOS.find((s) => s.id === selectedScenario) || GROUP_SCENARIOS[0];
 
   useEffect(() => {
-    // Initialize group logs with scenario inputs
     setGroupLogs(activeScenario.members.map((m) => ({ sender: m.name, role: m.role, message: m.input })));
     setCrmScore(null);
     setCrmFeedback("");
@@ -237,7 +369,6 @@ Return only JSON.`,
       setCrmScore(data.score ?? 75);
       setCrmFeedback(data.feedback ?? "Good collaboration.");
 
-      // Append user contribution and the Purser response to logs
       setGroupLogs((prev) => [
         ...prev,
         { sender: "You (Candidate)", role: "Team Player", message: userContribution },
@@ -312,25 +443,39 @@ Return only JSON.`,
 
       <div className="grid lg:grid-cols-2 gap-6">
         {/* ====================================================================
-            2. SONRU VIDEO INTERVIEW SIMULATOR
+            2. SONRU VIDEO INTERVIEW SIMULATOR (WITH VOICE RECON & STRESS MODE)
             ==================================================================== */}
         <Card className="border-border">
           <CardHeader>
             <CardTitle className="text-lg flex items-center gap-2">
-              <Icon name="Video" className="w-5 h-5 text-red-500" /> 2. Sonru / HireVue Video Screen Simulator
+              <Icon name="Video" className="w-5 h-5 text-red-500" /> 2. Sonru Video & Voice Screen Simulator
             </CardTitle>
-            <CardDescription>Rehearse asynchronous video prompts with exact preparation and recording constraints.</CardDescription>
+            <CardDescription>Rehearse asynchronous video prompts with active speech coaching and stress mode options.</CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
-            <div>
-              <label className="text-xs font-semibold text-muted-foreground">SELECT AIRLINE PROMPT</label>
-              <select
-                value={selectedSonruQ}
-                onChange={(e) => setSelectedSonruQ(e.target.value)}
-                className="w-full h-9 mt-1 px-2 rounded-md border border-input bg-background text-sm"
-              >
-                {SONRU_QUESTIONS.map((q) => <option key={q.id} value={q.id}>{q.text}</option>)}
-              </select>
+            <div className="grid sm:grid-cols-2 gap-3">
+              <div>
+                <label className="text-xs font-semibold text-muted-foreground">SELECT AIRLINE PROMPT</label>
+                <select
+                  value={selectedSonruQ}
+                  onChange={(e) => setSelectedSonruQ(e.target.value)}
+                  className="w-full h-9 mt-1 px-2 rounded-md border border-input bg-background text-sm"
+                >
+                  {SONRU_QUESTIONS.map((q) => <option key={q.id} value={q.id}>{q.text}</option>)}
+                </select>
+              </div>
+              <div className="flex items-center gap-2 mt-4 sm:mt-6 bg-secondary/30 border border-border p-2 rounded-lg">
+                <input
+                  type="checkbox"
+                  id="stress-toggle"
+                  checked={stressModeActive}
+                  onChange={(e) => setStressModeActive(e.target.checked)}
+                  className="rounded border-input text-brand focus:ring-brand w-4 h-4"
+                />
+                <label htmlFor="stress-toggle" className="text-xs font-semibold text-amber-600 select-none cursor-pointer flex items-center gap-1">
+                  <Icon name="AlertCircle" className="w-3.5 h-3.5" /> Recruiter Stress Mode
+                </label>
+              </div>
             </div>
 
             {/* Video Feed Box */}
@@ -377,7 +522,17 @@ Return only JSON.`,
 
             {/* Script Text Area */}
             <div className="space-y-1">
-              <label className="text-xs font-semibold text-muted-foreground">PASTE OR WRITE RESPONSE SCRIPT FOR EVALUATION</label>
+              <div className="flex justify-between items-center">
+                <label className="text-xs font-semibold text-muted-foreground">PASTE OR WRITE RESPONSE SCRIPT FOR EVALUATION</label>
+                <button
+                  onClick={startVoiceSimulation}
+                  disabled={isSimulatingAudio || !responseScript}
+                  className="text-xs text-brand hover:text-brand-dark flex items-center gap-1 font-semibold"
+                >
+                  <Icon name={isSimulatingAudio ? "Loader2" : "Mic"} className={`w-3.5 h-3.5 ${isSimulatingAudio ? "animate-spin" : ""}`} />
+                  {isSimulatingAudio ? "Recording..." : "Analyze Spoken Speed"}
+                </button>
+              </div>
               <textarea
                 value={responseScript}
                 onChange={(e) => setResponseScript(e.target.value)}
@@ -385,6 +540,25 @@ Return only JSON.`,
                 className="w-full h-24 p-2 rounded-md border border-input bg-background text-sm font-mono text-xs focus:ring-1 focus:ring-brand focus:outline-none"
               />
             </div>
+
+            {wpmSpeed > 0 && (
+              <div className="grid grid-cols-2 gap-3 text-xs bg-secondary/50 p-2.5 rounded-lg border border-border">
+                <div className="flex items-center gap-1.5">
+                  <Icon name="Activity" className="text-brand w-4 h-4" />
+                  <div>
+                    <span className="text-muted-foreground block text-[10px] uppercase">Speech Pace</span>
+                    <strong className="text-foreground">{wpmSpeed} WPM</strong> (Target: ~140)
+                  </div>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <Icon name="Smile" className="text-amber-500 w-4 h-4" />
+                  <div>
+                    <span className="text-muted-foreground block text-[10px] uppercase">Filler Words</span>
+                    <strong className="text-amber-600">{fillerCount} detected</strong>
+                  </div>
+                </div>
+              </div>
+            )}
 
             <Button onClick={evaluateSonruScript} disabled={evaluating || !responseScript} className="w-full bg-brand hover:bg-brand-dark text-white">
               {evaluating ? <Icon name="Loader2" className="w-4 h-4 animate-spin" /> : <Icon name="Sparkles" className="w-4 h-4" />}
@@ -408,6 +582,34 @@ Return only JSON.`,
                   <div className="text-[10px] space-y-1 mt-1 border-t border-border pt-1">
                     <p className="font-semibold text-muted-foreground">Recommendations:</p>
                     {evalResult.recommendations.map((r, idx) => <p key={idx} className="text-muted-foreground">· {r}</p>)}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Stress Follow-up widget */}
+            {stressFollowUp && (
+              <div className="rounded-lg border border-amber-400 bg-amber-50/20 dark:bg-amber-950/10 p-3 space-y-2 text-xs">
+                <div className="flex items-center gap-1.5 text-amber-600 font-bold uppercase text-[10px]">
+                  <Icon name="ShieldAlert" className="w-4 h-4" /> Recruiter Stress Follow-Up
+                </div>
+                <p className="italic text-neutral-800 leading-normal bg-background p-2 rounded border border-amber-200">{stressFollowUp}</p>
+                
+                <textarea
+                  value={stressResponse}
+                  onChange={(e) => setStressResponse(e.target.value)}
+                  placeholder="Draft your composed safety-first response here..."
+                  className="w-full h-16 p-2 rounded-md border border-input bg-background text-xs focus:ring-1 focus:ring-brand focus:outline-none"
+                />
+                
+                <Button onClick={submitStressResponse} disabled={answeringStress || !stressResponse} size="sm" className="w-full bg-amber-600 hover:bg-amber-700 text-white">
+                  {answeringStress ? <Icon name="Loader2" className="w-3.5 h-3.5 animate-spin" /> : "Submit Composed Answer"}
+                </Button>
+
+                {stressVerdict && (
+                  <div className="bg-background border border-border p-2.5 rounded-md mt-2 text-[11px] text-neutral-700">
+                    <strong className="text-brand text-[10px] uppercase block mb-0.5">Stress Recovery Verdict</strong>
+                    {stressVerdict}
                   </div>
                 )}
               </div>
@@ -540,6 +742,151 @@ Return only JSON.`,
               );
             })}
           </div>
+        </CardContent>
+      </Card>
+
+      {/* ====================================================================
+          5. INTERACTIVE STAR METHOD ANSWER BUILDER
+          ==================================================================== */}
+      <Card className="border-border">
+        <CardHeader>
+          <CardTitle className="text-lg flex items-center gap-2">
+            <Icon name="MessagesSquare" className="w-5 h-5 text-brand" /> 5. STAR Method Behavior Answer Builder
+          </CardTitle>
+          <CardDescription>Structure your personal career stories step-by-step to construct a robust behavioral response.</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          {starStep === "idle" && (
+            <div className="py-8 text-center space-y-3 bg-secondary/10 border border-dashed rounded-lg">
+              <Icon name="FileEdit" className="w-10 h-10 text-muted-foreground/60 mx-auto" />
+              <div className="text-sm font-semibold">Start building your STAR story</div>
+              <p className="text-xs text-muted-foreground max-w-sm mx-auto">Structure your answers step-by-step to be safety-recurrent and operationally aligned.</p>
+              <Button onClick={() => setStarStep("situation")} className="bg-brand hover:bg-brand-dark text-white gap-1.5">
+                Build STAR Story
+              </Button>
+            </div>
+          )}
+
+          {starStep !== "idle" && starStep !== "review" && (
+            <div className="space-y-4">
+              {/* STAR step indicators */}
+              <div className="grid grid-cols-4 gap-2 text-center text-[10px] font-bold text-muted-foreground">
+                <span className={`p-1.5 rounded border ${starStep === "situation" ? "bg-brand/10 border-brand text-brand" : "bg-background border-border"}`}>S (Situation)</span>
+                <span className={`p-1.5 rounded border ${starStep === "task" ? "bg-brand/10 border-brand text-brand" : "bg-background border-border"}`}>T (Task)</span>
+                <span className={`p-1.5 rounded border ${starStep === "action" ? "bg-brand/10 border-brand text-brand" : "bg-background border-border"}`}>A (Action)</span>
+                <span className={`p-1.5 rounded border ${starStep === "result" ? "bg-brand/10 border-brand text-brand" : "bg-background border-border"}`}>R (Result)</span>
+              </div>
+
+              {starStep === "situation" && (
+                <div className="space-y-2">
+                  <label className="text-xs font-semibold text-muted-foreground block">Describe the Situation (S): Where and when did this event take place?</label>
+                  <textarea
+                    value={starSituation}
+                    onChange={(e) => setStarSituation(e.target.value)}
+                    placeholder="Example: During flight EK007, we encountered severe, unforecasted turbulence..."
+                    className="w-full h-20 p-2 border border-input rounded text-xs focus:ring-1 focus:ring-brand focus:outline-none"
+                  />
+                  <div className="flex justify-end">
+                    <Button onClick={() => setStarStep("task")} disabled={!starSituation} className="bg-brand text-white">Next: Task</Button>
+                  </div>
+                </div>
+              )}
+
+              {starStep === "task" && (
+                <div className="space-y-2">
+                  <label className="text-xs font-semibold text-muted-foreground block">Describe the Task (T): What was your responsibility or the immediate challenge?</label>
+                  <textarea
+                    value={starTask}
+                    onChange={(e) => setStarTask(e.target.value)}
+                    placeholder="Example: As the Cabin Crew member in charge of the aft galley, I had to secure all loose carts..."
+                    className="w-full h-20 p-2 border border-input rounded text-xs focus:ring-1 focus:ring-brand focus:outline-none"
+                  />
+                  <div className="flex justify-between">
+                    <Button onClick={() => setStarStep("situation")} variant="outline">Back</Button>
+                    <Button onClick={() => setStarStep("action")} disabled={!starTask} className="bg-brand text-white">Next: Action</Button>
+                  </div>
+                </div>
+              )}
+
+              {starStep === "action" && (
+                <div className="space-y-2">
+                  <label className="text-xs font-semibold text-muted-foreground block">Describe the Action (A): What specific steps did you execute? Cite safety regulations / CRM.</label>
+                  <textarea
+                    value={starAction}
+                    onChange={(e) => setStarAction(e.target.value)}
+                    placeholder="Example: I immediately locked the cart breaks, secured the cabin using standard SEP protocols, and coordinated with the Purser..."
+                    className="w-full h-20 p-2 border border-input rounded text-xs focus:ring-1 focus:ring-brand focus:outline-none"
+                  />
+                  <div className="flex justify-between">
+                    <Button onClick={() => setStarStep("task")} variant="outline">Back</Button>
+                    <Button onClick={() => setStarStep("result")} disabled={!starAction} className="bg-brand text-white">Next: Result</Button>
+                  </div>
+                </div>
+              )}
+
+              {starStep === "result" && (
+                <div className="space-y-2">
+                  <label className="text-xs font-semibold text-muted-foreground block">Describe the Result (R): What was the final outcome? Quantify if possible.</label>
+                  <textarea
+                    value={starResultText}
+                    onChange={(e) => setStarResultText(e.target.value)}
+                    placeholder="Example: All loose service gear was locked within 45 seconds. Cabin safety was maintained with zero crew or guest injuries."
+                    className="w-full h-20 p-2 border border-input rounded text-xs focus:ring-1 focus:ring-brand focus:outline-none"
+                  />
+                  <div className="flex justify-between">
+                    <Button onClick={() => setStarStep("action")} variant="outline">Back</Button>
+                    <Button onClick={analyzeStarStory} disabled={analyzingStar || !starResultText} className="bg-brand text-white gap-1.5">
+                      {analyzingStar && <Icon name="Loader2" className="w-3.5 h-3.5 animate-spin" />}
+                      {analyzingStar ? "Assembling Answer..." : "Finish STAR Story"}
+                    </Button>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {starStep === "review" && starAnalysis && (
+            <div className="rounded-lg border border-brand/20 bg-brand/5 p-4 space-y-3">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold text-brand uppercase">Assembled STAR Answer</span>
+                <Badge variant="success">STAR Score: {starAnalysis.score}/100</Badge>
+              </div>
+              <p className="text-xs text-neutral-800 leading-relaxed bg-background p-3 rounded border border-border">{starAnalysis.finalOutput}</p>
+              
+              <div className="text-xs space-y-1">
+                <strong className="text-muted-foreground text-[10px] uppercase">Recruiter Feedback</strong>
+                <p className="text-muted-foreground leading-relaxed">{starAnalysis.feedback}</p>
+              </div>
+
+              <div className="flex gap-2 justify-end">
+                <Button
+                  onClick={() => {
+                    setResponseScript(starAnalysis.finalOutput);
+                    toast.success("STAR story copied into your Sonru script area!");
+                  }}
+                  variant="outline"
+                  size="sm"
+                  className="gap-1.5"
+                >
+                  <Icon name="Copy" className="w-3.5 h-3.5" /> Use in Sonru Script
+                </Button>
+                <Button
+                  onClick={() => {
+                    setStarSituation("");
+                    setStarTask("");
+                    setStarAction("");
+                    setStarResultText("");
+                    setStarAnalysis(null);
+                    setStarStep("situation");
+                  }}
+                  size="sm"
+                  className="bg-brand text-white"
+                >
+                  Build New Story
+                </Button>
+              </div>
+            </div>
+          )}
         </CardContent>
       </Card>
     </div>

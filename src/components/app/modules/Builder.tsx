@@ -196,6 +196,7 @@ export function Builder() {
 
   const [shrinking, setShrinking] = useState(false);
   const [rightPanelTab, setRightPanelTab] = useState<"preview" | "copilot" | "audit">("preview");
+  const [showHeatmap, setShowHeatmap] = useState(false);
   const [translateLang, setTranslateLang] = useState("en");
   const [translating, setTranslating] = useState(false);
   const [fixingIssueId, setFixingIssueId] = useState<string | null>(null);
@@ -1630,13 +1631,41 @@ ${resumeContext}
 
             {rightPanelTab === "preview" ? (
               <>
-                <div className="rounded-xl bg-secondary/60 p-2 sm:p-4 overflow-auto" style={{ maxHeight: "calc(100vh - 160px)" }}>
-                  <div className="flex justify-center">
-                    <A4Preview resume={resume} scale={scale} ref={previewRef} />
+                <div className="flex items-center justify-between mb-2 flex-wrap gap-2 text-xs bg-secondary p-2 rounded-lg border border-border">
+                  <div className="flex items-center gap-4">
+                    <label className="flex items-center gap-1.5 cursor-pointer font-medium select-none text-[10px]">
+                      <input
+                        type="checkbox"
+                        checked={showHeatmap}
+                        onChange={(e) => setShowHeatmap(e.target.checked)}
+                        className="rounded border-input text-brand focus:ring-brand w-3.5 h-3.5"
+                      />
+                      <span>👁️ Visual Heatmap Overlay</span>
+                    </label>
+                  </div>
+                  <div className="flex items-center gap-2 text-[10px]">
+                    <span className="text-muted-foreground">Zoom:</span>
+                    <button onClick={() => setScale(Math.max(0.4, scale - 0.05))} className="px-1.5 py-0.5 rounded border bg-background hover:bg-secondary">-</button>
+                    <span className="font-mono text-[10px]">{Math.round(scale * 100)}%</span>
+                    <button onClick={() => setScale(Math.min(1.0, scale + 0.05))} className="px-1.5 py-0.5 rounded border bg-background hover:bg-secondary">+</button>
                   </div>
                 </div>
-                <div className="flex items-center justify-center gap-2 text-xs text-muted-foreground">
-                  <Icon name="Lock" className="w-3 h-3" />
+                <div className="rounded-xl bg-secondary/60 p-2 sm:p-4 overflow-auto" style={{ maxHeight: "calc(100vh - 160px)" }}>
+                  <div className="relative" style={{ transform: `scale(${scale})`, transformOrigin: "top center", width: "100%", height: "fit-content" }}>
+                    <A4Preview resume={resume} scale={scale} ref={previewRef} />
+                    {showHeatmap && (
+                      <div
+                        className="absolute inset-0 pointer-events-none rounded-sm"
+                        style={{
+                          background: "radial-gradient(circle at 20% 15%, rgba(239, 68, 68, 0.45) 0%, rgba(239, 68, 68, 0.25) 15%, rgba(245, 158, 11, 0.15) 30%, transparent 60%), radial-gradient(circle at 15% 45%, rgba(239, 68, 68, 0.35) 0%, rgba(245, 158, 11, 0.2) 20%, transparent 50%), radial-gradient(circle at 80% 80%, rgba(59, 130, 246, 0.15) 0%, transparent 40%)",
+                          mixBlendMode: "multiply",
+                        }}
+                      />
+                    )}
+                  </div>
+                </div>
+                <div className="mt-2 text-center text-[10px] text-muted-foreground flex items-center justify-center gap-1">
+                  <Icon name="Info" className="w-3.5 h-3.5 text-brand shrink-0" />
                   <span className="hidden sm:inline">Export enforces <code className="px-1 rounded bg-muted">maxPages = 1</code> — auto-compresses if needed.</span>
                   <span className="sm:hidden">1-page enforced on export</span>
                 </div>
@@ -1796,6 +1825,83 @@ ${resumeContext}
                           ✓ No issues found. Your resume structure and keyword density are optimal!
                         </div>
                       )}
+                    </div>
+
+                    {/* Action Verbs Injector Panel */}
+                    <div className="space-y-2 border-t border-border pt-3 mt-3">
+                      <div className="text-[11px] font-bold text-muted-foreground uppercase tracking-wider">
+                        Action Verb Upgrades
+                      </div>
+                      {(() => {
+                        // Scan experience bullets for weak verbs
+                        const weakVerbsMap = [
+                          { weak: "responsible for", strong: "Spearheaded", suggestion: "Spearheaded check-in operations" },
+                          { weak: "helped", strong: "Facilitated", suggestion: "Facilitated passenger transition" },
+                          { weak: "managed", strong: "Coordinated", suggestion: "Coordinated team roster updates" },
+                          { weak: "worked", strong: "Collaborated with", suggestion: "Collaborated on international sectors" },
+                          { weak: "did", strong: "Executed", suggestion: "Executed pre-flight cabin safety checks" },
+                          { weak: "checked", strong: "Audited", suggestion: "Audited safety and emergency gear" }
+                        ];
+
+                        const upgrades: { expId: string; bulletIdx: number; weakText: string; replacement: string; original: string }[] = [];
+                        resume.experience.forEach((exp) => {
+                          exp.bullets.forEach((bullet, bIdx) => {
+                            for (const map of weakVerbsMap) {
+                              if (bullet.toLowerCase().includes(map.weak)) {
+                                // Build a replacement replacing the weak verb with the strong one
+                                const regex = new RegExp(map.weak, "i");
+                                const replacement = bullet.replace(regex, map.strong);
+                                upgrades.push({
+                                  expId: exp.id,
+                                  bulletIdx: bIdx,
+                                  weakText: map.weak,
+                                  replacement,
+                                  original: bullet
+                                });
+                                break;
+                              }
+                            }
+                          });
+                        });
+
+                        if (upgrades.length === 0) {
+                          return (
+                            <div className="text-[10px] text-muted-foreground bg-secondary/20 p-3 rounded-lg text-center">
+                              No weak action verbs detected in your experiences. Excellent work!
+                            </div>
+                          );
+                        }
+
+                        return (
+                          <div className="space-y-2 max-h-[220px] overflow-y-auto pr-1 text-left">
+                            {upgrades.map((upg, idx) => (
+                              <div key={idx} className="p-2.5 rounded-lg border border-border bg-background space-y-1.5 text-[11px]">
+                                <div className="text-[9px] uppercase tracking-wide text-amber-600 font-bold">Weak phrase: "{upg.weakText}"</div>
+                                <p className="text-muted-foreground line-through italic text-[10px]">{upg.original}</p>
+                                <p className="text-foreground font-medium">✨ {upg.replacement}</p>
+                                <Button
+                                  size="sm"
+                                  onClick={() => {
+                                    const updatedExp = resume.experience.map((e) => {
+                                      if (e.id === upg.expId) {
+                                        const bullets = [...e.bullets];
+                                        bullets[upg.bulletIdx] = upg.replacement;
+                                        return { ...e, bullets };
+                                      }
+                                      return e;
+                                    });
+                                    updateResume(resume.id, { ...resume, experience: updatedExp });
+                                    toast.success("Bullet point upgraded to airline-grade action verb!");
+                                  }}
+                                  className="w-full h-7 bg-brand hover:bg-brand-dark text-white text-[10px] flex items-center justify-center"
+                                >
+                                  Upgrade Action Verb
+                                </Button>
+                              </div>
+                            ))}
+                          </div>
+                        );
+                      })()}
                     </div>
                   </>
                 )}

@@ -23,6 +23,7 @@ import { runOptimizationPipeline, type PipelineResult as AgentPipelineResult, ty
 import { clearAllProviderCooldowns } from "@/lib/ai";
 import { PipelineProgressView } from "@/components/optimizer/PipelineProgressView";
 import { PipelineResults } from "@/components/optimizer/PipelineResults";
+import { ATSInspectionSuite } from "@/components/optimizer/ATSInspectionSuite";
 import { InterviewPrepSuite } from "@/components/interview/InterviewPrepSuite";
 import { toast } from "sonner";
 import type { ResumeData, JobDescription, ResumeSkill } from "@/lib/types";
@@ -1316,6 +1317,19 @@ export function Optimizer() {
             {/* === 5-agent pipeline results (before/after ATS, keyword improvements, recommendations, confidence, reflection) === */}
             {pipelineResult && (
               <PipelineResults result={pipelineResult} />
+            )}
+
+            {pipelineResult && jdParsed && resume && optimizedResume && (
+              <ATSInspectionSuite
+                resume={resume}
+                optimized={optimizedResume}
+                jd={jdParsed}
+                missingKeywords={pipelineResult.keywordFeedback?.missingKeywords ?? []}
+                onUpdateResume={(updated) => {
+                  setOptimizedResume(updated);
+                  updateResume(updated.id, updated);
+                }}
+              />
             )}
 
             {/* === MODEL VARIANT ARENA RESULTS === */}
