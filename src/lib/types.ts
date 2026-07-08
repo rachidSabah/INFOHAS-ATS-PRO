@@ -261,6 +261,7 @@ export interface ATSReport {
   matchedKeywords: string[];
   weakSections: string[];
   jdMatchPercent?: number;
+  detectedCliches?: string[];
   createdAt: string;
 }
 

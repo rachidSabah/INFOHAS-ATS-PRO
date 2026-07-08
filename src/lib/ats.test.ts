@@ -163,6 +163,23 @@ describe("scoreATS", () => {
     expect(expRec).toBeDefined();
     expect(expRec!.severity).toBe("critical");
   });
+
+  it("detects and penalizes cliché buzzwords", () => {
+    const resume = makeResume({
+      summary: "I am a detail-oriented team player with synergy.",
+    });
+    const report = scoreATS(resume);
+    expect(report.detectedCliches).toContain("team player");
+    expect(report.detectedCliches).toContain("detail-oriented");
+    expect(report.detectedCliches).toContain("synergy");
+    
+    const clicheRec = report.recommendations.find((r) => r.title.toLowerCase().includes("cliché"));
+    expect(clicheRec).toBeDefined();
+    expect(clicheRec!.severity).toBe("warning");
+
+    const cleanReport = scoreATS(makeResume());
+    expect(cleanReport.scores.content).toBeGreaterThan(report.scores.content);
+  });
 });
 
 describe("scoreLabel", () => {

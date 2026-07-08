@@ -230,6 +230,19 @@ export function ATSChecker() {
                   </div>
                 </div>
               )}
+
+              {report.detectedCliches && report.detectedCliches.length > 0 && (
+                <div className="mt-3">
+                  <div className="text-sm font-semibold mb-2 flex items-center gap-1.5">
+                    <Icon name="ShieldAlert" className="w-4 h-4 text-red-500" /> Detected Clichés
+                  </div>
+                  <div className="flex flex-wrap gap-1.5">
+                    {report.detectedCliches.map((k) => (
+                      <Badge key={k} variant="danger">{k}</Badge>
+                    ))}
+                  </div>
+                </div>
+              )}
             </CardContent>
           </Card>
 

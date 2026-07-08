@@ -12,6 +12,10 @@ const COMMON_ATS_KEYWORDS = [
 ];
 
 const WEAK_VERBS = ["responsible for", "worked on", "helped", "duties included", "tasked with"];
+const CLICHE_BUZZWORDS = [
+  "team player", "detail-oriented", "synergy", "think outside the box",
+  "go-getter", "self-motivated", "results-driven", "hard-working", "proven track record"
+];
 
 export function scoreATS(resume: ResumeData, jd?: JobDescription): ATSReport {
   const formatting = scoreFormatting(resume);
@@ -28,6 +32,20 @@ export function scoreATS(resume: ResumeData, jd?: JobDescription): ATSReport {
   const recommendations: ATSRecommendation[] = [];
   const missingKeywords: string[] = [];
   const matchedKeywords: string[] = [];
+
+  // Cliché Buzzwords Check
+  const resumeText = resumeToText(resume).toLowerCase();
+  const detectedCliches = CLICHE_BUZZWORDS.filter((word) => resumeText.includes(word));
+  if (detectedCliches.length > 0) {
+    recommendations.push({
+      id: uid("rec"),
+      severity: "warning",
+      category: "Content",
+      title: "Cliché buzzwords detected",
+      description: `Your resume contains generic buzzwords: ${detectedCliches.join(", ")}. These can dilute the quality of your achievements.`,
+      fix: "Replace cliché buzzwords with specific actions, tech stack names, and measurable metrics.",
+    });
+  }
 
   // Missing keywords — defensive against jd.keywords being undefined/null
   // (can happen with JDs from stale localStorage backups or older D1 rows).
@@ -165,6 +183,7 @@ export function scoreATS(resume: ResumeData, jd?: JobDescription): ATSReport {
     matchedKeywords,
     weakSections,
     jdMatchPercent,
+    detectedCliches,
     createdAt: new Date().toISOString(),
   };
 }
@@ -215,6 +234,12 @@ function scoreContent(r: ResumeData): number {
   const weak = bullets.filter((b) => WEAK_VERBS.some((v) => b.toLowerCase().startsWith(v))).length;
   score -= weak * 6;
   if (r.summary && r.summary.length > 40 && r.summary.length < 500) score += 8;
+
+  // Penalize for cliché buzzwords
+  const text = resumeToText(r).toLowerCase();
+  const cliches = CLICHE_BUZZWORDS.filter((word) => text.includes(word)).length;
+  score -= cliches * 3;
+
   return clamp(score);
 }
 
