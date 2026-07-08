@@ -10,6 +10,7 @@ import {
 import type { ResumeData } from "../../types";
 
 const mockResume: ResumeData = {
+  id: "test-resume-1",
   name: "John Doe",
   headline: "hospitality professional",
   contact: {
@@ -45,15 +46,19 @@ const mockResume: ResumeData = {
     }
   ],
   skills: [
-    { name: "Customer Service", category: "Core" },
-    { name: "Safety compliance", category: "Core" }
+    { id: "sk1", name: "Customer Service", category: "Core" },
+    { id: "sk2", name: "Safety compliance", category: "Core" }
   ],
   languages: [
-    { language: "English", proficiency: "fluent" }
+    { id: "lg1", name: "English", proficiency: "fluent" as const }
   ],
   certifications: [
-    { name: "SEP Certified", issuer: "GCAA", date: "2024" }
-  ]
+    { id: "ct1", name: "SEP Certified", issuer: "GCAA", date: "2024" }
+  ],
+  projects: [],
+  template: "ats-professional",
+  createdAt: "2025-01-01T00:00:00Z",
+  updatedAt: "2025-01-01T00:00:00Z",
 };
 
 describe("ATS Intelligence Engine Tests", () => {

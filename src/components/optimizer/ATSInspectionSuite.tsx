@@ -35,7 +35,7 @@ export function ATSInspectionSuite({
   const getPlainText = () => {
     let text = "";
     text += `${optimized.name.toUpperCase()}\n`;
-    text += `Email: ${optimized.email} | Phone: ${optimized.phone} | Location: ${optimized.location}\n`;
+    text += `Email: ${optimized.contact?.email ?? ""} | Phone: ${optimized.contact?.phone ?? ""} | Location: ${optimized.contact?.location ?? ""}\n`;
     if (optimized.headline) text += `Headline: ${optimized.headline}\n`;
     text += `=========================================\n\n`;
 

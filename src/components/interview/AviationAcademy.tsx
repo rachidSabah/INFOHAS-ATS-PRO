@@ -575,7 +575,7 @@ Return only JSON.`,
                 {evalResult.detectedKeywords.length > 0 && (
                   <div className="flex flex-wrap gap-1 text-[10px]">
                     <span className="font-semibold text-muted-foreground mr-1">Weaved:</span>
-                    {evalResult.detectedKeywords.map((k) => <Badge key={k} variant="secondary">{k}</Badge>)}
+                    {evalResult.detectedKeywords.map((k) => <Badge key={k} variant="default">{k}</Badge>)}
                   </div>
                 )}
                 {evalResult.recommendations.length > 0 && (

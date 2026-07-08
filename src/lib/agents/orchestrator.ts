@@ -544,6 +544,12 @@ export interface PipelineResult {
   eligibilityReport?: import("../eligibility-checker").EligibilityReport;
   /** Phase 11: Guardian Strict anti-fabrication report */
   guardianStrictReport?: import("../jd-fetch-integration").PostOptimizationReport;
+  /** Keyword feedback from ATS analysis — used by ATSInspectionSuite */
+  keywordFeedback?: {
+    missingKeywords: string[];
+    presentKeywords: string[];
+    score: number;
+  };
 }
 
 export interface ReflectionResult {

@@ -207,6 +207,23 @@ const TEMPLATE_MAP: Record<string, React.FC<{ resume: ResumeData; accent: string
   classic: ClassicTemplate,
 };
 
+/**
+ * Returns true when the headline field is just a reformatted copy of the
+ * contact fields already shown in the contact row — suppresses duplicate
+ * display across all templates.
+ */
+function headlineIsDuplicateContact(headline: string, contact: ResumeData["contact"]): boolean {
+  if (!headline || !contact) return false;
+  const hl = headline.toLowerCase();
+  if (contact.email && hl.includes(contact.email.toLowerCase())) return true;
+  if (contact.phone) {
+    const digits = contact.phone.replace(/\D/g, "");
+    if (digits.length >= 5 && hl.includes(digits)) return true;
+  }
+  if (contact.location && hl === contact.location.toLowerCase()) return true;
+  return false;
+}
+
 // ---- InfoHAS Pro template ----
 // Matches the OUSSAMA EL FATIMI reference PDF exactly:
 //   - Times New Roman throughout
