@@ -143,6 +143,33 @@ import type { ResumeData, ResumeExperience, ResumeEducation, ResumeSkill, Resume
 
 const ACCENT_PRESETS = ["#1154A3", "#0B1F3A", "#10B981", "#F59E0B", "#8B5CF6", "#EC4899", "#0EA5E9", "#DC2626"];
 
+const cleanStringField = (val: any): string | undefined => {
+  if (val === null || val === undefined) return undefined;
+  if (Array.isArray(val)) {
+    val = val.join("\n");
+  }
+  if (typeof val === "string") {
+    let str = val.trim();
+    // Handle cases where the LLM wrapped the string in a JSON array string e.g. ["text"]
+    if (str.startsWith("[") && str.endsWith("]")) {
+      try {
+        const parsed = JSON.parse(str);
+        if (Array.isArray(parsed)) {
+          return parsed.map(s => String(s)).join("\n");
+        }
+      } catch {}
+      // Fallback: strip brackets and surrounding quotes if JSON parsing failed
+      str = str.slice(1, -1).trim();
+      if ((str.startsWith('"') && str.endsWith('"')) || (str.startsWith("'") && str.endsWith("'"))) {
+        str = str.slice(1, -1).trim();
+      }
+    }
+    // Strip any markdown bold/italic tags
+    return str.replace(/\*\*|\*/g, "");
+  }
+  return String(val);
+};
+
 export function Builder() {
   const resumes = useApp((s) => s.resumes);
   const activeId = useApp((s) => s.activeResumeId);
@@ -354,7 +381,7 @@ Guidelines:
           messages: [{ role: "user", content: prompt }], maxTokens: 250, temperature: 0.6
         }, { agentTask: "summary" });
         if (res.text) {
-          const cleanSummary = res.text.trim().replace(/\*\*|\*/g, "");
+          const cleanSummary = cleanStringField(res.text) || "";
           patch({ summary: cleanSummary });
           toast.success("Summary optimized successfully!", { id: toastId });
         }
@@ -368,9 +395,9 @@ Return ONLY a valid JSON array of string bullets, NO formatting, NO markdown, NO
             messages: [{ role: "user", content: prompt }], maxTokens: 400, temperature: 0.7
           }, { agentTask: "experience" });
           try {
-            const parsedBullets = JSON.parse(res.text.trim());
+            const parsedBullets = extractJSON<any>(res.text);
             if (Array.isArray(parsedBullets)) {
-              const cleanBullets = parsedBullets.map((b) => typeof b === "string" ? b.replace(/\*\*|\*/g, "") : b);
+              const cleanBullets = parsedBullets.map((b) => cleanStringField(b) || "");
               patch({
                 experience: resume.experience.map((e) => e.id === exp.id ? { ...e, bullets: cleanBullets } : e)
               });
@@ -381,7 +408,7 @@ Return ONLY a valid JSON array of string bullets, NO formatting, NO markdown, NO
           }
         }
       } else if (issue.type === "skills") {
-        const cleanSkillName = (issue.meta.skill as string).replace(/\*\*|\*/g, "");
+        const cleanSkillName = cleanStringField(issue.meta.skill) || "";
         const newSkills = [...resume.skills, { id: uid("s"), name: cleanSkillName, category: "Core Competencies" }];
         patch({ skills: newSkills });
         toast.success(`Weaved "${cleanSkillName}" into your skills list!`, { id: toastId });
@@ -397,7 +424,7 @@ Return ONLY a valid JSON array of string bullets, NO formatting, NO markdown, NO
     const toastId = toast.loading(`AI is weaving "${keyword}" into your ${target}...`);
     try {
       const { ProviderRouter } = await import("@/lib/ai/services/router");
-      const cleanKeyword = keyword.replace(/\*\*|\*/g, "");
+      const cleanKeyword = cleanStringField(keyword) || "";
 
       if (target === "summary") {
         const prompt = `Rewrite this resume summary to naturally incorporate the keyword "${cleanKeyword}". Ensure it is highly professional, impactful, and about 90 words: "${resume.summary ?? ""}". Return ONLY the summary text. Do NOT use any asterisks or markdown bold formatting.`;
@@ -405,7 +432,7 @@ Return ONLY a valid JSON array of string bullets, NO formatting, NO markdown, NO
           messages: [{ role: "user", content: prompt }], maxTokens: 250, temperature: 0.6
         }, { agentTask: "summary" });
         if (res.text) {
-          const cleanSummary = res.text.trim().replace(/\*\*|\*/g, "");
+          const cleanSummary = cleanStringField(res.text) || "";
           patch({ summary: cleanSummary });
           toast.success(`Weaved "${cleanKeyword}" into Summary!`, { id: toastId });
         }
@@ -422,9 +449,9 @@ Return ONLY a valid JSON array of string bullets, NO formatting, NO markdown, NO
           messages: [{ role: "user", content: prompt }], maxTokens: 400, temperature: 0.7
         }, { agentTask: "experience" });
         try {
-          const parsedBullets = JSON.parse(res.text.trim());
+          const parsedBullets = extractJSON<any>(res.text);
           if (Array.isArray(parsedBullets)) {
-            const cleanBullets = parsedBullets.map((b) => typeof b === "string" ? b.replace(/\*\*|\*/g, "") : b);
+            const cleanBullets = parsedBullets.map((b) => cleanStringField(b) || "");
             patch({
               experience: resume.experience.map((e) => e.id === exp.id ? { ...e, bullets: cleanBullets } : e)
             });
@@ -753,22 +780,29 @@ ${resumeContext}
         const cleanedPatch = stripAst(patchData);
         const updatedResume: Partial<ResumeData> = {};
         
-        if (typeof cleanedPatch.summary === "string") {
-          updatedResume.summary = cleanedPatch.summary;
+        const summaryVal = cleanStringField(cleanedPatch.summary);
+        if (summaryVal !== undefined) {
+          updatedResume.summary = summaryVal;
         }
-        if (typeof cleanedPatch.headline === "string") {
-          updatedResume.headline = cleanedPatch.headline;
+        
+        const headlineVal = cleanStringField(cleanedPatch.headline);
+        if (headlineVal !== undefined) {
+          updatedResume.headline = headlineVal;
         }
+
         if (Array.isArray(cleanedPatch.skills)) {
           // Robust mapping of skills supporting strings and objects, preserving or generating ids
           updatedResume.skills = cleanedPatch.skills.map((s: any) => {
             if (typeof s === "string") {
-              return { id: uid("s"), name: s, category: "" };
+              const name = cleanStringField(s) || "";
+              return { id: uid("s"), name, category: "" };
             }
+            const name = cleanStringField(s.name) || "";
+            const category = cleanStringField(s.category) || "";
             return {
               id: s.id || uid("s"),
-              name: s.name || "",
-              category: s.category || ""
+              name,
+              category
             };
           });
         }
@@ -791,14 +825,46 @@ ${resumeContext}
             }
 
             if (match) {
+              const expTitle = cleanStringField(match.title);
+              const expCompany = cleanStringField(match.company);
+              const expLocation = cleanStringField(match.location);
+              const expStartDate = cleanStringField(match.startDate);
+              const expEndDate = cleanStringField(match.endDate);
+
+              // Normalize bullets (could be an array of strings, or a stringified array, or a single string)
+              let expBullets = e.bullets;
+              if (match.bullets !== undefined) {
+                if (Array.isArray(match.bullets)) {
+                  expBullets = match.bullets.map(b => cleanStringField(b) || "");
+                } else if (typeof match.bullets === "string") {
+                  const cleanedB = cleanStringField(match.bullets);
+                  if (cleanedB) {
+                    if (cleanedB.startsWith("[") && cleanedB.endsWith("]")) {
+                      try {
+                        const parsedB = JSON.parse(cleanedB);
+                        if (Array.isArray(parsedB)) {
+                          expBullets = parsedB.map(b => String(b));
+                        } else {
+                          expBullets = [cleanedB];
+                        }
+                      } catch {
+                        expBullets = [cleanedB];
+                      }
+                    } else {
+                      expBullets = cleanedB.split("\n");
+                    }
+                  }
+                }
+              }
+
               return {
                 ...e,
-                bullets: Array.isArray(match.bullets) ? match.bullets : e.bullets,
-                title: typeof match.title === "string" ? match.title : e.title,
-                company: typeof match.company === "string" ? match.company : e.company,
-                location: typeof match.location === "string" ? match.location : e.location,
-                startDate: typeof match.startDate === "string" ? match.startDate : e.startDate,
-                endDate: typeof match.endDate === "string" ? match.endDate : e.endDate,
+                bullets: expBullets,
+                title: expTitle !== undefined ? expTitle : e.title,
+                company: expCompany !== undefined ? expCompany : e.company,
+                location: expLocation !== undefined ? expLocation : e.location,
+                startDate: expStartDate !== undefined ? expStartDate : e.startDate,
+                endDate: expEndDate !== undefined ? expEndDate : e.endDate,
               };
             }
             return e;
@@ -819,18 +885,62 @@ ${resumeContext}
             }
 
             if (match) {
+              const edInst = cleanStringField(match.institution);
+              const edDegree = cleanStringField(match.degree);
+              const edField = cleanStringField(match.field);
+              const edLoc = cleanStringField(match.location);
+              const edStart = cleanStringField(match.startDate);
+              const edEnd = cleanStringField(match.endDate);
+              
+              let edHighlights = ed.highlights;
+              if (match.highlights !== undefined) {
+                if (Array.isArray(match.highlights)) {
+                  edHighlights = match.highlights.map(h => cleanStringField(h) || "");
+                } else if (typeof match.highlights === "string") {
+                  const cleanedH = cleanStringField(match.highlights);
+                  if (cleanedH) {
+                    if (cleanedH.startsWith("[") && cleanedH.endsWith("]")) {
+                      try {
+                        const parsedH = JSON.parse(cleanedH);
+                        if (Array.isArray(parsedH)) {
+                          edHighlights = parsedH.map(h => String(h));
+                        } else {
+                          edHighlights = [cleanedH];
+                        }
+                      } catch {
+                        edHighlights = [cleanedH];
+                      }
+                    } else {
+                      edHighlights = cleanedH.split("\n");
+                    }
+                  }
+                }
+              }
+
               return {
                 ...ed,
-                institution: typeof match.institution === "string" ? match.institution : ed.institution,
-                degree: typeof match.degree === "string" ? match.degree : ed.degree,
-                field: typeof match.field === "string" ? match.field : ed.field,
-                location: typeof match.location === "string" ? match.location : ed.location,
-                startDate: typeof match.startDate === "string" ? match.startDate : ed.startDate,
-                endDate: typeof match.endDate === "string" ? match.endDate : ed.endDate,
-                highlights: Array.isArray(match.highlights) ? match.highlights : ed.highlights,
+                institution: edInst !== undefined ? edInst : ed.institution,
+                degree: edDegree !== undefined ? edDegree : ed.degree,
+                field: edField !== undefined ? edField : ed.field,
+                location: edLoc !== undefined ? edLoc : ed.location,
+                startDate: edStart !== undefined ? edStart : ed.startDate,
+                endDate: edEnd !== undefined ? edEnd : ed.endDate,
+                highlights: edHighlights,
               };
             }
             return ed;
+          });
+        }
+        if (Array.isArray(cleanedPatch.languages)) {
+          updatedResume.languages = cleanedPatch.languages.map((l: any) => {
+            if (typeof l === "string") {
+              return { id: uid("l"), name: cleanStringField(l) || "", proficiency: "fluent" };
+            }
+            return {
+              id: l.id || uid("l"),
+              name: cleanStringField(l.name) || "",
+              proficiency: l.proficiency || "fluent"
+            };
           });
         }
 
