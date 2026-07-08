@@ -727,7 +727,7 @@ function AuditHistoryTab() {
                 <div className="flex items-start justify-between gap-2 mb-1">
                   <div className="flex items-center gap-2 min-w-0">
                     <Badge variant="outline" className="text-[10px] capitalize shrink-0">{h.action.replace(/_/g, " ")}</Badge>
-                    <span className="text-sm font-medium truncate">{h.response.slice(0, 100)}{h.response.length > 100 ? "..." : ""}</span>
+                    <span className="text-sm font-medium truncate">{(h.response || "").slice(0, 100)}{(h.response || "").length > 100 ? "..." : ""}</span>
                   </div>
                   <Badge
                     variant={h.status === "success" || h.status === "approved" ? "success" : h.status === "failed" || h.status === "rejected" ? "danger" : "warning"}

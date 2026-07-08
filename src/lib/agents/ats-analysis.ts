@@ -15,6 +15,13 @@ import type { ResumeData, JobDescription } from "../types";
 import { scoreATS, scoreLabel } from "../ats";
 import { COMMON_ATS_KEYWORDS, WEAK_VERBS, STRONG_ACTION_VERBS, getIndustryKeywords } from "../keyword-banks";
 import { mapToIndustryMode } from "../industry-mapper";
+import {
+  detectATSFromContext,
+  simulateATSParser,
+  simulateRecruiter,
+  evaluateDualScoring,
+  ATS_PLATFORM_PROFILES
+} from "../enterprise/ats-intelligence-engine";
 
 // ============================================================================
 // Types
@@ -73,6 +80,12 @@ export interface ATSAnalysisResult {
   label: { label: string; color: string };
   /** Per-score explanations (for the UI's score breakdown panel) */
   explanations: Record<keyof ATSScoreBreakdown, string>;
+  
+  // Enterprise Extensions (Phase 2)
+  detectedAts?: { atsId: string; name: string; confidence: number; reason: string };
+  parserSimulation?: { parseScore: number; risks: string[]; warnings: string[] };
+  recruiterSimulation?: { recruiterScore: number; breakdown: any; recommendations: string[] };
+  dualScoring?: { atsScore: number; recruiterScore: number; differenceReason: string; recommendations: string[] };
 }
 
 export interface ATSRecommendation {
@@ -125,25 +138,17 @@ export function analyzeATS(resume: ResumeData, jd?: JobDescription | null): ATSA
   const jobTitleMatchVal = calculateJobTitleMatch(resume, jd);
   const industryMatchVal = calculateIndustryMatch(resume, jd);
   const achievementDensityVal = calculateAchievementDensity(resume);
-  const parsingQualityVal = calculateParsingQuality(resume);
   const powerWordsVal = calculatePowerWords(resume);
   const consistencyVal = calculateConsistency(resume);
 
-  // Recruiter score: blend of readability, content, formatting, achievements, powerWords
-  const recruiterScoreVal = Math.round(
-    readabilityScore * 0.15 +
-    base.scores.content * 0.25 +
-    base.scores.formatting * 0.15 +
-    achievementDensityVal * 0.25 +
-    powerWordsVal * 0.10 +
-    base.scores.completeness * 0.10
-  );
-
-  // Confidence score: blend of parsingQuality and consistency
-  const confidenceScoreVal = Math.round(
-    parsingQualityVal * 0.60 +
-    consistencyVal * 0.40
-  );
+  // === Enterprise Extensions ===
+  const detectedAts = detectATSFromContext(undefined, jd?.rawText || (jd?.keywords || []).join(" "), jd?.company);
+  const platform = ATS_PLATFORM_PROFILES[detectedAts.atsId] || ATS_PLATFORM_PROFILES.generic;
+  const parserSim = simulateATSParser(resume, detectedAts.atsId);
+  const recruiterSim = simulateRecruiter(resume, jd);
+  
+  const parsingQualityVal = parserSim.parseScore;
+  const recruiterScoreVal = recruiterSim.recruiterScore;
 
   // === Build the unified score breakdown ===
   // Weights: formatting 10%, keywordMatch 15%, semanticSimilarity 10%, content 10%,
@@ -161,8 +166,16 @@ export function analyzeATS(resume: ResumeData, jd?: JobDescription | null): ATSA
     consistencyVal * 0.10
   );
 
+  // Adjusted ATS Score including target ATS platform parsing risks
+  const overallWithAtsParsingRisk = Math.max(10, Math.round(overall * 0.9 + parsingQualityVal * 0.1));
+
+  const confidenceScoreVal = Math.round(
+    parsingQualityVal * 0.60 +
+    consistencyVal * 0.40
+  );
+
   const scores: ATSScoreBreakdown = {
-    ats: overall,
+    ats: overallWithAtsParsingRisk,
     formatting: base.scores.formatting,
     keywordMatch: base.scores.keywords,
     semanticSimilarity: semanticScore,
@@ -181,8 +194,63 @@ export function analyzeATS(resume: ResumeData, jd?: JobDescription | null): ATSA
     confidenceScore: confidenceScoreVal,
   };
 
+  const dualScoringVal = evaluateDualScoring(overallWithAtsParsingRisk, recruiterScoreVal, parsingQualityVal, resume);
+
   // === Explainable recommendations ===
   const recommendations = buildRecommendations(scores, base, resume, jd);
+
+  // Construct enterprise recommendations
+  let idCounter = 1000;
+  const simRecs: ATSRecommendation[] = [];
+
+  for (const r of parserSim.risks) {
+    simRecs.push({
+      id: `ent-pr-${idCounter++}`,
+      severity: "critical",
+      category: "formatting",
+      title: `Parser Risk (${platform.name})`,
+      description: r,
+      fix: `Simplify formatting to ensure ${platform.name} can parse this section cleanly. Avoid multi-columns, images, or special character bullets.`,
+      affectsScore: "parsingQuality",
+      estimatedImpact: 15
+    });
+  }
+  for (const w of parserSim.warnings) {
+    simRecs.push({
+      id: `ent-pw-${idCounter++}`,
+      severity: "warning",
+      category: "formatting",
+      title: `Parser Warning (${platform.name})`,
+      description: w,
+      fix: "Standardize formatting or field values according to instructions.",
+      affectsScore: "parsingQuality",
+      estimatedImpact: 8
+    });
+  }
+  for (const r of recruiterSim.recommendations) {
+    simRecs.push({
+      id: `ent-rec-${idCounter++}`,
+      severity: "warning",
+      category: "content",
+      title: "Recruiter Review Recommendation",
+      description: r,
+      fix: "Refactor achievements or content focus to match recruiter expectations.",
+      affectsScore: "recruiterScore",
+      estimatedImpact: 10
+    });
+  }
+  for (const r of dualScoringVal.recommendations) {
+    simRecs.push({
+      id: `ent-dual-${idCounter++}`,
+      severity: "info",
+      category: "semantic",
+      title: "Dual Scoring Alignment",
+      description: r,
+      fix: "Balance keyword inclusion against natural readability.",
+      affectsScore: "ats",
+      estimatedImpact: 5
+    });
+  }
 
   const result: ATSAnalysisResult = {
     scores,
@@ -190,10 +258,10 @@ export function analyzeATS(resume: ResumeData, jd?: JobDescription | null): ATSA
     matchedKeywords: base.matchedKeywords,
     weakSections: base.weakSections,
     jdMatchPercent: base.jdMatchPercent ?? base.scores.keywords,
-    recommendations,
+    recommendations: [...recommendations, ...simRecs],
     label: scoreLabel(scores.ats),
     explanations: {
-      ats: `Overall ATS score: weighted average of all sub-scores. ${scores.ats >= 80 ? "Excellent — highly likely to pass ATS screening." : scores.ats >= 60 ? "Good — should pass most ATS systems. Room for improvement." : "Needs work — likely to be filtered out by ATS."}`,
+      ats: `Overall ATS score: ${scores.ats}/100. Weighted average of sub-scores, adjusted for target ATS platform parsing risks.`,
       formatting: `Formatting compliance: ${scores.formatting}/100. Checks for ATS-safe fonts, no tables/columns, no images in body. ${scores.formatting >= 90 ? "All formatting checks passed." : "Some formatting issues detected."}`,
       keywordMatch: `JD keyword coverage: ${scores.keywordMatch}/100. ${base.matchedKeywords.length} of ${base.matchedKeywords.length + base.missingKeywords.length} JD keywords found in resume. ${base.missingKeywords.length === 0 ? "All keywords matched!" : `Missing ${base.missingKeywords.length} keywords: ${base.missingKeywords.slice(0, 5).join(", ")}${base.missingKeywords.length > 5 ? "…" : ""}`}`,
       semanticSimilarity: semanticExplanation,
@@ -205,12 +273,22 @@ export function analyzeATS(resume: ResumeData, jd?: JobDescription | null): ATSA
       jobTitleMatch: `Job title alignment: ${scores.jobTitleMatch}/100. Evaluates how closely your resume headline and recent titles map to the target role.`,
       industryMatch: `Industry terminology matching: ${scores.industryMatch}/100. Checks for alignment of professional buzzwords and domain context.`,
       achievementDensity: `Achievement density: ${scores.achievementDensity}/100. Proportion of quantified accomplishments vs responsibilities.`,
-      parsingQuality: `ATS parsing structural quality: ${scores.parsingQuality}/100. Verifies contact formatting, section delimiters, and syntax correctness.`,
+      parsingQuality: `ATS parsing structural quality: ${scores.parsingQuality}/100. Simulates how ${platform.name} parses the layout, headings, tables, dates, and fonts.`,
       powerWords: `Power verbs usage: ${scores.powerWords}/100. Measures density of active, high-impact verbs compared to passive placeholders.`,
       consistency: `Format and chronology consistency: ${scores.consistency}/100. Audits chronological ordering of dates and syntax patterns.`,
       recruiterScore: `Overall recruiter review score: ${scores.recruiterScore}/100. Predicts recruiter visual appeal, plain readability, and overall impact.`,
       confidenceScore: `System parsing confidence: ${scores.confidenceScore}/100. Evaluates robustness of data extraction and match metrics.`,
     },
+    // Enterprise Extensions
+    detectedAts: {
+      atsId: detectedAts.atsId,
+      name: platform.name,
+      confidence: detectedAts.confidence,
+      reason: detectedAts.reason
+    },
+    parserSimulation: parserSim,
+    recruiterSimulation: recruiterSim,
+    dualScoring: dualScoringVal
   };
 
   // === IMMUTABILITY GUARD (V3.0.1) ===

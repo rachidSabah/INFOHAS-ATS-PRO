@@ -21,6 +21,11 @@ import { createSnapshot, compareSnapshots } from "./resume-snapshot-engine";
 import { globalEventBus } from "./agent-event-bus";
 import { getCachedOptimization, setCachedOptimization } from "./semantic-cache";
 import { recordProviderSuccess, recordProviderFailure } from "./provider-health-monitor";
+import {
+  detectATSFromContext,
+  ATS_PLATFORM_PROFILES,
+  AIRLINE_COMPETENCY_ONTOLOGY
+} from "./enterprise/ats-intelligence-engine";
 
 export interface ParallelOptimizerInput {
   resume: ResumeData;
@@ -78,35 +83,17 @@ export async function runParallelOptimizer(
     metadata: { snapshotId: beforeSnapshot.snapshotId },
   });
 
-  // Build the shared context for all agents
   const jdKeywords = jd.keywords ?? [];
-  const jdText = jd.rawText ?? JSON.stringify({
-    title: jd.title,
-    company: jd.company,
-    responsibilities: jd.responsibilities,
-    requiredSkills: jd.requiredSkills,
-    keywords: jd.keywords,
-  });
-
-  const sourceContext = JSON.stringify({
-    name: resume.name,
-    summary: resume.summary,
-    experience: resume.experience.map((e) => ({
-      id: e.id, title: e.title, company: e.company,
-      location: e.location, startDate: e.startDate, endDate: e.endDate,
-      bullets: e.bullets,
-    })),
-  });
 
   // ========================================================================
-  // Run Summary, Skills, and Experience agents IN PARALLEL
+  // Run Summary, Skills, and Experience agents IN PARALLEL (with dynamically assembled context)
   // ========================================================================
   const startTime = Date.now();
 
   const [summaryResult, skillsResult, experienceResult] = await Promise.all([
-    runSummaryAgent(sourceContext, jdText, jdKeywords, directiveConfig, optimizationPolicy),
-    runSkillsAgent(sourceContext, resume.skills, jdText, jdKeywords, directiveConfig, optimizationPolicy),
-    runExperienceAgent(sourceContext, resume.experience, jdText, jdKeywords, directiveConfig, optimizationPolicy),
+    runSummaryAgent(resume, jd, jdKeywords, directiveConfig, optimizationPolicy),
+    runSkillsAgent(resume, jd, jdKeywords, directiveConfig, optimizationPolicy),
+    runExperienceAgent(resume, jd, jdKeywords, directiveConfig, optimizationPolicy),
   ]);
 
   const parallelDuration = Date.now() - startTime;
@@ -185,36 +172,130 @@ export async function runParallelOptimizer(
 // Individual agent runners
 // ============================================================================
 
+// ============================================================================
+// Enterprise Prompt Helper
+// ============================================================================
+
+function buildEnterprisePromptContext(jd: JobDescription): { atsIntel: string; competencyIntel: string; airlineLanguageIntel: string } {
+  const jdText = jd.rawText || (jd.keywords || []).join(" ");
+  const detectedAts = detectATSFromContext(undefined, jdText, jd.company);
+  const platform = ATS_PLATFORM_PROFILES[detectedAts.atsId] || ATS_PLATFORM_PROFILES.generic;
+
+  const atsIntel = `
+═══════════════════════════════════════════════════════════════
+TARGET ATS ECOSYSTEM GUIDANCE (${platform.name} - Version ${platform.version}):
+- Parsing Behavior: ${platform.parsingStyle}
+- Formatting Constraints: ${platform.formattingPreferences}
+- Optimization Strategy: ${platform.optimizationStrategy}
+═══════════════════════════════════════════════════════════════`;
+
+  const matchedCompetencies: string[] = [];
+  for (const [key, comp] of Object.entries(AIRLINE_COMPETENCY_ONTOLOGY)) {
+    const termMatches = [comp.name, ...comp.aliases, ...comp.synonyms].some(term => 
+      jdText.toLowerCase().includes(term.toLowerCase())
+    );
+    if (termMatches) {
+      matchedCompetencies.push(`- **${comp.name}**: ${comp.description}
+  *Behavioral Indicators*: ${comp.behavioralIndicators.slice(0, 2).join("; ")}
+  *Key Terminology*: ${comp.relatedAtsKeywords.slice(0, 5).join(", ")}`);
+    }
+  }
+
+  const competencyIntel = matchedCompetencies.length > 0
+    ? `
+═══════════════════════════════════════════════════════════════
+TARGET COMPETENCY ONTOLOGY (Align candidate achievements with these profiles):
+${matchedCompetencies.join("\n")}
+═══════════════════════════════════════════════════════════════`
+    : "";
+
+  const airlineLanguageIntel = `
+═══════════════════════════════════════════════════════════════
+AIRLINE LANGUAGE ENGINE TRANSFORMS (Translate generic terms naturally where appropriate):
+- customer support / customer service -> Passenger Assistance / Passenger Experience
+- safety rules -> Safety Compliance / SEP Guidelines
+- help customers -> Deliver Exceptional Passenger Experience / Service Recovery
+- teamwork -> Crew Resource Management (CRM)
+- problem solving -> Operational Decision Making
+- baggage -> Cabin Baggage
+- flight -> Sector Operation
+- boss / supervisor -> Cabin Senior / Purser
+═══════════════════════════════════════════════════════════════`;
+
+  return { atsIntel, competencyIntel, airlineLanguageIntel };
+}
+
+// ============================================================================
+// Individual agent runners
+// ============================================================================
+
 // --- Summary Agent ---
 
-async function runSummaryAgent(
-  sourceContext: string,
-  jdText: string,
+export async function runSummaryAgent(
+  resume: ResumeData,
+  jd: JobDescription,
   jdKeywords: string[],
   directiveConfig?: OptimizerDirectiveConfig | null,
   optimizationPolicy?: string | null,
-): Promise<{ summary: string; headline: string; provider: string }> {
+  excludeProviderIds?: string[],
+): Promise<{ summary: string; headline: string; provider: string; rawResponse: string }> {
   const startTime = Date.now();
-  const systemPrompt = `You are a professional resume summary writer. Optimize the summary to be ATS-friendly.
+
+  // Dynamically assemble summary context: Summary Agent only needs summary and experience titles/companies
+  const resumeContext = JSON.stringify({
+    name: resume.name,
+    currentSummary: resume.summary || "(empty — user has not written a summary yet)",
+    experience: resume.experience.map((e) => ({
+      title: e.title,
+      company: e.company,
+    })),
+  }, null, 2);
+
+  const jdContext = JSON.stringify({
+    title: jd.title,
+    company: jd.company,
+  }, null, 2);
+
+  const { atsIntel, competencyIntel, airlineLanguageIntel } = buildEnterprisePromptContext(jd);
+
+  const systemPrompt = `You are a professional resume summary writer. Optimize the candidate's summary and headline to be ATS-friendly for the target job.
 ${optimizationPolicy ? `POLICY: ${optimizationPolicy}` : ""}
+
+${atsIntel}
+${competencyIntel}
+${airlineLanguageIntel}
+
 RULES:
-- Write 60-90 words
-- Use action-oriented language
+- Write 60-90 words.
+- Use action-oriented language.
 - Embed target keywords naturally: ${jdKeywords.join(", ")}
-- NEVER invent experience, certifications, or metrics
-- NEVER use parentheses
+- NEVER invent experience, certifications, or metrics.
+- NEVER use parentheses.
+- Focus ONLY on the candidate's existing background (summarized in the context).
 Return ONLY JSON: {"summary": "...", "headline": "..."}`;
 
-  const userPrompt = `SOURCE RESUME:\n${sourceContext}\n\nTARGET JOB:\n${jdText}\n\nReturn ONLY valid JSON.`;
+  const userPrompt = `CANDIDATE CONTEXT:
+${resumeContext}
+
+TARGET JOB:
+${jdContext}
+
+Return ONLY valid JSON.`;
+
+  const agentDirectives = directiveConfig?.agentDirectives;
+  const temp = agentDirectives?.supervisor?.temperature ?? 0.2;
 
   const result = await callAI({
     systemPrompt,
     userPrompt,
     maxTokens: 2000,
-    temperature: 0.2,
+    temperature: temp,
     taskCategory: "document",
     timeoutMs: OPTIMIZER_CALL_TIMEOUT_MS,
     isOptimizerCall: true,
+    excludeProviderIds,
+    enableRetries: agentDirectives?.supervisor?.enableRetries,
+    enableProviderSwitch: agentDirectives?.supervisor?.enableProviderSwitch,
   });
 
   const parsed = extractJSON<{ summary?: string; headline?: string }>(result.text);
@@ -235,46 +316,75 @@ Return ONLY JSON: {"summary": "...", "headline": "..."}`;
     success: !!parsed,
   });
 
-  return { summary: summaryOut, headline: headlineOut, provider: result.provider };
+  return { summary: summaryOut, headline: headlineOut, provider: result.provider, rawResponse: result.text };
 }
 
 // --- Skills Agent ---
 
-async function runSkillsAgent(
-  sourceContext: string,
-  existingSkills: { name: string; category?: string }[],
-  jdText: string,
+export async function runSkillsAgent(
+  resume: ResumeData,
+  jd: JobDescription,
   jdKeywords: string[],
   directiveConfig?: OptimizerDirectiveConfig | null,
   optimizationPolicy?: string | null,
-): Promise<{ skills: { name: string; category: string }[]; provider: string }> {
+  excludeProviderIds?: string[],
+): Promise<{ skills: { name: string; category: string }[]; provider: string; rawResponse: string }> {
   const startTime = Date.now();
-  const systemPrompt = `You are a skills optimizer. Reorder and enhance skills for ATS compatibility.
+
+  // Dynamically assemble skills context: Skills Agent only needs skills list
+  const skillsContext = JSON.stringify({
+    existingSkills: resume.skills.map((s) => ({ name: s.name, category: s.category || "" })),
+  }, null, 2);
+
+  const jdContext = JSON.stringify({
+    title: jd.title,
+    company: jd.company,
+    keywords: jdKeywords,
+  }, null, 2);
+
+  const { atsIntel, competencyIntel, airlineLanguageIntel } = buildEnterprisePromptContext(jd);
+
+  const systemPrompt = `You are a skills optimizer. Reorder and enhance the candidate's skills list for ATS compatibility with the target job.
 ${optimizationPolicy ? `POLICY: ${optimizationPolicy}` : ""}
+
+${atsIntel}
+${competencyIntel}
+${airlineLanguageIntel}
+
 RULES:
-- Keep ALL existing skills
-- Reorder: JD-relevant skills FIRST
-- Group by category (Languages, Frontend, Backend, Tools, etc.)
-- Only add skills that are genuinely present in the experience
-- NEVER add skills the candidate doesn't have
-- Target keywords: ${jdKeywords.join(", ")}
+- Keep ALL existing skills.
+- Reorder: place target job-relevant skills FIRST.
+- Group by category (Languages, Frontend, Backend, Tools, etc.).
+- Target keywords to weave or prioritize: ${jdKeywords.join(", ")}
+- Only add skills that are genuinely implied or relevant to the candidate's professional domain. NEVER fabricate unrelated skills.
 Return ONLY JSON: {"skills": [{"name": "...", "category": "..."}]}`;
 
-  const existingSkillsJson = JSON.stringify(existingSkills);
-  const userPrompt = `SOURCE RESUME:\n${sourceContext}\nEXISTING SKILLS:\n${existingSkillsJson}\n\nTARGET JOB:\n${jdText}\n\nReturn ONLY valid JSON.`;
+  const userPrompt = `CANDIDATE SKILLS:
+${skillsContext}
+
+TARGET JOB:
+${jdContext}
+
+Return ONLY valid JSON.`;
+
+  const agentDirectives = directiveConfig?.agentDirectives;
+  const temp = agentDirectives?.supervisor?.temperature ?? 0.15;
 
   const result = await callAI({
     systemPrompt,
     userPrompt,
     maxTokens: 1500,
-    temperature: 0.15,
+    temperature: temp,
     taskCategory: "document",
     timeoutMs: OPTIMIZER_CALL_TIMEOUT_MS,
     isOptimizerCall: true,
+    excludeProviderIds,
+    enableRetries: agentDirectives?.supervisor?.enableRetries,
+    enableProviderSwitch: agentDirectives?.supervisor?.enableProviderSwitch,
   });
 
   const parsed = extractJSON<{ skills?: { name: string; category: string }[] }>(result.text);
-  const skills = parsed?.skills || existingSkills.map((s) => ({ name: s.name, category: s.category || "General" }));
+  const skills = parsed?.skills || resume.skills.map((s) => ({ name: s.name, category: s.category || "General" }));
 
   // Record provider health
   recordProviderSuccess(result.provider, Date.now() - startTime, result.tokensEstimate ?? 0);
@@ -289,50 +399,87 @@ Return ONLY JSON: {"skills": [{"name": "...", "category": "..."}]}`;
     success: !!parsed,
   });
 
-  return { skills, provider: result.provider };
+  return { skills, provider: result.provider, rawResponse: result.text };
 }
 
 // --- Experience Agent ---
 
-async function runExperienceAgent(
-  sourceContext: string,
-  experiences: { id: string; title: string; company: string; bullets: string[] }[],
-  jdText: string,
+export async function runExperienceAgent(
+  resume: ResumeData,
+  jd: JobDescription,
   jdKeywords: string[],
   directiveConfig?: OptimizerDirectiveConfig | null,
   optimizationPolicy?: string | null,
-): Promise<{ experiences: { id: string; bullets: string[] }[]; provider: string }> {
+  excludeProviderIds?: string[],
+): Promise<{ experiences: { id: string; bullets: string[] }[]; provider: string; rawResponse: string }> {
   const startTime = Date.now();
-  const systemPrompt = `You are a resume bullet optimizer. Rewrite only the bullet points — NEVER change companies, dates, or roles.
-${optimizationPolicy ? `POLICY: ${optimizationPolicy}` : ""}
-RULES:
-- Rewrite each bullet to be more impactful
-- Use strong action verbs: Spearheaded, Orchestrated, Streamlined, Delivered
-- Embed keywords naturally: ${jdKeywords.join(", ")}
-- NEVER add metrics, percentages, or dollar amounts that aren't in the original
-- NEVER change the bullet count (same number of bullets per experience)
-- NEVER invent new experience entries
-- Return the SAME experience IDs as provided
-Return ONLY JSON: {"experiences": [{"id": "exp_1", "bullets": ["...", "..."]}]}`;
 
-  const expJson = JSON.stringify(experiences.map((e) => ({ id: e.id, title: e.title, company: e.company, bullets: e.bullets })));
-  const userPrompt = `SOURCE EXPERIENCES:\n${expJson}\n\nTARGET JOB:\n${jdText}\n\nSOURCE RESUME:\n${sourceContext}\n\nReturn ONLY valid JSON.`;
+  // Dynamically assemble experience context: Experience Agent only needs experience details
+  const experienceContext = JSON.stringify({
+    experience: resume.experience.map((e) => ({
+      id: e.id,
+      title: e.title,
+      company: e.company,
+      bullets: e.bullets,
+    })),
+  }, null, 2);
+
+  const jdContext = JSON.stringify({
+    title: jd.title,
+    company: jd.company,
+    keywords: jdKeywords,
+    responsibilities: jd.responsibilities || [],
+    requiredSkills: jd.requiredSkills || [],
+  }, null, 2);
+
+  const { atsIntel, competencyIntel, airlineLanguageIntel } = buildEnterprisePromptContext(jd);
+
+  const systemPrompt = `You are a resume bullet optimizer. Rewrite the candidate's experience bullet points to be more impactful and aligned with the target job description.
+${optimizationPolicy ? `POLICY: ${optimizationPolicy}` : ""}
+
+${atsIntel}
+${competencyIntel}
+${airlineLanguageIntel}
+
+RULES:
+- Rewrite each bullet point to emphasize achievements and results.
+- Use strong action verbs (e.g., Spearheaded, Orchestrated, Streamlined).
+- Embed target keywords naturally where they fit contextually: ${jdKeywords.join(", ")}
+- NEVER invent metrics, percentages, or achievements that aren't in the original.
+- NEVER change the bullet count (same number of bullets per experience entry).
+- NEVER change job titles, companies, dates, or locations.
+- Return the EXACT same experience IDs as provided.
+Return ONLY JSON: {"experiences": [{"id": "...", "bullets": ["...", "..."]}]}`;
+
+  const userPrompt = `CANDIDATE EXPERIENCE:
+${experienceContext}
+
+TARGET JOB:
+${jdContext}
+
+Return ONLY valid JSON.`;
+
+  const agentDirectives = directiveConfig?.agentDirectives;
+  const temp = agentDirectives?.supervisor?.temperature ?? 0.15;
 
   const result = await callAI({
     systemPrompt,
     userPrompt,
     maxTokens: 4000,
-    temperature: 0.15,
+    temperature: temp,
     taskCategory: "document",
     timeoutMs: OPTIMIZER_CALL_TIMEOUT_MS,
     isOptimizerCall: true,
+    excludeProviderIds,
+    enableRetries: agentDirectives?.supervisor?.enableRetries,
+    enableProviderSwitch: agentDirectives?.supervisor?.enableProviderSwitch,
   });
 
   const parsed = extractJSON<{ experiences?: { id: string; bullets: string[] }[] }>(result.text);
   const expOut = parsed?.experiences?.map((e) => ({
     id: e.id,
     bullets: e.bullets || [],
-  })) || experiences.map((e) => ({ id: e.id, bullets: e.bullets }));
+  })) || resume.experience.map((e) => ({ id: e.id, bullets: e.bullets }));
 
   // Record provider health
   recordProviderSuccess(result.provider, Date.now() - startTime, result.tokensEstimate ?? 0);
@@ -347,5 +494,5 @@ Return ONLY JSON: {"experiences": [{"id": "exp_1", "bullets": ["...", "..."]}]}`
     success: !!parsed,
   });
 
-  return { experiences: expOut, provider: result.provider };
+  return { experiences: expOut, provider: result.provider, rawResponse: result.text };
 }

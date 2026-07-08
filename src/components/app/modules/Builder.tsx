@@ -10,7 +10,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Badge, Icon } from "@/components/shared";
 
 // ── Lightweight inline Markdown → JSX renderer for Copilot chat ────────────
-// Handles: **bold**, *italic*, `code`, # h1-h3, - bullets, \n newlines.
+// Handles: **bold**, *italic*, `code`, # h1-h3, - bullets, ```code blocks```, \n newlines.
 // Zero dependencies — no remark/rehype added to the bundle.
 function renderMarkdown(text: string): React.ReactNode[] {
   const nodes: React.ReactNode[] = [];
@@ -50,7 +50,33 @@ function renderMarkdown(text: string): React.ReactNode[] {
     }
   };
 
-  for (const line of lines) {
+  let inCodeBlock = false;
+  let codeBlockLines: string[] = [];
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+
+    if (line.trim().startsWith("```")) {
+      flushList();
+      if (inCodeBlock) {
+        nodes.push(
+          <pre key={key++} className="bg-slate-100 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded p-2 my-1.5 font-mono text-[0.8rem] overflow-x-auto whitespace-pre">
+            <code>{codeBlockLines.join("\n")}</code>
+          </pre>
+        );
+        codeBlockLines = [];
+        inCodeBlock = false;
+      } else {
+        inCodeBlock = true;
+      }
+      continue;
+    }
+
+    if (inCodeBlock) {
+      codeBlockLines.push(line);
+      continue;
+    }
+
     // Heading
     const hMatch = line.match(/^(#{1,3})\s+(.+)/);
     if (hMatch) {
@@ -84,6 +110,15 @@ function renderMarkdown(text: string): React.ReactNode[] {
     flushList();
     nodes.push(<div key={key++}>{renderInline(line)}</div>);
   }
+
+  if (inCodeBlock && codeBlockLines.length) {
+    nodes.push(
+      <pre key={key++} className="bg-slate-100 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded p-2 my-1.5 font-mono text-[0.8rem] overflow-x-auto whitespace-pre">
+        <code>{codeBlockLines.join("\n")}</code>
+      </pre>
+    );
+  }
+
   flushList();
   return nodes;
 }
@@ -685,6 +720,13 @@ ${resumeContext}
           // No JSON found, which is fine
         }
       }
+
+      // Cleanup trailing markdown fences or patches in cleanReply
+      cleanReply = cleanReply
+        .replace(/\[PATCH\]\s*$/i, "")
+        .replace(/```json\s*$/i, "")
+        .replace(/```\s*$/i, "")
+        .trim();
 
       setMessages((prev) => [...prev, { role: "assistant", content: cleanReply }]);
 

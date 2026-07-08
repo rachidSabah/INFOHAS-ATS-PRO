@@ -1391,6 +1391,20 @@ ${jobMemory.industry}`);
           emitProgress(3, `⚠ All AI providers failed — using fallback output. Please retry later for full optimization.`);
         }
 
+        // === FACTUAL CONSISTENCY CHECK ===
+        try {
+          const { validateFactualConsistency } = await import("../enterprise/ats-intelligence-engine");
+          const consistencyReport = validateFactualConsistency(resume, result.optimizedResume!);
+          if (!consistencyReport.valid) {
+            console.warn("[Factual Consistency Checker] Found inconsistencies:", consistencyReport.issues);
+            log("Resume Optimizer", `⚠ Inconsistencies detected: ${consistencyReport.issues.join("; ")}`);
+          } else {
+            console.log("[Factual Consistency Checker] Optimized resume is 100% factually consistent.");
+          }
+        } catch (consErr: any) {
+          console.warn("[Factual Consistency Checker] Failed (non-fatal):", consErr?.message);
+        }
+
         success = true;
         const optLog = `✓ Generated ${result.charCount} chars (page fill ${pageFillVal.pageUsage}%) via ${result.provider}. Embedded ${optimizeResult.keywordsAdded} keywords. Attempts: ${optimizeAttempt}.`;
         log("Resume Optimizer", optLog);

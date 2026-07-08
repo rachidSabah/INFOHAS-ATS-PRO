@@ -34,6 +34,11 @@ import { buildBulletDirective } from "./optimizer-directive-engine";
 import { cleanupGrammar, repairMalformedJSON, stripMarkdown } from "./ai-response-processor";
 import type { OptimizerOutput } from "./resume-assembler";
 import { validateOptimizerPatch } from "./optimizer-patch";
+import {
+  detectATSFromContext,
+  ATS_PLATFORM_PROFILES,
+  AIRLINE_COMPETENCY_ONTOLOGY
+} from "./enterprise/ats-intelligence-engine";
 
 export interface BulletOnlyOptimizerResult {
   output: OptimizerOutput;
@@ -95,10 +100,59 @@ export function buildOptimizerInput(
     certifications: sourceResume.certifications,
   };
 
+  const jdText = jd.rawText || (jd.keywords || []).join(" ");
+  const detectedAts = detectATSFromContext(undefined, jdText, jd.company);
+  const platform = ATS_PLATFORM_PROFILES[detectedAts.atsId] || ATS_PLATFORM_PROFILES.generic;
+
+  const atsIntel = `
+═══════════════════════════════════════════════════════════════
+TARGET ATS ECOSYSTEM GUIDANCE (${platform.name} - Version ${platform.version}):
+- Parsing Behavior: ${platform.parsingStyle}
+- Formatting Constraints: ${platform.formattingPreferences}
+- Optimization Strategy: ${platform.optimizationStrategy}
+═══════════════════════════════════════════════════════════════`;
+
+  const matchedCompetencies: string[] = [];
+  for (const [key, comp] of Object.entries(AIRLINE_COMPETENCY_ONTOLOGY)) {
+    const termMatches = [comp.name, ...comp.aliases, ...comp.synonyms].some(term => 
+      jdText.toLowerCase().includes(term.toLowerCase())
+    );
+    if (termMatches) {
+      matchedCompetencies.push(`- **${comp.name}**: ${comp.description}
+  *Behavioral Indicators*: ${comp.behavioralIndicators.slice(0, 2).join("; ")}
+  *Key Terminology*: ${comp.relatedAtsKeywords.slice(0, 5).join(", ")}`);
+    }
+  }
+
+  const competencyIntel = matchedCompetencies.length > 0
+    ? `
+═══════════════════════════════════════════════════════════════
+TARGET COMPETENCY ONTOLOGY (Align candidate achievements with these profiles):
+${matchedCompetencies.join("\n")}
+═══════════════════════════════════════════════════════════════`
+    : "";
+
+  const airlineLanguageIntel = `
+═══════════════════════════════════════════════════════════════
+AIRLINE LANGUAGE ENGINE TRANSFORMS (Translate generic terms naturally where appropriate):
+- customer support / customer service -> Passenger Assistance / Passenger Experience
+- safety rules -> Safety Compliance / SEP Guidelines
+- help customers -> Deliver Exceptional Passenger Experience / Service Recovery
+- teamwork -> Crew Resource Management (CRM)
+- problem solving -> Operational Decision Making
+- baggage -> Cabin Baggage
+- flight -> Sector Operation
+- boss / supervisor -> Cabin Senior / Purser
+═══════════════════════════════════════════════════════════════`;
+
   const systemPrompt = `${optimizationPolicy ? optimizationPolicy + "\n\n" : ""}${buildBulletDirective(directiveConfig, {
     sourceResume,
     customOverride: directiveConfig?.customDirectiveOverride?.trim(),
   })}
+
+${atsIntel}
+${competencyIntel}
+${airlineLanguageIntel}
 
 ${agentDirectives ? buildAgentDirectiveSection(agentDirectives) : ""}`;
   let userPrompt = `SOURCE RESUME (be truthful to this — never invent employers, dates, or metrics):
@@ -272,8 +326,6 @@ export async function runBulletOnlyOptimizer(
   optimizationPolicy?: string | null,
   feedback?: string,
 ): Promise<BulletOnlyOptimizerResult> {
-  const { systemPrompt, userPrompt } = buildOptimizerInput(sourceResume, jd, intelligenceContext, directiveConfig, optimizationPolicy, feedback);
-
   // FAST-FAIL: Structural validation before any AI call
   const structuralWarnings: string[] = [];
   if (!sourceResume.experience || sourceResume.experience.length === 0) {
@@ -293,6 +345,58 @@ export async function runBulletOnlyOptimizer(
       `[BulletOnlyOptimizer] Structural advisories (non-blocking): ${structuralWarnings.join("; ")}`
     );
   }
+
+  const useParallel = process.env.NEXT_PUBLIC_USE_PARALLEL_PIPELINE !== "false"; // default: true
+
+  if (useParallel) {
+    console.info("[BulletOnlyOptimizer] Running in parallel subagent mode.");
+    const { runSummaryAgent, runSkillsAgent, runExperienceAgent } = await import("./parallel-pipeline");
+    const jdKeywords = jd.keywords ?? [];
+
+    const [summaryRes, skillsRes, experienceRes] = await Promise.all([
+      runSummaryAgent(sourceResume, jd, jdKeywords, directiveConfig, optimizationPolicy, excludeProviderIds),
+      runSkillsAgent(sourceResume, jd, jdKeywords, directiveConfig, optimizationPolicy, excludeProviderIds),
+      runExperienceAgent(sourceResume, jd, jdKeywords, directiveConfig, optimizationPolicy, excludeProviderIds),
+    ]);
+
+    // Reject local fallback if all subagents fell back or were offline
+    const allOffline = (summaryRes.provider === "Local Engine (offline mode)" || summaryRes.rawResponse.length < 200) &&
+                       (skillsRes.provider === "Local Engine (offline mode)" || skillsRes.rawResponse.length < 200) &&
+                       (experienceRes.provider === "Local Engine (offline mode)" || experienceRes.rawResponse.length < 200);
+    if (allOffline) {
+      throw new Error(
+        "No AI provider available. Optimization could not be completed. " +
+        "Configure an API provider in Settings or sign in to Puter.",
+      );
+    }
+
+    const output: OptimizerOutput = {
+      summary: summaryRes.summary,
+      headline: summaryRes.headline,
+      skills: skillsRes.skills,
+      experiences: experienceRes.experiences,
+    };
+
+    const providers = [summaryRes.provider, skillsRes.provider, experienceRes.provider];
+    const uniqueProviders = [...new Set(providers)];
+    const providerName = uniqueProviders.length === 1
+      ? uniqueProviders[0]
+      : `Parallel (Summary: ${summaryRes.provider}, Skills: ${skillsRes.provider}, Experience: ${experienceRes.provider})`;
+
+    return {
+      output,
+      provider: providerName,
+      rawResponse: JSON.stringify({
+        summary: summaryRes.summary,
+        headline: summaryRes.headline,
+        skills: skillsRes.skills,
+        experiences: experienceRes.experiences,
+      }),
+      warnings: [...structuralWarnings],
+    };
+  }
+
+  const { systemPrompt, userPrompt } = buildOptimizerInput(sourceResume, jd, intelligenceContext, directiveConfig, optimizationPolicy, feedback);
 
   const agentDirectives = directiveConfig?.agentDirectives;
   const temp = agentDirectives?.supervisor?.temperature ?? 0.15;

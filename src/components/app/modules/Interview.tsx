@@ -12,6 +12,7 @@ import { exportInterviewPDF, exportInterviewDOCX } from "@/lib/exporter";
 import { InterviewSession, InterviewSkeleton } from "@/components/interview/InterviewSession";
 import { toast } from "sonner";
 import type { InterviewPackage, InterviewQuestion } from "@/lib/types";
+import { AviationAcademy } from "@/components/interview/AviationAcademy";
 
 const CATEGORIES = [
   { id: "technical", label: "Technical", icon: "Code2", color: "#1154A3" },
@@ -38,6 +39,7 @@ export function Interview() {
   const [practiceSession, setPracticeSession] = useState<InterviewPackage | null>(null);
   const [selectedResumeId, setSelectedResumeId] = useState<string>(resumes[0]?.id ?? "");
   const [selectedJdId, setSelectedJdId] = useState<string>(jds[0]?.id ?? "");
+  const [selectedAirlineId, setSelectedAirlineId] = useState<string>("generic");
   const [completedQuestions, setCompletedQuestions] = useState<Set<string>>(new Set());
   const [readinessData, setReadinessData] = useState<{ score: number; strengths: string[]; weaknesses: string[]; topicsToReview: string[]; skillsToReview: string[]; focusAreas: string[] } | null>(null);
 
@@ -93,6 +95,17 @@ export function Interview() {
         keywords: selectedJd.keywords,
       });
 
+      const airlineContext = selectedAirlineId !== "generic" ? `
+TARGET AIRLINE PRESET: ${selectedAirlineId.toUpperCase()}
+AIRLINE WORKFLOW & PREPARATION ALIGNMENT:
+${selectedAirlineId === "qatar" ? "- Primary interview stage incorporates a Sonru asynchronous video interview invitation before panel rounds.\n- Highlight 5-star customer hospitality, visuals, and high-volume Doha hub operation answers." : ""}
+${selectedAirlineId === "emirates" ? "- Emirates Group Oracle ATS utilizes automated video assessment, physical assessment day stages, and group activities.\n- Emphasize safety (SEP), strict grooming standards, and Crew Resource Management (CRM)." : ""}
+${selectedAirlineId === "etihad" ? "- Etihad recruitment involves Oracle Cloud ATS, online assessments, assessment centers (group discussions), and panel rounds.\n- Focus on luxury brand representation and crew cohesion." : ""}
+${selectedAirlineId === "gulf" ? "- Gulf Air recruitment targets security compliance, Bahrain network service standards, and physical training readiness." : ""}
+${selectedAirlineId === "riyadh" ? "- Riyadh Air targets brand new futuristic guest services, digital-first hospitality, and ambassadorship standards." : ""}
+- Ensure behavioral and situational questions reflect these specific airline operational constraints and interview styles.
+` : "";
+
       const industryContext = industryProfile ? `
 INDUSTRY: ${industryProfile.label}
 INDUSTRY KEYWORDS: ${industryProfile.priorityKeywords.join(", ")}
@@ -102,7 +115,8 @@ INDUSTRY WRITING GUIDANCE: ${industryProfile.writingGuidance}
       const result = await callAI({
         systemPrompt: `You are an Expert Interview Coach and Senior Recruiter. You generate highly personalized interview preparation packages tailored to the candidate's resume and the job description. You NEVER ask about technologies or experiences not present in the resume. You NEVER fabricate answers — all answers reference real experience from the resume. You adapt questions to the detected industry. Always return ONLY valid JSON.
 
-${industryContext}`,
+${industryContext}
+${airlineContext}`,
         userPrompt: `CANDIDATE'S RESUME (primary source — use ONLY this information for answers):
 ${resumeContext}
 
@@ -251,23 +265,58 @@ Return JSON:
     );
   }
 
+  const [activeSubTab, setActiveSubTab] = useState<"standard" | "aviation-academy">("standard");
+
   return (
     <div className="space-y-6">
-      <div className="flex flex-wrap items-center justify-between gap-3">
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border pb-4">
         <div>
           <h1 className="font-display text-2xl font-bold flex items-center gap-2"><Icon name="MessagesSquare" className="w-6 h-6 text-brand" /> Interview Prep</h1>
           <p className="text-sm text-muted-foreground mt-1">Dynamic, context-aware interview preparation tailored to your resume and job description.</p>
         </div>
-        <Button onClick={generate} disabled={generating || !selectedResume || !selectedJd} className="bg-brand hover:bg-brand-dark text-white gap-2">
-          {generating ? <Icon name="Loader2" className="w-4 h-4 animate-spin" /> : <Icon name="Sparkles" className="w-4 h-4" />}
-          {generating ? "Generating…" : "Generate package"}
-        </Button>
+        
+        <div className="flex items-center gap-2">
+          <div className="flex bg-secondary/60 rounded-lg p-0.5 border border-border">
+            <button
+              onClick={() => setActiveSubTab("standard")}
+              className={`px-3 py-1.5 text-xs font-medium rounded-md transition-all ${
+                activeSubTab === "standard"
+                  ? "bg-background text-foreground shadow-sm font-semibold"
+                  : "text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              Standard Prep
+            </button>
+            <button
+              onClick={() => setActiveSubTab("aviation-academy")}
+              className={`px-3 py-1.5 text-xs font-medium rounded-md transition-all flex items-center gap-1.5 ${
+                activeSubTab === "aviation-academy"
+                  ? "bg-background text-brand shadow-sm font-semibold"
+                  : "text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              <Icon name="Plane" className="w-3.5 h-3.5 text-brand" /> Aviation Academy
+            </button>
+          </div>
+
+          {activeSubTab === "standard" && (
+            <Button onClick={generate} disabled={generating || !selectedResume || !selectedJd} className="bg-brand hover:bg-brand-dark text-white gap-2">
+              {generating ? <Icon name="Loader2" className="w-4 h-4 animate-spin" /> : <Icon name="Sparkles" className="w-4 h-4" />}
+              {generating ? "Generating…" : "Generate package"}
+            </Button>
+          )}
+        </div>
       </div>
+
+      {activeSubTab === "aviation-academy" ? (
+        <AviationAcademy />
+      ) : (
+        <>
 
       {/* === Context selection === */}
       <Card>
         <CardContent className="p-4 space-y-3">
-          <div className="grid sm:grid-cols-2 gap-3">
+          <div className="grid sm:grid-cols-3 gap-3">
             <div className="space-y-1.5">
               <label className="text-[10px] uppercase tracking-wide text-muted-foreground font-semibold">Select Resume</label>
               <select value={selectedResumeId} onChange={(e) => setSelectedResumeId(e.target.value)} className="w-full h-9 px-2 rounded-md border border-input bg-background text-sm">
@@ -279,6 +328,22 @@ Return JSON:
               <select value={selectedJdId} onChange={(e) => setSelectedJdId(e.target.value)} className="w-full h-9 px-2 rounded-md border border-input bg-background text-sm">
                 <option value="">No job selected</option>
                 {jds.map((j) => <option key={j.id} value={j.id}>{j.title}{j.company ? ` — ${j.company}` : ""}</option>)}
+              </select>
+            </div>
+            <div className="space-y-1.5">
+              <label className="text-[10px] uppercase tracking-wide text-muted-foreground font-semibold">Target Airline Preset</label>
+              <select value={selectedAirlineId} onChange={(e) => setSelectedAirlineId(e.target.value)} className="w-full h-9 px-2 rounded-md border border-input bg-background text-sm">
+                <option value="generic">Generic / Multi-Airline</option>
+                <option value="emirates">Emirates</option>
+                <option value="qatar">Qatar Airways</option>
+                <option value="etihad">Etihad Airways</option>
+                <option value="gulf">Gulf Air</option>
+                <option value="saudia">Saudia</option>
+                <option value="oman">Oman Air</option>
+                <option value="kuwait">Kuwait Airways</option>
+                <option value="arabia">Air Arabia</option>
+                <option value="flydubai">flydubai</option>
+                <option value="riyadh">Riyadh Air</option>
               </select>
             </div>
           </div>
@@ -494,6 +559,8 @@ Return JSON:
           </Card>
         );
       })}
+        </>
+      )}
     </div>
   );
 }

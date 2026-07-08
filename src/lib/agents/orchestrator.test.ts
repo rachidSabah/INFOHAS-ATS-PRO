@@ -25,10 +25,62 @@ vi.mock("../ai", () => ({
         usage: { promptTokens: 100, completionTokens: 200 },
       });
     }
+    // Check if this is the Summary Agent subagent call
+    if (opts.systemPrompt?.includes("professional resume summary writer")) {
+      return Promise.resolve({
+        text: JSON.stringify({
+          summary: "Senior engineer with 8+ years of experience building scalable web applications. Proven track record of leading teams and delivering high-impact products. Skilled in React, Node.js, and cloud architecture. Passionate about mentorship and code quality.",
+          headline: "Senior Software Engineer",
+        }),
+        provider: "test-provider",
+        usage: { promptTokens: 200, completionTokens: 300 },
+      });
+    }
+    // Check if this is the Skills Agent subagent call
+    if (opts.systemPrompt?.includes("skills optimizer")) {
+      return Promise.resolve({
+        text: JSON.stringify({
+          skills: [
+            { name: "React", category: "Frontend" },
+            { name: "TypeScript", category: "Frontend" },
+            { name: "Next.js", category: "Frontend" },
+            { name: "Node.js", category: "Backend" },
+            { name: "Python", category: "Backend" },
+            { name: "PostgreSQL", category: "Backend" },
+            { name: "AWS", category: "Cloud" },
+            { name: "Docker", category: "Cloud" },
+            { name: "Kubernetes", category: "Cloud" },
+          ],
+        }),
+        provider: "test-provider",
+        usage: { promptTokens: 200, completionTokens: 300 },
+      });
+    }
+    // Check if this is the Experience Agent subagent call
+    if (opts.systemPrompt?.includes("resume bullet optimizer")) {
+      return Promise.resolve({
+        text: JSON.stringify({
+          experiences: [
+            {
+              id: "e1", // MUST match the source resume's experience ID
+              bullets: [
+                "Led migration to microservices architecture, reducing deployment time by 65% and improving system reliability.",
+                "Mentored 5 junior engineers, with 3 receiving promotions within 18 months of joining the team.",
+                "Built real-time analytics dashboard processing 2M+ events daily using React, WebSocket, and Redis.",
+                "Designed scalable APIs handling 10k requests per second with 99.99% uptime.",
+                "Collaborated with product and design teams to deliver new features consistently.",
+              ],
+            },
+          ],
+        }),
+        provider: "test-provider",
+        usage: { promptTokens: 300, completionTokens: 500 },
+      });
+    }
     // Check if this is the NEW locked pipeline call (systemPrompt mentions the new contract)
     if (opts.systemPrompt?.includes("ONLY return the following JSON shape") ||
         opts.systemPrompt?.includes("Bullet-Only Optimizer") ||
-        opts.userPrompt?.includes("experiences") && opts.userPrompt?.includes("EXACT_SOURCE_ID")) {
+        (opts.userPrompt?.includes("experiences") && opts.userPrompt?.includes("EXACT_SOURCE_ID"))) {
       // Return the NEW optimizer contract: { summary, headline, skills, experiences: [{id, bullets}] }
       return Promise.resolve({
         text: JSON.stringify({

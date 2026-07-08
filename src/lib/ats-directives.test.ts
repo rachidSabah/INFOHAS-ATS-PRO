@@ -62,11 +62,18 @@ describe("AVIATION_KEYWORDS", () => {
 });
 
 describe("AIRLINE_ATS_PROFILES", () => {
-  it("has profiles for all 8 airlines + generic", () => {
-    expect(Object.keys(AIRLINE_ATS_PROFILES)).toHaveLength(9);
+  it("has profiles for all airlines + generic", () => {
+    expect(Object.keys(AIRLINE_ATS_PROFILES)).toHaveLength(16);
     expect(AIRLINE_ATS_PROFILES.emirates).toBeDefined();
     expect(AIRLINE_ATS_PROFILES.qatar).toBeDefined();
     expect(AIRLINE_ATS_PROFILES.etihad).toBeDefined();
+    expect(AIRLINE_ATS_PROFILES.gulf).toBeDefined();
+    expect(AIRLINE_ATS_PROFILES.saudia).toBeDefined();
+    expect(AIRLINE_ATS_PROFILES.oman).toBeDefined();
+    expect(AIRLINE_ATS_PROFILES.kuwait).toBeDefined();
+    expect(AIRLINE_ATS_PROFILES.arabia).toBeDefined();
+    expect(AIRLINE_ATS_PROFILES.flydubai).toBeDefined();
+    expect(AIRLINE_ATS_PROFILES.riyadh).toBeDefined();
     expect(AIRLINE_ATS_PROFILES.lufthansa).toBeDefined();
     expect(AIRLINE_ATS_PROFILES.ryanair).toBeDefined();
     expect(AIRLINE_ATS_PROFILES.singapore).toBeDefined();
@@ -88,8 +95,8 @@ describe("AIRLINE_ATS_PROFILES", () => {
 });
 
 describe("AIRLINE_OPTIONS", () => {
-  it("has 9 options matching the profiles", () => {
-    expect(AIRLINE_OPTIONS).toHaveLength(9);
+  it("has 16 options matching the profiles", () => {
+    expect(AIRLINE_OPTIONS).toHaveLength(16);
     expect(AIRLINE_OPTIONS.map((o) => o.id).sort()).toEqual(
       Object.keys(AIRLINE_ATS_PROFILES).sort()
     );
