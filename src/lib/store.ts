@@ -120,6 +120,21 @@ interface AppState {
     progressPercent: number;
   };
   logs: AuditLog[];
+  backgroundJobs: {
+    id: string;
+    type: string;
+    payload: any;
+    priority: "high" | "normal" | "low";
+    createdAt: string;
+    retryCount: number;
+    maxRetries: number;
+    status: "queued" | "running" | "success" | "failed";
+    durationMs?: number;
+    error?: string;
+  }[];
+  enqueueJob: (type: string, payload: any, options?: { priority?: "high" | "normal" | "low" }) => string;
+  runWorkerQueue: () => Promise<void>;
+  clearJobHistory: () => void;
 
   // ui
   theme: "light" | "dark";
@@ -474,6 +489,7 @@ export const useApp = create<AppState>()(
         progressPercent: 0,
       },
       logs: SEED_LOGS,
+      backgroundJobs: [],
 
       // SSR-safe: always start "light" — rehydrateSession() restores the real theme.
       theme: "light" as "light" | "dark",
@@ -1470,6 +1486,67 @@ export const useApp = create<AppState>()(
           const currentValue = (currentUsage as any)[k] || 0;
           return { user: { ...s.user, usage: { ...currentUsage, [k]: currentValue + 1 } } };
         }),
+
+      enqueueJob: (type, payload, options) => {
+        const jobId = "JOB_" + Math.random().toString(36).slice(2, 9).toUpperCase();
+        const newJob = {
+          id: jobId,
+          type,
+          payload,
+          priority: options?.priority ?? "normal",
+          createdAt: new Date().toISOString(),
+          retryCount: 0,
+          maxRetries: 3,
+          status: "queued" as const,
+        };
+        set((s) => ({ backgroundJobs: [newJob, ...s.backgroundJobs] }));
+        return jobId;
+      },
+
+      runWorkerQueue: async () => {
+        const jobs = get().backgroundJobs.filter((j) => j.status === "queued");
+        if (jobs.length === 0) return;
+
+        // Process sequentially to look beautiful and realistic in UI
+        for (const job of jobs) {
+          // Update status to running
+          set((s) => ({
+            backgroundJobs: s.backgroundJobs.map((j) =>
+              j.id === job.id ? { ...j, status: "running" } : j
+            ),
+          }));
+
+          // Simulate worker processing delay
+          await new Promise((resolve) => setTimeout(resolve, 800));
+
+          const success = Math.random() > 0.08; // 92% success rate for simulation realism
+          const durationMs = Math.round(150 + Math.random() * 400);
+
+          set((s) => ({
+            backgroundJobs: s.backgroundJobs.map((j) =>
+              j.id === job.id
+                ? {
+                    ...j,
+                    status: success ? "success" : "failed",
+                    durationMs,
+                    error: success ? undefined : "Worker timeout: failed to acquire lock on database row",
+                  }
+                : j
+            ),
+          }));
+
+          // Log in system audit logs
+          get().log({
+            actor: "cloudflare-queue-worker",
+            action: `Job processed: ${job.type}`,
+            category: "system",
+            details: `Job ${job.id} resolved with status: ${success ? "SUCCESS" : "FAILED"} in ${durationMs}ms`,
+            severity: success ? "info" : "error",
+          });
+        }
+      },
+
+      clearJobHistory: () => set({ backgroundJobs: [] }),
     })
 );
 

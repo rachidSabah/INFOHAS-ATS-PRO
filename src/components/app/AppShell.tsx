@@ -34,6 +34,7 @@ import { PipelineProfiles } from "./modules/PipelineProfiles";
 import { AgentConfigCenter } from "./modules/AgentConfigCenter";
 import { AIDevAgent } from "./modules/AIDevAgent";
 import { AIWorkspace } from "./modules/AIWorkspace";
+import { Workers } from "./modules/Workers";
 import {
   LinkedinImport, ResumeVersioning, MultiLanguage, ResumeSharing, AbTesting,
   BulkGenerator, ResumeAnalytics, AppTracker, SalaryInsights, SkillGap,
@@ -81,6 +82,7 @@ const VIEW_COMPONENTS: Record<ViewKey, React.FC> = {
   "agent-config": AgentConfigCenter,
   "ai-dev-agent": AIDevAgent,
   "ai-workspace": AIWorkspace,
+  "workers": Workers,
   "linkedin-import": LinkedinImport,
   "resume-versioning": ResumeVersioning,
   "multi-language": MultiLanguage,

@@ -28,6 +28,7 @@ export function SuperAdmin() {
     { label: "Fallback Chain", desc: "Configure ordered provider fallback", icon: "Shuffle", view: "fallback-chain", color: "#10B981" },
     { label: "Optimizer Directive", desc: "Per-agent behavior & layout", icon: "SlidersHorizontal", view: "optimizer-directive", color: "#F59E0B" },
     { label: "Prompt Library", desc: `${prompts.length} templates · ${activePrompts} active`, icon: "Brain", view: "prompts", color: "#8B5CF6" },
+    { label: "Orchestration & Workers", desc: "Monitor queues & background jobs", icon: "Activity", view: "workers", color: "#EC4899" },
     { label: "Branding", desc: "Customize logo, colors, email", icon: "Palette", view: "branding", color: "#EC4899" },
     { label: "Feature Flags", desc: `${Object.values(flags).filter(Boolean).length}/${Object.keys(flags).length} enabled`, icon: "Flag", view: "feature-flags", color: "#F59E0B" },
     { label: "Audit Logs", desc: `${logs.length} recent events`, icon: "ScrollText", view: "logs", color: "#10B981" },

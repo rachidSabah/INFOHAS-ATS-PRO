@@ -1299,6 +1299,7 @@ export type ViewKey =
   | "ai-email-writer"
   | "ai-resume-review"
   | "ai-job-match"
+  | "workers"
   | "integrations";
 
 export interface AIHealingIssue {
