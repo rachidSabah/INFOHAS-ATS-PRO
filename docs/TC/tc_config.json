@@ -1,0 +1,16 @@
+{
+  "project_name": "ResumeAI Pro",
+  "tc_root": "docs/TC",
+  "created": "2026-07-08T19:34:24+00:00",
+  "auto_track": true,
+  "default_author": "Claude",
+  "categories": [
+    "feature",
+    "bugfix",
+    "refactor",
+    "infrastructure",
+    "documentation",
+    "hotfix",
+    "enhancement"
+  ]
+}

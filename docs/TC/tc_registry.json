@@ -1,0 +1,44 @@
+{
+  "project_name": "ResumeAI Pro",
+  "created": "2026-07-08T19:34:24+00:00",
+  "updated": "2026-07-08T19:34:59+00:00",
+  "next_tc_number": 2,
+  "records": [
+    {
+      "tc_id": "TC-001-07-08-26-ai-dev-agent-scoping-ats-checker-cliches-workers-panel",
+      "title": "AI Dev Agent Scoping, ATS Checker Clich\u00e9s, and Workers Orchestration",
+      "status": "deployed",
+      "scope": "feature",
+      "priority": "high",
+      "created": "2026-07-08T19:34:32+00:00",
+      "updated": "2026-07-08T19:34:59+00:00",
+      "path": "records/TC-001-07-08-26-ai-dev-agent-scoping-ats-checker-cliches-workers-panel/tc_record.json"
+    }
+  ],
+  "statistics": {
+    "total": 1,
+    "by_status": {
+      "planned": 0,
+      "in_progress": 0,
+      "blocked": 0,
+      "implemented": 0,
+      "tested": 0,
+      "deployed": 1
+    },
+    "by_scope": {
+      "feature": 1,
+      "bugfix": 0,
+      "refactor": 0,
+      "infrastructure": 0,
+      "documentation": 0,
+      "hotfix": 0,
+      "enhancement": 0
+    },
+    "by_priority": {
+      "critical": 0,
+      "high": 1,
+      "medium": 0,
+      "low": 0
+    }
+  }
+}
