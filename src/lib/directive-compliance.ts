@@ -191,6 +191,52 @@ export function verifyDirectiveCompliance(
     feedback.push("Languages must be preserved. Original had " + origLangCount + ", optimized has " + optLangCount + ".");
   }
 
+  // 8. Required keywords check
+  if (config.customKeywords?.requiredKeywords && config.customKeywords.requiredKeywords.length > 0) {
+    maxScore += 10;
+    const serializedText = serializeResumeText(optimized);
+    const missing: string[] = [];
+    for (const kw of config.customKeywords.requiredKeywords) {
+      if (!serializedText.includes(kw.toLowerCase())) {
+        missing.push(kw);
+      }
+    }
+    const passed = missing.length === 0;
+    checks.push({
+      name: "required_keywords_check",
+      passed,
+      actual: passed ? "All keywords present" : `Missing: ${missing.join(", ")}`,
+      expected: `Keywords: ${config.customKeywords.requiredKeywords.join(", ")}`,
+      deduct: passed ? 0 : 10,
+    });
+    if (!passed) {
+      feedback.push("Missing required keyword(s): " + missing.join(", ") + ".");
+    }
+  }
+
+  // 9. Forbidden keywords check
+  if (config.customKeywords?.forbiddenKeywords && config.customKeywords.forbiddenKeywords.length > 0) {
+    maxScore += 10;
+    const serializedText = serializeResumeText(optimized);
+    const found: string[] = [];
+    for (const kw of config.customKeywords.forbiddenKeywords) {
+      if (serializedText.includes(kw.toLowerCase())) {
+        found.push(kw);
+      }
+    }
+    const passed = found.length === 0;
+    checks.push({
+      name: "forbidden_keywords_check",
+      passed,
+      actual: passed ? "No forbidden keywords found" : `Found: ${found.join(", ")}`,
+      expected: "None of these: " + config.customKeywords.forbiddenKeywords.join(", "),
+      deduct: passed ? 0 : 10,
+    });
+    if (!passed) {
+      feedback.push("Found forbidden keyword(s): " + found.join(", ") + ". Please remove them.");
+    }
+  }
+
   // Compute score
   const totalDeduct = checks.reduce((sum, c) => sum + c.deduct, 0);
   const score = Math.max(0, Math.round(100 - (totalDeduct / maxScore) * 100));
@@ -203,6 +249,45 @@ export function verifyDirectiveCompliance(
     directiveHash: hashDirective(config),
     feedback,
   };
+}
+
+function serializeResumeText(resume: ResumeData): string {
+  const parts: string[] = [];
+  if (resume.name) parts.push(resume.name);
+  if (resume.headline) parts.push(resume.headline);
+  if (resume.summary) parts.push(resume.summary);
+  if (resume.skills) {
+    for (const s of resume.skills) {
+      if (s.name) parts.push(s.name);
+      if (s.category) parts.push(s.category);
+    }
+  }
+  if (resume.experience) {
+    for (const e of resume.experience) {
+      if (e.title) parts.push(e.title);
+      if (e.company) parts.push(e.company);
+      if (e.bullets) parts.push(...e.bullets);
+    }
+  }
+  if (resume.education) {
+    for (const ed of resume.education) {
+      if (ed.degree) parts.push(ed.degree);
+      if (ed.institution) parts.push(ed.institution);
+    }
+  }
+  if (resume.certifications) {
+    for (const c of resume.certifications) {
+      if (c.name) parts.push(c.name);
+      if (c.issuer) parts.push(c.issuer);
+    }
+  }
+  if (resume.projects) {
+    for (const p of resume.projects) {
+      if (p.name) parts.push(p.name);
+      if (p.bullets) parts.push(...p.bullets);
+    }
+  }
+  return parts.join(" ").toLowerCase();
 }
 
 /** Generate a directive version string from config */
