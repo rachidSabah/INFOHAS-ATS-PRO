@@ -107,5 +107,23 @@
     "typescript": "^5",
     "vitest": "^4.1.9",
     "wrangler": "^4.101.0"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "@parcel/watcher",
+      "@prisma/client",
+      "@prisma/engines",
+      "@swc/core",
+      "core-js",
+      "ecc-universal",
+      "es5-ext",
+      "esbuild",
+      "msgpackr-extract",
+      "prisma",
+      "sharp",
+      "tesseract.js",
+      "unrs-resolver",
+      "workerd"
+    ]
   }
 }

@@ -750,7 +750,7 @@ export function extractResumeFromText(text: string, fileName: string): ResumeDat
   const allPotentialHeaders = lines.map((line, index) => {
     // A header is typically short (under 50 chars), uppercase or capitalized, and maybe ends with a colon
     const isHeaderCandidate = line.length > 0 && line.length < 50 && 
-      (line === line.toUpperCase() || /^[A-Z][a-z]+(\s+[A-Z][a-z]+)*:?$/.test(line));
+      (line === line.toUpperCase() ? (/[A-Z]{2,}/.test(line) && !/[a-z]/.test(line.replace(/[^a-zA-Z]/g, ""))) : /^[A-Z][a-z]+(\s+[A-Z][a-z]+)*:$/.test(line));
     return isHeaderCandidate ? index : -1;
   }).filter(idx => idx !== -1);
 

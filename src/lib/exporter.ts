@@ -35,6 +35,90 @@ function headlineIsDuplicateContact(headline: string, contact: ResumeData["conta
   return false;
 }
 
+export function sanitizeResumeData(resume: ResumeData): ResumeData {
+  const cleanStr = (s: any): any => {
+    if (typeof s === "string") {
+      return s.replace(/\u2011/g, "-").replace(/\u00a0/g, " ");
+    }
+    if (Array.isArray(s)) {
+      return s.map(cleanStr);
+    }
+    if (s !== null && typeof s === "object") {
+      const res: any = {};
+      for (const k of Object.keys(s)) {
+        res[k] = cleanStr(s[k]);
+      }
+      return res;
+    }
+    return s;
+  };
+  return cleanStr(resume);
+}
+
+export function adjustLayoutForPageFill(resume: ResumeData, layout: ResumeLayoutModel): ResumeLayoutModel {
+  const getVisibleCharCount = (r: ResumeData): number => {
+    let sum = (r.name || "").length + (r.headline || "").length + (r.summary || "").length;
+    for (const e of r.experience) {
+      sum += (e.title || "").length + (e.company || "").length + (e.location || "").length + e.bullets.join("").length;
+    }
+    for (const ed of r.education) {
+      sum += (ed.degree || "").length + (ed.institution || "").length + (ed.highlights || []).join("").length;
+    }
+    for (const s of r.skills) {
+      sum += (s.name || "").length;
+    }
+    for (const l of r.languages) {
+      sum += (l.name || "").length + (l.proficiency || "").length;
+    }
+    if (r.additionalInfo) sum += r.additionalInfo.length;
+    if (r.dynamicSections) {
+      for (const ds of r.dynamicSections) {
+        sum += (ds.title || "").length + (ds.content || "").length + (ds.bullets || []).join("").length;
+      }
+    }
+    return sum;
+  };
+
+  const chars = getVisibleCharCount(resume);
+  const L = { ...layout };
+
+  if (chars < 1800) {
+    L.marginLeftMm = Math.max(L.marginLeftMm, 15);
+    L.marginRightMm = Math.max(L.marginRightMm, 15);
+    L.marginTopMm = Math.max(L.marginTopMm, 15);
+    L.marginBottomMm = Math.max(L.marginBottomMm, 15);
+    L.bodyFontSizePt = Math.max(L.bodyFontSizePt, 11);
+    L.sectionTitleSizePt = Math.max(L.sectionTitleSizePt, 13);
+    L.nameSizePt = Math.max(L.nameSizePt, 18);
+    L.sectionGapMm = Math.max(L.sectionGapMm, 6.5);
+    L.headerGapMm = Math.max(L.headerGapMm, 5.0);
+    L.lineHeightMm = L.bodyFontSizePt * 0.352778 * 1.35;
+  } else if (chars < 2400) {
+    L.marginLeftMm = Math.max(L.marginLeftMm, 12);
+    L.marginRightMm = Math.max(L.marginRightMm, 12);
+    L.marginTopMm = Math.max(L.marginTopMm, 12);
+    L.marginBottomMm = Math.max(L.marginBottomMm, 12);
+    L.bodyFontSizePt = Math.max(L.bodyFontSizePt, 10.5);
+    L.sectionTitleSizePt = Math.max(L.sectionTitleSizePt, 12);
+    L.nameSizePt = Math.max(L.nameSizePt, 16);
+    L.sectionGapMm = Math.max(L.sectionGapMm, 5.0);
+    L.headerGapMm = Math.max(L.headerGapMm, 4.0);
+    L.lineHeightMm = L.bodyFontSizePt * 0.352778 * 1.3;
+  } else if (chars > 3200) {
+    L.marginLeftMm = Math.min(L.marginLeftMm, 8.89);
+    L.marginRightMm = Math.min(L.marginRightMm, 8.89);
+    L.marginTopMm = Math.min(L.marginTopMm, 8.89);
+    L.marginBottomMm = Math.min(L.marginBottomMm, 8.89);
+    L.bodyFontSizePt = Math.min(L.bodyFontSizePt, 9.5);
+    L.sectionTitleSizePt = Math.min(L.sectionTitleSizePt, 10.5);
+    L.sectionGapMm = Math.min(L.sectionGapMm, 3.0);
+    L.headerGapMm = Math.min(L.headerGapMm, 2.5);
+    L.lineHeightMm = L.bodyFontSizePt * 0.352778 * 1.15;
+  }
+
+  return L;
+}
+
 // ============================================================================
 // ResumeLayoutModel — single source of truth for PDF + DOCX layout
 // ============================================================================
@@ -446,12 +530,17 @@ export async function exportResumePDF(resume: ResumeData, opts: PDFOptions = {},
     throw new Error(`Export cancelled: data-loss detected.\n${msg}`);
   }
 
+  const sanitizedResume = sanitizeResumeData(resume);
+
   // Resolve layout: caller-supplied > template-specific > default
-  const templateKey = (opts.template ?? resume.template ?? "ats-professional") as string;
-  const L = layout ?? getLayoutForTemplate(templateKey, resume.accentColor);
+  const templateKey = (opts.template ?? sanitizedResume.template ?? "ats-professional") as string;
+  let L = layout ?? getLayoutForTemplate(templateKey, sanitizedResume.accentColor);
+  if (!layout) {
+    L = adjustLayoutForPageFill(sanitizedResume, L);
+  }
 
   if (templateKey === "infohas-pro") {
-    return exportInfohasProPDF(resume, opts, L);
+    return exportInfohasProPDF(sanitizedResume, opts, L);
   }
 
   // NEW PATH: Convert to RenderDocument (single source of truth) and use
@@ -459,7 +548,7 @@ export async function exportResumePDF(resume: ResumeData, opts: PDFOptions = {},
   // languages, education highlights, and additional info.
   const { toRenderDocument } = await import("./render-document");
   const { exportResumePDFRenderDoc } = await import("./export-pdf-render");
-  const rd = toRenderDocument(resume, L);
+  const rd = toRenderDocument(sanitizedResume, L);
   return exportResumePDFRenderDoc(rd);
 }
 
@@ -1405,20 +1494,24 @@ export async function exportResumeDOCX(resume: ResumeData, layout?: ResumeLayout
   // unified DOCX renderer. This ensures section order, contact rendering,
   // skills categories, languages, education highlights, and additional info
   // are all consistent with the Preview.
+  const sanitizedResume = sanitizeResumeData(resume);
   const { toRenderDocument } = await import("./render-document");
   const { exportResumeDOCXRenderDoc } = await import("./export-docx-render");
-  const resolvedLayout = layout ?? getLayoutForTemplate(
-    (resume.template ?? "ats-professional") as string,
-    resume.accentColor
+  let resolvedLayout = layout ?? getLayoutForTemplate(
+    (sanitizedResume.template ?? "ats-professional") as string,
+    sanitizedResume.accentColor
   );
-  const rd = toRenderDocument(resume, resolvedLayout);
+  if (!layout) {
+    resolvedLayout = adjustLayoutForPageFill(sanitizedResume, resolvedLayout);
+  }
+  const rd = toRenderDocument(sanitizedResume, resolvedLayout);
   const blob = await exportResumeDOCXRenderDoc(rd);
   // Download the blob
   // For browser: create download link
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
-  a.download = (resume.name || "resume").replace(/\s+/g, "_") + "_resume.docx";
+  a.download = (sanitizedResume.name || "resume").replace(/\s+/g, "_") + "_resume.docx";
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);
