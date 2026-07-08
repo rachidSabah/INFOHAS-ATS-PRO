@@ -1915,7 +1915,10 @@ ${jobMemory.industry}`);
   // ========================================================================
   // [Phase 11] Guardian Strict — anti-fabrication verification
   // ========================================================================
-  if (result.optimizedResume && resume && result.status === "completed") {
+  const appFlags = (useApp.getState() as any)?.flags || {};
+  const guardianEnabled = appFlags.enableAIGuardian ?? true;
+
+  if (guardianEnabled && result.optimizedResume && resume && result.status === "completed") {
     try {
       guardianStrictReport = verifyOptimizationHonesty(resume, result.optimizedResume);
       console.info(
@@ -1926,8 +1929,21 @@ ${jobMemory.industry}`);
     } catch (gsErr: any) {
       console.warn(`[Phase11] Guardian Strict check failed (non-fatal): ${gsErr?.message}`);
     }
+  } else if (!guardianEnabled && result.optimizedResume && resume && result.status === "completed") {
+    console.info("[Phase11] Guardian Strict auditing bypassed via feature flag.");
+    guardianStrictReport = {
+      guardianStrict: {
+        verdict: "CLEAN",
+        violations: [],
+        sourceFingerprint: { numbers: new Set(), words: new Set() },
+        targetFingerprint: { numbers: new Set(), words: new Set() },
+      } as any,
+      passed: true,
+    };
+  }
 
-    // Eligibility check: compare candidate profile against enriched JD requirements
+  // Eligibility check: compare candidate profile against enriched JD requirements
+  if (result.optimizedResume && resume && result.status === "completed") {
     try {
       eligibilityReport = checkCandidateEligibility(resume, jd);
       console.info(

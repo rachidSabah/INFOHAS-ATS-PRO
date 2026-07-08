@@ -588,6 +588,8 @@ export interface FeatureFlags {
    * Default: false — requires the pipeline worker to be deployed.
    */
   pipeline_websocket_enabled?: boolean;
+  enableAIGuardian?: boolean;
+  enableSelfHealing?: boolean;
 }
 
 /**

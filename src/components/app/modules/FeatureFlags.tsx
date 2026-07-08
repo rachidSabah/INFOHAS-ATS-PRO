@@ -23,6 +23,8 @@ const DEFAULT_SEED_FLAGS: Record<keyof Flags, boolean> = {
   enableAds: false,
   maintenanceMode: false,
   pipeline_websocket_enabled: false,
+  enableAIGuardian: true,
+  enableSelfHealing: true,
 };
 
 const FLAGS: { key: keyof Flags; label: string; desc: string; icon: string; severity: "safe" | "feature" | "danger" }[] = [
@@ -36,6 +38,8 @@ const FLAGS: { key: keyof Flags; label: string; desc: string; icon: string; seve
   { key: "enableDonations", label: "Donations", desc: "Show optional donation prompts.", icon: "Heart", severity: "safe" },
   { key: "enableAds", label: "Advertisements", desc: "Non-intrusive ads. Must never block features.", icon: "Megaphone", severity: "safe" },
   { key: "pipeline_websocket_enabled", label: "WebSocket Pipeline", desc: "Enable real-time WebSocket connection to the pipeline worker.", icon: "Network", severity: "safe" },
+  { key: "enableAIGuardian", label: "AI Guardian Auditor", desc: "Enforce honesty via the Guardian Agent to filter fact fabrications.", icon: "ShieldAlert", severity: "safe" },
+  { key: "enableSelfHealing", label: "Autonomous Self-Healing", desc: "Automatically schedule self-healing scripts to repair API nodes on failures.", icon: "Activity", severity: "safe" },
   { key: "maintenanceMode", label: "Maintenance Mode", desc: "Take the entire app offline for users.", icon: "Wrench", severity: "danger" },
 ];
 

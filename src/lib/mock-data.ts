@@ -1093,6 +1093,8 @@ export const SEED_FLAGS: FeatureFlags = {
   // P3: Real-time pipeline WebSocket. Default OFF — requires the pipeline
   // worker (resumeai-pro-pipeline) to be deployed. Enable via Super Admin UI.
   pipeline_websocket_enabled: false,
+  enableAIGuardian: true,
+  enableSelfHealing: true,
 };
 
 /**
