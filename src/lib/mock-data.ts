@@ -1215,6 +1215,7 @@ export const SEED_OPTIMIZER_DIRECTIVE: OptimizerDirectiveConfig = {
     enforcePowerVerbs: true,
     requireQuantification: false,
     avoidPassiveVoice: true,
+    experienceFormula: "auto",
   },
 
   // === CUSTOM KEYWORD CONTROLS ===
@@ -1239,6 +1240,18 @@ export const SEED_OPTIMIZER_DIRECTIVE: OptimizerDirectiveConfig = {
     additionalInfo: true,
     projects: true,
   },
+
+  // === SECTION ORDER ===
+  sectionOrder: ["summary", "experience", "education", "skills", "languages", "projects", "certifications", "additionalInfo"],
+
+  // === DATE STANDARDIZATION ===
+  dateFormat: "auto",
+
+  // === CONTACT BLOCK LAYOUT ===
+  contactSpacing: "stacked",
+
+  // === CUSTOM SECTION INSTRUCTIONS ===
+  customSectionInstructions: {},
 };
 
 /**

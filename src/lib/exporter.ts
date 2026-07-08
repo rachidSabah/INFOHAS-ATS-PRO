@@ -164,6 +164,9 @@ export function getDefaultResumeLayout(): ResumeLayoutModel {
 
     enforceOnePage: config?.enforceOnePage ?? true,
     minFontSizePt: config?.minFontSizePt ?? 10,
+
+    sectionOrder: config?.sectionOrder ?? ["summary", "experience", "education", "skills", "languages", "projects", "certifications", "additionalInfo"],
+    contactSpacing: config?.contactSpacing ?? "stacked",
   };
 }
 

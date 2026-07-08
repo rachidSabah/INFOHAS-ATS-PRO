@@ -315,18 +315,31 @@ function InfohasProTemplate({ resume, accent }: { resume: ResumeData; accent: st
         )}
 
         {/* Contact lines */}
-        <div style={{ fontSize: `${L.bodyFontSizePt}pt`, color: BLACK, marginBottom: "0.3mm", lineHeight: 1.2 }}>
-          {[resume.contact.location, resume.contact.phone].filter(Boolean).join(" | ")}
-        </div>
-        {resume.contact.email && (
+        {L.contactSpacing === "single-line" ? (
           <div style={{ fontSize: `${L.bodyFontSizePt}pt`, color: BLACK, marginBottom: "0.3mm", lineHeight: 1.2 }}>
-            {resume.contact.email}
+            {[
+              resume.contact.location,
+              resume.contact.phone,
+              resume.contact.email,
+              resume.dateOfBirth ? `DOB: ${resume.dateOfBirth}` : ""
+            ].filter(Boolean).join(" | ")}
           </div>
-        )}
-        {resume.dateOfBirth && (
-          <div style={{ fontSize: `${L.bodyFontSizePt}pt`, color: BLACK, marginBottom: "0.3mm", lineHeight: 1.2 }}>
-            Date Of Birth : {resume.dateOfBirth}
-          </div>
+        ) : (
+          <>
+            <div style={{ fontSize: `${L.bodyFontSizePt}pt`, color: BLACK, marginBottom: "0.3mm", lineHeight: 1.2 }}>
+              {[resume.contact.location, resume.contact.phone].filter(Boolean).join(" | ")}
+            </div>
+            {resume.contact.email && (
+              <div style={{ fontSize: `${L.bodyFontSizePt}pt`, color: BLACK, marginBottom: "0.3mm", lineHeight: 1.2 }}>
+                {resume.contact.email}
+              </div>
+            )}
+            {resume.dateOfBirth && (
+              <div style={{ fontSize: `${L.bodyFontSizePt}pt`, color: BLACK, marginBottom: "0.3mm", lineHeight: 1.2 }}>
+                Date Of Birth : {resume.dateOfBirth}
+              </div>
+            )}
+          </>
         )}
       </header>
 

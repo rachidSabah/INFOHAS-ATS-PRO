@@ -376,6 +376,12 @@ export function OptimizerDirective() {
       {/* TONE & WRITING STYLE */}
       <ToneWritingSection draft={draft} patch={patch} />
 
+      {/* PAGE LAYOUT & SECTIONS ORDER */}
+      <LayoutStructureSection draft={draft} patch={patch} />
+
+      {/* CUSTOM SECTION-LEVEL INSTRUCTIONS */}
+      <CustomSectionInstructionsSection draft={draft} patch={patch} />
+
       {/* CUSTOM KEYWORD CONTROLS */}
       <CustomKeywordsSection draft={draft} patch={patch} />
 
@@ -1202,7 +1208,7 @@ function ToneWritingSection({ draft, patch }: { draft: OptimizerDirectiveConfig;
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
-        <div className="grid sm:grid-cols-2 gap-4">
+        <div className="grid sm:grid-cols-3 gap-4">
           <div>
             <Label htmlFor="writingTone">Resume Voice/Tone</Label>
             <select
@@ -1229,6 +1235,19 @@ function ToneWritingSection({ draft, patch }: { draft: OptimizerDirectiveConfig;
               <option value="past-tense">Past Tense (e.g. "Developed", "Managed")</option>
               <option value="present-tense">Present Tense (e.g. "Develop", "Manage")</option>
               <option value="auto">Auto (Match role active status)</option>
+            </select>
+          </div>
+          <div>
+            <Label htmlFor="experienceFormula">Experience Bullet Formula</Label>
+            <select
+              id="experienceFormula"
+              value={draft.toneConfig?.experienceFormula ?? "auto"}
+              onChange={(e) => updateTone({ experienceFormula: e.target.value as any })}
+              className="w-full h-9 px-3 rounded-md border border-input bg-background text-sm mt-1"
+            >
+              <option value="auto">Auto / Flexible (AI decides)</option>
+              <option value="star">STAR Method (Situation, Task, Action, Result)</option>
+              <option value="xyz">Google's XYZ Formula (Accomplished [X] by [Y] doing [Z])</option>
             </select>
           </div>
         </div>
@@ -1623,6 +1642,185 @@ function PageDensityVisualizer({ draft }: { draft: OptimizerDirectiveConfig }) {
               </div>
             )}
           </div>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+function LayoutStructureSection({
+  draft,
+  patch,
+}: {
+  draft: OptimizerDirectiveConfig;
+  patch: (p: Partial<OptimizerDirectiveConfig>) => void;
+}) {
+  const currentOrder = draft.sectionOrder ?? ["summary", "experience", "education", "skills", "languages", "projects", "certifications", "additionalInfo"];
+
+  const handleMoveSection = (index: number, direction: "up" | "down") => {
+    const nextOrder = [...currentOrder];
+    const targetIndex = direction === "up" ? index - 1 : index + 1;
+    if (targetIndex >= 0 && targetIndex < nextOrder.length) {
+      const temp = nextOrder[index];
+      nextOrder[index] = nextOrder[targetIndex];
+      nextOrder[targetIndex] = temp;
+      patch({ sectionOrder: nextOrder });
+    }
+  };
+
+  const sectionLabels: Record<string, string> = {
+    summary: "Summary / Professional Profile",
+    experience: "Work Experience",
+    education: "Education History",
+    skills: "Core Skills & Competencies",
+    languages: "Languages",
+    certifications: "Certifications",
+    projects: "Key Projects",
+    additionalInfo: "Additional Information",
+  };
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-lg flex items-center gap-2">
+          <Icon name="LayoutGrid" className="w-5 h-5 text-brand" /> Page Layout & Formatting Controls
+        </CardTitle>
+        <CardDescription>
+          Adjust the visual formatting of the resume page, standardize date appearances, and control the order of sections.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-6">
+        {/* Spacing & Date Format grid */}
+        <div className="grid sm:grid-cols-2 gap-4">
+          <div>
+            <Label htmlFor="contactSpacingSelect">Contact Block Spacing</Label>
+            <select
+              id="contactSpacingSelect"
+              value={draft.contactSpacing ?? "stacked"}
+              onChange={(e) => patch({ contactSpacing: e.target.value as any })}
+              className="w-full h-9 px-3 rounded-md border border-input bg-background text-sm mt-1"
+            >
+              <option value="stacked">Stacked Layout (Multi-line contact details)</option>
+              <option value="single-line">Single-Line Layout (Inline dividers email | phone | location)</option>
+            </select>
+            <span className="text-[10px] text-muted-foreground">Single-Line saves about 3-4 lines of page space, helpful for 1-page fits.</span>
+          </div>
+
+          <div>
+            <Label htmlFor="dateFormatSelect">Date Format Standardization</Label>
+            <select
+              id="dateFormatSelect"
+              value={draft.dateFormat ?? "auto"}
+              onChange={(e) => patch({ dateFormat: e.target.value as any })}
+              className="w-full h-9 px-3 rounded-md border border-input bg-background text-sm mt-1"
+            >
+              <option value="auto">Auto / Flexible (Preserves candidate format)</option>
+              <option value="month-year">Month Year (e.g., "June 2026")</option>
+              <option value="short-date">Short Date (e.g., "06/2026")</option>
+              <option value="year-only">Year Only (e.g., "2026")</option>
+            </select>
+            <span className="text-[10px] text-muted-foreground">Enforces a unified format for all experience and education entries.</span>
+          </div>
+        </div>
+
+        {/* Section Reordering List */}
+        <div className="space-y-2">
+          <Label className="text-sm font-medium">Drag or Move Sections Order</Label>
+          <p className="text-xs text-muted-foreground mb-3">
+            Change the order of sections on the rendered page.
+          </p>
+          <div className="border border-input rounded-lg divide-y divide-border overflow-hidden">
+            {currentOrder.map((sec, idx) => (
+              <div key={sec} className="flex items-center justify-between p-3 bg-secondary/10 hover:bg-secondary/20 transition-colors">
+                <div className="flex items-center gap-2">
+                  <span className="text-xs text-muted-foreground font-mono">{idx + 1}.</span>
+                  <span className="text-sm font-medium">{sectionLabels[sec] || sec}</span>
+                </div>
+                <div className="flex gap-1">
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    onClick={() => handleMoveSection(idx, "up")}
+                    disabled={idx === 0}
+                    className="p-1 h-7 w-7"
+                    title="Move Up"
+                  >
+                    <Icon name="ChevronUp" className="w-4 h-4" />
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    onClick={() => handleMoveSection(idx, "down")}
+                    disabled={idx === currentOrder.length - 1}
+                    className="p-1 h-7 w-7"
+                    title="Move Down"
+                  >
+                    <Icon name="ChevronDown" className="w-4 h-4" />
+                  </Button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+function CustomSectionInstructionsSection({
+  draft,
+  patch,
+}: {
+  draft: OptimizerDirectiveConfig;
+  patch: (p: Partial<OptimizerDirectiveConfig>) => void;
+}) {
+  const instructions = draft.customSectionInstructions ?? {};
+
+  const handleInstructionChange = (section: string, value: string) => {
+    patch({
+      customSectionInstructions: {
+        ...instructions,
+        [section]: value,
+      },
+    });
+  };
+
+  const sectionsToConfigure = [
+    { key: "summary", label: "Summary / Profile Instructions", placeholder: "e.g., Focus on leadership, use active language, highlight aviation achievements." },
+    { key: "skills", label: "Skills Section Instructions", placeholder: "e.g., Group skills by category: Technical, Hard, Soft. Focus on cloud technologies." },
+    { key: "experience", label: "Work Experience Instructions", placeholder: "e.g., Emphasize managerial roles, highlight cost savings and customer retention achievements." },
+    { key: "education", label: "Education Section Instructions", placeholder: "e.g., Highlight relevant coursework, list academic achievements." },
+    { key: "languages", label: "Languages Instructions", placeholder: "e.g., List professional languages first, skip elementary proficiency." },
+    { key: "projects", label: "Projects Instructions", placeholder: "e.g., Focus on open source projects, highlight scale and tech stack." },
+    { key: "certifications", label: "Certifications Instructions", placeholder: "e.g., List safety and aviation certs first, skip expired ones." },
+    { key: "additionalInfo", label: "Additional Info Instructions", placeholder: "e.g., Keep extremely brief, focus on hobbies that demonstrate leadership." },
+  ];
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-lg flex items-center gap-2">
+          <Icon name="MessageSquare" className="w-5 h-5 text-brand" /> Custom Section-Level AI Instructions
+        </CardTitle>
+        <CardDescription>
+          Provide specific instructions for individual resume sections. These prompts are supplied directly to each specialist agent during optimization.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <div className="grid sm:grid-cols-2 gap-4">
+          {sectionsToConfigure.map((sec) => (
+            <div key={sec.key} className="space-y-1">
+              <Label htmlFor={`inst_${sec.key}`}>{sec.label}</Label>
+              <Textarea
+                id={`inst_${sec.key}`}
+                placeholder={sec.placeholder}
+                value={instructions[sec.key] ?? ""}
+                onChange={(e) => handleInstructionChange(sec.key, e.target.value)}
+                rows={3}
+                className="text-xs"
+              />
+            </div>
+          ))}
         </div>
       </CardContent>
     </Card>

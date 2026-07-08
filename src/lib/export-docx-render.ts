@@ -58,31 +58,44 @@ export async function exportResumeDOCXRenderDoc(
     }));
   }
 
-  // Contact block: line 1 = location | phone, line 2 = email
-  // Matches EditableA4Preview (InfoHAS Pro template) so the download is
-  // pixel-consistent with what the user sees on screen.
-  const locPhoneParts: string[] = [];
-  if (rd.contact.location) locPhoneParts.push(rd.contact.location);
-  if (rd.contact.phone) locPhoneParts.push(rd.contact.phone);
-  if (locPhoneParts.length) {
-    children.push(new Paragraph({
-      spacing: { after: 40 },
-      children: [new TextRun({ text: locPhoneParts.join(" | "), size: L.bodyFontSizePt * 2, font: L.fontFamily, color: contactHex })],
-    }));
-  }
-  if (rd.contact.email) {
-    children.push(new Paragraph({
-      spacing: { after: 60 },
-      children: [new TextRun({ text: rd.contact.email, size: L.bodyFontSizePt * 2, font: L.fontFamily, color: contactHex })],
-    }));
-  }
+  // Contact block styling (stacked vs single-line)
+  if (L.contactSpacing === "single-line") {
+    const contactParts: string[] = [];
+    if (rd.contact.location) contactParts.push(rd.contact.location);
+    if (rd.contact.phone) contactParts.push(rd.contact.phone);
+    if (rd.contact.email) contactParts.push(rd.contact.email);
+    if (rd.contact.dateOfBirth) contactParts.push(`DOB: ${rd.contact.dateOfBirth}`);
 
-  // Date of birth — single line
-  if (rd.contact.dateOfBirth) {
-    children.push(new Paragraph({
-      spacing: { after: 60 },
-      children: [new TextRun({ text: `Date Of Birth: ${rd.contact.dateOfBirth}`, size: L.bodyFontSizePt * 2, font: L.fontFamily, color: bodyHex })],
-    }));
+    if (contactParts.length) {
+      children.push(new Paragraph({
+        spacing: { after: 60 },
+        children: [new TextRun({ text: contactParts.join(" | "), size: L.bodyFontSizePt * 2, font: L.fontFamily, color: contactHex })],
+      }));
+    }
+  } else {
+    const locPhoneParts: string[] = [];
+    if (rd.contact.location) locPhoneParts.push(rd.contact.location);
+    if (rd.contact.phone) locPhoneParts.push(rd.contact.phone);
+    if (locPhoneParts.length) {
+      children.push(new Paragraph({
+        spacing: { after: 40 },
+        children: [new TextRun({ text: locPhoneParts.join(" | "), size: L.bodyFontSizePt * 2, font: L.fontFamily, color: contactHex })],
+      }));
+    }
+    if (rd.contact.email) {
+      children.push(new Paragraph({
+        spacing: { after: 60 },
+        children: [new TextRun({ text: rd.contact.email, size: L.bodyFontSizePt * 2, font: L.fontFamily, color: contactHex })],
+      }));
+    }
+
+    // Date of birth — single line
+    if (rd.contact.dateOfBirth) {
+      children.push(new Paragraph({
+        spacing: { after: 60 },
+        children: [new TextRun({ text: `Date Of Birth: ${rd.contact.dateOfBirth}`, size: L.bodyFontSizePt * 2, font: L.fontFamily, color: bodyHex })],
+      }));
+    }
   }
 
   // ===== SECTION HELPER =====

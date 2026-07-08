@@ -99,11 +99,24 @@ export interface OptimizationPolicy {
   enforcePowerVerbs?: boolean;
   avoidFillerPhrases?: boolean;
   requireQuantification?: boolean;
+  experienceFormula?: "auto" | "star" | "xyz";
 
   // === CUSTOM KEYWORDS ===
   forbiddenKeywords?: string[];        // must never appear in output
   requiredKeywords?: string[];         // must appear at least once
   keywordPlacement?: string;           // "summary-first" | "skills-first" | "spread-evenly"
+
+  // === SECTION ORDER ===
+  sectionOrder?: string[];
+
+  // === DATE STANDARDIZATION ===
+  dateFormat?: "auto" | "month-year" | "short-date" | "year-only";
+
+  // === CONTACT BLOCK LAYOUT ===
+  contactSpacing?: "stacked" | "single-line";
+
+  // === CUSTOM SECTION INSTRUCTIONS ===
+  customSectionInstructions?: Record<string, string>;
 }
 
 // ============================================================================
@@ -248,11 +261,24 @@ export function buildOptimizationPolicy(
     enforcePowerVerbs: directiveConfig?.toneConfig?.enforcePowerVerbs ?? true,
     avoidFillerPhrases: directiveConfig?.toneConfig?.avoidFillerPhrases ?? true,
     requireQuantification: directiveConfig?.toneConfig?.requireQuantification ?? false,
+    experienceFormula: directiveConfig?.toneConfig?.experienceFormula ?? "auto",
 
     // Custom keywords
     forbiddenKeywords: directiveConfig?.customKeywords?.forbiddenKeywords ?? [],
     requiredKeywords: directiveConfig?.customKeywords?.requiredKeywords ?? [],
     keywordPlacement: directiveConfig?.customKeywords?.keywordPlacement ?? "spread-evenly",
+
+    // Section order
+    sectionOrder: directiveConfig?.sectionOrder ?? ["summary", "experience", "education", "skills", "languages", "projects", "certifications", "additionalInfo"],
+
+    // Date standardization
+    dateFormat: directiveConfig?.dateFormat ?? "auto",
+
+    // Contact block layout
+    contactSpacing: directiveConfig?.contactSpacing ?? "stacked",
+
+    // Custom section instructions
+    customSectionInstructions: directiveConfig?.customSectionInstructions ?? {},
   };
 }
 
@@ -342,6 +368,36 @@ export function formatPolicyForPrompt(policy: OptimizationPolicy): string {
   // Keyword placement preference
   if (policy.keywordPlacement && policy.keywordPlacement !== "spread-evenly") {
     lines.push(`Keyword Placement Priority: ${policy.keywordPlacement}`);
+  }
+
+  // Structured experience bullet formula
+  if (policy.experienceFormula && policy.experienceFormula !== "auto") {
+    lines.push(`Experience Bullet Formula: Enforce the ${policy.experienceFormula.toUpperCase()} formula for all rewritten bullet points.`);
+  }
+
+  // Section order rule
+  if (policy.sectionOrder && policy.sectionOrder.length > 0) {
+    lines.push(`Required Section Order: Output sections in the following order: ${policy.sectionOrder.join(", ")}`);
+  }
+
+  // Date format rule
+  if (policy.dateFormat && policy.dateFormat !== "auto") {
+    lines.push(`Standard Date Format: Enforce the '${policy.dateFormat}' format for all dates in experience and education (e.g. Month Year or MM/YYYY).`);
+  }
+
+  // Contact layout rule
+  if (policy.contactSpacing) {
+    lines.push(`Contact Block Style: ${policy.contactSpacing === "single-line" ? "Single-Line inline divider" : "Stacked multi-line layout"}`);
+  }
+
+  // Custom section-level instructions
+  if (policy.customSectionInstructions && Object.keys(policy.customSectionInstructions).length > 0) {
+    lines.push("Custom Section-Level Instructions:");
+    for (const [sec, inst] of Object.entries(policy.customSectionInstructions)) {
+      if (inst && inst.trim()) {
+        lines.push(`  - ${sec}: ${inst.trim()}`);
+      }
+    }
   }
 
   lines.push("=== END SYSTEM POLICY ===");

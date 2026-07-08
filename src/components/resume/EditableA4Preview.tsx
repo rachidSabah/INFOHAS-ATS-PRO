@@ -260,11 +260,24 @@ export function EditableA4Preview({ resume, onChange, scale = 0.7, className }: 
                 {(resume.name || "YOUR NAME").toUpperCase()}
               </div>
               {resume.headline && !headlineIsDuplicateContact(resume.headline, resume.contact) && <div style={{ fontSize: `${L.bodyFontSizePt}pt`, color: BLACK, marginBottom: "0.5mm", lineHeight: 1.2 }}>{safeRender(resume.headline)}</div>}
-              <div style={{ fontSize: `${L.bodyFontSizePt}pt`, color: BLACK, marginBottom: "0.3mm", lineHeight: 1.2 }}>
-                {[safeRender(resume.contact.location), safeRender(resume.contact.phone)].filter(Boolean).join(" | ")}
-              </div>
-              {resume.contact.email && <div style={{ fontSize: `${L.bodyFontSizePt}pt`, color: BLACK, marginBottom: "0.3mm", lineHeight: 1.2 }}>{safeRender(resume.contact.email)}</div>}
-              {resume.dateOfBirth && <div style={{ fontSize: `${L.bodyFontSizePt}pt`, color: BLACK, marginBottom: "0.3mm", lineHeight: 1.2 }}>Date of Birth: {safeRender(resume.dateOfBirth)}</div>}
+              {L.contactSpacing === "single-line" ? (
+                <div style={{ fontSize: `${L.bodyFontSizePt}pt`, color: BLACK, marginBottom: "0.3mm", lineHeight: 1.2 }}>
+                  {[
+                    safeRender(resume.contact.location),
+                    safeRender(resume.contact.phone),
+                    safeRender(resume.contact.email),
+                    resume.dateOfBirth ? `DOB: ${safeRender(resume.dateOfBirth)}` : ""
+                  ].filter(Boolean).join(" | ")}
+                </div>
+              ) : (
+                <>
+                  <div style={{ fontSize: `${L.bodyFontSizePt}pt`, color: BLACK, marginBottom: "0.3mm", lineHeight: 1.2 }}>
+                    {[safeRender(resume.contact.location), safeRender(resume.contact.phone)].filter(Boolean).join(" | ")}
+                  </div>
+                  {resume.contact.email && <div style={{ fontSize: `${L.bodyFontSizePt}pt`, color: BLACK, marginBottom: "0.3mm", lineHeight: 1.2 }}>{safeRender(resume.contact.email)}</div>}
+                  {resume.dateOfBirth && <div style={{ fontSize: `${L.bodyFontSizePt}pt`, color: BLACK, marginBottom: "0.3mm", lineHeight: 1.2 }}>Date of Birth: {safeRender(resume.dateOfBirth)}</div>}
+                </>
+              )}
             </header>
           </EditableBlock>
 

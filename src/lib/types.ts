@@ -693,6 +693,18 @@ export interface OptimizerDirectiveConfig {
 
   // === SECTION VISIBILITY OVERRIDES ===
   sectionVisibility?: SectionVisibilityConfig;
+
+  // === SECTION ORDER ===
+  sectionOrder?: string[];
+
+  // === DATE STANDARDIZATION ===
+  dateFormat?: "auto" | "month-year" | "short-date" | "year-only";
+
+  // === CONTACT BLOCK LAYOUT ===
+  contactSpacing?: "stacked" | "single-line";
+
+  // === CUSTOM SECTION INSTRUCTIONS ===
+  customSectionInstructions?: Record<string, string>;
 }
 
 /**
@@ -854,6 +866,8 @@ export interface ToneWritingConfig {
   requireQuantification: boolean;
   /** If true, flag and remove passive voice constructions */
   avoidPassiveVoice: boolean;
+  /** Formulate rewritten experience bullets in a structured formula */
+  experienceFormula?: "auto" | "star" | "xyz";
 }
 
 /**
@@ -969,6 +983,9 @@ export interface ResumeLayoutModel {
 
   enforceOnePage: boolean;
   minFontSizePt: number;
+
+  sectionOrder?: string[];
+  contactSpacing?: "stacked" | "single-line";
 }
 
 /**

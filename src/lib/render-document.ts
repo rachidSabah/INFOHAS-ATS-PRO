@@ -397,15 +397,37 @@ export function toRenderDocument(
     }
   };
 
-  // 1. Standard structured sections (in canonical order)
-  renderAndTrack(() => buildProfessionalProfile(resume));
-  renderAndTrack(() => buildExperienceSection(resume));
-  renderAndTrack(() => buildEducationSection(resume));
-  renderAndTrack(() => buildSkillsSection(resume));
-  renderAndTrack(() => buildLanguagesSection(resume));
-  renderAndTrack(() => buildAdditionalInfoSection(resume));
-  renderAndTrack(() => buildProjectsSection(resume));
-  renderAndTrack(() => buildCertificationsSection(resume));
+  // 1. Standard structured sections (rendered according to layout sectionOrder)
+  const builders: Record<string, () => RenderDocumentSection | null> = {
+    summary: () => buildProfessionalProfile(resume),
+    experience: () => buildExperienceSection(resume),
+    education: () => buildEducationSection(resume),
+    skills: () => buildSkillsSection(resume),
+    languages: () => buildLanguagesSection(resume),
+    additionalInfo: () => buildAdditionalInfoSection(resume),
+    projects: () => buildProjectsSection(resume),
+    certifications: () => buildCertificationsSection(resume),
+  };
+
+  const renderedSections = new Set<string>();
+  const order = (L.sectionOrder && L.sectionOrder.length > 0)
+    ? L.sectionOrder
+    : ["summary", "skills", "experience", "education", "languages", "certifications", "projects", "additionalInfo"];
+
+  for (const sectionKey of order) {
+    const builder = builders[sectionKey];
+    if (builder) {
+      renderAndTrack(builder);
+      renderedSections.add(sectionKey);
+    }
+  }
+
+  // Fallback: render any sections that were missed/omitted in a custom order
+  for (const [sectionKey, builder] of Object.entries(builders)) {
+    if (!renderedSections.has(sectionKey)) {
+      renderAndTrack(builder);
+    }
+  }
 
   // 2. Dynamic sections — only if they don't overlap with already-rendered content
   const dynamicSections = resume.dynamicSections || [];

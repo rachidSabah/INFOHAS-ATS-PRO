@@ -139,31 +139,48 @@ export async function exportResumePDFRenderDoc(
       advanceLine();
     }
 
-    // Contact block: line 1 = location | phone, line 2 = email
-    // This exactly matches EditableA4Preview (InfoHAS Pro template) layout.
-    const locPhone = [rd.contact.location, rd.contact.phone].filter(Boolean);
-    if (locPhone.length) {
-      const contactRgb = hexToRgb(L.contactColor || L.bodyTextColor);
-      doc.setTextColor(contactRgb[0], contactRgb[1], contactRgb[2]);
-      doc.setFont(fontName, "normal");
-      doc.setFontSize(currentBodyFontSize);
-      doc.text(locPhone.join(" | "), left, textY(currentBodyFontSize));
-      advanceLine();
-    }
-    if (rd.contact.email) {
-      const contactRgb = hexToRgb(L.contactColor || L.bodyTextColor);
-      doc.setTextColor(contactRgb[0], contactRgb[1], contactRgb[2]);
-      doc.setFont(fontName, "normal");
-      doc.setFontSize(currentBodyFontSize);
-      doc.text(rd.contact.email, left, textY(currentBodyFontSize));
-      advanceLine();
-    }
+    // Contact block styling (stacked vs single-line)
+    if (L.contactSpacing === "single-line") {
+      const contactParts = [
+        rd.contact.location,
+        rd.contact.phone,
+        rd.contact.email,
+        rd.contact.dateOfBirth ? `DOB: ${rd.contact.dateOfBirth}` : ""
+      ].filter(Boolean);
+      if (contactParts.length) {
+        const contactRgb = hexToRgb(L.contactColor || L.bodyTextColor);
+        doc.setTextColor(contactRgb[0], contactRgb[1], contactRgb[2]);
+        doc.setFont(fontName, "normal");
+        doc.setFontSize(currentBodyFontSize);
+        doc.text(contactParts.join(" | "), left, textY(currentBodyFontSize));
+        advanceLine();
+      }
+    } else {
+      const locPhone = [rd.contact.location, rd.contact.phone].filter(Boolean);
+      if (locPhone.length) {
+        const contactRgb = hexToRgb(L.contactColor || L.bodyTextColor);
+        doc.setTextColor(contactRgb[0], contactRgb[1], contactRgb[2]);
+        doc.setFont(fontName, "normal");
+        doc.setFontSize(currentBodyFontSize);
+        doc.text(locPhone.join(" | "), left, textY(currentBodyFontSize));
+        advanceLine();
+      }
+      if (rd.contact.email) {
+        const contactRgb = hexToRgb(L.contactColor || L.bodyTextColor);
+        doc.setTextColor(contactRgb[0], contactRgb[1], contactRgb[2]);
+        doc.setFont(fontName, "normal");
+        doc.setFontSize(currentBodyFontSize);
+        doc.text(rd.contact.email, left, textY(currentBodyFontSize));
+        advanceLine();
+      }
 
-    if (rd.contact.dateOfBirth) {
-      doc.setTextColor(bodyRgb[0], bodyRgb[1], bodyRgb[2]);
-      doc.setFontSize(currentBodyFontSize);
-      doc.text(`Date Of Birth: ${rd.contact.dateOfBirth}`, left, textY(currentBodyFontSize));
-      advanceLine();
+      if (rd.contact.dateOfBirth) {
+        doc.setTextColor(bodyRgb[0], bodyRgb[1], bodyRgb[2]);
+        doc.setFont(fontName, "normal");
+        doc.setFontSize(currentBodyFontSize);
+        doc.text(`Date Of Birth: ${rd.contact.dateOfBirth}`, left, textY(currentBodyFontSize));
+        advanceLine();
+      }
     }
 
     advanceMm(1.5);
