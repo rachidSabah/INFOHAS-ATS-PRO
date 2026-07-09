@@ -1301,7 +1301,8 @@ export type ViewKey =
   | "ai-resume-review"
   | "ai-job-match"
   | "workers"
-  | "integrations";
+  | "integrations"
+  | "batch-optimizer";
 
 export interface AIHealingIssue {
   id: string;

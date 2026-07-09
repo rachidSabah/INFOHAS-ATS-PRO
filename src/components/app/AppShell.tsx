@@ -43,6 +43,7 @@ import {
   AiJobMatch, AiAchievement, Integrations,
 } from "./modules/CareerTools";
 import { ResumeReviewPlatform } from "./modules/ResumeReviewPlatform";
+import { BatchOptimizer } from "./modules/BatchOptimizer";
 import { SafeRender } from "./SafeRender";
 import { GlobalErrorCatcher } from "@/components/shared/GlobalErrorCatcher";
 import { Button } from "@/components/ui/button";
@@ -106,6 +107,7 @@ const VIEW_COMPONENTS: Record<ViewKey, React.FC> = {
   "ai-job-match": AiJobMatch,
   "ai-achievement": AiAchievement,
   "integrations": Integrations,
+  "batch-optimizer": BatchOptimizer,
   logs: Logs,
 };
 

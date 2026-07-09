@@ -85,6 +85,7 @@ export const NAV_USER: { key: string; label: string; icon: string; group: string
   { key: "resume-sharing", label: "Sharing", icon: "Share2", group: "Resume Tools" },
   { key: "ab-testing", label: "A/B Testing", icon: "FlaskConical", group: "Resume Tools" },
   { key: "bulk-generator", label: "Bulk Generator", icon: "Layers", group: "Resume Tools" },
+  { key: "batch-optimizer", label: "Batch Optimizer", icon: "FileStack", group: "Resume Tools" },
   { key: "resume-analytics", label: "Resume Analytics", icon: "BarChart3", group: "Resume Tools" },
   { key: "app-tracker", label: "Application Tracker", icon: "KanbanSquare", group: "Career Tools" },
   { key: "salary-insights", label: "Salary Insights", icon: "DollarSign", group: "Career Tools" },
