@@ -4,6 +4,7 @@ import { useState, useRef, useEffect, useCallback, Suspense, lazy } from "react"
 import { motion, AnimatePresence } from "framer-motion";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
@@ -17,7 +18,7 @@ import { validateResumeForExport } from "@/lib/ai-response-processor";
 import { exportResumePDF, exportResumeDOCX, exportResumeTXT, exportResumeDOC } from "@/lib/exporter";
 import { EditableA4Preview } from "@/components/resume/EditableA4Preview";
 import { AIRLINE_ATS_PROFILES, AIRLINE_OPTIONS, DEFAULT_APP_SETTINGS, type AppSettings } from "@/lib/ats-directives";
-import { INDUSTRY_PROFILES, INDUSTRY_OPTIONS, type IndustryAtsProfile } from "@/lib/industry-ats";
+import { INDUSTRY_PROFILES, INDUSTRY_OPTIONS, type IndustryAtsProfile, detectATSFromCompany, type AtsDetails } from "@/lib/industry-ats";
 import { mapToIndustryMode } from "@/lib/industry-mapper";
 import { runOptimizationPipeline, type PipelineResult as AgentPipelineResult, type PipelineProgress } from "@/lib/agents";
 import { clearAllProviderCooldowns } from "@/lib/ai";
@@ -95,6 +96,253 @@ export function Optimizer() {
   const [parsingText, setParsingText] = useState(false);
   const [jdUrl, setJdUrl] = useState("");
   const [scrapingJdUrl, setScrapingJdUrl] = useState(false);
+
+  // === KEYWORD INJECTION & COPILOT STATES ===
+  const [injectingKeyword, setInjectingKeyword] = useState<string | null>(null);
+  const [copilotMessages, setCopilotMessages] = useState<Array<{ role: "user" | "assistant"; content: string }>>([
+    {
+      role: "assistant",
+      content: "Hi! I am your AI Optimizer Copilot. Ask me to make specific tweaks to this optimized resume, adjust the tone of a section, add missing keywords, or change work bullet points to highlight different achievements!"
+    }
+  ]);
+  const [copilotInput, setCopilotInput] = useState("");
+  const [copilotLoading, setCopilotLoading] = useState(false);
+
+  const detectedAtsDetails = jdParsed ? detectATSFromCompany(jdParsed.company || employer || "", jdParsed.url || "") : null;
+
+  const handleInjectKeyword = async (keyword: string) => {
+    if (!optimizedResume || !jdParsed) return;
+    setInjectingKeyword(keyword);
+    toast.info(`Injecting keyword "${keyword}"...`);
+    try {
+      const result = await callAI({
+        systemPrompt: `You are an expert resume writer. Your job is to inject a specific target keyword naturally into the resume's summary or one of the experience bullet points.
+Return ONLY valid JSON matching the exact schema of the provided resume.
+Do NOT invent fake companies, jobs, or credentials.
+You MUST output the final updated resume JSON.`,
+        userPrompt: `Inject the keyword "${keyword}" naturally into the professional summary or experience bullet points of this resume:
+${JSON.stringify(optimizedResume)}
+
+Job Description context:
+Title: ${jdParsed.title}
+Company: ${jdParsed.company || "Generic"}
+Target Keyword: "${keyword}"
+
+Return ONLY valid JSON with keys: name, headline, summary, skills, experience, education, languages.`,
+        maxTokens: 2000,
+        taskCategory: "document"
+      });
+
+      let updatedResume: ResumeData;
+      try {
+        updatedResume = extractJSON<ResumeData>(result.text);
+      } catch {
+        throw new Error("AI returned an invalid JSON response. Please try again.");
+      }
+
+      // Preserve ID and other top-level fields
+      updatedResume.id = optimizedResume.id;
+      updatedResume.createdAt = optimizedResume.createdAt;
+      updatedResume.updatedAt = new Date().toISOString();
+      updatedResume.template = optimizedResume.template;
+      updatedResume.photoUrl = optimizedResume.photoUrl;
+
+      // Update state and store
+      setOptimizedResume(updatedResume);
+      updateResume(updatedResume.id, updatedResume);
+
+      // Re-calculate local report
+      const after = scoreATS(updatedResume, jdParsed);
+      
+      // Update pipelineResult if it exists so everything stays synced
+      if (pipelineResult) {
+        const nextResult = { ...pipelineResult };
+        if (nextResult.afterATS) {
+          nextResult.afterATS.scores.ats = after.scores.ats;
+          nextResult.afterATS.scores.keywordMatch = after.scores.keywords;
+          // Move keyword from missing to matched
+          nextResult.afterATS.missingKeywords = nextResult.afterATS.missingKeywords.filter(k => k.toLowerCase() !== keyword.toLowerCase());
+          if (!nextResult.afterATS.matchedKeywords.some(k => k.toLowerCase() === keyword.toLowerCase())) {
+            nextResult.afterATS.matchedKeywords.push(keyword);
+          }
+        }
+        setPipelineResult(nextResult);
+      }
+      
+      setAfterReport(after);
+      addATS(after);
+      
+      toast.success(`Keyword "${keyword}" injected successfully!`);
+    } catch (e: any) {
+      toast.error(e?.message || `Failed to inject keyword "${keyword}"`);
+    } finally {
+      setInjectingKeyword(null);
+    }
+  };
+
+  const sendCopilotMessage = async (overrideText?: string) => {
+    const textToSend = overrideText || copilotInput;
+    if (!textToSend.trim() || copilotLoading || !optimizedResume) return;
+
+    setCopilotInput("");
+    const newMessages = [...copilotMessages, { role: "user" as const, content: textToSend }];
+    setCopilotMessages(newMessages);
+    setCopilotLoading(true);
+
+    try {
+      const systemPrompt = `You are a professional AI Resume Optimizer Copilot.
+Your job is to help the candidate refine their optimized resume.
+You have the candidate's optimized resume and the job description they are targeting.
+You can suggest changes to their resume. If you decide to make updates to the resume fields, you MUST append a special [PATCH] block at the very end of your response, followed by a valid JSON object representing a partial ResumeData structure.
+
+Example 1 (updating summary):
+I have updated your summary to sound more punchy.
+[PATCH]
+{
+  "summary": "Results-driven engineer..."
+}
+
+Example 2 (updating experience bullets):
+I have updated the bullet points for your first role.
+[PATCH]
+{
+  "experience": [
+    {
+      "id": "e_1", // Use the correct ID from the experience list
+      "bullets": [
+        "Led team of 5 engineers to deliver key dashboard, improving user engagement by 20%.",
+        "Optimized database queries, reducing latency by 45%."
+      ]
+    }
+  ]
+}
+
+Guidelines:
+1. Do NOT invent fake facts, companies, or dates.
+2. Maintain clean, professional language with no grammatical errors.
+3. Keep the text concise and suitable for a 1-page A4 format.
+4. ALWAYS append a [PATCH] block containing the updated fields automatically at the end of your response whenever you make any edits. Do NOT wait for the user to ask you to "insert" or "apply" it.
+5. Do NOT use markdown formatting (e.g. **word**) inside the [PATCH] block fields. Plain text only.
+`;
+
+      const response = await callAI({
+        systemPrompt: `${systemPrompt}\n\nTARGET JOB:\n${jdParsed ? JSON.stringify({ title: jdParsed.title, company: jdParsed.company, keywords: jdParsed.keywords }) : "None"}\n\nCURRENT OPTIMIZED RESUME:\n${JSON.stringify(optimizedResume, null, 2)}`,
+        userPrompt: `Here is the conversation so far:
+${newMessages.map(m => `${m.role.toUpperCase()}: ${m.content}`).join("\n")}
+
+Respond to the last message and append a [PATCH] block with updates if appropriate.`,
+        maxTokens: 1500,
+        temperature: 0.65,
+        taskCategory: "document"
+      });
+
+      const reply = response.text || "";
+      let cleanReply = reply;
+      let patchData: any = null;
+
+      if (reply.includes("[PATCH]")) {
+        const parts = reply.split("[PATCH]");
+        cleanReply = parts[0].trim();
+        const jsonStr = parts[1].trim();
+        try {
+          patchData = JSON.parse(jsonStr.replace(/```json/gi, "").replace(/```/g, "").trim());
+        } catch {
+          try {
+            patchData = extractJSON(jsonStr);
+          } catch {}
+        }
+      } else {
+        try {
+          patchData = extractJSON(reply);
+          const firstBrace = reply.indexOf("{");
+          if (firstBrace !== -1) {
+            cleanReply = reply.slice(0, firstBrace).trim();
+          }
+        } catch {}
+      }
+
+      cleanReply = cleanReply
+        .replace(/\[PATCH\]\s*$/i, "")
+        .replace(/```json\s*$/i, "")
+        .replace(/```\s*$/i, "")
+        .trim();
+
+      setCopilotMessages((prev) => [...prev, { role: "assistant" as const, content: cleanReply }]);
+
+      if (patchData) {
+        const nextResume = { ...optimizedResume };
+        
+        if (patchData.summary !== undefined) nextResume.summary = patchData.summary;
+        if (patchData.headline !== undefined) nextResume.headline = patchData.headline;
+        if (patchData.name !== undefined) nextResume.name = patchData.name;
+        
+        if (Array.isArray(patchData.skills)) {
+          nextResume.skills = patchData.skills;
+        }
+        
+        if (Array.isArray(patchData.languages)) {
+          nextResume.languages = patchData.languages;
+        }
+
+        if (Array.isArray(patchData.experience)) {
+          nextResume.experience = nextResume.experience.map((exp) => {
+            const match = patchData.experience.find((x: any) => x.id === exp.id);
+            if (match) {
+              return {
+                ...exp,
+                company: match.company !== undefined ? match.company : exp.company,
+                title: match.title !== undefined ? match.title : exp.title,
+                bullets: Array.isArray(match.bullets) ? match.bullets : exp.bullets,
+              };
+            }
+            return exp;
+          });
+        }
+
+        if (Array.isArray(patchData.education)) {
+          nextResume.education = nextResume.education.map((edu) => {
+            const match = patchData.education.find((x: any) => x.id === edu.id);
+            if (match) {
+              return {
+                ...edu,
+                institution: match.institution !== undefined ? match.institution : edu.institution,
+                degree: match.degree !== undefined ? match.degree : edu.degree,
+              };
+            }
+            return edu;
+          });
+        }
+
+        nextResume.updatedAt = new Date().toISOString();
+        setOptimizedResume(nextResume);
+        updateResume(nextResume.id, nextResume);
+        
+        if (jdParsed) {
+          const after = scoreATS(nextResume, jdParsed);
+          setAfterReport(after);
+          addATS(after);
+          
+          if (pipelineResult) {
+            const nextResult = { ...pipelineResult };
+            if (nextResult.afterATS) {
+              nextResult.afterATS.scores.ats = after.scores.ats;
+              nextResult.afterATS.scores.keywordMatch = after.scores.keywords;
+              nextResult.afterATS.missingKeywords = after.missingKeywords;
+              nextResult.afterATS.matchedKeywords = after.matchedKeywords;
+            }
+            setPipelineResult(nextResult);
+          }
+        }
+        toast.success("AI Copilot updated your optimized resume!");
+      }
+    } catch (err: any) {
+      console.warn("[Optimizer Copilot] Chat request failed:", err);
+      toast.error("Failed to get response from AI Copilot.");
+    } finally {
+      setCopilotLoading(false);
+    }
+  };
+
 
   const scrapeJdUrl = async () => {
     if (!jdUrl || !/^https?:\/\//.test(jdUrl)) {
@@ -1005,19 +1253,51 @@ export function Optimizer() {
         {/* Step 4: Optimize */}
         {step === "optimize" && beforeReport && resume && jdParsed && (
           <motion.div key="optimize" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} className="grid lg:grid-cols-3 gap-4">
-            <Card className="lg:col-span-1">
-              <CardContent className="flex flex-col items-center pt-6">
-                {/* === UNIFIED SCORING ===
-                    Use the V2 analyzeATS() score (beforeAnalyzed) so the
-                    "optimize" step shows the SAME number the "done" step
-                    will show. Falls back to legacy scoreATS() if analyzeATS
-                    hasn't been computed yet. */}
-                <ScoreRing value={beforeAnalyzed?.scores.ats ?? beforeReport.scores.ats} size={140} label="Current ATS" />
-                <div className="mt-3 text-sm text-muted-foreground text-center">
-                  {beforeReport.missingKeywords.length} missing keywords · {beforeReport.matchedKeywords.length} matched
-                </div>
-              </CardContent>
-            </Card>
+            <div className="lg:col-span-1 space-y-4">
+              <Card>
+                <CardContent className="flex flex-col items-center pt-6">
+                  {/* === UNIFIED SCORING ===
+                      Use the V2 analyzeATS() score (beforeAnalyzed) so the
+                      "optimize" step shows the SAME number the "done" step
+                      will show. Falls back to legacy scoreATS() if analyzeATS
+                      hasn't been computed yet. */}
+                  <ScoreRing value={beforeAnalyzed?.scores.ats ?? beforeReport.scores.ats} size={140} label="Current ATS" />
+                  <div className="mt-3 text-sm text-muted-foreground text-center">
+                    {beforeReport.missingKeywords.length} missing keywords · {beforeReport.matchedKeywords.length} matched
+                  </div>
+                </CardContent>
+              </Card>
+
+              {/* Detected ATS System Info card */}
+              {detectedAtsDetails && (
+                <Card className="border-brand/35 bg-brand/5 dark:bg-brand/10">
+                  <CardHeader className="pb-2">
+                    <CardTitle className="text-sm font-semibold flex items-center gap-1.5">
+                      <Icon name="Activity" className="w-4 h-4 text-brand" />
+                      Target ATS: {detectedAtsDetails.name}
+                    </CardTitle>
+                    <CardDescription className="text-[11px]">
+                      Based on company and job description details.
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent className="space-y-3 text-xs">
+                    <div className="text-[11px] bg-amber-500/10 text-amber-600 dark:text-amber-400 p-2 rounded border border-amber-500/20 font-medium">
+                      ⚠️ {detectedAtsDetails.warning}
+                    </div>
+                    <div>
+                      <div className="font-semibold text-muted-foreground uppercase text-[10px] mb-1.5 tracking-wider">
+                        Known Quirks:
+                      </div>
+                      <ul className="space-y-1 list-disc pl-4 text-muted-foreground leading-relaxed">
+                        {detectedAtsDetails.quirks.map((q, idx) => (
+                          <li key={idx}>{q}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  </CardContent>
+                </Card>
+              )}
+            </div>
 
             {/* === Pre-optimization ATS gauge (compact) === */}
             {resume && (
@@ -1460,60 +1740,187 @@ export function Optimizer() {
               </Suspense>
             )}
 
-            {/* Live-editable InfoHAS Pro preview */}
-            <Card>
-              <CardContent className="p-5">
-                <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
-                  <div>
-                    <h3 className="font-display text-lg font-bold flex items-center gap-2">
-                      <Icon name="FileText" className="w-4 h-4 text-brand" /> Optimized resume
-                    </h3>
-                    <p className="text-xs text-muted-foreground mt-0.5">
-                      <span className="inline-flex items-center">
-                        <Icon name="Pencil" className="w-3 h-3 inline text-brand" />
-                        <span className="md:hidden"> Tap any section (or the pencil badge) to edit live. Tap the photo frame to upload your photo. Final step before export.</span>
-                        <span className="hidden md:inline"> Hover any section to see a pencil — click to edit live. Click the photo frame to upload your photo. Final step before export.</span>
-                      </span>
-                    </p>
+            {/* Live-editable InfoHAS Pro preview + Copilot chat side-by-side */}
+            <div className="grid lg:grid-cols-3 gap-6 items-start">
+              {/* Preview column */}
+              <Card className="lg:col-span-2">
+                <CardContent className="p-5">
+                  <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
+                    <div>
+                      <h3 className="font-display text-lg font-bold flex items-center gap-2">
+                        <Icon name="FileText" className="w-4 h-4 text-brand" /> Optimized resume
+                      </h3>
+                      <p className="text-xs text-muted-foreground mt-0.5">
+                        <span className="inline-flex items-center">
+                          <Icon name="Pencil" className="w-3 h-3 inline text-brand" />
+                          <span className="md:hidden"> Tap any section (or the pencil badge) to edit live. Tap the photo frame to upload your photo. Final step before export.</span>
+                          <span className="hidden md:inline"> Hover any section to see a pencil — click to edit live. Click the photo frame to upload your photo. Final step before export.</span>
+                        </span>
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <label className="text-xs text-muted-foreground font-semibold">Template:</label>
+                      <select
+                        value={optimizedResume.template || "infohas-pro"}
+                        onChange={(e) => {
+                          const newTemplate = e.target.value as any;
+                          const next = { ...optimizedResume, template: newTemplate, updatedAt: new Date().toISOString() };
+                          setOptimizedResume(next);
+                          updateResume(next.id, { template: newTemplate });
+                        }}
+                        className="h-8 px-2 rounded-md border border-input bg-background text-xs font-semibold"
+                      >
+                        <option value="infohas-pro">InfoHAS Pro Layout</option>
+                        <option value="ats-professional">ATS Professional Layout</option>
+                        <option value="executive">Executive Layout</option>
+                        <option value="modern">Modern Layout</option>
+                        <option value="minimal">Minimal Layout</option>
+                        <option value="corporate">Corporate Layout</option>
+                        <option value="tech">Tech Layout</option>
+                      </select>
+                      <Badge variant="brand"><Icon name="Lock" className="w-3 h-3" /> One A4 page · validated</Badge>
+                    </div>
                   </div>
-                  <div className="flex items-center gap-2">
-                    <label className="text-xs text-muted-foreground font-semibold">Template:</label>
-                    <select
-                      value={optimizedResume.template || "infohas-pro"}
-                      onChange={(e) => {
-                        const newTemplate = e.target.value as any;
-                        const next = { ...optimizedResume, template: newTemplate, updatedAt: new Date().toISOString() };
-                        setOptimizedResume(next);
-                        updateResume(next.id, { template: newTemplate });
-                      }}
-                      className="h-8 px-2 rounded-md border border-input bg-background text-xs font-semibold"
-                    >
-                      <option value="infohas-pro">InfoHAS Pro Layout</option>
-                      <option value="ats-professional">ATS Professional Layout</option>
-                      <option value="executive">Executive Layout</option>
-                      <option value="modern">Modern Layout</option>
-                      <option value="minimal">Minimal Layout</option>
-                      <option value="corporate">Corporate Layout</option>
-                      <option value="tech">Tech Layout</option>
-                    </select>
-                    <Badge variant="brand"><Icon name="Lock" className="w-3 h-3" /> One A4 page · validated</Badge>
+                  <div className="rounded-xl bg-secondary/60 p-2 sm:p-4 overflow-auto" style={{ maxHeight: "calc(100vh - 120px)" }}>
+                    <div className="flex justify-center">
+                      <EditableA4Preview
+                        resume={optimizedResume}
+                        onChange={(p) => {
+                          const next = { ...optimizedResume, ...p, updatedAt: new Date().toISOString() };
+                          setOptimizedResume(next);
+                          updateResume(next.id, p);
+                        }}
+                        scale={previewScale}
+                      />
+                    </div>
                   </div>
-                </div>
-                <div className="rounded-xl bg-secondary/60 p-2 sm:p-4 overflow-auto" style={{ maxHeight: "calc(100vh - 240px)" }}>
-                  <div className="flex justify-center">
-                    <EditableA4Preview
-                      resume={optimizedResume}
-                      onChange={(p) => {
-                        const next = { ...optimizedResume, ...p, updatedAt: new Date().toISOString() };
-                        setOptimizedResume(next);
-                        updateResume(next.id, p);
+                </CardContent>
+              </Card>
+
+              {/* Copilot column */}
+              <div className="lg:col-span-1 space-y-4">
+                {/* Detected ATS Warning inside the sidebar */}
+                {detectedAtsDetails && (
+                  <Card className="border-amber-300 dark:border-amber-700 bg-amber-500/5">
+                    <CardHeader className="pb-1.5 pt-3 px-4">
+                      <CardTitle className="text-xs font-bold flex items-center gap-1.5 text-amber-700 dark:text-amber-400">
+                        <Icon name="AlertTriangle" className="w-3.5 h-3.5" />
+                        Target: {detectedAtsDetails.name} System
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent className="px-4 pb-3 pt-0 text-[11px] text-muted-foreground leading-normal">
+                      {detectedAtsDetails.warning}
+                    </CardContent>
+                  </Card>
+                )}
+
+                {/* Copilot Chat Box */}
+                <Card className="flex flex-col border border-border shadow-sm overflow-hidden h-[540px]">
+                  <CardHeader className="p-3 border-b border-border/80 bg-gradient-to-r from-violet-600/5 to-indigo-600/5 shrink-0">
+                    <CardTitle className="text-sm font-semibold flex items-center gap-1.5">
+                      <Icon name="Sparkles" className="w-4 h-4 text-violet-600 animate-pulse" />
+                      AI Optimizer Copilot
+                    </CardTitle>
+                    <CardDescription className="text-[10px]">
+                      Ask AI to refine, expand, or adjust your optimized resume.
+                    </CardDescription>
+                  </CardHeader>
+
+                  {/* Suggestions list when chat is empty or fresh */}
+                  {copilotMessages.length <= 1 && (
+                    <div className="p-2.5 border-b border-border/40 bg-slate-500/5 space-y-1 shrink-0">
+                      <div className="text-[9px] uppercase font-bold text-muted-foreground tracking-wider flex items-center gap-1">
+                        <Icon name="Lightbulb" className="w-3 h-3 text-amber-500" /> Suggestions
+                      </div>
+                      <div className="flex flex-wrap gap-1 mt-0.5">
+                        {[
+                          { text: "✍️ Shorten summary", prompt: "shorten the summary to be under 3 sentences" },
+                          { text: "💼 Highlight leadership", prompt: "rewrite the first job experience bullet points to focus on leadership" },
+                          { text: "💪 Add technical metrics", prompt: "make my experience bullet points contain more quantified metrics" },
+                        ].map((s, idx) => (
+                          <button
+                            key={idx}
+                            onClick={() => sendCopilotMessage(s.prompt)}
+                            className="text-[9px] px-2 py-0.5 rounded-full border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 text-slate-600 dark:text-slate-400 hover:border-brand hover:text-brand font-medium transition cursor-pointer"
+                          >
+                            {s.text}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Messages list */}
+                  <div className="flex-1 p-3 overflow-y-auto space-y-3 scrollbar-thin">
+                    {copilotMessages.map((msg, idx) => (
+                      <div key={idx} className={`flex items-start gap-2 ${msg.role === "user" ? "flex-row-reverse" : "flex-row"}`}>
+                        <div className={`w-5 h-5 rounded-full flex items-center justify-center text-[9px] font-bold shrink-0 ${
+                          msg.role === "user" ? "bg-slate-200 dark:bg-slate-800 text-slate-700" : "bg-gradient-to-tr from-violet-600 to-indigo-600 text-white"
+                        }`}>
+                          {msg.role === "user" ? "U" : <Icon name="Sparkles" className="w-2.5 h-2.5" />}
+                        </div>
+                        <div className={`max-w-[85%] rounded-xl px-2.5 py-1.5 text-xs leading-normal shadow-sm ${
+                          msg.role === "user"
+                            ? "bg-slate-900 dark:bg-slate-800 text-slate-100 rounded-tr-none border border-slate-800"
+                            : "bg-secondary/40 border border-border text-foreground rounded-tl-none prose prose-xs dark:prose-invert"
+                        }`}>
+                          {msg.role === "assistant" ? (
+                            <div className="[&_p]:mb-1.5 [&_ul]:list-disc [&_ul]:pl-4 [&_li]:mb-1 font-sans">
+                              {/* Simple paragraph/bullet renderer */}
+                              {msg.content.split("\n").map((line, li) => {
+                                if (line.trim().startsWith("-") || line.trim().startsWith("*")) {
+                                  return <li key={li}>{line.trim().substring(1).trim()}</li>;
+                                }
+                                return <p key={li} className="mb-1">{line}</p>;
+                              })}
+                            </div>
+                          ) : (
+                            msg.content
+                          )}
+                        </div>
+                      </div>
+                    ))}
+
+                    {copilotLoading && (
+                      <div className="flex items-start gap-2">
+                        <div className="w-5 h-5 rounded-full bg-gradient-to-tr from-violet-500 to-indigo-500 flex items-center justify-center shrink-0 animate-pulse">
+                          <Icon name="Sparkles" className="w-2.5 h-2.5 text-white" />
+                        </div>
+                        <div className="flex-1 space-y-1.5 max-w-[80%] py-0.5">
+                          <div className="h-2.5 bg-slate-200 dark:bg-slate-800 rounded animate-pulse w-3/4" />
+                          <div className="h-2.5 bg-slate-200/80 dark:bg-slate-800/80 rounded animate-pulse w-1/2" />
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Input box */}
+                  <div className="p-2 border-t border-border flex gap-1.5 bg-slate-50/50 dark:bg-slate-900/40 shrink-0">
+                    <Input
+                      value={copilotInput}
+                      onChange={(e) => setCopilotInput(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" && !e.shiftKey) {
+                          e.preventDefault();
+                          sendCopilotMessage();
+                        }
                       }}
-                      scale={previewScale}
+                      placeholder="Ask copilot to tweak..."
+                      className="text-xs h-8 bg-white dark:bg-slate-950"
+                      disabled={copilotLoading}
                     />
+                    <Button
+                      size="sm"
+                      onClick={() => sendCopilotMessage()}
+                      disabled={copilotLoading || !copilotInput.trim()}
+                      className="h-8 w-8 p-0 bg-gradient-to-tr from-violet-600 to-indigo-600 hover:from-violet-700 hover:to-indigo-700 text-white shadow-sm shrink-0"
+                    >
+                      <Icon name="Send" className="w-3.5 h-3.5" />
+                    </Button>
                   </div>
-                </div>
-              </CardContent>
-            </Card>
+                </Card>
+              </div>
+            </div>
 
             <div className="grid lg:grid-cols-3 gap-4">
               <Card>
@@ -1619,21 +2026,31 @@ export function Optimizer() {
                   </div>
                   <div>
                     <div className="text-xs font-semibold text-muted-foreground mb-2">
-                      MISSING KEYWORDS ({(pipelineResult?.afterATS?.missingKeywords.length ?? afterReport.missingKeywords.length)}) — Click to copy
+                      MISSING KEYWORDS ({(pipelineResult?.afterATS?.missingKeywords.length ?? afterReport.missingKeywords.length)}) — Click keyword to inject automatically
                     </div>
                     <div className="flex flex-wrap gap-1.5">
-                      {((pipelineResult?.afterATS?.missingKeywords ?? afterReport.missingKeywords) || []).map((kw: string) => (
-                        <span
-                          key={kw}
-                          className="inline-flex items-center rounded-full border border-border px-2 py-0.5 text-xs font-semibold bg-secondary text-secondary-foreground gap-1 cursor-pointer hover:bg-brand-light/30 transition-all duration-200"
-                          onClick={() => {
-                            navigator.clipboard.writeText(kw);
-                            toast.success(`Copied "${kw}" to clipboard!`);
-                          }}
-                        >
-                          <Icon name="Plus" className="w-3 h-3 text-muted-foreground" /> {kw}
-                        </span>
-                      ))}
+                      {((pipelineResult?.afterATS?.missingKeywords ?? afterReport.missingKeywords) || []).map((kw: string) => {
+                        const isInjecting = injectingKeyword === kw;
+                        return (
+                          <button
+                            key={kw}
+                            disabled={!!injectingKeyword}
+                            className={`inline-flex items-center rounded-full border border-border px-2.5 py-1 text-xs font-semibold gap-1.5 transition-all duration-200 ${
+                              isInjecting 
+                                ? "bg-brand/20 border-brand/50 text-brand animate-pulse cursor-wait"
+                                : "bg-secondary text-secondary-foreground hover:bg-brand/10 hover:border-brand/30 cursor-pointer active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
+                            }`}
+                            onClick={() => handleInjectKeyword(kw)}
+                          >
+                            {isInjecting ? (
+                              <Icon name="Loader2" className="w-3 h-3 animate-spin text-brand" />
+                            ) : (
+                              <Icon name="Sparkles" className="w-3 h-3 text-brand" />
+                            )}
+                            {kw}
+                          </button>
+                        );
+                      })}
                       {((pipelineResult?.afterATS?.missingKeywords ?? afterReport.missingKeywords) || []).length === 0 && (
                         <div className="text-xs text-emerald-600 font-medium flex items-center gap-1">
                           <Icon name="CheckCircle2" className="w-3.5 h-3.5" /> ✓ Perfect match! All job description keywords are present in the optimized resume.

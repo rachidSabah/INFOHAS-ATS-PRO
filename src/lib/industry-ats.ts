@@ -587,3 +587,139 @@ Return ONLY valid JSON with the standard resume shape:
 { "name": "...", "headline": "...", "summary": "...", "skills": [...], "experience": [...], "education": [...], "languages": [...], "missingKeywordsAdded": [...], "bulletsRewritten": N }
 `;
 }
+
+// ============================================================================
+// ATS System Detector & Warnings
+// ============================================================================
+
+export interface AtsDetails {
+  name: string;
+  quirks: string[];
+  warning: string;
+}
+
+export const ATS_DETAILS_MAP: Record<string, AtsDetails> = {
+  Workday: {
+    name: "Workday",
+    quirks: [
+      "Strips tables, custom vertical lines, and graphic icons during text extraction.",
+      "Requires standard headings (e.g. 'Professional Experience', 'Education') to map sections correctly.",
+      "Prefers a strict chronological layout over functional or highly creative templates."
+    ],
+    warning: "Workday is notoriously strict. Keep your layout chronological, avoid multiple columns, and do not put important information in headers or footers."
+  },
+  Greenhouse: {
+    name: "Greenhouse",
+    quirks: [
+      "Extremely robust PDF parsing, but can struggle with text wrapping inside complex columns.",
+      "Allows manual resume review easily, making visual layout (A4 presentation) highly important."
+    ],
+    warning: "Greenhouse parses single-column PDFs very well. Ensure your formatting is clean, as recruiters often read resumes directly inside their dashboard."
+  },
+  Lever: {
+    name: "Lever",
+    quirks: [
+      "Converts PDF documents into raw continuous text blocks for keyword search.",
+      "Can merge text from side-by-side columns into confusing sentences."
+    ],
+    warning: "Lever indexes plain text. Avoid multi-column layouts where text flow can read out of order. Ensure keywords are spelled exactly as they appear in the job description."
+  },
+  Taleo: {
+    name: "Taleo",
+    quirks: [
+      "Legacy system that fails to parse complex formatting, text boxes, or custom tables.",
+      "Ignores images, logos, and colored backgrounds completely."
+    ],
+    warning: "Taleo is highly sensitive to layout. Absolutely avoid text boxes, graphics, or nested tables. Stick to standard bullet points and standard font sizes."
+  },
+  iCIMS: {
+    name: "iCIMS",
+    quirks: [
+      "Strict matching against predefined skill profiles.",
+      "Strips headers/footers and processes plain text."
+    ],
+    warning: "iCIMS requires standard section headers. Use 'Work Experience' and 'Education' literally, and list technical skills clearly in a dedicated section."
+  },
+  Ashby: {
+    name: "Ashby",
+    quirks: [
+      "Modern parser that handles layouts very well.",
+      "Flags keyword density and matches skills against direct search queries."
+    ],
+    warning: "Ashby handles modern resume formats well. Focus on matching keyword frequency and listing your core skills clearly."
+  },
+  SmartRecruiters: {
+    name: "SmartRecruiters",
+    quirks: [
+      "Builds a candidate profile directly from the parsed resume text.",
+      "Can miss dates that do not use standard formats (e.g. 'MM/YYYY' or 'Month YYYY')."
+    ],
+    warning: "SmartRecruiters parses dates strictly. Ensure all job dates use standard spelling or formatting (e.g., 'Oct 2023 - Present')."
+  },
+  Generic: {
+    name: "Standard ATS",
+    quirks: [
+      "Scrapes text from top-to-bottom, left-to-right.",
+      "Strips graphic elements, charts, and non-standard symbols."
+    ],
+    warning: "Since the exact ATS is unknown, follow best practices: use standard fonts, keep a single-column flow, and embed job description keywords naturally."
+  }
+};
+
+export function detectATSFromCompany(company: string, url: string): AtsDetails {
+  const companyLower = company?.toLowerCase() || "";
+  const urlLower = url?.toLowerCase() || "";
+
+  // 1. Check URL patterns
+  if (urlLower.includes("myworkdayjobs") || urlLower.includes("workday")) {
+    return ATS_DETAILS_MAP.Workday;
+  }
+  if (urlLower.includes("greenhouse.io")) {
+    return ATS_DETAILS_MAP.Greenhouse;
+  }
+  if (urlLower.includes("lever.co")) {
+    return ATS_DETAILS_MAP.Lever;
+  }
+  if (urlLower.includes("taleo.net") || urlLower.includes("taleo")) {
+    return ATS_DETAILS_MAP.Taleo;
+  }
+  if (urlLower.includes("icims.com") || urlLower.includes("icims")) {
+    return ATS_DETAILS_MAP.iCIMS;
+  }
+  if (urlLower.includes("ashbyhq.com") || urlLower.includes("ashby")) {
+    return ATS_DETAILS_MAP.Ashby;
+  }
+  if (urlLower.includes("smartrecruiters.com")) {
+    return ATS_DETAILS_MAP.SmartRecruiters;
+  }
+
+  // 2. Check major company name defaults
+  const companyAtsRules: Record<string, string> = {
+    emirates: "Workday",
+    flydubai: "Workday",
+    etihad: "Taleo",
+    qatar: "Workday",
+    google: "Greenhouse",
+    facebook: "Greenhouse",
+    meta: "Greenhouse",
+    amazon: "Workday",
+    microsoft: "iCIMS",
+    netflix: "Workday",
+    apple: "Taleo",
+    salesforce: "Workday",
+    uber: "Greenhouse",
+    lyft: "Greenhouse",
+    airbnb: "Greenhouse",
+    stripe: "Greenhouse",
+    shopify: "Workday",
+  };
+
+  for (const [key, value] of Object.entries(companyAtsRules)) {
+    if (companyLower.includes(key)) {
+      return ATS_DETAILS_MAP[value] || ATS_DETAILS_MAP.Generic;
+    }
+  }
+
+  return ATS_DETAILS_MAP.Generic;
+}
+
