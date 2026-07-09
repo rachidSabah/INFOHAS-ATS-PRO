@@ -50,6 +50,9 @@ export function Optimizer() {
   const incUsage = useApp((s) => s.incUsage);
   const log = useApp((s) => s.log);
 
+  const config = useApp((s) => s.optimizerDirective);
+  const updateOptimizerDirective = useApp((s) => s.updateOptimizerDirective);
+
   const [step, setStep] = useState<Step>("upload");
   // Honor the active resume / JD from the store so navigation from
   // AI Resume Review (or any other module that sets activeResumeId/
@@ -1917,6 +1920,147 @@ Respond to the last message and append a [PATCH] block with updates if appropria
                       />
                     </div>
                   </div>
+
+                  {/* Manual Layout Precision Tuning Panel */}
+                  <Card className="mt-4 border-brand/20 bg-secondary/10">
+                    <CardHeader className="pb-2">
+                      <CardTitle className="text-xs font-bold flex items-center gap-1.5 text-brand">
+                        <Icon name="Settings" className="w-3.5 h-3.5" />
+                        Manual Layout Precision Tuning
+                      </CardTitle>
+                      <CardDescription className="text-[10px]">
+                        Override page margins, sizing, and line spacing to achieve the perfect fit.
+                      </CardDescription>
+                    </CardHeader>
+                    <CardContent className="space-y-4 pt-0 text-[11px]">
+                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+                        {/* Font Size */}
+                        <div className="space-y-1">
+                          <div className="flex justify-between font-medium">
+                            <span>Font Size</span>
+                            <span className="text-brand font-semibold">{config?.bodyFontSizePt ?? 10.5} pt</span>
+                          </div>
+                          <input
+                            type="range"
+                            min="9"
+                            max="12"
+                            step="0.1"
+                            value={config?.bodyFontSizePt ?? 10.5}
+                            onChange={(e) => updateOptimizerDirective({ bodyFontSizePt: parseFloat(e.target.value) })}
+                            className="w-full h-1 bg-secondary rounded-lg appearance-none cursor-pointer accent-brand"
+                          />
+                        </div>
+
+                        {/* Line Height */}
+                        <div className="space-y-1">
+                          <div className="flex justify-between font-medium">
+                            <span>Line Height</span>
+                            <span className="text-brand font-semibold">{config?.lineHeight ?? 1.2}</span>
+                          </div>
+                          <input
+                            type="range"
+                            min="1.0"
+                            max="1.5"
+                            step="0.05"
+                            value={config?.lineHeight ?? 1.2}
+                            onChange={(e) => updateOptimizerDirective({ lineHeight: parseFloat(e.target.value) })}
+                            className="w-full h-1 bg-secondary rounded-lg appearance-none cursor-pointer accent-brand"
+                          />
+                        </div>
+
+                        {/* Margins Top/Bottom */}
+                        <div className="space-y-1">
+                          <div className="flex justify-between font-medium">
+                            <span>Top/Bottom Margins</span>
+                            <span className="text-brand font-semibold">{config?.marginTopMm ?? 6.35} mm</span>
+                          </div>
+                          <input
+                            type="range"
+                            min="4"
+                            max="15"
+                            step="0.5"
+                            value={config?.marginTopMm ?? 6.35}
+                            onChange={(e) => updateOptimizerDirective({
+                              marginTopMm: parseFloat(e.target.value),
+                              marginBottomMm: parseFloat(e.target.value)
+                            })}
+                            className="w-full h-1 bg-secondary rounded-lg appearance-none cursor-pointer accent-brand"
+                          />
+                        </div>
+
+                        {/* Margins Left/Right */}
+                        <div className="space-y-1">
+                          <div className="flex justify-between font-medium">
+                            <span>Side Margins</span>
+                            <span className="text-brand font-semibold">{config?.marginLeftMm ?? 8.89} mm</span>
+                          </div>
+                          <input
+                            type="range"
+                            min="6"
+                            max="18"
+                            step="0.5"
+                            value={config?.marginLeftMm ?? 8.89}
+                            onChange={(e) => updateOptimizerDirective({
+                              marginLeftMm: parseFloat(e.target.value),
+                              marginRightMm: parseFloat(e.target.value)
+                            })}
+                            className="w-full h-1 bg-secondary rounded-lg appearance-none cursor-pointer accent-brand"
+                          />
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+                        {/* Section Gap */}
+                        <div className="space-y-1">
+                          <div className="flex justify-between font-medium">
+                            <span>Section Gap</span>
+                            <span className="text-brand font-semibold">{config?.sectionGapMm ?? 3} mm</span>
+                          </div>
+                          <input
+                            type="range"
+                            min="1"
+                            max="8"
+                            step="0.5"
+                            value={config?.sectionGapMm ?? 3}
+                            onChange={(e) => updateOptimizerDirective({ sectionGapMm: parseFloat(e.target.value) })}
+                            className="w-full h-1 bg-secondary rounded-lg appearance-none cursor-pointer accent-brand"
+                          />
+                        </div>
+
+                        {/* Bullet Indent */}
+                        <div className="space-y-1">
+                          <div className="flex justify-between font-medium">
+                            <span>Bullet Indent</span>
+                            <span className="text-brand font-semibold">{config?.bulletIndentMm ?? 6.4} mm</span>
+                          </div>
+                          <input
+                            type="range"
+                            min="4"
+                            max="12"
+                            step="0.5"
+                            value={config?.bulletIndentMm ?? 6.4}
+                            onChange={(e) => updateOptimizerDirective({ bulletIndentMm: parseFloat(e.target.value) })}
+                            className="w-full h-1 bg-secondary rounded-lg appearance-none cursor-pointer accent-brand"
+                          />
+                        </div>
+
+                        {/* Contact Spacing */}
+                        <div className="space-y-1">
+                          <div className="flex justify-between font-medium">
+                            <span>Contact Layout</span>
+                          </div>
+                          <select
+                            value={config?.contactSpacing || "stacked"}
+                            onChange={(e) => updateOptimizerDirective({ contactSpacing: e.target.value as any })}
+                            className="w-full h-7 px-2 rounded border border-input bg-background text-[11px]"
+                          >
+                            <option value="stacked">Stacked Rows (Default)</option>
+                            <option value="single-line">Single Inline Row</option>
+                          </select>
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
                 </CardContent>
               </Card>
 

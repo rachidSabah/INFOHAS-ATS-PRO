@@ -96,6 +96,62 @@ type EditTarget =
 // Master layout colors — BLACK fallback
 const BLACK_FALLBACK = "#000000";
 
+function renderHighlightedText(
+  text: string,
+  heatmapMode: boolean,
+  matchedKeywords: string[] = [],
+  cliches: string[] = []
+) {
+  if (!text) return "";
+  if (!heatmapMode) return text as any;
+  const keywords = [...matchedKeywords];
+  const buzzwords = [...cliches];
+  
+  // Sort by length descending to avoid partial matches on nested words
+  const allTargets = [
+    ...keywords.map(k => ({ text: k, type: "keyword" as const })),
+    ...buzzwords.map(b => ({ text: b, type: "cliche" as const }))
+  ].sort((a, b) => b.text.length - a.text.length);
+
+  if (allTargets.length === 0) return text as any;
+
+  // Build a regex pattern matching any of the targets
+  const escaped = allTargets
+    .map(t => t.text.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&'))
+    .filter(Boolean);
+  if (escaped.length === 0) return text as any;
+  
+  const regex = new RegExp(`\\b(${escaped.join("|")})\\b`, "gi");
+
+  const parts = text.split(regex);
+  if (parts.length <= 1) return text as any;
+
+  return parts.map((part, idx) => {
+    const match = allTargets.find(t => t.text.toLowerCase() === part.toLowerCase());
+    if (match) {
+      const isKeyword = match.type === "keyword";
+      return (
+        <span
+          key={idx}
+          style={{
+            backgroundColor: isKeyword ? "rgba(16, 185, 129, 0.2)" : "rgba(239, 68, 68, 0.2)",
+            borderBottom: isKeyword ? "2px solid #10B981" : "2px solid #EF4444",
+            padding: "0.2px 1.5px",
+            borderRadius: "2px",
+            fontWeight: 500,
+            cursor: "help",
+            position: "relative"
+          }}
+          title={isKeyword ? "Matched target job keyword!" : "Generic cliché word. Try to replace with action/metrics."}
+        >
+          {part}
+        </span>
+      );
+    }
+    return part;
+  }) as any;
+}
+
 export function EditableA4Preview({ resume, onChange, scale = 0.7, className }: EditableA4PreviewProps) {
   const [editing, setEditing] = useState<EditTarget>(null);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -121,6 +177,16 @@ export function EditableA4Preview({ resume, onChange, scale = 0.7, className }: 
   };
 
   const BLACK = L.bodyTextColor;
+
+  const atsReports = useApp((s) => s.atsReports);
+  const latestReport = atsReports.find((r) => r.resumeId === resume.id);
+  const [heatmapMode, setHeatmapMode] = useState(false);
+
+  const renderHText = (textVal: any) => {
+    const raw = safeRender(textVal);
+    if (!heatmapMode) return raw;
+    return renderHighlightedText(raw, true, latestReport?.matchedKeywords || [], latestReport?.detectedCliches || []) as any;
+  };
 
   // No local draft — the parent owns the state. Edits call onChange() directly,
   // which updates the parent's `resume` prop, which re-renders this component.
@@ -152,6 +218,26 @@ export function EditableA4Preview({ resume, onChange, scale = 0.7, className }: 
   return (
     <div className={className}>
       <input ref={fileRef} type="file" accept="image/png,image/jpeg,image/webp" className="hidden" onChange={(e) => onPhotoUpload(e.target.files)} />
+
+      {latestReport && (
+        <div className="flex items-center justify-between mb-3 bg-secondary/30 p-2 rounded-lg border border-border">
+          <div className="flex items-center gap-1.5">
+            <Icon name="Activity" className="w-4 h-4 text-brand animate-pulse" />
+            <span className="text-xs font-semibold">Heatmap Analysis Available (ATS: {latestReport.scores.ats}/100)</span>
+          </div>
+          <button
+            onClick={() => setHeatmapMode(!heatmapMode)}
+            className={`flex items-center gap-1.5 px-2.5 py-1 rounded text-xs font-medium transition-all ${
+              heatmapMode 
+                ? "bg-brand text-white shadow-sm" 
+                : "bg-secondary hover:bg-secondary-hover text-foreground/80 border border-border"
+            }`}
+          >
+            <Icon name="Flame" className={`w-3.5 h-3.5 ${heatmapMode ? "text-amber-300 animate-pulse" : ""}`} />
+            {heatmapMode ? "Hide ATS Heatmap" : "Show ATS Heatmap"}
+          </button>
+        </div>
+      )}
 
       {/* Outer wrapper — occupies the SCALED layout space (210mm × scale × 297mm × scale)
           so the parent container sees a correctly-sized box. Without this, CSS transform: scale()
@@ -289,7 +375,7 @@ export function EditableA4Preview({ resume, onChange, scale = 0.7, className }: 
             {resume.summary && (
               <EditableBlock isEditing={editing === "summary"} onEdit={() => setEditing("summary")} label="Edit summary" isTouch={isTouch}>
                 <InfohasSection title="PROFESSIONAL PROFILE">
-                  <p style={{ margin: 0, textAlign: "justify", color: BLACK, lineHeight: 1.2 }}>{safeRender(resume.summary)}</p>
+                  <p style={{ margin: 0, textAlign: "justify", color: BLACK, lineHeight: 1.2 }}>{renderHText(resume.summary)}</p>
                 </InfohasSection>
               </EditableBlock>
             )}
@@ -317,7 +403,7 @@ export function EditableA4Preview({ resume, onChange, scale = 0.7, className }: 
                       </div>
                       <ul style={{ margin: 0, paddingLeft: `${L.bulletIndentMm}mm`, listStyleType: "•", lineHeight: 1.2 }}>
                         {e.bullets.map((b, i) => (
-                          <li key={i} style={{ marginBottom: 0, color: BLACK, textAlign: "justify", lineHeight: 1.2 }}>{safeRender(b)}</li>
+                          <li key={i} style={{ marginBottom: 0, color: BLACK, textAlign: "justify", lineHeight: 1.2 }}>{renderHText(b)}</li>
                         ))}
                       </ul>
                     </div>
@@ -354,7 +440,7 @@ export function EditableA4Preview({ resume, onChange, scale = 0.7, className }: 
                   {ed.highlights && ed.highlights.length > 0 && (
                     <ul style={{ margin: "0.3mm 0 0 0", paddingLeft: `${L.bulletIndentMm}mm`, listStyleType: "•", lineHeight: 1.2 }}>
                       {ed.highlights.map((h, i) => (
-                        <li key={i} style={{ color: BLACK, lineHeight: 1.2, textAlign: "justify" }}>{safeRender(h)}</li>
+                        <li key={i} style={{ color: BLACK, lineHeight: 1.2, textAlign: "justify" }}>{renderHText(h)}</li>
                       ))}
                     </ul>
                   )}
@@ -371,7 +457,7 @@ export function EditableA4Preview({ resume, onChange, scale = 0.7, className }: 
                   <ul style={{ margin: 0, paddingLeft: `${L.bulletIndentMm}mm`, listStyleType: "•", lineHeight: 1.2 }}>
                     {groupSkillsByCategory(resume.skills).slice(0, 4).map((g, i) => (
                       <li key={i} style={{ marginBottom: 0, color: BLACK, lineHeight: 1.2, textAlign: "justify" }}>
-                        <span style={{ fontWeight: 700 }}>{safeRender(g.category)}:</span> <span>{g.items.map((item: any) => safeRender(item)).join(", ")}.</span>
+                        <span style={{ fontWeight: 700 }}>{safeRender(g.category)}:</span> <span>{g.items.length > 0 ? g.items.map((item: any) => renderHText(item)).reduce((prev: any, curr: any) => [prev, ", ", curr]) : ""}.</span>
                       </li>
                     ))}
                   </ul>
@@ -396,7 +482,7 @@ export function EditableA4Preview({ resume, onChange, scale = 0.7, className }: 
                 <ul style={{ margin: 0, paddingLeft: `${L.bulletIndentMm}mm`, listStyleType: "•", lineHeight: 1.2 }}>
                   {resume.certifications.map((cert) => (
                     <li key={cert.id} style={{ color: BLACK, lineHeight: 1.2 }}>
-                      {safeRender(cert.name)}{cert.issuer ? ` — ${safeRender(cert.issuer)}` : ""}{cert.date ? ` (${cert.date})` : ""}
+                      {renderHText(cert.name)}{cert.issuer ? ` — ${renderHText(cert.issuer)}` : ""}{cert.date ? ` (${cert.date})` : ""}
                     </li>
                   ))}
                 </ul>
@@ -413,13 +499,13 @@ export function EditableA4Preview({ resume, onChange, scale = 0.7, className }: 
                     </div>
                     {proj.description && (
                       <p style={{ margin: "0.2mm 0", color: BLACK, lineHeight: 1.2, textAlign: "justify" }}>
-                        {safeRender(proj.description)}
+                        {renderHText(proj.description)}
                       </p>
                     )}
                     {proj.bullets && proj.bullets.length > 0 && (
                       <ul style={{ margin: 0, paddingLeft: `${L.bulletIndentMm}mm`, listStyleType: "•", lineHeight: 1.2 }}>
                         {proj.bullets.map((b, i) => (
-                          <li key={i} style={{ color: BLACK, lineHeight: 1.2 }}>{safeRender(b)}</li>
+                          <li key={i} style={{ color: BLACK, lineHeight: 1.2 }}>{renderHText(b)}</li>
                         ))}
                       </ul>
                     )}
@@ -433,13 +519,13 @@ export function EditableA4Preview({ resume, onChange, scale = 0.7, className }: 
               <InfohasSection key={ds.id} title={ds.title.toUpperCase()}>
                 {ds.content && (
                   <p style={{ margin: 0, color: BLACK, lineHeight: 1.2, textAlign: "justify" }}>
-                    {safeRender(ds.content)}
+                    {renderHText(ds.content)}
                   </p>
                 )}
                 {ds.bullets && ds.bullets.length > 0 && (
                   <ul style={{ margin: "0.3mm 0 0 0", paddingLeft: `${L.bulletIndentMm}mm`, listStyleType: "•", lineHeight: 1.2 }}>
                     {ds.bullets.map((b, i) => (
-                      <li key={i} style={{ color: BLACK, lineHeight: 1.2 }}>{safeRender(b)}</li>
+                      <li key={i} style={{ color: BLACK, lineHeight: 1.2 }}>{renderHText(b)}</li>
                     ))}
                   </ul>
                 )}

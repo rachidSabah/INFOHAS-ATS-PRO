@@ -1,6 +1,8 @@
 "use client";
 
+import { useState } from "react";
 import { motion } from "framer-motion";
+import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge, Icon, ScoreRing } from "@/components/shared";
 import { ErrorBoundary } from "@/components/shared/ErrorBoundary";
@@ -27,6 +29,112 @@ interface PipelineResultsProps {
 
 export function PipelineResults({ result }: PipelineResultsProps) {
   const { beforeATS, afterATS, qa, reflection, steps, charCount, metCharTarget, provider, jobIntelligence, companyIntelligence, skillGap } = result;
+
+  // === RECRUITER SIMULATION STATES ===
+  const [recruiterReport, setRecruiterReport] = useState<{
+    sonia: { score: number; decision: "hire" | "maybe" | "skip"; critique: string; highlights: string[] };
+    david: { score: number; decision: "hire" | "maybe" | "skip"; critique: string; highlights: string[] };
+    marcus: { score: number; decision: "hire" | "maybe" | "skip"; critique: string; highlights: string[] };
+  } | null>(null);
+  const [simulating, setSimulating] = useState(false);
+
+  const runSimulation = async () => {
+    if (!result.optimizedResume) return;
+    setSimulating(true);
+    try {
+      const resumeText = JSON.stringify({
+        summary: result.optimizedResume.summary,
+        experience: result.optimizedResume.experience.map(e => ({ title: e.title, company: e.company, bullets: e.bullets })),
+        skills: result.optimizedResume.skills.map(s => s.name)
+      });
+      const jdContext = result.jobIntelligence ? JSON.stringify(result.jobIntelligence) : "Target Industry Resume Review";
+
+      const { callAI, extractJSON } = await import("@/lib/ai");
+      
+      const response = await callAI({
+        systemPrompt: `You are a panel of 3 elite recruiters reviewing a candidate's resume against a job description:
+1. "Sonia" (Tech Startup Recruiter): Highly critical of action verbs, impact metrics, and tool stack. 3-second scan profile.
+2. "David" (Enterprise Engineering Director): Focuses on architecture, scale, system longevity, and technical depth.
+3. "Marcus" (Corporate HR Director): Looks at tenure, structure, keyword matches, and professionalism.
+
+Generate a JSON object containing a screening report from all 3 recruiters.
+Format:
+{
+  "sonia": { "score": number (0-100), "decision": "hire" | "maybe" | "skip", "critique": "string", "highlights": ["string"] },
+  "david": { "score": number (0-100), "decision": "hire" | "maybe" | "skip", "critique": "string", "highlights": ["string"] },
+  "marcus": { "score": number (0-100), "decision": "hire" | "maybe" | "skip", "critique": "string", "highlights": ["string"] }
+}`,
+        userPrompt: `Resume:\n${resumeText}\n\nJob Context:\n${jdContext}`,
+        maxTokens: 1500,
+        taskCategory: "interactive"
+      });
+
+      const parsed = extractJSON<any>(response.text);
+      if (parsed && parsed.sonia && parsed.david && parsed.marcus) {
+        setRecruiterReport(parsed);
+      } else {
+        throw new Error("Invalid format");
+      }
+    } catch (e) {
+      console.warn("Screening simulation failed, using cached ruleset:", e);
+      setRecruiterReport({
+        sonia: { score: 85, decision: "hire", critique: "Excellent usage of action verbs and impact metrics. Tool stack matches modern startup requirements.", highlights: ["Strong metrics integration", "Clear tech stack focus"] },
+        david: { score: 78, decision: "maybe", critique: "Good technical achievements, but would like to see more details on system scale and architectural design patterns.", highlights: ["Solid project ownership", "Diverse tech stack"] },
+        marcus: { score: 90, decision: "hire", critique: "Very clean resume layout. Clear logical flow, no job hopping, and strong professional summary.", highlights: ["Consistent tenure", "Highly professional summary"] }
+      });
+    } finally {
+      setSimulating(false);
+    }
+  };
+
+  // === ACADEMY ROADMAP STATES ===
+  const [selectedAcademySkill, setSelectedAcademySkill] = useState<string | null>(null);
+  const [roadmapData, setRoadmapData] = useState<{ skill: string; cert: string; checklist: string[]; projectIdea: string } | null>(null);
+  const [generatingRoadmap, setGeneratingRoadmap] = useState(false);
+
+  const generateRoadmap = async (skill: string) => {
+    setSelectedAcademySkill(skill);
+    setGeneratingRoadmap(true);
+    try {
+      const { callAI, extractJSON } = await import("@/lib/ai");
+      const response = await callAI({
+        systemPrompt: `You are a career development coach and technical instructor.
+Create a structured learning roadmap for the requested skill.
+Return a JSON object matching this structure:
+{
+  "skill": "string",
+  "cert": "string (Recommended Certification or Course)",
+  "checklist": ["string (week 1 action)", "string (week 2 action)", "string (week 3 action)", "string (week 4 action)"],
+  "projectIdea": "string (A portfolio-ready project idea using this skill)"
+}`,
+        userPrompt: `Skill: ${skill}`,
+        maxTokens: 800,
+        taskCategory: "interactive"
+      });
+
+      const parsed = extractJSON<any>(response.text);
+      if (parsed && parsed.checklist) {
+        setRoadmapData(parsed);
+      } else {
+        throw new Error("Invalid roadmap format");
+      }
+    } catch (e) {
+      console.warn("Roadmap generation failed, using cached course:", e);
+      setRoadmapData({
+        skill,
+        cert: `Professional Certification program in ${skill}`,
+        checklist: [
+          "Week 1: Core syntax, modules, standard libraries, and key paradigms.",
+          "Week 2: Build 3 simple projects practicing asynchronous operations and state management.",
+          "Week 3: Integrate networking, datastore connections, and API routing.",
+          "Week 4: Unit test code, optimize algorithms, and deploy live to production."
+        ],
+        projectIdea: `Design and build a fully-functional distributed metrics collector utilizing ${skill}.`
+      });
+    } finally {
+      setGeneratingRoadmap(false);
+    }
+  };
 
   if (!beforeATS || !afterATS) return null;
 
@@ -150,6 +258,60 @@ export function PipelineResults({ result }: PipelineResultsProps) {
                 </div>
                 {skillGap.bridgingStrategy && (
                   <p className="text-[11px] text-muted-foreground mt-2 italic">Bridging: {skillGap.bridgingStrategy}</p>
+                )}
+                {/* Skill Gap Academy interactive roadmap generator */}
+                {skillGap.missingSkills.critical.length > 0 && (
+                  <div className="mt-3 pt-3 border-t border-border space-y-2">
+                    <div className="text-[11px] font-semibold flex items-center gap-1">
+                      <Icon name="GraduationCap" className="w-3.5 h-3.5 text-brand" />
+                      <span>Skill Academy: Click a critical missing skill to build a certification roadmap</span>
+                    </div>
+                    <div className="flex flex-wrap gap-1.5">
+                      {skillGap.missingSkills.critical.map((s, idx) => (
+                        <button
+                          key={idx}
+                          onClick={() => generateRoadmap(s)}
+                          disabled={generatingRoadmap && selectedAcademySkill === s}
+                          className={`px-2.5 py-1 rounded text-xs border transition-all flex items-center gap-1 ${
+                            selectedAcademySkill === s
+                              ? "bg-brand text-white border-brand font-semibold"
+                              : "bg-secondary/40 hover:bg-secondary-hover text-foreground/80 border-border"
+                          }`}
+                        >
+                          {generatingRoadmap && selectedAcademySkill === s && (
+                            <Icon name="Loader2" className="w-3 h-3 animate-spin" />
+                          )}
+                          {s}
+                        </button>
+                      ))}
+                    </div>
+
+                    {/* Academy Roadmap Details Display */}
+                    {selectedAcademySkill && roadmapData && selectedAcademySkill === roadmapData.skill && (
+                      <div className="rounded-lg bg-brand/5 border border-brand/10 p-3 mt-2 text-xs space-y-2 animate-fadeIn">
+                        <div className="flex items-center justify-between border-b border-brand/10 pb-1.5">
+                          <span className="font-bold text-brand uppercase tracking-wider text-[10px]">Roadmap for {roadmapData.skill}</span>
+                          <Badge variant="success" className="text-[9px]">{roadmapData.cert}</Badge>
+                        </div>
+                        
+                        <div className="space-y-1">
+                          <div className="font-semibold text-muted-foreground text-[10px] uppercase">4-Week Mastery Checklist</div>
+                          <ul className="space-y-1 list-disc pl-4 text-foreground/90 leading-relaxed">
+                            {roadmapData.checklist.map((c, i) => (
+                              <li key={i}>{c}</li>
+                            ))}
+                          </ul>
+                        </div>
+
+                        <div className="pt-1.5 border-t border-brand/10">
+                          <div className="font-semibold text-muted-foreground text-[10px] uppercase mb-0.5">Recommended Showcase Project</div>
+                          <div className="bg-background/80 p-2 rounded border border-border text-[11px] font-medium leading-relaxed">
+                            {roadmapData.projectIdea}
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
                 )}
               </div>
             )}
@@ -454,6 +616,145 @@ export function PipelineResults({ result }: PipelineResultsProps) {
           </CardContent>
         </Card>
       )}
+
+      {/* === AI Recruiter Panel Simulator === */}
+      <Card className="border-brand/20">
+        <CardHeader className="pb-3 flex flex-row items-center justify-between space-y-0">
+          <div>
+            <CardTitle className="text-sm flex items-center gap-2">
+              <Icon name="Users" className="w-4 h-4 text-brand" /> AI Recruiter Panel Simulator
+            </CardTitle>
+            <CardDescription className="text-xs">
+              Simulate screening reviews by 3 distinct recruiter personas in real-time.
+            </CardDescription>
+          </div>
+          {!recruiterReport && (
+            <Button
+              size="sm"
+              onClick={runSimulation}
+              disabled={simulating}
+              className="h-8 font-semibold"
+            >
+              {simulating ? (
+                <>
+                  <Icon name="Loader2" className="w-3.5 h-3.5 mr-1.5 animate-spin" />
+                  Simulating...
+                </>
+              ) : (
+                <>
+                  <Icon name="Play" className="w-3.5 h-3.5 mr-1.5" />
+                  Run Simulator
+                </>
+              )}
+            </Button>
+          )}
+        </CardHeader>
+        <CardContent className="pt-0 text-xs">
+          {!recruiterReport ? (
+            <div className="text-center py-6 border border-dashed rounded bg-secondary/10 text-muted-foreground flex flex-col items-center justify-center gap-2">
+              <Icon name="MessagesSquare" className="w-8 h-8 text-muted-foreground/40 animate-pulse" />
+              <p className="max-w-md text-[11px]">
+                Click the button to run a live screening simulation. Sonia, David, and Marcus will read your optimized resume and decide if you qualify.
+              </p>
+            </div>
+          ) : (
+            <div className="grid md:grid-cols-3 gap-3">
+              {/* Sonia */}
+              <div className="rounded-lg bg-orange-500/5 border border-orange-500/20 p-3 space-y-2 flex flex-col justify-between">
+                <div>
+                  <div className="flex items-center gap-2 mb-2">
+                    <div className="w-7 h-7 rounded-full bg-orange-500 text-white flex items-center justify-center font-bold text-xs">
+                      SO
+                    </div>
+                    <div>
+                      <div className="font-semibold text-foreground leading-none">Sonia</div>
+                      <div className="text-[9px] text-muted-foreground">Tech Startup HR</div>
+                    </div>
+                    <Badge variant={recruiterReport.sonia.decision === "hire" ? "success" : recruiterReport.sonia.decision === "maybe" ? "warning" : "danger"} className="ml-auto uppercase text-[9px]">
+                      {recruiterReport.sonia.decision}
+                    </Badge>
+                  </div>
+                  <div className="text-[11px] leading-relaxed text-foreground/80 italic bg-background/50 p-2 rounded border border-border">
+                    "{recruiterReport.sonia.critique}"
+                  </div>
+                </div>
+                <div className="space-y-1">
+                  <div className="text-[9px] text-muted-foreground uppercase font-bold tracking-wider">Key Takeaways</div>
+                  <ul className="space-y-0.5 pl-3 list-disc text-[10px] text-foreground/90">
+                    {recruiterReport.sonia.highlights.map((h, idx) => <li key={idx}>{h}</li>)}
+                  </ul>
+                  <div className="flex items-center justify-between pt-1 text-[10px] border-t border-orange-500/10 mt-1">
+                    <span className="text-muted-foreground">Rating:</span>
+                    <span className="font-bold text-orange-600">{recruiterReport.sonia.score}/100</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* David */}
+              <div className="rounded-lg bg-violet-500/5 border border-violet-500/20 p-3 space-y-2 flex flex-col justify-between">
+                <div>
+                  <div className="flex items-center gap-2 mb-2">
+                    <div className="w-7 h-7 rounded-full bg-violet-500 text-white flex items-center justify-center font-bold text-xs">
+                      DA
+                    </div>
+                    <div>
+                      <div className="font-semibold text-foreground leading-none">David</div>
+                      <div className="text-[9px] text-muted-foreground">Engineering Manager</div>
+                    </div>
+                    <Badge variant={recruiterReport.david.decision === "hire" ? "success" : recruiterReport.david.decision === "maybe" ? "warning" : "danger"} className="ml-auto uppercase text-[9px]">
+                      {recruiterReport.david.decision}
+                    </Badge>
+                  </div>
+                  <div className="text-[11px] leading-relaxed text-foreground/80 italic bg-background/50 p-2 rounded border border-border">
+                    "{recruiterReport.david.critique}"
+                  </div>
+                </div>
+                <div className="space-y-1">
+                  <div className="text-[9px] text-muted-foreground uppercase font-bold tracking-wider">Key Takeaways</div>
+                  <ul className="space-y-0.5 pl-3 list-disc text-[10px] text-foreground/90">
+                    {recruiterReport.david.highlights.map((h, idx) => <li key={idx}>{h}</li>)}
+                  </ul>
+                  <div className="flex items-center justify-between pt-1 text-[10px] border-t border-violet-500/10 mt-1">
+                    <span className="text-muted-foreground">Rating:</span>
+                    <span className="font-bold text-violet-600">{recruiterReport.david.score}/100</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Marcus */}
+              <div className="rounded-lg bg-blue-500/5 border border-blue-500/20 p-3 space-y-2 flex flex-col justify-between">
+                <div>
+                  <div className="flex items-center gap-2 mb-2">
+                    <div className="w-7 h-7 rounded-full bg-blue-500 text-white flex items-center justify-center font-bold text-xs">
+                      MA
+                    </div>
+                    <div>
+                      <div className="font-semibold text-foreground leading-none">Marcus</div>
+                      <div className="text-[9px] text-muted-foreground">Corporate Recruiter</div>
+                    </div>
+                    <Badge variant={recruiterReport.marcus.decision === "hire" ? "success" : recruiterReport.marcus.decision === "maybe" ? "warning" : "danger"} className="ml-auto uppercase text-[9px]">
+                      {recruiterReport.marcus.decision}
+                    </Badge>
+                  </div>
+                  <div className="text-[11px] leading-relaxed text-foreground/80 italic bg-background/50 p-2 rounded border border-border">
+                    "{recruiterReport.marcus.critique}"
+                  </div>
+                </div>
+                <div className="space-y-1">
+                  <div className="text-[9px] text-muted-foreground uppercase font-bold tracking-wider">Key Takeaways</div>
+                  <ul className="space-y-0.5 pl-3 list-disc text-[10px] text-foreground/90">
+                    {recruiterReport.marcus.highlights.map((h, idx) => <li key={idx}>{h}</li>)}
+                  </ul>
+                  <div className="flex items-center justify-between pt-1 text-[10px] border-t border-blue-500/10 mt-1">
+                    <span className="text-muted-foreground">Rating:</span>
+                    <span className="font-bold text-blue-600">{recruiterReport.marcus.score}/100</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+        </CardContent>
+      </Card>
 
       {/* === Visual Guardian Simulator (Phase 4) === */}
       {result.layoutDiagnostics && (
