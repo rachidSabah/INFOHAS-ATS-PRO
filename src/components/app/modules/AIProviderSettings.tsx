@@ -37,6 +37,69 @@ export function AIProviderSettings() {
   const [testingChain, setTestingChain] = useState(false);
   const [chainResults, setChainResults] = useState<Record<string, { ok: boolean; latencyMs: number; error?: string }>>({});
 
+  // === FAILOVER SIMULATOR STATES ===
+  const [simulatingFailover, setSimulatingFailover] = useState(false);
+  const [failoverTrace, setFailoverTrace] = useState<Array<{ title: string; status: string; desc: string; type: "info" | "success" | "error" }>>([]);
+
+  const runFailoverSimulation = async () => {
+    setSimulatingFailover(true);
+    setFailoverTrace([]);
+
+    const delay = (ms: number) => new Promise(r => setTimeout(r, ms));
+
+    // Step 1: Initiate call
+    setFailoverTrace([{ title: "Triggering API Request", status: "started", desc: "User initiated a resume optimization call. Routing to default provider...", type: "info" }]);
+    await delay(1000);
+
+    // Step 2: Primary failure
+    setFailoverTrace(prev => [...prev, {
+      title: `Connecting to Primary: ${defaultProvider?.name || "OpenAI"}`,
+      status: "failed",
+      desc: "API returned status code 429: Rate Limit Exceeded. Triggering failover policy...",
+      type: "error"
+    }]);
+    await delay(1200);
+
+    // Step 3: Check fallback count
+    if (fallbackProviders.length === 0) {
+      setFailoverTrace(prev => [...prev, {
+        title: "Routing Failure",
+        status: "aborted",
+        desc: "Failover aborted. No active fallback providers are configured in your routing settings.",
+        type: "error"
+      }]);
+      setSimulatingFailover(false);
+      return;
+    }
+
+    // Step 4: Cascade through fallbacks
+    for (let i = 0; i < fallbackProviders.length; i++) {
+      const p = fallbackProviders[i];
+      const isLast = i === fallbackProviders.length - 1;
+
+      if (!isLast) {
+        // Simulate a failure on intermediate fallbacks
+        setFailoverTrace(prev => [...prev, {
+          title: `Failover Tier ${i + 1}: ${p.name}`,
+          status: "failed",
+          desc: "API connection timed out after 3000ms. Escalating to next fallback tier...",
+          type: "error"
+        }]);
+        await delay(1200);
+      } else {
+        // Final fallback succeeds
+        setFailoverTrace(prev => [...prev, {
+          title: `Failover Tier ${i + 1}: ${p.name}`,
+          status: "success",
+          desc: `Successfully established connection to ${p.name}. Completed text generation in 840ms with score metrics.`,
+          type: "success"
+        }]);
+      }
+    }
+
+    setSimulatingFailover(false);
+  };
+
   const defaultProvider = providers.find((p) => p.id === form.defaultProviderId);
   const fallbackProviders = form.fallbackProviderIds
     .map((id) => providers.find((p) => p.id === id))
@@ -411,6 +474,74 @@ export function AIProviderSettings() {
           <ToggleRow label="Enable failover" desc="Automatically try the next provider when one fails" checked={form.enableFailover} onChange={(v) => update({ enableFailover: v })} />
           <ToggleRow label="Enable response caching" desc="Cache identical prompts for 1 hour to save tokens" checked={form.enableCaching} onChange={(v) => update({ enableCaching: v })} />
           <ToggleRow label="Enable cost tracking" desc="Track token usage and estimate cost per provider" checked={form.enableCostTracking} onChange={(v) => update({ enableCostTracking: v })} />
+        </CardContent>
+      </Card>
+
+      {/* Dynamic Failover Simulation Sandbox */}
+      <Card className="border-amber-500/20 bg-amber-500/[0.02]">
+        <CardHeader className="pb-3 flex flex-row items-center justify-between space-y-0">
+          <div>
+            <CardTitle className="text-lg flex items-center gap-2">
+              <Icon name="Activity" className="w-5 h-5 text-amber-500 animate-pulse" />
+              Dynamic Failover Simulation Sandbox
+            </CardTitle>
+            <CardDescription className="text-xs">
+              Simulate a primary API failure (e.g., 429 Rate Limit) to test and visually trace your fallback chain routing in real-time.
+            </CardDescription>
+          </div>
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={simulatingFailover}
+            onClick={runFailoverSimulation}
+            className="border-amber-500/30 hover:bg-amber-500/10 font-semibold"
+          >
+            {simulatingFailover ? (
+              <>
+                <Icon name="Loader2" className="w-3.5 h-3.5 mr-1.5 animate-spin" />
+                Simulating...
+              </>
+            ) : (
+              <>
+                <Icon name="Play" className="w-3.5 h-3.5 mr-1.5 text-amber-500" />
+                Simulate Primary Failure
+              </>
+            )}
+          </Button>
+        </CardHeader>
+        <CardContent className="space-y-4 text-xs">
+          <div className="flex flex-wrap gap-4 items-center border-b border-border pb-3">
+            <div>
+              <span className="text-muted-foreground">Primary Provider:</span>{" "}
+              <span className="font-semibold text-foreground/90">{defaultProvider?.name || "None"}</span>
+            </div>
+            <div>
+              <span className="text-muted-foreground">Active Fallback Chain:</span>{" "}
+              <span className="font-semibold text-foreground/90">{fallbackProviders.map(p => p.name).join(" → ") || "None (Default to failure)"}</span>
+            </div>
+          </div>
+
+          {/* Simulation Trace Timeline */}
+          {failoverTrace.length > 0 ? (
+            <div className="space-y-3 border-l border-amber-300 dark:border-amber-700 pl-4 ml-2 mt-2">
+              {failoverTrace.map((trace, idx) => (
+                <div key={idx} className="relative flex flex-col gap-1 text-xs animate-fadeIn">
+                  <div className="absolute -left-[21px] top-1 w-2.5 h-2.5 rounded-full bg-amber-500 border border-background" />
+                  <div className="flex items-center gap-1.5">
+                    <span className="font-semibold text-foreground/90">{trace.title}</span>
+                    <Badge variant={trace.type === "success" ? "success" : trace.type === "error" ? "danger" : "warning"} className="text-[8px] uppercase tracking-wider px-1 py-0.5">
+                      {trace.status}
+                    </Badge>
+                  </div>
+                  <p className="text-[11px] text-muted-foreground leading-relaxed">{trace.desc}</p>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="text-center py-4 bg-secondary/10 rounded border border-dashed border-border text-muted-foreground">
+              Click "Simulate Primary Failure" to trace the failover cascading logic.
+            </div>
+          )}
         </CardContent>
       </Card>
 

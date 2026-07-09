@@ -1,9 +1,10 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { Badge, Icon } from "@/components/shared";
 import { useApp } from "@/lib/store";
 import { ProviderManager } from "@/lib/ai/services";
@@ -216,9 +217,76 @@ export function AIModels() {
   const [autoAddFree, setAutoAddFree] = useState(true);
   const [newlyDiscovered, setNewlyDiscovered] = useState<string[]>([]);
 
+  // === BENCHMARK & CALCULATOR STATES ===
+  const [testModel, setTestModel] = useState("");
+  const [benchmarking, setBenchmarking] = useState(false);
+  const [benchmarkResult, setBenchmarkResult] = useState<{ ok: boolean; latencyMs?: number; reply?: string; error?: string } | null>(null);
+  const [estInputTokens, setEstInputTokens] = useState(2500);
+  const [estOutputTokens, setEstOutputTokens] = useState(1000);
+
   const selected = providers.find((p) => p.id === selectedProviderId);
   const catalog = selected ? (MODEL_CATALOG[selected.type] ?? []) : [];
   const enabledModels = selected?.enabledModels ?? [];
+
+  // Sync testModel when selected provider changes
+  useEffect(() => {
+    if (enabledModels.length > 0) {
+      setTestModel(enabledModels[0]);
+    } else {
+      setTestModel("");
+    }
+  }, [selectedProviderId, enabledModels.length]);
+
+  const runBenchmark = async () => {
+    if (!selected || !testModel) return;
+    setBenchmarking(true);
+    setBenchmarkResult(null);
+    try {
+      const start = Date.now();
+      const { callAI } = await import("@/lib/ai");
+      
+      // Temporarily override the provider default model using a shallow patch
+      const originalModel = selected.modelName;
+      selected.modelName = testModel;
+
+      const res = await callAI({
+        systemPrompt: "Respond in exactly one word: 'READY'. Do not write anything else.",
+        userPrompt: "status check",
+        maxTokens: 5,
+        taskCategory: "interactive",
+        providerId: selected.id
+      });
+
+      // Restore original modelName
+      selected.modelName = originalModel;
+
+      const latency = Date.now() - start;
+      setBenchmarkResult({
+        ok: true,
+        latencyMs: latency,
+        reply: res.text.trim()
+      });
+      toast.success(`Speed test complete: ${latency}ms latency.`);
+    } catch (e: any) {
+      setBenchmarkResult({
+        ok: false,
+        error: e?.message || "Connection timed out or invalid API key"
+      });
+      toast.error(`Benchmark failed: ${e?.message || "Verify your API Key"}`);
+    } finally {
+      setBenchmarking(false);
+    }
+  };
+
+  const calculateEstimatedCost = () => {
+    if (!selected || !testModel) return 0;
+    const cat = MODEL_CATALOG[selected.type] || [];
+    const modelInfo = cat.find(m => m.name === testModel);
+    if (!modelInfo) return 0;
+    const inputRate = modelInfo.inputCost ?? 0;
+    const outputRate = modelInfo.outputCost ?? 0;
+    return (estInputTokens * inputRate) + (estOutputTokens * outputRate);
+  };
 
   /** Returns true if a model ID looks like a free-tier model based on naming conventions. */
   const isFreeModel = (id: string) =>
@@ -464,6 +532,121 @@ export function AIModels() {
                   </CardContent>
                 </Card>
               )}
+
+              {/* Real-time AI Playground & Cost Estimator */}
+              <Card className="border-brand/20">
+                <CardHeader>
+                  <CardTitle className="text-base flex items-center gap-2">
+                    <Icon name="Activity" className="w-4 h-4 text-brand" /> Live API Benchmarker & Token Calculator
+                  </CardTitle>
+                  <CardDescription className="text-xs">
+                    Run a real-time connection test to benchmark latency, model speeds, and calculate estimated token costs.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-4 text-xs">
+                  <div className="grid sm:grid-cols-3 gap-3">
+                    <div>
+                      <Label className="text-[10px] text-muted-foreground">Active Provider</Label>
+                      <div className="font-semibold text-sm mt-1 flex items-center gap-1.5">
+                        <Icon name="Cpu" className="w-3.5 h-3.5 text-brand" /> {selected?.name || "None selected"}
+                      </div>
+                    </div>
+                    <div>
+                      <Label htmlFor="benchmark-model" className="text-[10px] text-muted-foreground">Select Model to Test</Label>
+                      <select
+                        id="benchmark-model"
+                        value={testModel}
+                        onChange={(e) => setTestModel(e.target.value)}
+                        className="w-full h-8 px-2 rounded-md border border-input bg-background text-xs mt-1"
+                      >
+                        {enabledModels.map((m) => (
+                          <option key={m} value={m}>{m}</option>
+                        ))}
+                        {enabledModels.length === 0 && <option value="">No models enabled</option>}
+                      </select>
+                    </div>
+                    <div className="flex items-end">
+                      <Button
+                        onClick={runBenchmark}
+                        disabled={benchmarking || !selected || !testModel}
+                        className="w-full h-8 font-semibold"
+                      >
+                        {benchmarking ? (
+                          <>
+                            <Icon name="Loader2" className="w-3.5 h-3.5 mr-1.5 animate-spin" />
+                            Testing Speed...
+                          </>
+                        ) : (
+                          <>
+                            <Icon name="Gauge" className="w-3.5 h-3.5 mr-1.5" />
+                            Run Benchmark Ping
+                          </>
+                        )}
+                      </Button>
+                    </div>
+                  </div>
+
+                  {/* Benchmark results */}
+                  {benchmarkResult && (
+                    <div className={`p-3 rounded-lg border text-xs space-y-1.5 ${benchmarkResult.ok ? "bg-emerald-500/5 border-emerald-500/20" : "bg-red-500/5 border-red-500/20"}`}>
+                      <div className="flex items-center justify-between font-semibold">
+                        <span className="flex items-center gap-1">
+                          <Icon name={benchmarkResult.ok ? "CheckCircle2" : "XCircle"} className={`w-4 h-4 ${benchmarkResult.ok ? "text-emerald-500" : "text-red-500"}`} />
+                          {benchmarkResult.ok ? "Test Succeeded!" : "Test Failed"}
+                        </span>
+                        {benchmarkResult.ok && (
+                          <Badge variant="success">{benchmarkResult.latencyMs} ms</Badge>
+                        )}
+                      </div>
+                      {benchmarkResult.ok ? (
+                        <p className="text-[11px] text-foreground/80 font-mono bg-background/50 p-2 rounded border border-border">
+                          <strong>Reply:</strong> "{benchmarkResult.reply}"
+                        </p>
+                      ) : (
+                        <p className="text-[11px] text-red-600 font-medium">
+                          <strong>Error:</strong> {benchmarkResult.error}
+                        </p>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Cost Estimator */}
+                  <div className="rounded-lg bg-secondary/40 p-3 space-y-3 border border-border/60">
+                    <div className="font-semibold text-xs flex items-center gap-1.5">
+                      <Icon name="Calculator" className="w-3.5 h-3.5 text-brand" />
+                      <span>Estimated Token Cost Calculator</span>
+                    </div>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <Label htmlFor="input-tokens" className="text-[10px] text-muted-foreground">Estimated Input Tokens</Label>
+                        <Input
+                          id="input-tokens"
+                          type="number"
+                          value={estInputTokens}
+                          onChange={(e) => setEstInputTokens(parseInt(e.target.value) || 0)}
+                          className="h-8 text-xs mt-1"
+                        />
+                      </div>
+                      <div>
+                        <Label htmlFor="output-tokens" className="text-[10px] text-muted-foreground">Estimated Output Tokens</Label>
+                        <Input
+                          id="output-tokens"
+                          type="number"
+                          value={estOutputTokens}
+                          onChange={(e) => setEstOutputTokens(parseInt(e.target.value) || 0)}
+                          className="h-8 text-xs mt-1"
+                        />
+                      </div>
+                    </div>
+                    <div className="pt-2 border-t border-border flex justify-between items-center text-xs">
+                      <span className="text-muted-foreground">Calculated Cost for {testModel || "selected model"}:</span>
+                      <span className="font-bold text-sm text-brand">
+                        ${calculateEstimatedCost().toFixed(6)}
+                      </span>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
             </>
           )}
         </div>

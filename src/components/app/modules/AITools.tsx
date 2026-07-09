@@ -21,6 +21,9 @@ const TOOLS = [
   { id: "salary", name: "Salary Negotiator", icon: "DollarSign", desc: "Draft a professional email to negotiate salary offers.", color: "#10B981" },
   { id: "interview", name: "Interview Q&A Builder", icon: "MessagesSquare", desc: "Generate mock interview Q&As tailored to your resume.", color: "#8B5CF6" },
   { id: "cover_letter_outline", name: "Cover Letter Outline", icon: "FileText", desc: "Create a structured outline for your cover letter.", color: "#EC4899" },
+  { id: "roast", name: "Resume Roaster (Critic)", icon: "Flame", desc: "Roast your resume with brutal, constructive feedback.", color: "#DC2626" },
+  { id: "star_transformer", name: "STAR Bullet Transformer", icon: "Wand2", desc: "Convert weak bullets into metric-driven STAR bullets.", color: "#10B981" },
+  { id: "cold_pitch", name: "Cold Outreach Pitcher", icon: "Mail", desc: "Draft personalized cold emails to recruiters.", color: "#8B5CF6" },
 ];
 
 export function AITools() {
@@ -64,6 +67,15 @@ export function AITools() {
         user = `Generate 5 custom behavioral interview questions (STAR method) and recommended answers for this resume:\n${input || JSON.stringify(resume ?? {})}`;
       } else if (active === "cover_letter_outline") {
         user = `Create a structured cover letter outline based on this target role/description:\n${input}`;
+      } else if (active === "roast") {
+        sys = "You are a brutally honest, highly critical, yet constructive resume auditor. Roast this resume with sharp humor and direct remarks on formatting, clichés, metrics, and experience structure. Give 5 bullet points of roasting and then provide a fully rewritten better version.";
+        user = `Roast this resume and rewrite it to be 10x better:\n${input || JSON.stringify(resume ?? {})}`;
+      } else if (active === "star_transformer") {
+        sys = "You are an elite interview prep coach. Take a candidate's weak resume bullet point and transform it into the high-impact STAR method (Situation, Task, Action, Result) with clear metrics.";
+        user = `Transform this weak achievement bullet point into a strong STAR bullet point (include metrics):\n${input}`;
+      } else if (active === "cold_pitch") {
+        sys = "You are an expert recruiter outreach strategist. Write a highly personalized, brief, and professional cold email pitch or LinkedIn message to a hiring manager or recruiter.";
+        user = `Write a personalized cold email pitch based on this resume and target role details:\n${input || JSON.stringify(resume ?? {})}`;
       }
       const result = await callAI({ systemPrompt: sys, userPrompt: user, maxTokens: 1500, taskCategory: "document" });
       setOutput(result.text);
@@ -81,7 +93,7 @@ export function AITools() {
     <div className="space-y-6">
       <div>
         <h1 className="font-display text-2xl font-bold flex items-center gap-2"><Icon name="Sparkles" className="w-6 h-6 text-brand" /> AI Tools</h1>
-        <p className="text-sm text-muted-foreground mt-1">Eleven AI-powered generators. Free, unlimited. Pick a tool and start writing.</p>
+        <p className="text-sm text-muted-foreground mt-1">Fourteen AI-powered generators. Free, unlimited. Pick a tool and start writing.</p>
       </div>
 
       <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-3">
