@@ -369,7 +369,7 @@ export async function runBulletOnlyOptimizer(
     );
   }
 
-  const useParallel = process.env.NEXT_PUBLIC_USE_PARALLEL_PIPELINE !== "false"; // default: true
+  const useParallel = process.env.NEXT_PUBLIC_USE_PARALLEL_PIPELINE === "true"; // default: false
 
   if (useParallel) {
     console.info("[BulletOnlyOptimizer] Running in parallel subagent mode.");
