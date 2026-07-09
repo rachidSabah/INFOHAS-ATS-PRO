@@ -618,6 +618,7 @@ function parseDbProvider(p: any): any {
   return {
     id: p.id, name: p.name, type: p.provider_type,
     apiUrl: p.base_url, baseUrl: p.base_url, apiKey: p.api_key_encrypted,
+    alternateApiKeys: safeJson(p.alternate_api_keys_json, []),
     headersJson: p.headers_json, parametersJson: p.parameters_json,
     requestTemplate: p.request_template, responsePath: p.response_path,
     streamingEnabled: p.streaming_enabled === 1,

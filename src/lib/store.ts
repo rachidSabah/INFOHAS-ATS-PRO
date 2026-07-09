@@ -28,6 +28,7 @@ import { BRAND, getRoleForEmail } from "./brand";
 import { hashPassword, verifyPassword, SUPER_ADMIN_SEED, canSignIn, canAccessApp } from "./auth-utils";
 import type { UserStatus as US } from "./types";
 import { setUserId, clearUserId, api as cloudApi, cloudApiSafe } from "./cloud-api";
+import { loadUserProfile, saveUserProfile } from "./agents/memory-agent";
 
 // Destructure cloud API methods so the existing cloudApiSafe(createResume)(...) call sites
 // in this file resolve to the real functions. Each of these is an async function that hits
@@ -918,6 +919,56 @@ export const useApp = create<AppState>()(
         }
       },
       updateResume: (id, patch) => {
+        // === Learn from manual overrides (User Memory) ===
+        try {
+          const currentResume = get().resumes.find((r) => r.id === id);
+          if (currentResume) {
+            // Find changes in experience bullets
+            if (patch.experience) {
+              const profile = loadUserProfile();
+              let profileChanged = false;
+
+              for (const patchedExp of patch.experience) {
+                const currentExp = currentResume.experience.find(e => e.id === patchedExp.id);
+                if (currentExp && patchedExp.bullets && currentExp.bullets) {
+                  // Compare bullets
+                  const minLen = Math.min(patchedExp.bullets.length, currentExp.bullets.length);
+                  for (let i = 0; i < minLen; i++) {
+                    const original = currentExp.bullets[i]?.trim();
+                    const edited = patchedExp.bullets[i]?.trim();
+                    if (original && edited && original !== edited) {
+                      // Skip if this edit is already logged or too short
+                      if (original.length > 10 && edited.length > 10) {
+                        const exists = (profile.manualOverrides || []).some((o: any) => o.original === original);
+                        if (!exists) {
+                          if (!profile.manualOverrides) profile.manualOverrides = [];
+                          profile.manualOverrides.push({
+                            original,
+                            edited,
+                            timestamp: new Date().toISOString()
+                          });
+                          // Cap at 20 overrides
+                          if (profile.manualOverrides.length > 20) {
+                            profile.manualOverrides.shift();
+                          }
+                          profileChanged = true;
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+
+              if (profileChanged) {
+                saveUserProfile(profile);
+                console.log(`[MemoryAgent] Saved user writing style preference from manual override.`);
+              }
+            }
+          }
+        } catch (e) {
+          console.warn("[store] Failed to learn from user edits:", e);
+        }
+
         set((s) => ({
           resumes: s.resumes.map((r) =>
             r.id === id ? { ...r, ...patch, updatedAt: new Date().toISOString() } : r

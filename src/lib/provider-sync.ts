@@ -268,7 +268,7 @@ export function syncProviderConfigs(d1Providers: AIProvider[]): {
  */
 export function calculateProviderHash(providers: AIProvider[]): string {
   const parts = providers
-    .map((p) => `${p.id}|${p.modelName || ""}|${(p.apiKey || "").slice(0, 8)}|${p.isActive ? 1 : 0}`)
+    .map((p) => `${p.id}|${p.modelName || ""}|${(p.apiKey || "").slice(0, 8)}|${p.isActive ? 1 : 0}|${(p.alternateApiKeys || []).join(",")}`)
     .sort()
     .join("||");
   let hash = 0;

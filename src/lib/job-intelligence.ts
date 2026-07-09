@@ -16,6 +16,7 @@
 import { callAI, extractJSON } from "./ai";
 import { PIPELINE_STEP_CALL_TIMEOUT_MS } from "./pipeline-watchdog";
 import type { JobDescription } from "./types";
+import { prefetchCache } from "./prefetch-cache";
 
 export interface JobIntelligence {
   // Core required skills (the MUST-HAVES)
@@ -68,6 +69,12 @@ export interface JobIntelligence {
  * Uses the configured AI provider (via callAI).
  */
 export async function analyzeJobIntelligence(jd: JobDescription): Promise<JobIntelligence> {
+  const cached = prefetchCache.getJobIntelligence(jd.id);
+  if (cached) {
+    console.info(`[PrefetchCache] Hit for Job Intelligence: ${jd.id}`);
+    return cached;
+  }
+
   const jdText = jd.rawText || [
     `Title: ${jd.title}`,
     jd.company ? `Company: ${jd.company}` : "",
@@ -134,6 +141,7 @@ Return ONLY valid JSON:
       maxTokens: 3000,
       temperature: 0.3,
       taskCategory: "document",
+      agentType: "simple",
       // Free-tier models (OpenCode free, Nvidia build-free) can take 40-80s
       // even on this smaller prompt. The default 60s was too tight.
       timeoutMs: PIPELINE_STEP_CALL_TIMEOUT_MS,
@@ -148,7 +156,9 @@ Return ONLY valid JSON:
 
     const data = extractJSON<JobIntelligence>(result.text);
 
-    return normalizeJobIntelligence(data, jd);
+    const normalized = normalizeJobIntelligence(data, jd);
+    prefetchCache.setJobIntelligence(jd.id, normalized);
+    return normalized;
   } catch (e: any) {
     console.warn("[JobIntelligence] Analysis failed, using fallback:", e?.message);
     return fallbackJobIntelligence(jd);

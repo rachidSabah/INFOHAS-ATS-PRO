@@ -74,6 +74,7 @@ export function ProviderEditor({ provider, onClose, onSave }: {
     clientId: provider?.clientId ?? "",
     redirectUri: provider?.redirectUri ?? "",
     enabledModels: provider?.enabledModels?.join(", ") ?? "",
+    alternateApiKeys: provider?.alternateApiKeys ?? [],
   }));
 
   const cfg = PROVIDER_TYPES.find((t) => t.type === form.type);

@@ -182,6 +182,20 @@ export function JDScraper() {
         createdAt: new Date().toISOString(),
       };
       addJD(jd);
+      // Background Speculative Pre-Fetching
+      try {
+        const activeResumeId = useApp.getState().activeResumeId;
+        const activeResume = useApp.getState().resumes.find(r => r.id === activeResumeId);
+        if (activeResume) {
+          import("@/lib/agents/prefetch").then(({ startSpeculativePrefetch }) => {
+            startSpeculativePrefetch(activeResume, jd);
+          }).catch(err => {
+            console.warn("[Prefetch] Dynamic import failed:", err);
+          });
+        }
+      } catch (e) {
+        console.warn("[Prefetch] Failed to trigger pre-fetch:", e);
+      }
       log({ actor: "you", action: "JD scraped & extracted", category: "ai", details: `${jd.title} at ${jd.company ?? "—"}`, severity: "info" });
       setLogLines((l) => [...l, `✓ Extracted ${jd.keywords.length} keywords, ${jd.requiredSkills.length} required skills.`, `Saved to library via ${result.provider}.`]);
       toast.success(`Extracted: ${jd.title}`);

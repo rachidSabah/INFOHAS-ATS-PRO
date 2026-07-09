@@ -268,6 +268,8 @@ app.get("/api/health/schema", async (c) => {
       "application_id", "client_id", "redirect_uri", "enabled_models_json",
       // From migration 0004
       "provider_category", "health_last_success_at", "health_last_failure_at",
+      // From migration 0009
+      "alternate_api_keys_json",
     ];
 
     const missing = requiredColumns.filter((col) => !columns.includes(col));
@@ -636,7 +638,31 @@ app.get("/api/providers", async (c) => {
   if (cached) return cached;
 
   const { results } = await c.env.DB.prepare("SELECT * FROM ai_providers ORDER BY priority ASC").all();
-  const response = c.json({ providers: results || [] });
+  
+  const providers: any[] = [];
+  if (results) {
+    for (const p of results as any[]) {
+      const decProvider = { ...p };
+      if (p.api_key_encrypted) {
+        decProvider.api_key_encrypted = await decryptApiKey(p.api_key_encrypted, c.env);
+      }
+      if (p.alternate_api_keys_json) {
+        try {
+          const keys = JSON.parse(p.alternate_api_keys_json) as string[];
+          const decryptedKeys: string[] = [];
+          for (const k of keys) {
+            decryptedKeys.push(await decryptApiKey(k, c.env));
+          }
+          decProvider.alternate_api_keys_json = JSON.stringify(decryptedKeys);
+        } catch (e) {
+          console.warn("[workers/api] Failed to decrypt alternate API keys:", e);
+        }
+      }
+      providers.push(decProvider);
+    }
+  }
+
+  const response = c.json({ providers });
   response.headers.set("X-Cache-Status", "MISS");
   await setCached(c, fullUrl, response.clone());
   return response;
@@ -679,10 +705,22 @@ app.post("/api/providers", async (c) => {
     // Uses AES-GCM if ENCRYPTION_KEY is set, otherwise stores plaintext (DEV ONLY)
     const apiKeyToStore = body.apiKey ? await encryptApiKey(String(body.apiKey), c.env) : null;
 
+    // Encrypt alternate API keys if present
+    let alternateKeysStore: string | null = null;
+    if (body.alternateApiKeys && Array.isArray(body.alternateApiKeys)) {
+      const encryptedAltKeys: string[] = [];
+      for (const k of body.alternateApiKeys) {
+        if (k && typeof k === "string" && k.trim()) {
+          encryptedAltKeys.push(await encryptApiKey(k.trim(), c.env));
+        }
+      }
+      alternateKeysStore = JSON.stringify(encryptedAltKeys);
+    }
+
     const result = await c.env.DB.prepare(
-      "INSERT INTO ai_providers (id, name, provider_type, base_url, api_key_encrypted, headers_json, parameters_json, model_name, priority, is_active, is_default, is_fallback, allowed_for_regular_users, timeout, max_tokens, temperature, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+      "INSERT INTO ai_providers (id, name, provider_type, base_url, api_key_encrypted, alternate_api_keys_json, headers_json, parameters_json, model_name, priority, is_active, is_default, is_fallback, allowed_for_regular_users, timeout, max_tokens, temperature, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
     ).bind(
-      id, body.name.trim(), body.type, body.baseUrl || null, apiKeyToStore,
+      id, body.name.trim(), body.type, body.baseUrl || null, apiKeyToStore, alternateKeysStore,
       body.headersJson || null, body.parametersJson || null,
       body.modelName || null, priority, body.isActive ? 1 : 0, body.isDefault ? 1 : 0, body.isFallback ? 1 : 0,
       body.allowedForRegularUsers ? 1 : 0, timeout, maxTokens, temperature,
@@ -746,6 +784,7 @@ app.put("/api/providers/:id", async (c) => {
     // Map of JS field name -> DB column name
     const fieldToColumn: Record<string, string> = {
       name: "name", baseUrl: "base_url", apiKey: "api_key_encrypted",
+      alternateApiKeys: "alternate_api_keys_json",
       modelName: "model_name", priority: "priority", isActive: "is_active",
       isDefault: "is_default", isFallback: "is_fallback",
       allowedForRegularUsers: "allowed_for_regular_users", timeout: "timeout",
@@ -767,6 +806,16 @@ app.put("/api/providers/:id", async (c) => {
         if (k === "apiKey") {
           // Encrypt API key before storing
           values.push(val ? await encryptApiKey(String(val), c.env) : null);
+        } else if (k === "alternateApiKeys") {
+          const encryptedAltKeys: string[] = [];
+          if (Array.isArray(val)) {
+            for (const ak of val) {
+              if (ak && typeof ak === "string" && ak.trim()) {
+                encryptedAltKeys.push(await encryptApiKey(ak.trim(), c.env));
+              }
+            }
+          }
+          values.push(JSON.stringify(encryptedAltKeys));
         } else if (k === "enabledModels") {
           values.push(JSON.stringify(val));
         } else if (typeof val === "boolean") {

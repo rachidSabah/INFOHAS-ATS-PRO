@@ -89,6 +89,7 @@ export async function runLockedPipeline(
   directiveConfig?: OptimizerDirectiveConfig | null,
   optimizationPolicy?: string | null,
   feedback?: string,
+  baselineResume?: ResumeData, // Added for Localized Diff-Only Processing
 ): Promise<LockedPipelineResult> {
   const agentDirectives = directiveConfig?.agentDirectives;
   const warnings: string[] = [];
@@ -210,7 +211,7 @@ export async function runLockedPipeline(
       // Step 2: Run Bullet-Only Optimizer (supports excludeProviderIds)
       // ========================================================================
       const optimizerInput = buildOptimizerInput(idReadyResume, jd, intelligenceContext, directiveConfig, optimizationPolicy, feedback);
-      const optimizerResult = await runBulletOnlyOptimizer(idReadyResume, jd, intelligenceContext, directiveConfig, excludeProviderIds, optimizationPolicy, feedback);
+      const optimizerResult = await runBulletOnlyOptimizer(idReadyResume, jd, intelligenceContext, directiveConfig, excludeProviderIds, optimizationPolicy, feedback, baselineResume);
       warnings.push(...optimizerResult.warnings);
 
       console.info(`[Locked Pipeline] Attempt ${attempts}: Optimizer returned: ${optimizerResult.output.experiences?.length ?? 0} experiences, ${optimizerResult.output.skills?.length ?? 0} skills`);

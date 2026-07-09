@@ -31,6 +31,9 @@ export interface UserProfile {
   optimizationHistory: OptimizationEntry[];
   interviewHistory: InterviewEntry[];
 
+  // === Writing Style Preferences ===
+  manualOverrides?: { original: string; edited: string; timestamp: string }[];
+
   // === Metadata ===
   updatedAt: string;
 }
@@ -102,6 +105,7 @@ export function createEmptyProfile(): UserProfile {
     applicationHistory: [],
     optimizationHistory: [],
     interviewHistory: [],
+    manualOverrides: [],
     updatedAt: new Date().toISOString(),
   };
 }

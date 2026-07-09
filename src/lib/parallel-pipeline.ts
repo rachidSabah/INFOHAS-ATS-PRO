@@ -32,6 +32,7 @@ export interface ParallelOptimizerInput {
   jd: JobDescription;
   directiveConfig?: OptimizerDirectiveConfig | null;
   optimizationPolicy?: string | null;
+  baselineResume?: ResumeData; // Added for Localized Diff-Only Processing
 }
 
 export interface ParallelOptimizerResult {
@@ -90,10 +91,50 @@ export async function runParallelOptimizer(
   // ========================================================================
   const startTime = Date.now();
 
+  // Localized Diff-Only Processing (Token Efficiency)
+  const baseline = input.baselineResume;
+  let summaryModified = true;
+  let skillsModified = true;
+  let targetExperienceIds: string[] | undefined = undefined;
+
+  if (baseline) {
+    summaryModified = resume.summary !== baseline.summary || !resume.summary;
+    skillsModified = JSON.stringify(resume.skills) !== JSON.stringify(baseline.skills) || resume.skills.length === 0;
+    
+    // Find modified experiences
+    const modifiedIds: string[] = [];
+    for (const curr of resume.experience) {
+      const base = baseline.experience.find(b => b.id === curr.id);
+      if (!base) {
+        modifiedIds.push(curr.id);
+      } else {
+        const currBullets = (curr.bullets || []).join("\n");
+        const baseBullets = (base.bullets || []).join("\n");
+        if (currBullets !== baseBullets || curr.title !== base.title) {
+          modifiedIds.push(curr.id);
+        }
+      }
+    }
+    targetExperienceIds = modifiedIds;
+    console.info(`[Diff-Only Processing] summaryModified=${summaryModified}, skillsModified=${skillsModified}, targetExperienceIds=[${targetExperienceIds.join(", ")}]`);
+  }
+
+  const summaryPromise = summaryModified
+    ? runSummaryAgent(resume, jd, jdKeywords, directiveConfig, optimizationPolicy)
+    : Promise.resolve({ summary: resume.summary || "", headline: resume.headline || "", provider: "cache", rawResponse: "" });
+
+  const skillsPromise = skillsModified
+    ? runSkillsAgent(resume, jd, jdKeywords, directiveConfig, optimizationPolicy)
+    : Promise.resolve({ skills: resume.skills, provider: "cache", rawResponse: "" });
+
+  const experiencePromise = targetExperienceIds !== undefined && targetExperienceIds.length === 0
+    ? Promise.resolve({ experiences: resume.experience.map(e => ({ id: e.id, bullets: e.bullets })), provider: "cache", rawResponse: "" })
+    : runExperienceAgent(resume, jd, jdKeywords, directiveConfig, optimizationPolicy, undefined, targetExperienceIds);
+
   const [summaryResult, skillsResult, experienceResult] = await Promise.all([
-    runSummaryAgent(resume, jd, jdKeywords, directiveConfig, optimizationPolicy),
-    runSkillsAgent(resume, jd, jdKeywords, directiveConfig, optimizationPolicy),
-    runExperienceAgent(resume, jd, jdKeywords, directiveConfig, optimizationPolicy),
+    summaryPromise,
+    skillsPromise,
+    experiencePromise,
   ]);
 
   const parallelDuration = Date.now() - startTime;
@@ -411,12 +452,26 @@ export async function runExperienceAgent(
   directiveConfig?: OptimizerDirectiveConfig | null,
   optimizationPolicy?: string | null,
   excludeProviderIds?: string[],
+  targetExperienceIds?: string[], // added for Localized Diff-Only Processing
 ): Promise<{ experiences: { id: string; bullets: string[] }[]; provider: string; rawResponse: string }> {
   const startTime = Date.now();
 
+  // Filter experiences to optimize if targetExperienceIds is provided
+  const experiencesToOptimize = targetExperienceIds && targetExperienceIds.length > 0
+    ? resume.experience.filter(e => targetExperienceIds.includes(e.id))
+    : resume.experience;
+
+  if (experiencesToOptimize.length === 0) {
+    return {
+      experiences: resume.experience.map(e => ({ id: e.id, bullets: e.bullets })),
+      provider: "cache",
+      rawResponse: "",
+    };
+  }
+
   // Dynamically assemble experience context: Experience Agent only needs experience details
   const experienceContext = JSON.stringify({
-    experience: resume.experience.map((e) => ({
+    experience: experiencesToOptimize.map((e) => ({
       id: e.id,
       title: e.title,
       company: e.company,

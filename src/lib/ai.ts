@@ -352,7 +352,7 @@ export async function selectProvider(excludeIds?: string[]): Promise<any> {
  * Falls back to selectProvider() if no tier-matching provider found.
  */
 export async function selectProviderForAgent(
-  agentType: "optimizer" | "supervisor" | "guardian" | "assembler" | "emergency",
+  agentType: "optimizer" | "supervisor" | "guardian" | "assembler" | "emergency" | "simple" | "reasoning",
   excludeIds?: string[]
 ): Promise<any> {
   const state: any = useApp.getState();
@@ -376,18 +376,30 @@ export async function selectProviderForAgent(
     if (emergency && isAvailableForSelection(emergency, excludeIds)) return emergency;
   }
 
-  // Map agent type to max allowed tier
+  // Map agent type to max allowed tier or preferences
   const tierMax: Record<string, number> = {
     optimizer: 2,
     supervisor: 3,
     guardian: 3,
     assembler: 3,
+    reasoning: 2, // Prefer Tier 1 & 2 for complex reasoning tasks
+    simple: 4,    // Allow up to Tier 4
   };
-  const maxTier = tierMax[agentType] ?? 3;
 
-  const eligible = providers
-    .filter((p: any) => isAvailableForSelection(p, excludeIds) && getProviderTier(p) <= maxTier)
-    .sort((a: any, b: any) => (a.priority ?? 50) - (b.priority ?? 50));
+  let eligible = providers.filter((p: any) => isAvailableForSelection(p, excludeIds));
+
+  if (agentType === "simple") {
+    // For simple tasks, prioritize Tier 3 & 4 (faster, cheaper models)
+    const cheapEligible = eligible.filter((p: any) => getProviderTier(p) >= 3);
+    if (cheapEligible.length > 0) {
+      eligible = cheapEligible;
+    }
+  } else {
+    const maxTier = tierMax[agentType] ?? 3;
+    eligible = eligible.filter((p: any) => getProviderTier(p) <= maxTier);
+  }
+
+  eligible = eligible.sort((a: any, b: any) => (a.priority ?? 50) - (b.priority ?? 50));
 
   if (eligible.length > 0) return eligible[0];
 
@@ -626,7 +638,7 @@ export interface AICallOptions {
   excludeProviderIds?: string[];
   enableRetries?: boolean;
   enableProviderSwitch?: boolean;
-  agentType?: "optimizer" | "supervisor" | "guardian" | "assembler" | "emergency";
+  agentType?: "optimizer" | "supervisor" | "guardian" | "assembler" | "emergency" | "simple" | "reasoning";
   providerId?: string;
 }
 
@@ -780,7 +792,7 @@ export function extractJSON<T = any>(raw: string): T {
  *
  * Returns the extracted text from the response, or throws on error.
  */
-async function callUserProvider(
+async function callUserProviderSingleAttempt(
   provider: any,
   opts: AICallOptions,
 ): Promise<string> {
@@ -1083,6 +1095,110 @@ async function callUserProvider(
   return text;
 }
 
+async function callUserProvider(
+  provider: any,
+  opts: AICallOptions,
+): Promise<string> {
+  try {
+    const text = await callUserProviderSingleAttempt(provider, opts);
+    if (text && text.trim().length > 0) return text;
+  } catch (e: any) {
+    const eMsg = e?.message || String(e);
+    const isRateOrQuotaOrAuthError = 
+      e?.statusCode === 429 || 
+      e?.statusCode === 401 || 
+      e?.statusCode === 403 ||
+      /429/.test(eMsg) || 
+      /rate.?limit/i.test(eMsg) || 
+      /quota/i.test(eMsg) || 
+      /billing/i.test(eMsg) || 
+      /limit/i.test(eMsg) || 
+      /auth/i.test(eMsg) || 
+      /key/i.test(eMsg) || 
+      /FreeUsageLimitError/i.test(eMsg);
+
+    if (isRateOrQuotaOrAuthError) {
+      // 1. Try alternate API keys
+      const alternateKeys = provider.alternateApiKeys as string[] | undefined;
+      if (alternateKeys && alternateKeys.length > 0) {
+        console.log(`[PROVIDER] Rotating API keys for ${provider.name} due to rate-limit/auth error...`);
+        for (let ki = 0; ki < alternateKeys.length; ki++) {
+          const altKey = alternateKeys[ki];
+          if (!altKey || altKey.trim() === "") continue;
+          console.log(`[PROVIDER] Trying alternate API key #${ki + 1} for ${provider.name}...`);
+          try {
+            const altProvider = { ...provider, apiKey: altKey };
+            const text = await callUserProviderSingleAttempt(altProvider, opts);
+            if (text && text.trim().length > 0) {
+              console.log(`[PROVIDER] Alternate key #${ki + 1} succeeded for ${provider.name}.`);
+              return text;
+            }
+          } catch (altErr: any) {
+            console.warn(`[PROVIDER] Alternate key #${ki + 1} failed for ${provider.name}: ${altErr?.message || altErr}`);
+          }
+        }
+      }
+
+      // 2. Try model rotation if alternate keys failed or were not present
+      const enabledModels = provider.enabledModels as string[] | undefined;
+      const currentModel = provider.modelName || provider.model || "";
+      if (enabledModels && enabledModels.length > 1) {
+        const otherModels = enabledModels.filter((m: string) => m !== currentModel);
+        for (const altModel of otherModels) {
+          console.log(`[PROVIDER] Rotating model to "${altModel}" for ${provider.name}...`);
+          try {
+            const altProvider = { ...provider, modelName: altModel, model: altModel };
+            try {
+              const text = await callUserProviderSingleAttempt(altProvider, opts);
+              if (text && text.trim().length > 0) {
+                console.log(`[PROVIDER] Model rotation succeeded: "${altModel}" for ${provider.name}.`);
+                if (provider.id) {
+                  try {
+                    const { useApp: _useApp } = await import("./store");
+                    _useApp.getState().updateProvider(provider.id, { modelName: altModel });
+                  } catch (se) {
+                    console.warn("[PROVIDER] Failed to update provider model in store:", se);
+                  }
+                }
+                return text;
+              }
+            } catch (modelErr: any) {
+              // Try alternate keys for this model too
+              if (alternateKeys && alternateKeys.length > 0) {
+                for (let ki = 0; ki < alternateKeys.length; ki++) {
+                  const altKey = alternateKeys[ki];
+                  if (!altKey || altKey.trim() === "") continue;
+                  try {
+                    const altProviderWithKey = { ...altProvider, apiKey: altKey };
+                    const text = await callUserProviderSingleAttempt(altProviderWithKey, opts);
+                    if (text && text.trim().length > 0) {
+                      console.log(`[PROVIDER] Model rotation + alternate key #${ki + 1} succeeded: "${altModel}" for ${provider.name}.`);
+                      if (provider.id) {
+                        try {
+                          const { useApp: _useApp } = await import("./store");
+                          _useApp.getState().updateProvider(provider.id, { modelName: altModel });
+                        } catch (se) {
+                          console.warn("[PROVIDER] Failed to update provider model in store:", se);
+                        }
+                      }
+                      return text;
+                    }
+                  } catch {}
+                }
+              }
+              throw modelErr;
+            }
+          } catch (modelErr: any) {
+            console.warn(`[PROVIDER] Model "${altModel}" failed for ${provider.name}: ${modelErr?.message || modelErr}`);
+          }
+        }
+      }
+    }
+    throw e;
+  }
+  throw new Error("Provider returned an empty response");
+}
+
 /**
  * Main AI entrypoint. Tries user-default-provider → Puter → server (z-ai) → local fallback.
  */
@@ -1294,97 +1410,26 @@ export async function callAI(opts: AICallOptions): Promise<AICallResult> {
       };
     } catch (e: any) {
       const eMsg = e?.message || String(e);
-      if (e?.statusCode === 429 || /429/.test(eMsg) || /rate.?limit/i.test(eMsg) || /FreeUsageLimitError/i.test(eMsg)) {
+      const isRateOrQuotaOrAuthError = 
+        e?.statusCode === 429 || 
+        e?.statusCode === 401 || 
+        e?.statusCode === 403 ||
+        /429/.test(eMsg) || 
+        /rate.?limit/i.test(eMsg) || 
+        /quota/i.test(eMsg) || 
+        /billing/i.test(eMsg) || 
+        /limit/i.test(eMsg) || 
+        /auth/i.test(eMsg) || 
+        /key/i.test(eMsg) || 
+        /FreeUsageLimitError/i.test(eMsg);
+
+      if (isRateOrQuotaOrAuthError) {
         circuitBreakerFailure(primaryCooldownId, "rate_limit");
-        console.log("[PROVIDER]\nPrimary provider returned 429.");
-        
-        // Try alternate API keys before marking as rate-limited
-        const alternateKeys = (provider as any).alternateApiKeys as string[] | undefined;
-        if (alternateKeys && alternateKeys.length > 0) {
-          let altSuccess = false;
-          for (let ki = 0; ki < alternateKeys.length; ki++) {
-            const altKey = alternateKeys[ki];
-            if (!altKey || altKey.trim() === "") continue;
-            console.log(`[PROVIDER] Trying alternate API key #${ki + 1} for ${provider.name}...`);
-            try {
-              const altProvider = { ...provider, apiKey: altKey };
-              const text = await withTimeout(
-                callUserProvider(altProvider, finalOpts),
-                callTimeoutMs,
-                `${provider.name}.generate (alt key #${ki + 1})`
-              );
-              assert(text !== "", "Provider response is empty");
-              if (text && text.length > 0) {
-                console.log(`[PROVIDER] Alternate key #${ki + 1} succeeded for ${provider.name}.`);
-                altSuccess = true;
-                return {
-                  text,
-                  provider: provider.name,
-                  latencyMs: Math.round(performance.now() - t0),
-                  tokensEstimate: estTokens(finalOpts.userPrompt + (finalOpts.systemPrompt ?? "")),
-                };
-              }
-            } catch (altErr: any) {
-              const altMsg = altErr?.message || String(altErr);
-              if (altErr?.statusCode === 429 || /429/.test(altMsg) || /rate.?limit/i.test(altMsg)) {
-                console.warn(`[PROVIDER] Alternate key #${ki + 1} also rate-limited for ${provider.name}.`);
-              } else {
-                console.warn(`[PROVIDER] Alternate key #${ki + 1} failed for ${provider.name}: ${altMsg}`);
-              }
-            }
-          }
-          if (!altSuccess) {
-            console.warn(`[PROVIDER] All ${alternateKeys.length} alternate keys exhausted for ${provider.name}. Marking as rate-limited.`);
-          }
+        if (e?.statusCode === 401 || /401/.test(eMsg) || /billing/i.test(eMsg) || /payment/i.test(eMsg) || /CreditsError/i.test(eMsg)) {
+          markProvider401Cooldown(primaryCooldownId);
+        } else {
+          markProvider429Cooldown(primaryCooldownId);
         }
-
-        // ── Model rotation: try other enabledModels on 429 before giving up ──
-        // Useful for providers like OpenCode Zen where one free model is overloaded
-        // but others on the same key still work.
-        const enabledModels = (provider as any).enabledModels as string[] | undefined;
-        const currentModel = (provider as any).modelName || (provider as any).model || "";
-        if (enabledModels && enabledModels.length > 1) {
-          const otherModels = enabledModels.filter((m: string) => m !== currentModel);
-          for (const altModel of otherModels) {
-            console.log(`[PROVIDER] 429 on model "${currentModel}" — trying model "${altModel}" for ${provider.name}...`);
-            try {
-              const altProvider = { ...provider, modelName: altModel, model: altModel };
-              const text = await withTimeout(
-                callUserProvider(altProvider, finalOpts),
-                callTimeoutMs,
-                `${provider.name}.generate (model ${altModel})`
-              );
-              if (text && text.length > 0) {
-                console.log(`[PROVIDER] Model rotation succeeded: "${altModel}" for ${provider.name}.`);
-                // Update the store's modelName so next call uses this model directly
-                try {
-                  const { useApp: _useApp } = await import("./store");
-                  _useApp.getState().updateProvider(provider.id, { modelName: altModel });
-                } catch {}
-                circuitBreakerSuccess(primaryCooldownId, Math.round(performance.now() - t0));
-                return {
-                  text,
-                  provider: `${provider.name} (${altModel})`,
-                  latencyMs: Math.round(performance.now() - t0),
-                  tokensEstimate: estTokens(finalOpts.userPrompt + (finalOpts.systemPrompt ?? "")),
-                };
-              }
-            } catch (modelErr: any) {
-              const modelErrMsg = modelErr?.message || String(modelErr);
-              if (/429/.test(modelErrMsg) || /rate.?limit/i.test(modelErrMsg)) {
-                console.warn(`[PROVIDER] Model "${altModel}" also rate-limited for ${provider.name}.`);
-              } else {
-                console.warn(`[PROVIDER] Model "${altModel}" failed for ${provider.name}: ${modelErrMsg}`);
-              }
-            }
-          }
-          console.warn(`[PROVIDER] All ${enabledModels.length} models rate-limited for ${provider.name}. Marking provider on cooldown.`);
-        }
-
-        markProvider429Cooldown(primaryCooldownId);
-      } else if (e?.statusCode === 401 || /401/.test(eMsg) || /billing/i.test(eMsg) || /payment/i.test(eMsg) || /CreditsError/i.test(eMsg)) {
-        circuitBreakerFailure(primaryCooldownId, "auth");
-        markProvider401Cooldown(primaryCooldownId);
       } else if (isTimeoutError(e)) {
         circuitBreakerFailure(primaryCooldownId, "timeout");
         markProviderTimeoutCooldown(primaryCooldownId);

@@ -475,6 +475,8 @@ export interface PipelineInput {
   providerId?: string;
   /** Optional: real-time progress callback. Fired after each step completes. */
   onProgress?: (progress: PipelineProgress) => void;
+  /** Optional: baseline resume for diff-only processing */
+  baselineResume?: ResumeData;
 }
 
 export interface PipelineProgress {
@@ -636,7 +638,7 @@ export async function runOptimizationPipeline(input: PipelineInput): Promise<Pip
  * the 120s timeout and watchdog lifecycle management.
  */
 async function _runOptimizationPipelineInner(input: PipelineInput, watchdog: OptimizationWatchdog): Promise<PipelineResult> {
-  const { resume, jd, userDirectives, aviationMode, checkExport = false, enableReflection = true, deepAgenticMode = false } = input;
+  const { resume, jd, userDirectives, aviationMode, checkExport = false, enableReflection = true, deepAgenticMode = false, baselineResume } = input;
 
   // ============================================================
   // Load Optimizer Directive — Single Source of Truth
@@ -977,7 +979,7 @@ ${jobMemory.industry}`);
             log("Resume Optimizer", "Parallel pipeline mode — running summary, skills, and experience agents concurrently.");
             const { runParallelOptimizer } = await import("../parallel-pipeline");
             const parallelResult = await runParallelOptimizer({
-              resume, jd, directiveConfig, optimizationPolicy,
+              resume, jd, directiveConfig, optimizationPolicy, baselineResume
             });
             optimizeResult = {
               resume: parallelResult.resume,
@@ -993,17 +995,16 @@ ${jobMemory.industry}`);
               `provider: ${parallelResult.provider}, keywords: ${parallelResult.keywordsAdded}`
             );
           } else {
-          // Run the locked pipeline
-          // Pass the user-configured per-agent directives from the store
-          const { runLockedPipeline } = await import("../locked-pipeline");
-          const lockedResult = await runLockedPipeline(resume, jd, intelligenceContext, directiveConfig, optimizationPolicy);
+            // Run the locked pipeline
+            const { runLockedPipeline } = await import("../locked-pipeline");
+            const lockedResult = await runLockedPipeline(resume, jd, intelligenceContext, directiveConfig, optimizationPolicy, undefined, baselineResume);
 
-          optimizeResult = {
-            resume: lockedResult.resume,
-            provider: lockedResult.provider,
-            charCount: lockedResult.charCount,
-            keywordsAdded: lockedResult.keywordsAdded,
-          };
+            optimizeResult = {
+              resume: lockedResult.resume,
+              provider: lockedResult.provider,
+              charCount: lockedResult.charCount,
+              keywordsAdded: lockedResult.keywordsAdded,
+            };
 
           // Log warnings
           for (const w of lockedResult.warnings) {
@@ -1548,19 +1549,23 @@ ${jobMemory.industry}`);
     emitProgress(4, afterLog);
 
     // ========================================================================
-    // [Deep Agentic Mode] Autonomous Self-Correction Loop
+    // Multi-Agent Self-Healing Loop (Up to 3 Attempts)
     // ========================================================================
-    if (deepAgenticMode && result.optimizedResume && result.status !== "failed") {
-      const qaVerdict = result.qa;
-      const needsCorrection = qaVerdict && (
+    if (result.optimizedResume && result.status !== "failed") {
+      let healingAttempt = 0;
+      const maxHealingAttempts = 3;
+      let qaVerdict = result.qa;
+      let needsCorrection = qaVerdict && (
         qaVerdict.confidence < 95 || 
         (qaVerdict.factualConsistency && !qaVerdict.factualConsistency.passed)
       );
 
-      if (needsCorrection) {
-        log("Quality Assurance", `[Deep Agentic Mode] QA score (${qaVerdict.confidence}/100) or factual integrity needs improvement. Initiating self-correction loop…`);
-        emitProgress(4, "Deep Agentic Mode: Running self-correction loop…");
-        
+      while (needsCorrection && healingAttempt < maxHealingAttempts) {
+        healingAttempt++;
+        console.log(`[Self-Healing] Starting self-correction round ${healingAttempt}/${maxHealingAttempts}...`);
+        log("Quality Assurance", `[Self-Healing] QA score (${qaVerdict.confidence}/100) or factual integrity needs improvement. Initiating self-correction round ${healingAttempt}/${maxHealingAttempts}...`);
+        emitProgress(4, `Self-correction round ${healingAttempt}/${maxHealingAttempts}...`);
+
         // Compile feedback critique from QA failed checks and factual issues
         const failedChecks = qaVerdict.checks.filter(c => !c.passed).map(c => `- ${c.name}: ${c.details || "failed validation"}`);
         const factualIssues = qaVerdict.factualConsistency 
@@ -1580,9 +1585,8 @@ ${jobMemory.industry}`);
           ...factualIssues
         ].join("\n");
 
-        console.info("[Deep Agentic Mode] Re-optimizing with critique:\n", critique);
+        console.info(`[Self-Healing] Re-optimizing with critique:\n`, critique);
 
-        // Re-run optimizer with critique feedback
         try {
           const { runLockedPipeline } = await import("../locked-pipeline");
           // Re-build standard policy and directives config
@@ -1602,7 +1606,8 @@ ${jobMemory.industry}`);
             intelligenceContext,
             directiveConfig,
             optimizationPolicy,
-            critique
+            critique,
+            baselineResume // Pass baselineResume for Localized Diff-Only Processing
           );
 
           if (correctedResult.resume) {
@@ -1620,17 +1625,24 @@ ${jobMemory.industry}`);
             );
             
             result.qa = newQA;
+            qaVerdict = newQA;
             result.afterATS = analyzeATS(result.optimizedResume, jd);
 
             const passedChecks = newQA.checks.filter((c) => c.passed).length;
             const totalChecks = newQA.checks.length;
-            const newQALog = `[Self-Correction] QA Score: ${newQA.confidence}/100. Passed: ${passedChecks}/${totalChecks}. ATS Score: ${result.afterATS.scores.ats}/100.`;
+            const newQALog = `[Self-Correction Round ${healingAttempt}] QA Score: ${newQA.confidence}/100. Passed: ${passedChecks}/${totalChecks}. ATS Score: ${result.afterATS.scores.ats}/100.`;
             log("Quality Assurance", newQALog);
             emitProgress(4, newQALog);
+
+            // Re-evaluate if correction is still needed
+            needsCorrection = newQA.confidence < 95 || (newQA.factualConsistency && !newQA.factualConsistency.passed);
+          } else {
+            break;
           }
         } catch (err: any) {
-          console.error("[Deep Agentic Mode] Self-correction turn failed:", err?.message);
-          log("Quality Assurance", `[Deep Agentic Mode] Self-correction turn failed: ${err?.message}. Using initial optimization.`);
+          console.error(`[Self-Healing] Turn ${healingAttempt} failed:`, err?.message);
+          log("Quality Assurance", `[Self-Healing] Turn ${healingAttempt} failed: ${err?.message}. Ending self-healing loop.`);
+          break;
         }
       }
     }

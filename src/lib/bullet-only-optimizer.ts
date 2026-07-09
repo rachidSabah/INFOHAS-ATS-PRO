@@ -39,6 +39,7 @@ import {
   ATS_PLATFORM_PROFILES,
   AIRLINE_COMPETENCY_ONTOLOGY
 } from "./enterprise/ats-intelligence-engine";
+import { loadUserProfile } from "./agents/memory-agent";
 
 export interface BulletOnlyOptimizerResult {
   output: OptimizerOutput;
@@ -105,12 +106,12 @@ export function buildOptimizerInput(
   const platform = ATS_PLATFORM_PROFILES[detectedAts.atsId] || ATS_PLATFORM_PROFILES.generic;
 
   const atsIntel = `
-═══════════════════════════════════════════════════════════════
-TARGET ATS ECOSYSTEM GUIDANCE (${platform.name} - Version ${platform.version}):
-- Parsing Behavior: ${platform.parsingStyle}
-- Formatting Constraints: ${platform.formattingPreferences}
-- Optimization Strategy: ${platform.optimizationStrategy}
-═══════════════════════════════════════════════════════════════`;
+  ═══════════════════════════════════════════════════════════════
+  TARGET ATS ECOSYSTEM GUIDANCE (${platform.name} - Version ${platform.version}):
+  - Parsing Behavior: ${platform.parsingStyle}
+  - Formatting Constraints: ${platform.formattingPreferences}
+  - Optimization Strategy: ${platform.optimizationStrategy}
+  ═══════════════════════════════════════════════════════════════`;
 
   const matchedCompetencies: string[] = [];
   for (const [key, comp] of Object.entries(AIRLINE_COMPETENCY_ONTOLOGY)) {
@@ -126,24 +127,34 @@ TARGET ATS ECOSYSTEM GUIDANCE (${platform.name} - Version ${platform.version}):
 
   const competencyIntel = matchedCompetencies.length > 0
     ? `
-═══════════════════════════════════════════════════════════════
-TARGET COMPETENCY ONTOLOGY (Align candidate achievements with these profiles):
-${matchedCompetencies.join("\n")}
-═══════════════════════════════════════════════════════════════`
+  ═══════════════════════════════════════════════════════════════
+  TARGET COMPETENCY ONTOLOGY (Align candidate achievements with these profiles):
+  ${matchedCompetencies.join("\n")}
+  ═══════════════════════════════════════════════════════════════`
     : "";
 
   const airlineLanguageIntel = `
-═══════════════════════════════════════════════════════════════
-AIRLINE LANGUAGE ENGINE TRANSFORMS (Translate generic terms naturally where appropriate):
-- customer support / customer service -> Passenger Assistance / Passenger Experience
-- safety rules -> Safety Compliance / SEP Guidelines
-- help customers -> Deliver Exceptional Passenger Experience / Service Recovery
-- teamwork -> Crew Resource Management (CRM)
-- problem solving -> Operational Decision Making
-- baggage -> Cabin Baggage
-- flight -> Sector Operation
-- boss / supervisor -> Cabin Senior / Purser
-═══════════════════════════════════════════════════════════════`;
+  ═══════════════════════════════════════════════════════════════
+  AIRLINE LANGUAGE ENGINE TRANSFORMS (Translate generic terms naturally where appropriate):
+  - customer support / customer service -> Passenger Assistance / Passenger Experience
+  - safety rules -> Safety Compliance / SEP Guidelines
+  - help customers -> Deliver Exceptional Passenger Experience / Service Recovery
+  - teamwork -> Crew Resource Management (CRM)
+  - problem solving -> Operational Decision Making
+  - baggage -> Cabin Baggage
+  - flight -> Sector Operation
+  - boss / supervisor -> Cabin Senior / Purser
+  ═══════════════════════════════════════════════════════════════`;
+
+  // === Load manual style overrides from memory ===
+  const profile = loadUserProfile();
+  const manualOverridesPrompt = profile.manualOverrides && profile.manualOverrides.length > 0
+    ? `\n\n═══════════════════════════════════════════════════════════════
+USER WRITING STYLE PREFERENCES (Learned from manual overrides of prior generations):
+${profile.manualOverrides.slice(-5).map(o => `- Preferred: "${o.edited}" instead of "${o.original}"`).join("\n")}
+Please mimic this style and choice of wording in new generations.
+═══════════════════════════════════════════════════════════════`
+    : "";
 
   const systemPrompt = `${optimizationPolicy ? optimizationPolicy + "\n\n" : ""}${buildBulletDirective(directiveConfig, {
     sourceResume,
@@ -153,6 +164,7 @@ AIRLINE LANGUAGE ENGINE TRANSFORMS (Translate generic terms naturally where appr
 ${atsIntel}
 ${competencyIntel}
 ${airlineLanguageIntel}
+${manualOverridesPrompt}
 
 ${agentDirectives ? buildAgentDirectiveSection(agentDirectives) : ""}`;
   let userPrompt = `SOURCE RESUME (be truthful to this — never invent employers, dates, or metrics):
@@ -325,6 +337,7 @@ export async function runBulletOnlyOptimizer(
   excludeProviderIds?: string[],
   optimizationPolicy?: string | null,
   feedback?: string,
+  baselineResume?: ResumeData, // Added for Localized Diff-Only Processing
 ): Promise<BulletOnlyOptimizerResult> {
   // FAST-FAIL: Structural validation before any AI call
   const structuralWarnings: string[] = [];
@@ -350,49 +363,27 @@ export async function runBulletOnlyOptimizer(
 
   if (useParallel) {
     console.info("[BulletOnlyOptimizer] Running in parallel subagent mode.");
-    const { runSummaryAgent, runSkillsAgent, runExperienceAgent } = await import("./parallel-pipeline");
-    const jdKeywords = jd.keywords ?? [];
-
-    const [summaryRes, skillsRes, experienceRes] = await Promise.all([
-      runSummaryAgent(sourceResume, jd, jdKeywords, directiveConfig, optimizationPolicy, excludeProviderIds),
-      runSkillsAgent(sourceResume, jd, jdKeywords, directiveConfig, optimizationPolicy, excludeProviderIds),
-      runExperienceAgent(sourceResume, jd, jdKeywords, directiveConfig, optimizationPolicy, excludeProviderIds),
-    ]);
-
-    // Reject local fallback if all subagents fell back or were offline
-    const allOffline = (summaryRes.provider === "Local Engine (offline mode)" || summaryRes.rawResponse.length < 200) &&
-                       (skillsRes.provider === "Local Engine (offline mode)" || skillsRes.rawResponse.length < 200) &&
-                       (experienceRes.provider === "Local Engine (offline mode)" || experienceRes.rawResponse.length < 200);
-    if (allOffline) {
-      throw new Error(
-        "No AI provider available. Optimization could not be completed. " +
-        "Configure an API provider in Settings or sign in to Puter.",
-      );
-    }
+    const { runParallelOptimizer } = await import("./parallel-pipeline");
+    const parallelResult = await runParallelOptimizer({
+      resume: sourceResume,
+      jd,
+      directiveConfig,
+      optimizationPolicy,
+      baselineResume,
+    });
 
     const output: OptimizerOutput = {
-      summary: summaryRes.summary,
-      headline: summaryRes.headline,
-      skills: skillsRes.skills,
-      experiences: experienceRes.experiences,
+      summary: parallelResult.resume.summary,
+      headline: parallelResult.resume.headline,
+      skills: parallelResult.resume.skills,
+      experiences: parallelResult.resume.experience,
     };
-
-    const providers = [summaryRes.provider, skillsRes.provider, experienceRes.provider];
-    const uniqueProviders = [...new Set(providers)];
-    const providerName = uniqueProviders.length === 1
-      ? uniqueProviders[0]
-      : `Parallel (Summary: ${summaryRes.provider}, Skills: ${skillsRes.provider}, Experience: ${experienceRes.provider})`;
 
     return {
       output,
-      provider: providerName,
-      rawResponse: JSON.stringify({
-        summary: summaryRes.summary,
-        headline: summaryRes.headline,
-        skills: skillsRes.skills,
-        experiences: experienceRes.experiences,
-      }),
-      warnings: [...structuralWarnings],
+      provider: parallelResult.provider,
+      rawResponse: JSON.stringify(output),
+      warnings: [...structuralWarnings, ...parallelResult.warnings],
     };
   }
 

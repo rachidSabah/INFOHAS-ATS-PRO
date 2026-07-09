@@ -22,6 +22,7 @@ import type { ResumeData, JobDescription } from "../types";
 import type { JobIntelligence } from "../job-intelligence";
 import { callAI, extractJSON } from "../ai";
 import { PIPELINE_STEP_CALL_TIMEOUT_MS } from "../pipeline-watchdog";
+import { prefetchCache } from "../prefetch-cache";
 
 // ============================================================================
 // CompanyIntelligenceAgent
@@ -62,6 +63,12 @@ export async function analyzeCompanyIntelligence(
     // company-specific optimization. The optimizer will still work with
     // just JI + SkillGap + ATS.
     return null;
+  }
+
+  const cached = prefetchCache.getCompanyIntelligence(jd.id);
+  if (cached) {
+    console.info(`[PrefetchCache] Hit for Company Intelligence: ${jd.id}`);
+    return cached;
   }
 
   const jdContext = jd.rawText?.slice(0, 2000) ??
@@ -121,7 +128,7 @@ Be specific to ${companyName}. If information is not available for a field, use 
   };
   const toStr = (v: any): string => (v === null || v === undefined) ? "" : String(v);
 
-  return {
+  const normalized = {
     companyName: toStr(data.companyName) || companyName,
     overview: toStr(data.overview),
     culture: toStr(data.culture),
@@ -136,6 +143,8 @@ Be specific to ${companyName}. If information is not available for a field, use 
     companySpecificPriorities: toArray(data.companySpecificPriorities),
     positioningAdvice: toStr(data.positioningAdvice),
   };
+  prefetchCache.setCompanyIntelligence(jd.id, normalized);
+  return normalized;
 }
 
 // ============================================================================
@@ -177,6 +186,12 @@ export async function analyzeSkillGap(
   if (!ji) {
     // Can't do a meaningful skill gap analysis without job intelligence.
     return null;
+  }
+
+  const cached = prefetchCache.getSkillGap(resume.id, jd.id);
+  if (cached) {
+    console.info(`[PrefetchCache] Hit for Skill Gap: ${resume.id}:${jd.id}`);
+    return cached;
   }
 
   const result = await callAI({
@@ -265,7 +280,7 @@ Be honest. If the candidate is a poor match, say so. The bridging strategy must 
     }));
   };
 
-  return {
+  const normalized = {
     overallMatch: toNum(data.overallMatch),
     matchedSkills: toArray(data.matchedSkills),
     missingSkills: {
@@ -279,4 +294,6 @@ Be honest. If the candidate is a poor match, say so. The bridging strategy must 
     improvementOpportunities: toArray(data.improvementOpportunities),
     bridgingStrategy: toStr(data.bridgingStrategy),
   };
+  prefetchCache.setSkillGap(resume.id, jd.id, normalized);
+  return normalized;
 }
