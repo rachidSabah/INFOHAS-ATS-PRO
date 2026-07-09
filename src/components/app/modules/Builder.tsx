@@ -139,9 +139,158 @@ import { A4Preview } from "@/components/resume/A4Preview";
 import { ATSMatchMeter } from "@/components/optimizer/ATSMatchMeter";
 import { toast } from "sonner";
 import { extractJSON } from "@/lib/ai";
-import type { ResumeData, ResumeExperience, ResumeEducation, ResumeSkill, ResumeTemplate } from "@/lib/types";
+import type { ResumeData, ResumeExperience, ResumeEducation, ResumeSkill, ResumeTemplate, JobDescription } from "@/lib/types";
 
 const ACCENT_PRESETS = ["#1154A3", "#0B1F3A", "#10B981", "#F59E0B", "#8B5CF6", "#EC4899", "#0EA5E9", "#DC2626"];
+
+const computeLocalATSScore = (res: ResumeData, jd: JobDescription): number => {
+  const jdKeywords = (jd.keywords || []).map(k => k.toLowerCase());
+  if (jdKeywords.length === 0) return 0;
+  
+  const resumeText = [
+    res.summary || "",
+    ...(res.skills || []).map(s => s.name),
+    ...(res.experience || []).flatMap(e => e.bullets),
+  ].join(" ").toLowerCase();
+
+  const found = jdKeywords.filter(kw => resumeText.includes(kw));
+  const keywordDensity = Math.round((found.length / jdKeywords.length) * 100);
+
+  const summaryText = (res.summary || "").toLowerCase();
+  const summaryMatch = jdKeywords.filter(k => summaryText.includes(k)).length;
+  const summaryScore = Math.round((summaryMatch / jdKeywords.length) * 100);
+
+  const skillsText = (res.skills || []).map(s => s.name).join(" ").toLowerCase();
+  const skillsMatch = jdKeywords.filter(k => skillsText.includes(k)).length;
+  const skillsScore = Math.round((skillsMatch / jdKeywords.length) * 100);
+
+  const expText = (res.experience || []).flatMap(e => e.bullets).join(" ").toLowerCase();
+  const expMatch = jdKeywords.filter(k => expText.includes(k)).length;
+  const expScore = Math.round((expMatch / jdKeywords.length) * 100);
+
+  return Math.round((keywordDensity * 0.4) + (summaryScore * 0.2) + (skillsScore * 0.2) + (expScore * 0.2));
+};
+
+const DiffApprovalCard = ({
+  patch,
+  currentResume,
+  onApprove,
+  onReject
+}: {
+  patch: Partial<ResumeData>;
+  currentResume: ResumeData;
+  onApprove: () => void;
+  onReject: () => void;
+}) => {
+  return (
+    <div className="bg-slate-50 dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 rounded-xl p-3 space-y-3 shadow-sm text-xs select-none">
+      <div className="flex items-center justify-between border-b border-border dark:border-slate-850 pb-1.5">
+        <span className="font-bold text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
+          <Icon name="FileText" className="w-3.5 h-3.5 text-indigo-500" /> Proposed Resume Updates
+        </span>
+        <Badge variant="outline" className="bg-indigo-500/10 text-indigo-500 border-indigo-500/20 text-[9px] font-semibold py-0.5">
+          Pending Approval
+        </Badge>
+      </div>
+
+      <div className="space-y-3 max-h-[220px] overflow-y-auto pr-1 scrollbar-thin">
+        {/* Summary Diff */}
+        {patch.summary !== undefined && patch.summary !== currentResume.summary && (
+          <div className="space-y-1">
+            <span className="text-[9px] uppercase font-bold text-muted-foreground tracking-wider">Professional Summary</span>
+            <div className="rounded-lg border border-border dark:border-slate-800 overflow-hidden">
+              <div className="p-2 bg-red-500/5 text-red-600 dark:text-red-400 line-through text-[11px] border-b border-border/40">
+                {currentResume.summary || "(empty)"}
+              </div>
+              <div className="p-2 bg-green-500/5 text-green-600 dark:text-green-400 text-[11px]">
+                {patch.summary}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Headline Diff */}
+        {patch.headline !== undefined && patch.headline !== currentResume.headline && (
+          <div className="space-y-1">
+            <span className="text-[9px] uppercase font-bold text-muted-foreground tracking-wider">Headline / Role</span>
+            <div className="flex flex-col gap-1 rounded-lg border border-border dark:border-slate-800 p-2">
+              <div className="text-red-500 line-through text-[11px]">{currentResume.headline || "(empty)"}</div>
+              <div className="text-green-500 font-semibold text-[11px]">{patch.headline}</div>
+            </div>
+          </div>
+        )}
+
+        {/* Name Diff */}
+        {patch.name !== undefined && patch.name !== currentResume.name && (
+          <div className="space-y-1">
+            <span className="text-[9px] uppercase font-bold text-muted-foreground tracking-wider">Full Name</span>
+            <div className="flex flex-col gap-1 rounded-lg border border-border dark:border-slate-800 p-2">
+              <div className="text-red-500 line-through text-[11px]">{currentResume.name || "(empty)"}</div>
+              <div className="text-green-500 font-semibold text-[11px]">{patch.name}</div>
+            </div>
+          </div>
+        )}
+
+        {/* Skills Diff */}
+        {patch.skills !== undefined && (
+          <div className="space-y-1">
+            <span className="text-[9px] uppercase font-bold text-muted-foreground tracking-wider">Skills List</span>
+            <div className="flex flex-wrap gap-1 border border-border dark:border-slate-800 rounded-lg p-2 bg-slate-500/5">
+              {patch.skills.map((s, idx) => (
+                <div key={idx} className="flex items-center gap-1 bg-green-500/10 text-green-600 dark:text-green-400 border border-green-500/20 rounded px-1.5 py-0.5 text-[10px] font-medium">
+                  <Icon name="Plus" className="w-2.5 h-2.5" /> {s.name}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Experience Diff */}
+        {patch.experience !== undefined && (
+          <div className="space-y-1.5">
+            <span className="text-[9px] uppercase font-bold text-muted-foreground tracking-wider">Experience Bullets</span>
+            {patch.experience.map((pe: any, expIdx) => {
+              const currentExp = currentResume.experience.find(e => e.id === pe.id) || currentResume.experience[expIdx];
+              if (!currentExp || !pe.bullets) return null;
+              return (
+                <div key={expIdx} className="rounded-lg border border-border dark:border-slate-800 overflow-hidden bg-slate-500/5">
+                  <div className="bg-slate-200/50 dark:bg-slate-800/50 px-2 py-1 border-b border-border dark:border-slate-850 font-semibold text-[10px] text-slate-700 dark:text-slate-300">
+                    {pe.title || currentExp.title} @ {pe.company || currentExp.company}
+                  </div>
+                  <div className="p-2 space-y-1.5">
+                    <div className="text-[10px] text-muted-foreground font-semibold">Original:</div>
+                    <ul className="list-disc pl-3 text-red-500/80 line-through space-y-0.5 text-[11px]">
+                      {currentExp.bullets.map((b, bIdx) => <li key={bIdx}>{b}</li>)}
+                    </ul>
+                    <div className="text-[10px] text-green-500 font-semibold pt-1">Proposed:</div>
+                    <ul className="list-disc pl-3 text-green-600 dark:text-green-400 font-medium space-y-0.5 text-[11px]">
+                      {pe.bullets.map((b: string, bIdx: number) => <li key={bIdx}>{b}</li>)}
+                    </ul>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      <div className="flex gap-2 pt-1 border-t border-border dark:border-slate-800">
+        <button
+          onClick={onReject}
+          className="flex-1 py-1.5 rounded-lg border border-slate-200 dark:border-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800/50 font-semibold shadow-sm transition cursor-pointer text-center select-none"
+        >
+          Discard
+        </button>
+        <button
+          onClick={onApprove}
+          className="flex-1 py-1.5 rounded-lg bg-gradient-to-r from-violet-600 to-indigo-600 text-white hover:from-violet-500 hover:to-indigo-500 font-semibold shadow-sm transition active:scale-95 cursor-pointer text-center select-none"
+        >
+          Apply Changes
+        </button>
+      </div>
+    </div>
+  );
+};
 
 const cleanStringField = (val: any): string | undefined => {
   if (val === null || val === undefined) return undefined;
@@ -475,6 +624,288 @@ Return ONLY a valid JSON array of string bullets, NO formatting, NO markdown, NO
   const [inputMessage, setInputMessage] = useState("");
   const [sendingMessage, setSendingMessage] = useState(false);
 
+  const [pendingPatches, setPendingPatches] = useState<Record<number, Partial<ResumeData>>>({});
+  const [isInterviewActive, setIsInterviewActive] = useState(false);
+  const [interviewQuestionIdx, setInterviewQuestionIdx] = useState(0);
+  const [autopilotRunning, setAutopilotRunning] = useState(false);
+
+  const mockQuestions = [
+    "Tell me about your most significant achievement while working as an Administrative Agent at Biologia Laboratory. How did you lead or coordinate the workflows?",
+    "In your role at Maestro Fashion Shop, how did you handle a difficult customer or conflict, and what was the result?",
+    "Why do you want to transition to a high-demand customer-facing role like Cabin Crew or Luxury Hospitality?"
+  ];
+
+  const startInterview = () => {
+    setIsInterviewActive(true);
+    setInterviewQuestionIdx(0);
+    setMessages((prev) => [
+      ...prev,
+      {
+        role: "assistant",
+        content: `👋 Welcome to your Mock Recruiter Interview! I will grill your resume for a Cabin Crew / Luxury Hospitality target role. Let's start:
+
+**Question 1:** ${mockQuestions[0]}`
+      }
+    ]);
+  };
+
+  const exitInterview = () => {
+    setIsInterviewActive(false);
+    setMessages((prev) => [
+      ...prev,
+      {
+        role: "assistant",
+        content: "Interview roleplay ended. Let me know what edits you want to make next!"
+      }
+    ]);
+  };
+
+  const toggleInterview = () => {
+    if (isInterviewActive) {
+      exitInterview();
+    } else {
+      startInterview();
+    }
+  };
+
+  const handleApprovePatch = (messageIndex: number) => {
+    const patchObj = pendingPatches[messageIndex];
+    if (patchObj) {
+      patch(patchObj);
+      toast.success("AI Copilot changes applied successfully!");
+      setPendingPatches(prev => {
+        const copy = { ...prev };
+        delete copy[messageIndex];
+        return copy;
+      });
+    }
+  };
+
+  const handleRejectPatch = (messageIndex: number) => {
+    setPendingPatches(prev => {
+      const copy = { ...prev };
+      delete copy[messageIndex];
+      return copy;
+    });
+    toast.info("Changes discarded.");
+  };
+
+  const startAutopilot = async () => {
+    if (!activeJD) {
+      toast.error("Please select or paste a target job description first to run ATS Autopilot!");
+      return;
+    }
+    setAutopilotRunning(true);
+    
+    const initialScore = atsScore ? atsScore.overall : computeLocalATSScore(resume, activeJD);
+    setMessages(prev => [
+      ...prev,
+      {
+        role: "assistant",
+        content: `🤖 **ATS Autopilot Activated!** 
+
+Current ATS Score: **${initialScore}%**
+Initiating target-seeking optimization loops...`
+      }
+    ]);
+
+    await new Promise(r => setTimeout(r, 1500));
+
+    try {
+      // Loop Step 1: Summary keyword alignment
+      setMessages(prev => [
+        ...prev,
+        {
+          role: "assistant",
+          content: `🔄 **[Autopilot Loop 1/3]** Aligning professional summary and headline with target keywords...`
+        }
+      ]);
+
+      const { ProviderRouter } = await import("@/lib/ai/services/router");
+      const opt1 = await ProviderRouter.chat({
+        messages: [
+          {
+            role: "system",
+            content: `You are a professional ATS Resume Optimization Agent.
+Analyze the target job description and current resume.
+Rewrite the professional summary and headline to incorporate missing keywords: ${JSON.stringify(activeJD.keywords || [])}.
+You MUST output a valid [PATCH] block with updates to "summary" and "headline" fields.`
+          },
+          {
+            role: "user",
+            content: `Resume:\n${JSON.stringify(resume)}\n\nJob description:\n${JSON.stringify(activeJD)}`
+          }
+        ],
+        maxTokens: 1000,
+        temperature: 0.6
+      }, { agentTask: "summary" });
+
+      const reply1 = opt1.text || "";
+      let patch1: any = null;
+      try {
+        const parts = reply1.split("[PATCH]");
+        const jsonStr = parts[1] ? parts[1].trim() : reply1;
+        patch1 = extractJSON(jsonStr);
+      } catch {}
+
+      let currentTempResume = { ...resume };
+      if (patch1) {
+        const cleaned1 = stripAst(patch1);
+        if (cleaned1.summary) currentTempResume.summary = cleanStringField(cleaned1.summary);
+        if (cleaned1.headline) currentTempResume.headline = cleanStringField(cleaned1.headline);
+      }
+
+      const scoreAfterStep1 = computeLocalATSScore(currentTempResume, activeJD);
+      setMessages(prev => [
+        ...prev,
+        {
+          role: "assistant",
+          content: `✅ **[Autopilot Loop 1/3 Complete]** Professional summary and headline aligned!
+New ATS Score: **${scoreAfterStep1}%** (Improvement: +${scoreAfterStep1 - initialScore}%)`
+        }
+      ]);
+
+      await new Promise(r => setTimeout(r, 1500));
+
+      // Loop Step 2: Injecting Skills & Core Competencies
+      setMessages(prev => [
+        ...prev,
+        {
+          role: "assistant",
+          content: `🔄 **[Autopilot Loop 2/3]** Restructuring skills list to inject matching capabilities...`
+        }
+      ]);
+
+      const opt2 = await ProviderRouter.chat({
+        messages: [
+          {
+            role: "system",
+            content: `You are a professional ATS Resume Optimization Agent.
+Compare the current resume skills against the target job description.
+Extract and add missing keywords to the skills list.
+You MUST output a valid [PATCH] block containing the updated "skills" array.`
+          },
+          {
+            role: "user",
+            content: `Resume:\n${JSON.stringify(currentTempResume)}\n\nJob description:\n${JSON.stringify(activeJD)}`
+          }
+        ],
+        maxTokens: 1000,
+        temperature: 0.6
+      }, { agentTask: "summary" });
+
+      const reply2 = opt2.text || "";
+      let patch2: any = null;
+      try {
+        const parts = reply2.split("[PATCH]");
+        const jsonStr = parts[1] ? parts[1].trim() : reply2;
+        patch2 = extractJSON(jsonStr);
+      } catch {}
+
+      if (patch2 && Array.isArray(patch2.skills)) {
+        currentTempResume.skills = patch2.skills.map((s: any) => {
+          if (typeof s === "string") return { id: uid("s"), name: cleanStringField(s) || "", category: "" };
+          return { id: s.id || uid("s"), name: cleanStringField(s.name) || "", category: cleanStringField(s.category) || "" };
+        });
+      }
+
+      const scoreAfterStep2 = computeLocalATSScore(currentTempResume, activeJD);
+      setMessages(prev => [
+        ...prev,
+        {
+          role: "assistant",
+          content: `✅ **[Autopilot Loop 2/3 Complete]** Skills array updated with missing competencies!
+New ATS Score: **${scoreAfterStep2}%** (Improvement: +${scoreAfterStep2 - scoreAfterStep1}%)`
+        }
+      ]);
+
+      await new Promise(r => setTimeout(r, 1500));
+
+      // Loop Step 3: Quantifying metrics in experiences
+      setMessages(prev => [
+        ...prev,
+        {
+          role: "assistant",
+          content: `🔄 **[Autopilot Loop 3/3]** Enhancing experience bullet points with quantified achievements and metrics...`
+        }
+      ]);
+
+      const opt3 = await ProviderRouter.chat({
+        messages: [
+          {
+            role: "system",
+            content: `You are a professional ATS Resume Optimization Agent.
+Enhance work experiences to focus on leadership and inject quantified metrics (numbers, percentages, time limits).
+You MUST output a valid [PATCH] block containing the updated "experience" array.`
+          },
+          {
+            role: "user",
+            content: `Resume:\n${JSON.stringify(currentTempResume)}\n\nJob description:\n${JSON.stringify(activeJD)}`
+          }
+        ],
+        maxTokens: 1000,
+        temperature: 0.6
+      }, { agentTask: "summary" });
+
+      const reply3 = opt3.text || "";
+      let patch3: any = null;
+      try {
+        const parts = reply3.split("[PATCH]");
+        const jsonStr = parts[1] ? parts[1].trim() : reply3;
+        patch3 = extractJSON(jsonStr);
+      } catch {}
+
+      if (patch3 && Array.isArray(patch3.experience)) {
+        currentTempResume.experience = currentTempResume.experience.map((e, idx) => {
+          let match = patch3.experience.find((pe: any) => pe.id === e.id);
+          if (!match && patch3.experience[idx]) match = patch3.experience[idx];
+          if (match) {
+            return {
+              ...e,
+              bullets: Array.isArray(match.bullets) ? match.bullets.map((b: any) => cleanStringField(b) || "") : e.bullets
+            };
+          }
+          return e;
+        });
+      }
+
+      const scoreAfterStep3 = computeLocalATSScore(currentTempResume, activeJD);
+      
+      const cumulativePatch: Partial<ResumeData> = {
+        summary: currentTempResume.summary,
+        headline: currentTempResume.headline,
+        skills: currentTempResume.skills,
+        experience: currentTempResume.experience
+      };
+
+      const finalMsgIdx = messages.length + 6;
+      setPendingPatches(prev => ({
+        ...prev,
+        [finalMsgIdx]: cumulativePatch
+      }));
+
+      setMessages(prev => [
+        ...prev,
+        {
+          role: "assistant",
+          content: `🏆 **ATS Autopilot Run Complete!** 
+
+Initial Score: **${initialScore}%**
+Final Score: **${scoreAfterStep3}%**
+Total Improvement: **+${scoreAfterStep3 - initialScore}%**
+
+I have prepared a comprehensive proposed patch to apply all 3 steps of optimizations to your resume. Review and click 'Apply Changes' below!`
+        }
+      ]);
+
+    } catch (err: any) {
+      console.error("[Autopilot] Error:", err);
+      toast.error("Autopilot failed to complete all steps.");
+    } finally {
+      setAutopilotRunning(false);
+    }
+  };
+
   const renderCopilotChat = (heightClass: string) => {
     const suggestions = [
       { text: "📈 Improve ATS score", prompt: "improve ats score" },
@@ -485,8 +916,56 @@ Return ONLY a valid JSON array of string bullets, NO formatting, NO markdown, NO
 
     return (
       <div className={`flex flex-col ${heightClass} border border-border dark:border-slate-800 rounded-xl bg-gradient-to-b from-card to-background shadow-md overflow-hidden relative group`}>
+        {/* Header */}
+        <div className="p-3 border-b border-border dark:border-slate-800/80 bg-slate-500/5 flex items-center justify-between shrink-0">
+          <span className="font-bold text-slate-800 dark:text-slate-100 flex items-center gap-1.5 text-xs">
+            <Icon name="Sparkles" className="w-3.5 h-3.5 text-indigo-500" /> AI Resume Agent
+          </span>
+          <div className="flex gap-1.5">
+            <button
+              onClick={startAutopilot}
+              disabled={autopilotRunning || isInterviewActive}
+              className="text-[10px] px-2 py-0.5 rounded bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-500 border border-indigo-500/20 font-semibold shadow-sm transition active:scale-95 disabled:opacity-40 flex items-center gap-1 cursor-pointer"
+              title="Launch AI Autopilot to iteratively seek a high ATS score"
+            >
+              <Icon name="Target" className={`w-3 h-3 ${autopilotRunning ? 'animate-spin' : ''}`} /> Autopilot
+            </button>
+            <button
+              onClick={toggleInterview}
+              disabled={autopilotRunning}
+              className={`text-[10px] px-2 py-0.5 rounded font-semibold border shadow-sm transition active:scale-95 flex items-center gap-1 cursor-pointer ${
+                isInterviewActive 
+                  ? 'bg-rose-500/10 hover:bg-rose-500/20 text-rose-500 border-rose-500/20' 
+                  : 'bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-500 border-indigo-500/20'
+              }`}
+              title="Practice interview questions based on your resume"
+            >
+              <Icon name={isInterviewActive ? "Square" : "MessagesSquare"} className="w-3 h-3" /> 
+              {isInterviewActive ? "Exit Mock" : "Interview"}
+            </button>
+          </div>
+        </div>
+
+        {/* Banners */}
+        {isInterviewActive && (
+          <div className="bg-rose-500/10 text-rose-600 dark:text-rose-400 px-3 py-1.5 border-b border-rose-500/20 text-[10px] flex items-center justify-between shrink-0 font-medium">
+            <span className="flex items-center gap-1">
+              <span className="w-1.5 h-1.5 rounded-full bg-rose-500 animate-ping" />
+              Mock Recruiter Interview active (Question {interviewQuestionIdx + 1}/3)
+            </span>
+            <button onClick={() => exitInterview()} className="hover:underline font-bold">End Mock</button>
+          </div>
+        )}
+
+        {autopilotRunning && (
+          <div className="bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 px-3 py-1.5 border-b border-indigo-500/20 text-[10px] flex items-center gap-1 shrink-0 font-medium">
+            <Icon name="Loader2" className="w-3 h-3 animate-spin" />
+            ATS Autopilot seeking score... (Target: 90%+)
+          </div>
+        )}
+
         {/* Suggestion Chips */}
-        {messages.length <= 1 && (
+        {messages.length <= 1 && !isInterviewActive && !autopilotRunning && (
           <div className="p-3 border-b border-border/50 bg-slate-500/5 space-y-1.5 shrink-0">
             <span className="text-[10px] uppercase font-bold text-muted-foreground tracking-wider flex items-center gap-1">
               <Icon name="Lightbulb" className="w-3.5 h-3.5 text-amber-500" /> Quick Suggestions
@@ -525,15 +1004,28 @@ Return ONLY a valid JSON array of string bullets, NO formatting, NO markdown, NO
                 </div>
               )}
 
-              {/* Bubble */}
-              <div
-                className={`max-w-[80%] rounded-2xl px-3 py-2.5 text-xs leading-relaxed shadow-sm ${
-                  msg.role === "user"
-                    ? "bg-slate-900 dark:bg-slate-800 text-slate-100 rounded-tr-sm border border-slate-800 whitespace-pre-wrap"
-                    : "bg-white dark:bg-slate-950 border border-slate-200/80 dark:border-slate-800 text-slate-800 dark:text-slate-100 rounded-tl-sm"
-                }`}
-              >
-                {msg.role === "assistant" ? renderMarkdown(msg.content) : msg.content}
+              {/* Bubble & Patch Diff */}
+              <div className="max-w-[80%] flex flex-col gap-2">
+                <div
+                  className={`rounded-2xl px-3 py-2.5 text-xs leading-relaxed shadow-sm ${
+                    msg.role === "user"
+                      ? "bg-slate-900 dark:bg-slate-800 text-slate-100 rounded-tr-sm border border-slate-800 whitespace-pre-wrap"
+                      : "bg-white dark:bg-slate-950 border border-slate-200/80 dark:border-slate-800 text-slate-800 dark:text-slate-100 rounded-tl-sm"
+                  }`}
+                >
+                  {msg.role === "assistant" ? renderMarkdown(msg.content) : msg.content}
+                </div>
+
+                {msg.role === "assistant" && pendingPatches[i] && (
+                  <div className="mt-1">
+                    <DiffApprovalCard 
+                      patch={pendingPatches[i]} 
+                      currentResume={resume} 
+                      onApprove={() => handleApprovePatch(i)} 
+                      onReject={() => handleRejectPatch(i)} 
+                    />
+                  </div>
+                )}
               </div>
             </div>
           ))}
@@ -583,68 +1075,72 @@ Return ONLY a valid JSON array of string bullets, NO formatting, NO markdown, NO
   };
 
   const sendMessage = async (overrideText?: string) => {
-    const textToSend = overrideText || inputMessage;
+    let textToSend = overrideText || inputMessage;
     if (!textToSend.trim() || sendingMessage) return;
-    const userText = textToSend;
     setInputMessage("");
+
+    // Check if input is a URL and scrape it!
+    const urlRegex = /(https?:\/\/[^\s]+)/gi;
+    const urlMatch = textToSend.match(urlRegex);
+    const addJD = useApp.getState().addJD;
+    if (urlMatch) {
+      const targetUrl = urlMatch[0];
+      toast.info("Scraping job details from URL...", { duration: 3000 });
+      try {
+        const scrapeRes = await fetch("/api/jd-scrape", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ url: targetUrl })
+        });
+        if (scrapeRes.ok) {
+          const scrapeData = await scrapeRes.json();
+          if (scrapeData.success && scrapeData.job) {
+            const newJdId = uid("jd");
+            const newJd = {
+              id: newJdId,
+              title: scrapeData.job.title || "Scraped Position",
+              company: scrapeData.job.company || "Scraped Employer",
+              rawText: scrapeData.job.description || "",
+              keywords: scrapeData.job.keywords || [],
+              url: targetUrl
+            };
+            addJD(newJd);
+            setActiveJD(newJdId);
+            toast.success(`Target-locked: ${newJd.title} @ ${newJd.company}!`);
+            textToSend = `Optimize my resume professional summary and skills for the Scraped Job: ${newJd.title} at ${newJd.company}.`;
+          }
+        }
+      } catch (err) {
+        console.warn("[Copilot] Scraper error:", err);
+      }
+    }
+
+    const userText = textToSend;
     setMessages((prev) => [...prev, { role: "user", content: userText }]);
     setSendingMessage(true);
 
     try {
       const { ProviderRouter } = await import("@/lib/ai/services/router");
-      const systemPrompt = `You are a professional AI Resume Copilot.
-Your job is to help the candidate optimize their resume for their target job.
-You can suggest changes to their resume. If you decide to make updates to the resume fields, you MUST append a special [PATCH] block at the very end of your response, followed by a valid JSON object representing a partial ResumeData structure.
+      
+      let targetSystemPrompt = systemPrompt;
+      if (isInterviewActive) {
+        const nextQ = interviewQuestionIdx + 1 < mockQuestions.length 
+          ? `Question ${interviewQuestionIdx + 2}: ${mockQuestions[interviewQuestionIdx + 1]}`
+          : "Interview complete! Excellent job practicing your responses.";
+        
+        targetSystemPrompt = `You are a professional HR Recruiter interviewing a candidate for a Cabin Crew/Luxury Hospitality role.
+Critique the candidate's answer to the previous interview question: "${mockQuestions[interviewQuestionIdx]}".
+State the strengths of their answer and how they can improve it for a real interview.
+Based on their answer, rewrite their resume experience bullets (or summary) to turn their explanation into a high-impact, professional achievement bullet with action verbs.
+You MUST output a [PATCH] block containing this updated experience bullet.
+At the very end of your response, after the [PATCH] block, ask the next interview question: "${nextQ}".`;
 
-Example 1 (updating professional summary):
-I have updated your professional summary to emphasize your leadership skills.
-[PATCH]
-{
-  "summary": "Strategic and outcomes-driven manager with..."
-}
-
-Example 2 (updating experience bullets):
-I have polished your experience bullet points to be more impact-oriented.
-[PATCH]
-{
-  "experience": [
-    {
-      "id": "e_1", // You MUST use the correct experience entry ID from the context
-      "bullets": [
-        "Spearheaded cloud migration of 12 critical services, improving availability to 99.99%.",
-        "Managed a team of 4 engineers to deliver the product v2 2 weeks ahead of schedule."
-      ]
-    }
-  ]
-}
-
-Example 3 (updating skills):
-I've updated your skills list to include key missing technical proficiencies.
-[PATCH]
-{
-  "skills": [
-    { "id": "s_1", "name": "React", "category": "Frontend" },
-    { "id": "s_2", "name": "TypeScript", "category": "Languages" }
-  ]
-}
-
-Guidelines:
-1. Do NOT invent false experiences, employers, dates, or credentials.
-2. Maintain clean, professional language with absolute zero grammatical or spelling errors.
-3. When referencing experience or skills, ensure you map them using the exact 'id' values provided in the current resume.
-4. Keep the text concise and suitable for a 1-page A4 format.
-5. CRITICAL — when the candidate's summary is marked as "(empty — user has not written a summary yet)", do NOT fabricate a generic summary (e.g. 'Results-driven professional with a passion for...'). Instead, ask the user to share their actual background so you can write something real and personalised.
-6. ALWAYS append a [PATCH] block containing the updated fields automatically at the end of your response whenever you suggest or generate any edits. Do NOT wait for the user to ask you to "insert" or "apply" it. CRITICAL RULE: You MUST append a [PATCH] block containing a valid JSON object at the very end of your response if you make or suggest ANY edits. If you do not include the [PATCH] block, the system cannot apply your changes to the resume editor and the user's data will not be updated.
-7. CRITICAL — Do NOT use markdown bold/italic formatting (e.g. **word** or *word*) inside any fields in the [PATCH] block or inside your text suggestions. All resume fields must contain plain text only without asterisks, as the system does not support inline markdown formatting.
-8. WRITING STYLE & PREMIUM AGENT CAPABILITIES:
-   - Use active voice only (e.g. 'Spearheaded', 'Engineered', 'Optimized' instead of passive forms like 'Responsible for' or 'Was managing').
-   - Integrate natural transition words to ensure high readability and flow.
-   - Choose bullet points for structured lists (achievements, core tasks) and unified paragraphs for summaries.
-   - For emphasis, place key metrics, action words, or credentials at the beginning of bullet points/sentences rather than using markdown formatting.
-9. ATS OPTIMIZATION & JOB DESCRIPTION BUCKLE:
-   - Carefully analyze the provided TARGET JOB description (title, company, keywords).
-   - Calibrate all generated resume fields (summary, experience bullets, skills) to incorporate key phrases, required methodologies, and matching keywords from the job description.
-   - Seamlessly weave these keywords into the content to achieve a high ATS compatibility score without keyword stuffing.`;
+        if (interviewQuestionIdx + 1 >= mockQuestions.length) {
+          setIsInterviewActive(false);
+        } else {
+          setInterviewQuestionIdx(prev => prev + 1);
+        }
+      }
 
       // Detect placeholder / demo summaries — covers blankResume defaults, quality-gate clichés, and any AI-generated filler
       const PLACEHOLDER_PATTERNS = [
@@ -697,14 +1193,14 @@ Guidelines:
         languages: resume.languages,
       }, null, 2) : "{}";
 
-      const fullSystemPrompt = `${systemPrompt}
-
+      const fullSystemPrompt = `${targetSystemPrompt}
+ 
 ---
 CANDIDATE CONTEXT (use this as the source of truth — do NOT invent facts):
-
+ 
 TARGET JOB:
 ${activeJD ? JSON.stringify({ title: activeJD.title, company: activeJD.company, keywords: activeJD.keywords }) : "General Optimization (No specific job target selected)"}
-
+ 
 CURRENT RESUME DATA:
 ${resumeContext}
 ---`;
@@ -1055,12 +1551,14 @@ ${resumeContext}
         }
 
         console.log("[Copilot] Applying updated resume fields:", updatedResume);
-        patch(updatedResume);
-        toast.success("AI Copilot updated your resume!");
+        const messageIndex = messages.length;
+        setPendingPatches((prev) => ({
+          ...prev,
+          [messageIndex]: updatedResume,
+        }));
+        toast.info("Proposed edits from AI Copilot are ready for review!", { duration: 4000 });
       }
     } catch (err: any) {
-      // Error is surfaced to the user via the chat UI \u2014 use warn not error to avoid
-      // polluting error telemetry with non-fatal copilot request failures.
       console.warn("[Copilot] Chat request failed:", err instanceof Error ? err.message : err);
       setMessages((prev) => [...prev, { role: "assistant", content: "Sorry, I encountered an error trying to process your request. Please try again." }]);
     } finally {

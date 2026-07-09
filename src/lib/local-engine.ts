@@ -516,6 +516,112 @@ export function localCopilot(prompt: string, sp: string): string {
 
   const promptLower = prompt.toLowerCase();
 
+  // A. Autopilot Loop 1/3 (Summary and Headline)
+  if (sp.includes("summary and headline to incorporate missing keywords") || promptLower.includes("headline to incorporate missing keywords")) {
+    return `I have aligned your summary and headline to target the active job description.
+[PATCH]
+{
+  "headline": "Cabin Crew Candidate & Customer Service Professional",
+  "summary": "Trilingual Professional (Arabic, French, English) dedicated to cabin safety, world-class passenger service, and operational excellence. Eager to bring premium service standards to Qatar Airways/Emirates cabin crew team."
+}`;
+  }
+
+  // B. Autopilot Loop 2/3 (Skills)
+  if (sp.includes("skills list containing the updated") || promptLower.includes("skills list containing the updated")) {
+    return `I have added missing target skills.
+[PATCH]
+{
+  "skills": [
+    { "name": "World-Class Customer Service", "category": "Service" },
+    { "name": "Cabin Safety Awareness", "category": "Safety" },
+    { "name": "Emergency Procedures", "category": "Safety" },
+    { "name": "First Aid & CPR", "category": "Safety" },
+    { "name": "Trilingual Communication", "category": "Languages" }
+  ]
+}`;
+  }
+
+  // C. Autopilot Loop 3/3 (Experience)
+  if (sp.includes("Enhance work experiences to focus on leadership") || promptLower.includes("focus on leadership and inject quantified metrics")) {
+    const firstExpId = resume?.experience?.[0]?.id || "exp-1";
+    return `I have rewritten your experiences to focus on quantified leadership impact.
+[PATCH]
+{
+  "experience": [
+    {
+      "id": "${firstExpId}",
+      "bullets": [
+        "Spearheaded scheduling workflows for 150+ daily laboratory operations, improving efficiency by 25%.",
+        "Resolved 98% of complex customer inquiries under strict compliance guidelines.",
+        "Coordinated trilingual front-desk liaison (Arabic, French, English) with zero errors."
+      ]
+    }
+  ]
+}`;
+  }
+
+  // D. Interview Mode Response
+  if (sp.includes("hr recruiter interviewing") || promptLower.includes("tell me about") || promptLower.includes("achievement") || promptLower.includes("difficult customer")) {
+    const firstExpId = resume?.experience?.[0]?.id || "exp-1";
+    const secondExpId = resume?.experience?.[1]?.id || "exp-2";
+    
+    if (promptLower.includes("biologia") || promptLower.includes("administrative") || promptLower.includes("laboratory") || promptLower.includes("coordinate")) {
+      return `That is a solid answer! You successfully demonstrated leadership by coordinating critical laboratory workflows and managing confidential records under stress. 
+
+To highlight this on your resume, I have upgraded your first bullet point at Biologia Laboratory to emphasize this coordinator ownership.
+
+[PATCH]
+{
+  "experience": [
+    {
+      "id": "${firstExpId}",
+      "bullets": [
+        "Spearheaded trilingual front-desk liaison (Arabic, French, English) and directed scheduling workflows for 150+ daily laboratory operations.",
+        "Managed complex scheduling and confidential records for high-volume operations, ensuring 100% data accuracy and strict compliance protocols.",
+        "Coordinated critical communication between laboratory staff, medical teams, and management to ensure seamless operational workflow.",
+        "Resolved complex client inquiries and scheduling conflicts with a solutions-oriented approach, directly enhancing client satisfaction and service reputation."
+      ]
+    }
+  ]
+}
+
+**Next Question:** In your role at Maestro Fashion Shop, how did you handle a difficult customer or conflict, and what was the result?`;
+    }
+
+    if (promptLower.includes("maestro") || promptLower.includes("fashion") || promptLower.includes("difficult") || promptLower.includes("conflict")) {
+      return `Excellent response. Highlighting your poise and customer resolution capacity in luxury retail shows that you have the premium service skills needed for five-star airlines.
+
+I have updated your first experience entry for Maestro Fashion Shop to include a metrics-driven conflict resolution achievement.
+
+[PATCH]
+{
+  "experience": [
+    {
+      "id": "${secondExpId}",
+      "bullets": [
+        "Consistently exceeded premium retail sales targets by 15% through attentive guest relations and personalized customer service.",
+        "Pioneered a conflict-resolution protocol for point-of-sale operations, resolving 98%+ of client inquiries and checkout bottlenecks.",
+        "Managed all point-of-sale (POS) operations, inventory tracking for 500+ SKUs, and visual merchandising to support a premium guest shopping experience."
+      ]
+    }
+  ]
+}
+
+**Next Question:** Why do you want to transition to a high-demand customer-facing role like Cabin Crew or Luxury Hospitality?`;
+    }
+
+    return `Great explanation! Eagerness to deliver safety and premium customer service is the absolute core of hospitality and cabin crew.
+
+I have updated your professional summary to highlight this transition target.
+
+[PATCH]
+{
+  "summary": "Highly motivated, Trilingual Professional (Arabic, French, English) dedicated to cabin safety and five-star luxury service. Transitioning my business management skills to become an exceptional Cabin Crew member, bringing proven expertise in high-volume customer relations, emergency protocol awareness, and multi-cultural compliance."
+}
+
+Mock Interview complete! Excellent job practicing your responses. Click 'Apply Changes' below to save these edits to your resume!`;
+  }
+
   // 1. Target Qatar Duty Free
   if (promptLower.includes("qatar") || promptLower.includes("duty free") || promptLower.includes("sales assistant")) {
     return `I have optimized your resume to target the Sales Assistant role at Qatar Duty Free. The changes focus on premium guest relations, trilingual communication, POS/retail operations, and luxury service.
