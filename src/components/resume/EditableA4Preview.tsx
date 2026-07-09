@@ -117,6 +117,7 @@ export function EditableA4Preview({ resume, onChange, scale = 0.7, className }: 
     bodyTextColor: config?.bodyTextColor || "#000000",
     sectionGapMm: config?.sectionGapMm ?? 3,
     bulletIndentMm: config?.bulletIndentMm ?? 6.4,
+    contactSpacing: config?.contactSpacing ?? "stacked",
   };
 
   const BLACK = L.bodyTextColor;

@@ -33,6 +33,7 @@ export interface ParallelOptimizerInput {
   directiveConfig?: OptimizerDirectiveConfig | null;
   optimizationPolicy?: string | null;
   baselineResume?: ResumeData; // Added for Localized Diff-Only Processing
+  providerId?: string; // Added for Model Variant Arena
 }
 
 export interface ParallelOptimizerResult {
@@ -42,6 +43,12 @@ export interface ParallelOptimizerResult {
   keywordsAdded: number;
   warnings: string[];
   errors: string[];
+  rationales?: Array<{
+    section: string;
+    original: string;
+    edited: string;
+    reason: string;
+  }>;
 }
 
 // ============================================================================
@@ -55,7 +62,7 @@ export interface ParallelOptimizerResult {
 export async function runParallelOptimizer(
   input: ParallelOptimizerInput,
 ): Promise<ParallelOptimizerResult> {
-  const { resume, jd, directiveConfig, optimizationPolicy } = input;
+  const { resume, jd, directiveConfig, optimizationPolicy, providerId } = input;
   const warnings: string[] = [];
   const errors: string[] = [];
 
@@ -120,16 +127,16 @@ export async function runParallelOptimizer(
   }
 
   const summaryPromise = summaryModified
-    ? runSummaryAgent(resume, jd, jdKeywords, directiveConfig, optimizationPolicy)
-    : Promise.resolve({ summary: resume.summary || "", headline: resume.headline || "", provider: "cache", rawResponse: "" });
+    ? runSummaryAgent(resume, jd, jdKeywords, directiveConfig, optimizationPolicy, undefined, providerId)
+    : Promise.resolve({ summary: resume.summary || "", headline: resume.headline || "", provider: "cache", rawResponse: "", rationales: [] });
 
   const skillsPromise = skillsModified
-    ? runSkillsAgent(resume, jd, jdKeywords, directiveConfig, optimizationPolicy)
-    : Promise.resolve({ skills: resume.skills, provider: "cache", rawResponse: "" });
+    ? runSkillsAgent(resume, jd, jdKeywords, directiveConfig, optimizationPolicy, undefined, providerId)
+    : Promise.resolve({ skills: resume.skills, provider: "cache", rawResponse: "", rationales: [] });
 
   const experiencePromise = targetExperienceIds !== undefined && targetExperienceIds.length === 0
-    ? Promise.resolve({ experiences: resume.experience.map(e => ({ id: e.id, bullets: e.bullets })), provider: "cache", rawResponse: "" })
-    : runExperienceAgent(resume, jd, jdKeywords, directiveConfig, optimizationPolicy, undefined, targetExperienceIds);
+    ? Promise.resolve({ experiences: resume.experience.map(e => ({ id: e.id, bullets: e.bullets })), provider: "cache", rawResponse: "", rationales: [] })
+    : runExperienceAgent(resume, jd, jdKeywords, directiveConfig, optimizationPolicy, undefined, targetExperienceIds, providerId);
 
   const [summaryResult, skillsResult, experienceResult] = await Promise.all([
     summaryPromise,
@@ -139,6 +146,12 @@ export async function runParallelOptimizer(
 
   const parallelDuration = Date.now() - startTime;
   warnings.push(`Parallel optimization completed in ${parallelDuration}ms`);
+
+  const combinedRationales = [
+    ...((summaryResult as any).rationales || []),
+    ...((skillsResult as any).rationales || []),
+    ...((experienceResult as any).rationales || []),
+  ];
 
   // ========================================================================
   // Assemble final resume (education + languages from source)
@@ -201,6 +214,7 @@ export async function runParallelOptimizer(
     keywordsAdded,
     warnings,
     errors,
+    rationales: combinedRationales,
   };
 
   // Store in semantic cache for future identical requests
@@ -279,7 +293,8 @@ export async function runSummaryAgent(
   directiveConfig?: OptimizerDirectiveConfig | null,
   optimizationPolicy?: string | null,
   excludeProviderIds?: string[],
-): Promise<{ summary: string; headline: string; provider: string; rawResponse: string }> {
+  providerId?: string,
+): Promise<{ summary: string; headline: string; provider: string; rawResponse: string; rationales: any[] }> {
   const startTime = Date.now();
 
   // Dynamically assemble summary context: Summary Agent only needs summary and experience titles/companies
@@ -313,7 +328,7 @@ RULES:
 - NEVER invent experience, certifications, or metrics.
 - NEVER use parentheses.
 - Focus ONLY on the candidate's existing background (summarized in the context).
-Return ONLY JSON: {"summary": "...", "headline": "..."}`;
+Return ONLY JSON: {"summary": "...", "headline": "...", "rationales": [{"section": "summary", "original": "...", "edited": "...", "reason": "..."}]}`;
 
   const userPrompt = `CANDIDATE CONTEXT:
 ${resumeContext}
@@ -335,13 +350,27 @@ Return ONLY valid JSON.`;
     timeoutMs: OPTIMIZER_CALL_TIMEOUT_MS,
     isOptimizerCall: true,
     excludeProviderIds,
+    providerId,
     enableRetries: agentDirectives?.supervisor?.enableRetries,
     enableProviderSwitch: agentDirectives?.supervisor?.enableProviderSwitch,
   });
 
-  const parsed = extractJSON<{ summary?: string; headline?: string }>(result.text);
+  const parsed = extractJSON<{ summary?: string; headline?: string; rationales?: any[] }>(result.text);
   const summaryOut = parsed?.summary || "Summary optimization failed.";
   const headlineOut = parsed?.headline || "";
+  const rationalesOut = Array.isArray(parsed?.rationales)
+    ? parsed.rationales.map(r => ({
+        section: "summary",
+        original: typeof r.original === "string" ? r.original : resume.summary || "",
+        edited: typeof r.edited === "string" ? r.edited : summaryOut,
+        reason: typeof r.reason === "string" ? r.reason : "Optimized summary for ATS alignment.",
+      }))
+    : [{
+        section: "summary",
+        original: resume.summary || "",
+        edited: summaryOut,
+        reason: "Optimized summary for ATS alignment and role matching.",
+      }];
 
   // Record provider health
   const summaryDuration = Date.now() - startTime;
@@ -357,7 +386,7 @@ Return ONLY valid JSON.`;
     success: !!parsed,
   });
 
-  return { summary: summaryOut, headline: headlineOut, provider: result.provider, rawResponse: result.text };
+  return { summary: summaryOut, headline: headlineOut, provider: result.provider, rawResponse: result.text, rationales: rationalesOut };
 }
 
 // --- Skills Agent ---
@@ -369,7 +398,8 @@ export async function runSkillsAgent(
   directiveConfig?: OptimizerDirectiveConfig | null,
   optimizationPolicy?: string | null,
   excludeProviderIds?: string[],
-): Promise<{ skills: { name: string; category: string }[]; provider: string; rawResponse: string }> {
+  providerId?: string,
+): Promise<{ skills: { name: string; category: string }[]; provider: string; rawResponse: string; rationales: any[] }> {
   const startTime = Date.now();
 
   // Dynamically assemble skills context: Skills Agent only needs skills list
@@ -398,7 +428,7 @@ RULES:
 - Group by category (Languages, Frontend, Backend, Tools, etc.).
 - Target keywords to weave or prioritize: ${jdKeywords.join(", ")}
 - Only add skills that are genuinely implied or relevant to the candidate's professional domain. NEVER fabricate unrelated skills.
-Return ONLY JSON: {"skills": [{"name": "...", "category": "..."}]}`;
+Return ONLY JSON: {"skills": [{"name": "...", "category": "..."}], "rationales": [{"section": "skills", "original": "...", "edited": "...", "reason": "..."}]}`;
 
   const userPrompt = `CANDIDATE SKILLS:
 ${skillsContext}
@@ -420,12 +450,26 @@ Return ONLY valid JSON.`;
     timeoutMs: OPTIMIZER_CALL_TIMEOUT_MS,
     isOptimizerCall: true,
     excludeProviderIds,
+    providerId,
     enableRetries: agentDirectives?.supervisor?.enableRetries,
     enableProviderSwitch: agentDirectives?.supervisor?.enableProviderSwitch,
   });
 
-  const parsed = extractJSON<{ skills?: { name: string; category: string }[] }>(result.text);
+  const parsed = extractJSON<{ skills?: { name: string; category: string }[]; rationales?: any[] }>(result.text);
   const skills = parsed?.skills || resume.skills.map((s) => ({ name: s.name, category: s.category || "General" }));
+  const rationalesOut = Array.isArray(parsed?.rationales)
+    ? parsed.rationales.map(r => ({
+        section: "skills",
+        original: typeof r.original === "string" ? r.original : resume.skills.map(s => s.name).join(", "),
+        edited: typeof r.edited === "string" ? r.edited : skills.map(s => s.name).join(", "),
+        reason: typeof r.reason === "string" ? r.reason : "Enriched and prioritized skills for job relevance.",
+      }))
+    : [{
+        section: "skills",
+        original: resume.skills.map(s => s.name).join(", "),
+        edited: skills.map(s => s.name).join(", "),
+        reason: "Aligned core skills list with target job competencies.",
+      }];
 
   // Record provider health
   recordProviderSuccess(result.provider, Date.now() - startTime, result.tokensEstimate ?? 0);
@@ -440,7 +484,7 @@ Return ONLY valid JSON.`;
     success: !!parsed,
   });
 
-  return { skills, provider: result.provider, rawResponse: result.text };
+  return { skills, provider: result.provider, rawResponse: result.text, rationales: rationalesOut };
 }
 
 // --- Experience Agent ---
@@ -452,8 +496,9 @@ export async function runExperienceAgent(
   directiveConfig?: OptimizerDirectiveConfig | null,
   optimizationPolicy?: string | null,
   excludeProviderIds?: string[],
-  targetExperienceIds?: string[], // added for Localized Diff-Only Processing
-): Promise<{ experiences: { id: string; bullets: string[] }[]; provider: string; rawResponse: string }> {
+  targetExperienceIds?: string[],
+  providerId?: string,
+): Promise<{ experiences: { id: string; bullets: string[] }[]; provider: string; rawResponse: string; rationales: any[] }> {
   const startTime = Date.now();
 
   // Filter experiences to optimize if targetExperienceIds is provided
@@ -466,6 +511,7 @@ export async function runExperienceAgent(
       experiences: resume.experience.map(e => ({ id: e.id, bullets: e.bullets })),
       provider: "cache",
       rawResponse: "",
+      rationales: [],
     };
   }
 
@@ -504,7 +550,7 @@ RULES:
 - NEVER change the bullet count (same number of bullets per experience entry).
 - NEVER change job titles, companies, dates, or locations.
 - Return the EXACT same experience IDs as provided.
-Return ONLY JSON: {"experiences": [{"id": "...", "bullets": ["...", "..."]}]}`;
+Return ONLY JSON: {"experiences": [{"id": "...", "bullets": ["...", "..."]}], "rationales": [{"section": "experience:[id]", "original": "...", "edited": "...", "reason": "..."}]}`;
 
   const userPrompt = `CANDIDATE EXPERIENCE:
 ${experienceContext}
@@ -526,15 +572,33 @@ Return ONLY valid JSON.`;
     timeoutMs: OPTIMIZER_CALL_TIMEOUT_MS,
     isOptimizerCall: true,
     excludeProviderIds,
+    providerId,
     enableRetries: agentDirectives?.supervisor?.enableRetries,
     enableProviderSwitch: agentDirectives?.supervisor?.enableProviderSwitch,
   });
 
-  const parsed = extractJSON<{ experiences?: { id: string; bullets: string[] }[] }>(result.text);
+  const parsed = extractJSON<{ experiences?: { id: string; bullets: string[] }[]; rationales?: any[] }>(result.text);
   const expOut = parsed?.experiences?.map((e) => ({
     id: e.id,
     bullets: e.bullets || [],
   })) || resume.experience.map((e) => ({ id: e.id, bullets: e.bullets }));
+
+  const rationalesOut = Array.isArray(parsed?.rationales)
+    ? parsed.rationales.map(r => ({
+        section: typeof r.section === "string" ? r.section : "experience",
+        original: typeof r.original === "string" ? r.original : "",
+        edited: typeof r.edited === "string" ? r.edited : "",
+        reason: typeof r.reason === "string" ? r.reason : "Optimized bullet statements for achievement-oriented impact.",
+      }))
+    : expOut.map(e => {
+        const orig = resume.experience.find(oe => oe.id === e.id);
+        return {
+          section: `experience:${e.id}`,
+          original: orig?.bullets.join(" | ") || "",
+          edited: e.bullets.join(" | "),
+          reason: "Rewrote bullets to follow the Action-Verb-Metric structure.",
+        };
+      });
 
   // Record provider health
   recordProviderSuccess(result.provider, Date.now() - startTime, result.tokensEstimate ?? 0);
@@ -549,5 +613,5 @@ Return ONLY valid JSON.`;
     success: !!parsed,
   });
 
-  return { experiences: expOut, provider: result.provider, rawResponse: result.text };
+  return { experiences: expOut, provider: result.provider, rawResponse: result.text, rationales: rationalesOut };
 }

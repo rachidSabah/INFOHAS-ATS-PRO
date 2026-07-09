@@ -198,6 +198,11 @@ export const api = {
   getDownloads: () => apiFetch<{ downloads: any[] }>("/api/downloads"),
   createDownload: (download: any) => apiFetch("/api/downloads", { method: "POST", body: JSON.stringify(download) }),
 
+  // Career Materials (RAG)
+  getCareerMaterials: () => apiFetch<{ careerMaterials: any[] }>("/api/career-materials"),
+  createCareerMaterial: (cm: any) => apiFetch("/api/career-materials", { method: "POST", body: JSON.stringify(cm) }),
+  deleteCareerMaterial: (id: string) => apiFetch(`/api/career-materials/${id}`, { method: "DELETE" }),
+
   // Health
   health: () => apiFetch<{ ok: boolean }>("/api/health"),
 };

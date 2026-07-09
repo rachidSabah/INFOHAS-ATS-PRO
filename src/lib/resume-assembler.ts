@@ -50,7 +50,6 @@ export interface OptimizerOutput {
   headline?: string;
   /** Enriched skills list */
   skills?: Array<{ name: string; category?: string }>;
-  /** Rewritten experience bullets — matched back to source by ID */
   experiences?: Array<{
     /** MUST match a source experience ID */
     id: string;
@@ -63,6 +62,13 @@ export interface OptimizerOutput {
     id: string;
     /** Rewritten highlights */
     highlights: string[];
+  }>;
+  /** Rationales for modifications made during optimization */
+  rationales?: Array<{
+    section: string;
+    original: string;
+    edited: string;
+    reason: string;
   }>;
   /** Optional: keywords the optimizer embedded (for logging only) */
   missingKeywordsAdded?: string[];

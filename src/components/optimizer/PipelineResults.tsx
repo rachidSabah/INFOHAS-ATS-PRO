@@ -415,6 +415,77 @@ export function PipelineResults({ result }: PipelineResultsProps) {
         </CardContent>
       </Card>
 
+      {/* === Explainable Tailoring Score & Rationales (Phase 2) === */}
+      {result.rationales && result.rationales.length > 0 && (
+        <Card className="border-brand/20">
+          <CardHeader className="pb-3">
+            <CardTitle className="text-sm flex items-center gap-2">
+              <Icon name="Lightbulb" className="w-4 h-4 text-brand" /> Explainable Tailoring Rationales
+            </CardTitle>
+            <CardDescription className="text-xs">
+              Direct explanations of why the AI made each change (ATS alignment, active verbs, readability)
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="pt-0 space-y-2.5 max-h-[300px] overflow-y-auto pr-1">
+            {result.rationales.map((rat, i) => (
+              <div key={i} className="rounded-lg bg-secondary/30 p-3 text-xs border border-border/50">
+                <div className="flex items-center gap-1.5 mb-1.5">
+                  <Badge variant="outline" className="text-[9px] uppercase tracking-wider px-1.5 py-0.5">
+                    {rat.section}
+                  </Badge>
+                  <span className="text-muted-foreground text-[10px]">Rationale</span>
+                </div>
+                {rat.original && (
+                  <div className="text-muted-foreground mb-1 line-through decoration-red-300/80 bg-red-500/5 px-1.5 py-0.5 rounded">
+                    <strong>Was:</strong> {rat.original}
+                  </div>
+                )}
+                {rat.edited && (
+                  <div className="text-foreground font-medium mb-1.5 bg-emerald-500/5 px-1.5 py-0.5 rounded">
+                    <strong>Is:</strong> {rat.edited}
+                  </div>
+                )}
+                <div className="text-brand dark:text-brand-light font-semibold bg-brand/5 dark:bg-brand/10 p-1.5 rounded flex items-start gap-1.5">
+                  <Icon name="Info" className="w-3.5 h-3.5 mt-0.5 shrink-0" />
+                  <span>{rat.reason}</span>
+                </div>
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+      )}
+
+      {/* === Visual Guardian Simulator (Phase 4) === */}
+      {result.layoutDiagnostics && (
+        <Card className={result.layoutDiagnostics.overflows ? "border-amber-500/40 bg-amber-500/5" : "border-emerald-500/30 bg-emerald-500/5"}>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm flex items-center gap-2">
+              <Icon name="LayoutGrid" className={`w-4 h-4 ${result.layoutDiagnostics.overflows ? "text-amber-500" : "text-emerald-500"}`} />
+              Visual Guardian Simulator
+            </CardTitle>
+            <CardDescription className="text-xs">
+              Simulates PDF line-wrap height constraints in real-time
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="pt-0 text-xs flex flex-col gap-2">
+            <div className="flex items-center justify-between">
+              <span>Estimated layout vertical height:</span>
+              <span className={`font-semibold ${result.layoutDiagnostics.overflows ? "text-amber-600 font-bold" : "text-emerald-600 font-semibold"}`}>
+                {Math.round(result.layoutDiagnostics.totalHeightPt)} / 842 pt
+              </span>
+            </div>
+            <div className="flex items-center justify-between">
+              <span>A4 One-Page Fill Factor:</span>
+              <span className="font-semibold">{Math.round((result.layoutDiagnostics.totalHeightPt / 842) * 100)}%</span>
+            </div>
+            <div className="flex items-start gap-1.5 p-2 bg-background/50 border border-border/50 rounded mt-1">
+              <Icon name="Info" className="w-3.5 h-3.5 mt-0.5 text-muted-foreground shrink-0" />
+              <span className="text-[11px] leading-relaxed text-foreground/80">{result.layoutDiagnostics.recommendation}</span>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
       {/* === Pipeline Timings === */}
       <Card>
         <CardHeader className="pb-3">

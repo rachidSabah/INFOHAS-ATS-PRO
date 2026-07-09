@@ -12,7 +12,7 @@ describe("Agent-Aware AI Routing", () => {
     ];
     
     useApp.setState({
-      providers: mockProviders,
+      providers: mockProviders as any,
       providerSettings: {
         defaultProviderId: "p_fast_local",
         defaultModel: "fast",

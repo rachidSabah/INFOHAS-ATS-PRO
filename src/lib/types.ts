@@ -591,6 +591,7 @@ export interface FeatureFlags {
   pipeline_websocket_enabled?: boolean;
   enableAIGuardian?: boolean;
   enableSelfHealing?: boolean;
+  enableModelArena?: boolean;
 }
 
 /**
@@ -1505,5 +1506,14 @@ export interface PreservationSnapshot {
     highlightCount: number;
     skillCategoryCount: number;
   };
+}
+
+export interface CareerMaterial {
+  id: string;
+  title: string;
+  contentText: string;
+  category: "resume" | "cover_letter" | "certificate" | "project";
+  createdAt?: string;
+  updatedAt?: string;
 }
 

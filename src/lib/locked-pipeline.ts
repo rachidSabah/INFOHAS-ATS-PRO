@@ -39,6 +39,8 @@ import { getCachedOptimization, setCachedOptimization } from "./semantic-cache";
 import { recordProviderSuccess, recordProviderFailure } from "./provider-health-monitor";
 import { runDynamicSectionPipeline } from "./dynamic-section-engine";
 import { reportDegradedOptimization } from "./degradation";
+import { selectProviderForAgent, getOrderedFallbackProviders } from "./ai";
+import { useApp } from "./store";
 
 export interface LockedPipelineResult {
   resume: ResumeData;
@@ -52,6 +54,18 @@ export interface LockedPipelineResult {
   isDegraded: boolean;
   fingerprintValid: boolean;
   blueprintValid: boolean;
+  rationales?: Array<{
+    section: string;
+    original: string;
+    edited: string;
+    reason: string;
+  }>;
+  layoutDiagnostics?: {
+    totalHeightPt: number;
+    overflows: boolean;
+    scaleFactor: number;
+    recommendation: string;
+  };
   templateBlueprintValid: boolean;
   guardianVerdict?: GuardianVerdict;
   retryCount: number;
@@ -211,7 +225,50 @@ export async function runLockedPipeline(
       // Step 2: Run Bullet-Only Optimizer (supports excludeProviderIds)
       // ========================================================================
       const optimizerInput = buildOptimizerInput(idReadyResume, jd, intelligenceContext, directiveConfig, optimizationPolicy, feedback);
-      const optimizerResult = await runBulletOnlyOptimizer(idReadyResume, jd, intelligenceContext, directiveConfig, excludeProviderIds, optimizationPolicy, feedback, baselineResume);
+      let optimizerResult;
+      const flags = (useApp.getState() as any).flags || {};
+      const primaryProvider = await selectProviderForAgent("optimizer", excludeProviderIds);
+      const fallbackChain = getOrderedFallbackProviders([primaryProvider.id, ...excludeProviderIds]);
+
+      if (flags.enableModelArena && fallbackChain.length > 0) {
+        const secondaryProvider = fallbackChain[0].provider;
+        const secondaryProviderId = secondaryProvider.id || secondaryProvider.name || secondaryProvider.type;
+        console.info(`[Model Arena] Running Primary (${primaryProvider.id}) and Secondary (${secondaryProviderId}) in parallel...`);
+        const [pRes, sRes] = await Promise.all([
+          runBulletOnlyOptimizer(idReadyResume, jd, intelligenceContext, directiveConfig, excludeProviderIds, optimizationPolicy, feedback, baselineResume).catch(e => {
+            console.warn("[Model Arena] Primary failed:", e);
+            return null;
+          }),
+          runBulletOnlyOptimizer(idReadyResume, jd, intelligenceContext, directiveConfig, [primaryProvider.id, ...excludeProviderIds], optimizationPolicy, feedback, baselineResume).catch(e => {
+            console.warn("[Model Arena] Secondary failed:", e);
+            return null;
+          })
+        ]);
+        if (pRes && sRes) {
+          const { scoreATS } = await import("./ats");
+          // Assemble temporary resumes to check ATS scores
+          const pResume = assembleResume(idReadyResume, pRes.output).resume;
+          const sResume = assembleResume(idReadyResume, sRes.output).resume;
+          const pScore = scoreATS(pResume, jd).scores.ats;
+          const sScore = scoreATS(sResume, jd).scores.ats;
+          console.info(`[Model Arena] Primary ATS score: ${pScore}/100. Secondary ATS score: ${sScore}/100.`);
+          if (sScore > pScore) {
+            console.info(`[Model Arena] Winner: Secondary (${sRes.provider})!`);
+            optimizerResult = sRes;
+          } else {
+            console.info(`[Model Arena] Winner: Primary (${pRes.provider})!`);
+            optimizerResult = pRes;
+          }
+        } else {
+          optimizerResult = pRes || sRes;
+        }
+      } else {
+        optimizerResult = await runBulletOnlyOptimizer(idReadyResume, jd, intelligenceContext, directiveConfig, excludeProviderIds, optimizationPolicy, feedback, baselineResume);
+      }
+
+      if (!optimizerResult) {
+        throw new Error("Optimizer failed to return a result.");
+      }
       warnings.push(...optimizerResult.warnings);
 
       console.info(`[Locked Pipeline] Attempt ${attempts}: Optimizer returned: ${optimizerResult.output.experiences?.length ?? 0} experiences, ${optimizerResult.output.skills?.length ?? 0} skills`);
@@ -513,6 +570,14 @@ export async function runLockedPipeline(
       }
       warnings.push(`Snapshot diff: ${snapshotDiff.summary}`);
 
+      let layoutDiagnostics;
+      try {
+        const { simulateLayoutHeight } = await import("./layout-simulator");
+        layoutDiagnostics = simulateLayoutHeight(assembleResult.resume);
+      } catch (simErr) {
+        console.warn("[Layout Simulator] Failed to run layout height simulation:", simErr);
+      }
+
       // ========================================================================
       // Step 9: Return result
       // ========================================================================
@@ -531,6 +596,8 @@ export async function runLockedPipeline(
         guardianVerdict,
         retryCount: attempts,
         isDegraded: false,
+        rationales: optimizerResult.output.rationales,
+        layoutDiagnostics,
         assemblerStats: {
           matchedById: assembleResult.matchedById,
           matchedByFingerprint: assembleResult.matchedByFingerprint,

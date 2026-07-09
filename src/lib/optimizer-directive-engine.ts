@@ -149,6 +149,14 @@ You may ONLY return this exact JSON shape:
       "id": "MUST match the source experience ID exactly",
       "bullets": ["rewritten bullet 1", "rewritten bullet 2", ...]
     }
+  ],
+  "rationales": [
+    {
+      "section": "summary | skills | experience:[id]",
+      "original": "original text or bullet",
+      "edited": "edited text or bullet",
+      "reason": "why this change was made (ATS keyword alignment, active verbs, readability)"
+    }
   ]
 }
 

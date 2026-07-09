@@ -8,6 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+import { Label } from "@/components/ui/label";
 import { Badge, Icon, ScoreRing } from "@/components/shared";
 import { useApp, uid } from "@/lib/store";
 import { parseResumeFile, parseResumeText } from "@/lib/parser";
@@ -89,6 +90,14 @@ export function Optimizer() {
   const [arenaProviderIds, setArenaProviderIds] = useState<string[]>([]);
   const [variantResults, setVariantResults] = useState<Record<string, AgentPipelineResult>>({});
   const [arenaRunning, setArenaRunning] = useState(false);
+  // === CAREER RAG STATES ===
+  const careerMaterials = useApp((s) => s.careerMaterials);
+  const addCareerMaterial = useApp((s) => s.addCareerMaterial);
+  const deleteCareerMaterial = useApp((s) => s.deleteCareerMaterial);
+  const fetchCareerMaterials = useApp((s) => s.fetchCareerMaterials);
+  const [ragDraftTitle, setRagDraftTitle] = useState("");
+  const [ragDraftContent, setRagDraftContent] = useState("");
+  const [ragDraftCategory, setRagDraftCategory] = useState<"resume" | "cover_letter" | "certificate" | "project">("certificate");
   const allProviders = useApp((s) => s.providers);
   const fileRef = useRef<HTMLInputElement>(null);
 
@@ -490,6 +499,10 @@ Respond to the last message and append a [PATCH] block with updates if appropria
     window.addEventListener("resize", onResize);
     return () => window.removeEventListener("resize", onResize);
   }, []);
+
+  useEffect(() => {
+    fetchCareerMaterials();
+  }, [fetchCareerMaterials]);
 
   const uploadResume = async (files: FileList | null) => {
     if (!files?.[0]) return;
@@ -1197,6 +1210,116 @@ Respond to the last message and append a [PATCH] block with updates if appropria
                   </div>
                 </CardContent>
               </Tabs>
+            </Card>
+
+            {/* Career Context Indexer (RAG) Card */}
+            <Card className="mt-4">
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm flex items-center gap-2">
+                  <Icon name="Database" className="w-4 h-4 text-brand" /> Career Context RAG Indexer
+                </CardTitle>
+                <CardDescription className="text-xs">
+                  Index past career materials (resumes, cover letters, certs, projects) to automatically bridge skills gaps during optimization.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4 pt-0 text-xs">
+                {/* Add new career material */}
+                <div className="rounded-lg border border-border bg-secondary/20 p-3 space-y-2.5">
+                  <div className="font-semibold text-xs">Index New Career Document / Certificate</div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div className="space-y-1">
+                      <Label htmlFor="rag-title" className="text-[10px] text-muted-foreground">Title</Label>
+                      <Input
+                        id="rag-title"
+                        placeholder="e.g. AWS Solutions Architect Cert"
+                        value={ragDraftTitle}
+                        onChange={(e) => setRagDraftTitle(e.target.value)}
+                        className="h-8 text-xs"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <Label htmlFor="rag-category" className="text-[10px] text-muted-foreground">Category</Label>
+                      <select
+                        id="rag-category"
+                        value={ragDraftCategory}
+                        onChange={(e) => setRagDraftCategory(e.target.value as any)}
+                        className="w-full h-8 px-2 rounded-md border border-input bg-background text-xs"
+                      >
+                        <option value="certificate">Certificate</option>
+                        <option value="project">Project / Case Study</option>
+                        <option value="resume">Past Resume Version</option>
+                        <option value="cover_letter">Past Cover Letter</option>
+                      </select>
+                    </div>
+                  </div>
+                  <div className="space-y-1">
+                    <Label htmlFor="rag-content" className="text-[10px] text-muted-foreground">Document Details / Body Text</Label>
+                    <Textarea
+                      id="rag-content"
+                      placeholder="Paste achievements, project descriptions, technologies used, or certificate details..."
+                      value={ragDraftContent}
+                      onChange={(e) => setRagDraftContent(e.target.value)}
+                      className="min-h-[60px] text-xs"
+                    />
+                  </div>
+                  <Button
+                    size="sm"
+                    onClick={() => {
+                      if (!ragDraftTitle || !ragDraftContent) {
+                        toast.error("Please fill in both title and content.");
+                        return;
+                      }
+                      addCareerMaterial(ragDraftTitle, ragDraftContent, ragDraftCategory);
+                      setRagDraftTitle("");
+                      setRagDraftContent("");
+                      toast.success("Document indexed successfully!");
+                    }}
+                    className="w-full h-8"
+                  >
+                    <Icon name="Plus" className="w-3.5 h-3.5 mr-1" /> Index Document
+                  </Button>
+                </div>
+
+                {/* List of indexed materials */}
+                <div className="space-y-2">
+                  <div className="font-semibold text-xs flex items-center justify-between">
+                    <span>Currently Indexed Materials ({careerMaterials.length})</span>
+                    {careerMaterials.length > 0 && <span className="text-[10px] text-emerald-600 font-medium">Active & ready for RAG matching</span>}
+                  </div>
+                  {careerMaterials.length === 0 ? (
+                    <div className="text-center py-4 border border-dashed rounded text-muted-foreground bg-secondary/10">
+                      No career materials indexed yet. Add some achievements or past projects to help the AI.
+                    </div>
+                  ) : (
+                    <div className="space-y-1.5 max-h-[180px] overflow-y-auto pr-1">
+                      {careerMaterials.map((mat) => (
+                        <div key={mat.id} className="flex items-center justify-between p-2 bg-secondary/30 rounded border border-border/50">
+                          <div className="min-w-0 flex-1">
+                            <div className="font-medium truncate flex items-center gap-1.5">
+                              <Badge variant="outline" className="text-[9px] uppercase px-1">
+                                {mat.category}
+                              </Badge>
+                              <span className="truncate">{mat.title}</span>
+                            </div>
+                            <div className="text-[10px] text-muted-foreground truncate mt-0.5">{mat.contentText}</div>
+                          </div>
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            onClick={() => {
+                              deleteCareerMaterial(mat.id);
+                              toast.success("Material deleted from index.");
+                            }}
+                            className="h-7 w-7 p-0 text-red-500 hover:text-red-700 hover:bg-red-500/10"
+                          >
+                            <Icon name="Trash" className="w-3.5 h-3.5" />
+                          </Button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </CardContent>
             </Card>
           </motion.div>
         )}

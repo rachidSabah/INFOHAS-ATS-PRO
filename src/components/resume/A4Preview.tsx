@@ -251,6 +251,7 @@ function InfohasProTemplate({ resume, accent }: { resume: ResumeData; accent: st
     bodyTextColor: config?.bodyTextColor || "#000000",
     sectionGapMm: config?.sectionGapMm ?? 3,
     bulletIndentMm: config?.bulletIndentMm ?? 6.4,
+    contactSpacing: config?.contactSpacing ?? "stacked",
   };
 
   const BLACK = L.bodyTextColor;

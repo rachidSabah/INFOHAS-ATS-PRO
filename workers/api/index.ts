@@ -1383,6 +1383,33 @@ app.get("/api/tasks/:id/events", async (c) => {
   return new Response(stream, { headers });
 });
 
+// ============ CAREER MATERIALS (RAG) ============
+app.get("/api/career-materials", async (c) => {
+  const { results } = await c.env.DB.prepare("SELECT * FROM career_materials ORDER BY created_at DESC").all();
+  return c.json({ careerMaterials: results || [] });
+});
+
+app.post("/api/career-materials", async (c) => {
+  const body = await c.req.json();
+  if (!body.id || !body.title || !body.contentText) {
+    return c.json({ error: "Missing required fields: id, title, contentText" }, 400);
+  }
+  const now = new Date().toISOString();
+  await c.env.DB.prepare(
+    "INSERT OR REPLACE INTO career_materials (id, title, content_text, category, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)"
+  ).bind(
+    body.id, body.title.trim(), body.contentText.trim(), body.category || 'project', now, now
+  ).run();
+
+  return c.json({ success: true });
+});
+
+app.delete("/api/career-materials/:id", async (c) => {
+  const id = c.req.param("id");
+  await c.env.DB.prepare("DELETE FROM career_materials WHERE id = ?").bind(id).run();
+  return c.json({ success: true });
+});
+
 // 404
 app.notFound((c) => c.json({ error: "Not found", path: c.req.path }, 404));
 

@@ -309,6 +309,16 @@ export function parseOptimizerOutput(rawResponse: string): { output: OptimizerOu
       : undefined,
     missingKeywordsAdded: Array.isArray(parsed.missingKeywordsAdded) ? parsed.missingKeywordsAdded : undefined,
     bulletsRewritten: typeof parsed.bulletsRewritten === "number" ? parsed.bulletsRewritten : undefined,
+    rationales: Array.isArray(parsed.rationales)
+      ? parsed.rationales
+          .filter((r: any) => r && typeof r === "object" && typeof r.reason === "string")
+          .map((r: any) => ({
+            section: typeof r.section === "string" ? r.section : "experience",
+            original: typeof r.original === "string" ? r.original : "",
+            edited: typeof r.edited === "string" ? r.edited : "",
+            reason: typeof r.reason === "string" ? r.reason : "",
+          }))
+      : undefined,
   };
 
   // Use OptimizerPatch validator to detect & strip ALL forbidden fields at every level

@@ -540,6 +540,20 @@ export interface PipelineResult {
   customDirectiveApplied?: boolean;
   /** Phase 11: Whether a live JD fetch was attempted */
   liveFetchAttempted?: boolean;
+  /** Rationales for modifications made during optimization */
+  rationales?: Array<{
+    section: string;
+    original: string;
+    edited: string;
+    reason: string;
+  }>;
+  /** Deterministic layout simulation height and warnings */
+  layoutDiagnostics?: {
+    totalHeightPt: number;
+    overflows: boolean;
+    scaleFactor: number;
+    recommendation: string;
+  };
   /** Phase 11: The URL from which the JD was fetched live */
   liveJDFetchUrl?: string;
   /** Phase 11: Eligibility check report (candidate vs live JD requirements) */
@@ -677,6 +691,7 @@ async function _runOptimizationPipelineInner(input: PipelineInput, watchdog: Opt
     provider: "unknown",
     charCount: 0,
     metCharTarget: false,
+    rationales: [],
   };
 
   let intelligenceContext = "";
@@ -848,7 +863,14 @@ async function _runOptimizationPipelineInner(input: PipelineInput, watchdog: Opt
     let optimizeAttempt = 0;
     const maxOptimizeAttempts = 4; // 1 initial + 3 retries
     let success = false;
-    let optimizeResult: { resume: ResumeData; provider: string; charCount: number; keywordsAdded: number } | null = null;
+    let optimizeResult: {
+      resume: ResumeData;
+      provider: string;
+      charCount: number;
+      keywordsAdded: number;
+      rationales?: any[];
+      layoutDiagnostics?: any;
+    } | null = null;
     let optimizeError: string | null = null;
 
     // Load the directive config (for font size, margins, line height)
@@ -970,6 +992,23 @@ INDUSTRY CONTEXT:
 ${jobMemory.industry}`);
           }
 
+          // === Career Context RAG (Vector-Free Semantic Matcher) ===
+          try {
+            const storeMaterials = (useApp.getState() as any).careerMaterials || [];
+            if (storeMaterials.length > 0) {
+              const { searchCareerMaterials, formatRAGContext } = await import("../rag-search");
+              const ragQuery = `${jd.title} ${missingKeywords.slice(0, 5).join(" ")}`;
+              const ragResults = searchCareerMaterials(storeMaterials, ragQuery, 3);
+              if (ragResults.length > 0) {
+                const ragContext = formatRAGContext(ragResults);
+                intelligenceBlocks.push(ragContext);
+                console.info(`[Career RAG] Injected ${ragResults.length} relevant context snippets into optimization intelligence.`);
+              }
+            }
+          } catch (ragErr) {
+            console.warn("[Career RAG] Search integration failed:", ragErr);
+          }
+
           intelligenceContext = intelligenceBlocks.join("\n\n");
 
           // Check if parallel pipeline is enabled via env var
@@ -1004,6 +1043,8 @@ ${jobMemory.industry}`);
               provider: lockedResult.provider,
               charCount: lockedResult.charCount,
               keywordsAdded: lockedResult.keywordsAdded,
+              rationales: lockedResult.rationales,
+              layoutDiagnostics: lockedResult.layoutDiagnostics,
             };
 
           // Log warnings
@@ -1153,6 +1194,8 @@ ${jobMemory.industry}`);
       result.optimizedResume = optimizeResult.resume;
       result.provider = optimizeResult.provider;
       result.charCount = optimizeResult.charCount;
+      result.rationales = optimizeResult.rationales || [];
+      result.layoutDiagnostics = optimizeResult.layoutDiagnostics;
 
       // ========================================================================
       // [V3.5] ResumeRepairAgent — fix structural issues from optimizer

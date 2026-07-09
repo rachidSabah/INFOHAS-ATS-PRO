@@ -26,7 +26,7 @@ import {
 } from "./pipeline-orchestration-seeds";
 import { BRAND, getRoleForEmail } from "./brand";
 import { hashPassword, verifyPassword, SUPER_ADMIN_SEED, canSignIn, canAccessApp } from "./auth-utils";
-import type { UserStatus as US } from "./types";
+import type { UserStatus as US, CareerMaterial } from "./types";
 import { setUserId, clearUserId, api as cloudApi, cloudApiSafe } from "./cloud-api";
 import { loadUserProfile, saveUserProfile } from "./agents/memory-agent";
 
@@ -81,6 +81,7 @@ interface AppState {
   coverLetters: CoverLetter[];
   interviews: InterviewPackage[];
   atsReports: ATSReport[];
+  careerMaterials: CareerMaterial[];
   // AI Resume Review Platform — comprehensive multi-module review reports.
   // Stored as rich JSON blobs in the store; persisted to localStorage as
   // `resumeai-review-reports-backup` and best-effort synced to the
@@ -178,6 +179,9 @@ interface AppState {
   suspendUser: (userId: string) => void;
   unsuspendUser: (userId: string) => void;
   deleteUser: (userId: string) => void;
+  addCareerMaterial: (title: string, contentText: string, category: "resume" | "cover_letter" | "certificate" | "project") => void;
+  deleteCareerMaterial: (id: string) => void;
+  fetchCareerMaterials: () => Promise<void>;
   promoteToAdmin: (userId: string) => void;
   demoteToUser: (userId: string) => void;
   resetUserPassword: (userId: string, newPassword: string) => void;
@@ -429,6 +433,7 @@ export const useApp = create<AppState>()(
       jobDescriptions: SEED_JDS,
       coverLetters: SEED_COVER_LETTERS,
       interviews: SEED_INTERVIEW,
+      careerMaterials: [],
       atsReports: SEED_ATS_REPORTS,
       // SSR-safe: start empty — rehydrateSession() restores from localStorage.
       reviewReports: [],
@@ -534,6 +539,7 @@ export const useApp = create<AppState>()(
             reviewReports: restoredReports,
             _needsRehydrate: false,
           });
+          get().fetchCareerMaterials();
         } else {
           set({ _needsRehydrate: false });
         }
@@ -549,6 +555,7 @@ export const useApp = create<AppState>()(
         setUserId(updatedUser.id); // Set user ID for API calls
         // Persist session to localStorage so it survives browser refresh
         persistSession(updatedUser);
+        get().fetchCareerMaterials();
         set((s) => {
           const exists = s.users.find((u) => u.email === user.email);
           const users = exists
@@ -583,6 +590,7 @@ export const useApp = create<AppState>()(
           activeJdId: null,
           activeCoverLetterId: null,
           activeInterviewId: null,
+          careerMaterials: [],
         });
       },
 
@@ -828,6 +836,37 @@ export const useApp = create<AppState>()(
       },
       updateUserStatus: (userId, status) => {
         set((s) => ({ users: s.users.map((u) => (u.id === userId ? { ...u, status, updatedAt: new Date().toISOString() } : u)) }));
+      },
+      addCareerMaterial: (title, contentText, category) => {
+        const id = crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).substring(2);
+        const newItem: CareerMaterial = {
+          id,
+          title,
+          contentText,
+          category,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString()
+        };
+        set((s) => ({ careerMaterials: [newItem, ...s.careerMaterials] }));
+        cloudApiSafe(cloudApi.createCareerMaterial)(newItem).catch((e) => {
+          console.warn("[store] Career material cloud sync failed:", e);
+        });
+      },
+      deleteCareerMaterial: (id) => {
+        set((s) => ({ careerMaterials: s.careerMaterials.filter((m) => m.id !== id) }));
+        cloudApiSafe(cloudApi.deleteCareerMaterial)(id).catch((e) => {
+          console.warn("[store] Career material cloud delete failed:", e);
+        });
+      },
+      fetchCareerMaterials: async () => {
+        try {
+          const resp = await cloudApi.getCareerMaterials();
+          if (resp && resp.careerMaterials) {
+            set({ careerMaterials: resp.careerMaterials });
+          }
+        } catch (e) {
+          console.warn("[store] Failed to fetch career materials:", e);
+        }
       },
       updateUserName: (newName) => {
         const trimmed = newName.trim();

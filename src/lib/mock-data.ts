@@ -1095,6 +1095,7 @@ export const SEED_FLAGS: FeatureFlags = {
   pipeline_websocket_enabled: false,
   enableAIGuardian: true,
   enableSelfHealing: true,
+  enableModelArena: true,
 };
 
 /**
