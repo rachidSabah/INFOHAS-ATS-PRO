@@ -67,4 +67,40 @@ ${JSON.stringify(dummyResume, null, 2)}`;
     expect(patchJson.experience[0].id).toBe("exp-1");
     expect(patchJson.experience[1].id).toBe("exp-2");
   });
+
+  it("should return Qatar Duty Free targeting patch when requested", () => {
+    const opts: AICallOptions = {
+      systemPrompt: `You are a professional AI Resume Copilot.
+Here is the current resume data:
+{
+  "experience": []
+}`,
+      userPrompt: "optimize for Sales Assistant role at Qatar Duty Free",
+      taskCategory: "document"
+    };
+
+    const response = localGenerate(opts);
+    expect(response).toContain("[PATCH]");
+
+    const parts = response.split("[PATCH]");
+    const patchJson = JSON.parse(parts[1].trim());
+    expect(patchJson.headline).toBe("Sales Assistant & Customer Service Specialist");
+    expect(patchJson.skills.length).toBeGreaterThan(0);
+  });
+
+  it("should return ATS score improvement patch when requested", () => {
+    const opts: AICallOptions = {
+      systemPrompt: `You are a professional AI Resume Copilot.`,
+      userPrompt: "improve ats score",
+      taskCategory: "document"
+    };
+
+    const response = localGenerate(opts);
+    expect(response).toContain("[PATCH]");
+
+    const parts = response.split("[PATCH]");
+    const patchJson = JSON.parse(parts[1].trim());
+    expect(patchJson.skills).toBeDefined();
+    expect(patchJson.skills[0].name).toBe("World-Class Customer Service");
+  });
 });

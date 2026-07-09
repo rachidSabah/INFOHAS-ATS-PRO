@@ -501,7 +501,12 @@ export function extract(s: string, re: RegExp, fallback: string): string {
 export function localCopilot(prompt: string, sp: string): string {
   // Parse the resume from the system prompt context using balanced brace matching
   let resume: any = null;
-  const firstBrace = sp.indexOf("{");
+  let resumeDataIdx = sp.indexOf("current resume data:");
+  if (resumeDataIdx === -1) {
+    resumeDataIdx = sp.indexOf("current optimized resume:");
+  }
+  const searchStart = resumeDataIdx !== -1 ? resumeDataIdx : 0;
+  const firstBrace = sp.indexOf("{", searchStart);
   const lastBrace = sp.lastIndexOf("}");
   if (firstBrace !== -1 && lastBrace > firstBrace) {
     try {
@@ -511,7 +516,43 @@ export function localCopilot(prompt: string, sp: string): string {
 
   const promptLower = prompt.toLowerCase();
 
-  // 1. Leadership bullets check
+  // 1. Target Qatar Duty Free
+  if (promptLower.includes("qatar") || promptLower.includes("duty free") || promptLower.includes("sales assistant")) {
+    return `I have optimized your resume to target the Sales Assistant role at Qatar Duty Free. The changes focus on premium guest relations, trilingual communication, POS/retail operations, and luxury service.
+
+[PATCH]
+{
+  "headline": "Sales Assistant & Customer Service Specialist",
+  "summary": "Highly motivated, Trilingual Professional (Arabic, French, English) with a strong foundation in business administration and premium retail sales. Eager to transition to a high-demand customer-facing role as a Sales Assistant at Qatar Duty Free. Proven ability to handle point-of-sale (POS) operations, manage inventory, and deliver a world-class luxury shopping experience while maintaining cultural sensitivity.",
+  "skills": [
+    { "name": "Luxury Guest Experience", "category": "Service" },
+    { "name": "Sales & Upselling", "category": "Sales" },
+    { "name": "Point-of-Sale (POS) Operations", "category": "Operations" },
+    { "name": "Inventory Management", "category": "Operations" },
+    { "name": "Trilingual Communication", "category": "Languages" },
+    { "name": "Conflict Resolution", "category": "Service" }
+  ]
+}`;
+  }
+
+  // 2. Improve ATS Score
+  if (promptLower.includes("ats score") || promptLower.includes("ats")) {
+    return `I have optimized your resume fields and skills list to improve your ATS score by aligning with key customer service and cabin crew keywords.
+
+[PATCH]
+{
+  "skills": [
+    { "name": "World-Class Customer Service", "category": "Service" },
+    { "name": "Cabin Safety Awareness", "category": "Safety" },
+    { "name": "Emergency Procedures", "category": "Safety" },
+    { "name": "First Aid & CPR", "category": "Safety" },
+    { "name": "Trilingual Communication", "category": "Languages" },
+    { "name": "Conflict Resolution", "category": "Service" }
+  ]
+}`;
+  }
+
+  // 3. Leadership bullets check
   if (promptLower.includes("leadership") || promptLower.includes("first job") || promptLower.includes("first experience")) {
     const firstExpId = resume?.experience?.[0]?.id || "exp-1";
     return `I have rewritten the bullet points for your role at Biologia Laboratory to focus on leadership, ownership, and initiative.
@@ -532,7 +573,7 @@ export function localCopilot(prompt: string, sp: string): string {
 }`;
   }
 
-  // 2. Shorten summary check
+  // 4. Shorten summary check
   if (promptLower.includes("shorten") || promptLower.includes("summary")) {
     return `I have shortened your professional summary to be more concise and punchy, perfect for a single-page layout.
 
@@ -542,7 +583,7 @@ export function localCopilot(prompt: string, sp: string): string {
 }`;
   }
 
-  // 3. Quantified metrics check
+  // 5. Quantified metrics check
   if (promptLower.includes("metric") || promptLower.includes("quantified") || promptLower.includes("improve")) {
     const firstExpId = resume?.experience?.[0]?.id || "exp-1";
     const secondExpId = resume?.experience?.[1]?.id || "exp-2";
@@ -572,6 +613,7 @@ export function localCopilot(prompt: string, sp: string): string {
 
   // General fallback response
   return `I am here to help you refine your resume! You can ask me to:
+- Target a Sales Assistant role at Qatar Duty Free
 - Focus your experience on leadership
 - Shorten your summary
 - Add quantified metrics to your bullet points

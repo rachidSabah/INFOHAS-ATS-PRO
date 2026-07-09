@@ -778,20 +778,47 @@ ${resumeContext}
         };
 
         const cleanedPatch = stripAst(patchData);
+        console.log("[Copilot] Raw patch data:", patchData);
+        console.log("[Copilot] Cleaned patch data:", cleanedPatch);
+
         const updatedResume: Partial<ResumeData> = {};
         
-        const summaryVal = cleanStringField(cleanedPatch.summary);
-        if (summaryVal !== undefined) {
-          updatedResume.summary = summaryVal;
+        // 1. Core Profile Fields
+        const nameVal = cleanStringField(cleanedPatch.name);
+        if (nameVal !== undefined) {
+          updatedResume.name = nameVal;
         }
-        
+
         const headlineVal = cleanStringField(cleanedPatch.headline);
         if (headlineVal !== undefined) {
           updatedResume.headline = headlineVal;
         }
 
+        const summaryVal = cleanStringField(cleanedPatch.summary);
+        if (summaryVal !== undefined) {
+          updatedResume.summary = summaryVal;
+        }
+
+        const dobVal = cleanStringField(cleanedPatch.dateOfBirth);
+        if (dobVal !== undefined) {
+          updatedResume.dateOfBirth = dobVal;
+        }
+
+        // 2. Nested Contact Info
+        if (cleanedPatch.contact !== undefined && cleanedPatch.contact !== null) {
+          updatedResume.contact = {
+            ...resume.contact,
+            email: cleanedPatch.contact.email !== undefined ? cleanStringField(cleanedPatch.contact.email) || resume.contact.email : resume.contact.email,
+            phone: cleanedPatch.contact.phone !== undefined ? cleanStringField(cleanedPatch.contact.phone) || resume.contact.phone : resume.contact.phone,
+            location: cleanedPatch.contact.location !== undefined ? cleanStringField(cleanedPatch.contact.location) || resume.contact.location : resume.contact.location,
+            website: cleanedPatch.contact.website !== undefined ? cleanStringField(cleanedPatch.contact.website) : resume.contact.website,
+            linkedin: cleanedPatch.contact.linkedin !== undefined ? cleanStringField(cleanedPatch.contact.linkedin) : resume.contact.linkedin,
+            github: cleanedPatch.contact.github !== undefined ? cleanStringField(cleanedPatch.contact.github) : resume.contact.github,
+          };
+        }
+
+        // 3. Skills Array
         if (Array.isArray(cleanedPatch.skills)) {
-          // Robust mapping of skills supporting strings and objects, preserving or generating ids
           updatedResume.skills = cleanedPatch.skills.map((s: any) => {
             if (typeof s === "string") {
               const name = cleanStringField(s) || "";
@@ -806,10 +833,28 @@ ${resumeContext}
             };
           });
         }
+
+        // 4. Experience Array (Smart Match)
         if (Array.isArray(cleanedPatch.experience)) {
           updatedResume.experience = resume.experience.map((e, idx) => {
-            // Find match by exact id, or name/company similarity, or fallback to index
+            // Find match by exact id
             let match = cleanedPatch.experience.find((pe: any) => pe.id === e.id);
+            
+            // Try matching by mock ID suffix (e.g. e_1 or exp-1 matching index 0)
+            if (!match) {
+              match = cleanedPatch.experience.find((pe: any) => {
+                if (typeof pe.id === "string") {
+                  const numMatch = pe.id.match(/\d+/);
+                  if (numMatch) {
+                    const mockIdx = parseInt(numMatch[0], 10) - 1;
+                    return mockIdx === idx;
+                  }
+                }
+                return false;
+              });
+            }
+
+            // Fuzzy match by company/title similarity
             if (!match) {
               match = cleanedPatch.experience.find((pe: any) => {
                 const peCompany = (pe.company || "").toLowerCase().trim();
@@ -820,7 +865,9 @@ ${resumeContext}
                        (peTitle && eTitle && peTitle === eTitle);
               });
             }
-            if (!match && cleanedPatch.experience[idx]) {
+
+            // Safe fallback to index only if array lengths are identical
+            if (!match && cleanedPatch.experience.length === resume.experience.length && cleanedPatch.experience[idx]) {
               match = cleanedPatch.experience[idx];
             }
 
@@ -831,7 +878,6 @@ ${resumeContext}
               const expStartDate = cleanStringField(match.startDate);
               const expEndDate = cleanStringField(match.endDate);
 
-              // Normalize bullets (could be an array of strings, or a stringified array, or a single string)
               let expBullets = e.bullets;
               if (match.bullets !== undefined) {
                 if (Array.isArray(match.bullets)) {
@@ -870,9 +916,28 @@ ${resumeContext}
             return e;
           });
         }
+
+        // 5. Education Array (Smart Match)
         if (Array.isArray(cleanedPatch.education)) {
           updatedResume.education = resume.education.map((ed, idx) => {
+            // Find match by exact id
             let match = cleanedPatch.education.find((ped: any) => ped.id === ed.id);
+
+            // Try matching by mock ID suffix (e.g. ed_1 or edu-1 matching index 0)
+            if (!match) {
+              match = cleanedPatch.education.find((ped: any) => {
+                if (typeof ped.id === "string") {
+                  const numMatch = ped.id.match(/\d+/);
+                  if (numMatch) {
+                    const mockIdx = parseInt(numMatch[0], 10) - 1;
+                    return mockIdx === idx;
+                  }
+                }
+                return false;
+              });
+            }
+
+            // Fuzzy match by institution similarity
             if (!match) {
               match = cleanedPatch.education.find((ped: any) => {
                 const pedInst = (ped.institution || "").toLowerCase().trim();
@@ -880,7 +945,9 @@ ${resumeContext}
                 return pedInst && edInst && pedInst === edInst;
               });
             }
-            if (!match && cleanedPatch.education[idx]) {
+
+            // Safe fallback to index only if array lengths are identical
+            if (!match && cleanedPatch.education.length === resume.education.length && cleanedPatch.education[idx]) {
               match = cleanedPatch.education[idx];
             }
 
@@ -931,6 +998,8 @@ ${resumeContext}
             return ed;
           });
         }
+
+        // 6. Languages Array
         if (Array.isArray(cleanedPatch.languages)) {
           updatedResume.languages = cleanedPatch.languages.map((l: any) => {
             if (typeof l === "string") {
@@ -944,6 +1013,48 @@ ${resumeContext}
           });
         }
 
+        // 7. Projects Array
+        if (Array.isArray(cleanedPatch.projects)) {
+          updatedResume.projects = cleanedPatch.projects.map((p: any) => {
+            if (typeof p === "string") {
+              return { id: uid("p"), name: cleanStringField(p) || "", description: "", role: "", date: "" };
+            }
+            return {
+              id: p.id || uid("p"),
+              name: cleanStringField(p.name) || "",
+              description: cleanStringField(p.description) || "",
+              role: cleanStringField(p.role) || "",
+              date: cleanStringField(p.date) || ""
+            };
+          });
+        }
+
+        // 8. Certifications Array
+        if (Array.isArray(cleanedPatch.certifications)) {
+          updatedResume.certifications = cleanedPatch.certifications.map((c: any) => {
+            if (typeof c === "string") {
+              return { id: uid("c"), name: cleanStringField(c) || "", date: "", authority: "" };
+            }
+            return {
+              id: c.id || uid("c"),
+              name: cleanStringField(c.name) || "",
+              date: cleanStringField(c.date) || "",
+              authority: cleanStringField(c.authority) || ""
+            };
+          });
+        }
+
+        // 9. Additional Info / Achievements
+        const addInfoVal = cleanStringField(cleanedPatch.additionalInfo);
+        if (addInfoVal !== undefined) {
+          updatedResume.additionalInfo = addInfoVal;
+        }
+
+        if (Array.isArray(cleanedPatch.achievements)) {
+          updatedResume.achievements = cleanedPatch.achievements.map(a => cleanStringField(a) || "");
+        }
+
+        console.log("[Copilot] Applying updated resume fields:", updatedResume);
         patch(updatedResume);
         toast.success("AI Copilot updated your resume!");
       }
