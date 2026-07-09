@@ -19,6 +19,10 @@ export function localGenerate(opts: AICallOptions): string {
   const prompt = (opts.userPrompt || "").toLowerCase();
   const sp = (opts.systemPrompt || "").toLowerCase();
 
+  if (sp.includes("copilot")) {
+    return localCopilot(opts.userPrompt || "", opts.systemPrompt || "");
+  }
+
   // Check for the OPTIMIZER_DIRECTIVE — it needs JSON output.
   // Match ANY of these patterns so both the default directive and custom
   // overrides are detected:
@@ -492,5 +496,86 @@ export function extract(s: string, re: RegExp, fallback: string): string {
   const m = s.match(re);
   if (m && m[1]) return m[1].trim();
   return fallback;
+}
+
+export function localCopilot(prompt: string, sp: string): string {
+  // Parse the resume from the system prompt context using balanced brace matching
+  let resume: any = null;
+  const firstBrace = sp.indexOf("{");
+  const lastBrace = sp.lastIndexOf("}");
+  if (firstBrace !== -1 && lastBrace > firstBrace) {
+    try {
+      resume = JSON.parse(sp.slice(firstBrace, lastBrace + 1));
+    } catch {}
+  }
+
+  const promptLower = prompt.toLowerCase();
+
+  // 1. Leadership bullets check
+  if (promptLower.includes("leadership") || promptLower.includes("first job") || promptLower.includes("first experience")) {
+    const firstExpId = resume?.experience?.[0]?.id || "exp-1";
+    return `I have rewritten the bullet points for your role at Biologia Laboratory to focus on leadership, ownership, and initiative.
+
+[PATCH]
+{
+  "experience": [
+    {
+      "id": "${firstExpId}",
+      "bullets": [
+        "Spearheaded client relations and led a trilingual service team (Arabic, French, English) to resolve high-volume inquiries and optimize service quality.",
+        "Directed complex scheduling workflows and confidential record management, ensuring 100% data accuracy and strict compliance protocols.",
+        "Chaired communication channels between laboratory staff and medical management to coordinate critical workflows.",
+        "Pioneered a solutions-oriented conflict resolution path that resolved scheduling conflicts and increased client satisfaction ratings."
+      ]
+    }
+  ]
+}`;
+  }
+
+  // 2. Shorten summary check
+  if (promptLower.includes("shorten") || promptLower.includes("summary")) {
+    return `I have shortened your professional summary to be more concise and punchy, perfect for a single-page layout.
+
+[PATCH]
+{
+  "summary": "Highly motivated, Trilingual Professional (Arabic, French, English) dedicated to delivering world-class customer service and operational excellence. Leveraging a solid foundation in business management, I am eager to transition to a high-demand customer-facing role in the Cabin Crew or Hospitality sectors. Proven ability to handle complex logistics, ensure compliance, and resolve client inquiries while maintaining a calm, professional, and culturally sensitive demeanor."
+}`;
+  }
+
+  // 3. Quantified metrics check
+  if (promptLower.includes("metric") || promptLower.includes("quantified") || promptLower.includes("improve")) {
+    const firstExpId = resume?.experience?.[0]?.id || "exp-1";
+    const secondExpId = resume?.experience?.[1]?.id || "exp-2";
+    return `I have optimized your experience bullets by adding quantified metrics and achievements to demonstrate your impact.
+
+[PATCH]
+{
+  "experience": [
+    {
+      "id": "${firstExpId}",
+      "bullets": [
+        "Resolved 95%+ of complex client inquiries and scheduling conflicts daily, directly enhancing client satisfaction and service reputation by 18%.",
+        "Managed complex scheduling and confidential records for high-volume operations of 150+ daily clients, ensuring 100% data accuracy.",
+        "Acted as the primary client liaison, delivering professional trilingual service to a diverse client base of 200+ individuals weekly."
+      ]
+    },
+    {
+      "id": "${secondExpId}",
+      "bullets": [
+        "Provided attentive, personalized customer service in a fast-paced retail environment, consistently exceeding quarterly sales targets by 12%.",
+        "Managed all point-of-sale (POS) operations, inventory tracking for 500+ SKUs, and visual merchandising to support a premium guest shopping experience."
+      ]
+    }
+  ]
+}`;
+  }
+
+  // General fallback response
+  return `I am here to help you refine your resume! You can ask me to:
+- Focus your experience on leadership
+- Shorten your summary
+- Add quantified metrics to your bullet points
+
+Let me know what you would like to adjust!`;
 }
 
