@@ -47,9 +47,15 @@ function makeResume(bullets: string[], overrides: Partial<ResumeData["experience
         location: "Oxford",
       },
     ],
-    certifications: [{ id: "cert-1", name: "AWS Solutions Architect", issuer: "Amazon", date: "2021" }],
     skills: [{ id: "s1", name: "TypeScript", category: "Languages" }],
-    languages: [{ id: "l1", name: "English", level: "Native" }],
+    languages: [{ id: "l1", name: "English", proficiency: "native" as any }],
+    certifications: [{ id: "cert-1", name: "AWS Solutions Architect" } as any],
+    projects: [],
+    template: "infohas-pro",
+    accentColor: "#0563C1",
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    source: "upload",
   };
 }
 

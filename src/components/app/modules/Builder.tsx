@@ -748,9 +748,21 @@ You MUST output a valid [PATCH] block with updates to "summary" and "headline" f
         patch1 = extractJSON(jsonStr);
       } catch {}
 
+      // stripAst is defined later in sendMessage; for autopilot, use a simple inline version
+      const stripAstInline = (val: any): any => {
+        if (val === null || typeof val !== "object") return val;
+        if (Array.isArray(val)) return val.map(stripAstInline);
+        const res: any = {};
+        for (const k in val) {
+          if (k === "_ast" || k === "__ast") continue;
+          res[k] = stripAstInline(val[k]);
+        }
+        return res;
+      };
+
       let currentTempResume = { ...resume };
       if (patch1) {
-        const cleaned1 = stripAst(patch1);
+        const cleaned1 = stripAstInline(patch1);
         if (cleaned1.summary) currentTempResume.summary = cleanStringField(cleaned1.summary);
         if (cleaned1.headline) currentTempResume.headline = cleanStringField(cleaned1.headline);
       }
@@ -1093,16 +1105,21 @@ I have prepared a comprehensive proposed patch to apply all 3 steps of optimizat
           body: JSON.stringify({ url: targetUrl })
         });
         if (scrapeRes.ok) {
-          const scrapeData = await scrapeRes.json();
+          const scrapeData: any = await scrapeRes.json();
           if (scrapeData.success && scrapeData.job) {
             const newJdId = uid("jd");
-            const newJd = {
+            const newJd: any = {
               id: newJdId,
               title: scrapeData.job.title || "Scraped Position",
               company: scrapeData.job.company || "Scraped Employer",
               rawText: scrapeData.job.description || "",
               keywords: scrapeData.job.keywords || [],
-              url: targetUrl
+              url: targetUrl,
+              responsibilities: [],
+              requiredSkills: [],
+              preferredSkills: [],
+              technologies: [],
+              createdAt: new Date().toISOString(),
             };
             addJD(newJd);
             setActiveJD(newJdId);
@@ -1122,7 +1139,18 @@ I have prepared a comprehensive proposed patch to apply all 3 steps of optimizat
     try {
       const { ProviderRouter } = await import("@/lib/ai/services/router");
       
-      let targetSystemPrompt = systemPrompt;
+      let targetSystemPrompt = `You are an expert AI Resume Copilot integrated into a resume builder. Your job is to help the user improve their resume.
+You can:
+1. Rewrite and improve the professional summary
+2. Polish experience bullet points with action verbs and metrics
+3. Suggest skills and keywords relevant to the target job
+4. Improve formatting and ATS compatibility
+5. Generate a [PATCH] block with JSON to update resume fields
+
+When you want to modify the resume, output a [PATCH] block containing a JSON object with any of these fields:
+{"summary": "...", "headline": "...", "experience": [{"id": "...", "bullets": ["...", "..."]}], "skills": [{"name": "...", "category": "..."}]}
+
+Always explain your changes in plain text BEFORE the [PATCH] block.`;
       if (isInterviewActive) {
         const nextQ = interviewQuestionIdx + 1 < mockQuestions.length 
           ? `Question ${interviewQuestionIdx + 2}: ${mockQuestions[interviewQuestionIdx + 1]}`

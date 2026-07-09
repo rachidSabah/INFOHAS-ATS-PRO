@@ -170,7 +170,7 @@ async function buildZip(entries: { name: string; data: Uint8Array }[]): Promise<
   );
 
   const full = concat(...localHeaders, centralDir, eocd);
-  return new Blob([full], { type: "application/zip" });
+  return new Blob([full as any], { type: "application/zip" });
 }
 
 /** Convert a ResumeData object to a human-readable plain-text resume */
@@ -178,11 +178,12 @@ function resumeToText(r: ResumeData): string {
   const lines: string[] = [];
   lines.push(r.name || "Resume");
   if (r.headline) lines.push(r.headline);
-  if (r.email || r.phone || r.location) {
-    lines.push([r.email, r.phone, r.location].filter(Boolean).join(" · "));
+  const contact = r.contact || {};
+  if (contact.email || contact.phone || contact.location) {
+    lines.push([contact.email, contact.phone, contact.location].filter(Boolean).join(" · "));
   }
-  if (r.linkedin || r.website) {
-    lines.push([r.linkedin, r.website].filter(Boolean).join(" · "));
+  if (contact.linkedin || contact.website) {
+    lines.push([contact.linkedin, contact.website].filter(Boolean).join(" · "));
   }
   lines.push("");
 
@@ -208,7 +209,7 @@ function resumeToText(r: ResumeData): string {
     lines.push("EDUCATION");
     lines.push("─".repeat(40));
     for (const edu of r.education) {
-      lines.push(`${edu.degree}${edu.field ? ` in ${edu.field}` : ""} — ${edu.school}`);
+      lines.push(`${edu.degree}${edu.field ? ` in ${edu.field}` : ""} — ${edu.institution || ""}`);
       if (edu.startDate || edu.endDate) lines.push(`${edu.startDate ?? ""} – ${edu.endDate ?? "Present"}`);
       lines.push("");
     }
@@ -237,12 +238,12 @@ function resumeToText(r: ResumeData): string {
 // Status badge helper
 // ============================================================================
 
-const STATUS_CONFIG: Record<ItemStatus, { label: string; variant: "default" | "secondary" | "warning" | "success" | "destructive"; icon: string }> = {
-  pending: { label: "Pending", variant: "secondary", icon: "Clock" },
+const STATUS_CONFIG: Record<ItemStatus, { label: string; variant: "default" | "outline" | "warning" | "success" | "danger"; icon: string }> = {
+  pending: { label: "Pending", variant: "outline", icon: "Clock" },
   parsing: { label: "Parsing…", variant: "warning", icon: "Loader2" },
   optimizing: { label: "Optimizing…", variant: "warning", icon: "Loader2" },
   done: { label: "Done", variant: "success", icon: "CheckCircle2" },
-  failed: { label: "Failed", variant: "destructive", icon: "XCircle" },
+  failed: { label: "Failed", variant: "danger", icon: "XCircle" },
 };
 
 // ============================================================================
@@ -454,7 +455,7 @@ export function BatchOptimizer() {
               <CardTitle className="text-base flex items-center gap-2">
                 <Icon name="FileStack" className="w-4 h-4 text-brand" />
                 Resume Files
-                <Badge variant="secondary" className="ml-auto">{items.length} / 10</Badge>
+                <Badge variant="outline" className="ml-auto">{items.length} / 10</Badge>
               </CardTitle>
               <CardDescription>PDF or DOCX — up to 10 files, max 5 MB each.</CardDescription>
             </CardHeader>
