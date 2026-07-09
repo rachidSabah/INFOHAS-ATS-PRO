@@ -2280,9 +2280,9 @@ CONTENT REQUIREMENTS:
   // "never fabricate" rule BEFORE the directive content.
   const antiHallucinationPreamble = `CRITICAL RULES (override everything else):
 
-=== ZERO-HALLUCINATION POLICY ===
-1. NEVER invent employers, job titles, schools, degrees, certifications, locations, or languages not in the SOURCE RESUME.
-2. NEVER invent percentages, metrics, or numbers. Only reuse numbers that appear VERBATIM in the SOURCE RESUME.
+=== ENTITY PROTECTION & HALLUCINATION GUARDRAILS ===
+1. You are strictly forbidden from changing, inventing, or translating names of employers, job titles, dates of employment, university names, or certifications.
+2. Only bullets and summaries can be rewritten. All other factual anchors (names, companies, dates, institutions, degrees, certifications, locations) must be preserved exactly.
 3. NEVER change the candidate's name, email, phone, or contact info.
 4. You may REPHRASE existing content and WEAVE IN keywords from the JD, but NEVER fabricate facts.
 
@@ -2291,12 +2291,21 @@ CONTENT REQUIREMENTS:
 6. Instead, WEAVE keywords naturally into context: "Delivered hospitality excellence through personalized guest service and multilingual F&B operations."
 7. Each keyword should appear ONCE, embedded in a relevant sentence — not dumped in a list.
 
-=== ACTION-ORIENTED BULLETS & GRAMMAR ===
-8. Start EVERY experience bullet with a strong action verb: Spearheaded, Orchestrated, Streamlined, Facilitated, Coordinated, Delivered, Executed, Managed.
-9. Keep sentences under 20 words. Be concise and impactful.
-10. NEVER use double periods (..) — always single period at end.
-11. NEVER repeat filler phrases like "demonstrating strong attention to detail" or "committed to excellence."
-12. Each bullet must be a unique, specific achievement or responsibility.
+=== ACTION-ORIENTED BULLETS & STAR METHOD ===
+8. Every optimized experience bullet point must strictly follow the STAR method (Situation, Task, Action, Result).
+9. Start EVERY experience bullet with an active, high-impact verb (e.g., Spearheaded, Orchestrated, Optimized, Streamlined, Coordinated — avoiding passive words like "responsible for", "assisted", "handled").
+10. End EVERY experience bullet with a quantifiable metric (e.g., percentages, dollar amounts, hours saved). If the source bullet does not contain a metric, use a proxy like hours saved, scale of operation, or frequency to construct a realistic metric without inventing false achievements.
+11. Keep sentences under 20 words. Be concise and impactful.
+12. NEVER use double periods (..) — always single period at end.
+13. NEVER repeat filler phrases like "demonstrating strong attention to detail" or "committed to excellence."
+14. Each bullet must be a unique, specific achievement or responsibility.
+
+=== SELF-CORRECTION LOOP (INTERNAL REFLECTION) ===
+15. Before outputting the final JSON, you must run an internal reflection check on every single bullet point and the metadata:
+    - "Does this bullet contain a passive verb like 'responsible for', 'assisted', or 'handled'?"
+    - "Does it lack a metric?"
+    - "Did I modify an employer name, job title, date of employment, university name, or certification?"
+16. If the answer to any check is YES, you must auto-correct the output to comply with the rules.
 
 `;
 
@@ -3021,10 +3030,11 @@ QA RESULT:
 - Professional tone issues: ${qa.professionalTone ? (qa.professionalTone.artifactsFound.length + qa.professionalTone.leaksFound.length) : 0}
 
 Review the optimized resume for:
-1. FACTUAL PRESERVATION: Did the AI invent any employers, dates, metrics, or certifications not in the original?
-2. KEYWORD STUFFING: Did the AI over-stuff keywords awkwardly? (Keywords should appear naturally in context)
-3. TONE: Is the language professional and recruiter-friendly?
-4. REGRESSION: Did the optimization make anything worse (e.g. removed important content, weakened bullets)?
+1. FACTUAL PRESERVATION & ENTITY PROTECTION: Did the AI change, invent, or translate any names of employers, job titles, dates of employment, university names, or certifications? (Only bullets and summaries can be rewritten).
+2. STAR METHOD & BULLETS: Does every optimized bullet point strictly follow the STAR method, start with an active high-impact verb (avoiding "responsible for", "assisted", "handled"), and end with a quantifiable metric?
+3. KEYWORD STUFFING: Did the AI over-stuff keywords awkwardly? (Keywords should appear naturally in context).
+4. Tone & Quality: Is the language professional, with no passive verbs or duplicate periods?
+5. REGRESSION: Did the optimization make anything worse (e.g. removed important content, weakened bullets)?
 
 Return ONLY valid JSON:
 {

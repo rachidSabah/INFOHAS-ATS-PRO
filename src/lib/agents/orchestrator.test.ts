@@ -174,6 +174,12 @@ vi.mock("../ai", () => ({
   }),
   extractJSON: vi.fn((text: string) => JSON.parse(text)),
   getOptimizerDirective: vi.fn(() => "Test directive"),
+  selectProviderForAgent: vi.fn().mockImplementation(() => {
+    return Promise.resolve({ id: "test-provider", name: "test-provider", type: "mock", isActive: true });
+  }),
+  getOrderedFallbackProviders: vi.fn().mockImplementation(() => {
+    return [];
+  }),
   OPTIMIZER_CALL_TIMEOUT_MS: 120000,
   PIPELINE_STEP_CALL_TIMEOUT_MS: 90000,
   OptimizationProviderExhaustedError: class extends Error {},

@@ -321,6 +321,10 @@ ${atsIntel}
 ${competencyIntel}
 ${airlineLanguageIntel}
 
+GLOBAL CONSTRAINTS (ENTITY PROTECTION & HALLUCINATION GUARDRAILS):
+- You are strictly forbidden from changing, inventing, or translating names of employers, job titles, dates of employment, university names, or certifications.
+- Only bullets and summaries can be rewritten. All other factual anchors must be preserved exactly.
+
 RULES:
 - Write 60-90 words.
 - Use action-oriented language.
@@ -328,6 +332,12 @@ RULES:
 - NEVER invent experience, certifications, or metrics.
 - NEVER use parentheses.
 - Focus ONLY on the candidate's existing background (summarized in the context).
+
+SELF-CORRECTION LOOP (INTERNAL REFLECTION):
+Before returning the final JSON, run an internal reflection check:
+1. "Did I modify an employer name, job title, employment date, university name, or certification?"
+If yes, you must auto-correct the summary/headline and revert any modified factual anchors before outputting the final JSON.
+
 Return ONLY JSON: {"summary": "...", "headline": "...", "rationales": [{"section": "summary", "original": "...", "edited": "...", "reason": "..."}]}`;
 
   const userPrompt = `CANDIDATE CONTEXT:
@@ -422,12 +432,22 @@ ${atsIntel}
 ${competencyIntel}
 ${airlineLanguageIntel}
 
+GLOBAL CONSTRAINTS (ENTITY PROTECTION & HALLUCINATION GUARDRAILS):
+- You are strictly forbidden from changing, inventing, or translating names of employers, job titles, dates of employment, university names, or certifications.
+- Only bullets and summaries can be rewritten. All other factual anchors must be preserved exactly.
+
 RULES:
 - Keep ALL existing skills.
 - Reorder: place target job-relevant skills FIRST.
 - Group by category (Languages, Frontend, Backend, Tools, etc.).
 - Target keywords to weave or prioritize: ${jdKeywords.join(", ")}
 - Only add skills that are genuinely implied or relevant to the candidate's professional domain. NEVER fabricate unrelated skills.
+
+SELF-CORRECTION LOOP (INTERNAL REFLECTION):
+Before returning the final JSON, run an internal reflection check:
+1. "Did I modify any employer name, job title, employment date, university name, or certification?"
+If yes, you must revert the modified factual anchors before outputting the final JSON.
+
 Return ONLY JSON: {"skills": [{"name": "...", "category": "..."}], "rationales": [{"section": "skills", "original": "...", "edited": "...", "reason": "..."}]}`;
 
   const userPrompt = `CANDIDATE SKILLS:
@@ -542,14 +562,28 @@ ${atsIntel}
 ${competencyIntel}
 ${airlineLanguageIntel}
 
+GLOBAL CONSTRAINTS (ENTITY PROTECTION & HALLUCINATION GUARDRAILS):
+- You are strictly forbidden from changing, inventing, or translating names of employers, job titles, dates of employment, university names, or certifications.
+- Only bullets and summaries can be rewritten. All other factual anchors must be preserved exactly.
+- NEVER change the bullet count (same number of bullets per experience entry).
+- Return the EXACT same experience IDs as provided.
+
+STAR METHOD CONSTRAINTS:
+- Every optimized bullet point must strictly follow the STAR method (Situation, Task, Action, Result).
+- Every bullet point MUST start with an active, high-impact verb (e.g., Spearheaded, Orchestrated, Optimized, Streamlined, Coordinated — avoiding passive words like 'Responsible for', 'Assisted', 'Handled').
+- Every bullet point MUST end with a quantifiable metric (e.g., percentages, dollar amounts, hours saved). If the source bullet does not contain a metric, use a proxy like hours saved, scale of operation, or frequency to construct a realistic metric without inventing false achievements.
+
 RULES:
 - Rewrite each bullet point to emphasize achievements and results.
-- Use strong action verbs (e.g., Spearheaded, Orchestrated, Streamlined).
 - Embed target keywords naturally where they fit contextually: ${jdKeywords.join(", ")}
-- NEVER invent metrics, percentages, or achievements that aren't in the original.
-- NEVER change the bullet count (same number of bullets per experience entry).
-- NEVER change job titles, companies, dates, or locations.
-- Return the EXACT same experience IDs as provided.
+
+SELF-CORRECTION LOOP (INTERNAL REFLECTION):
+Before returning the final JSON, run an internal reflection check on every single bullet point:
+1. "Does this bullet contain a passive verb like 'responsible for', 'assisted', or 'handled'?"
+2. "Does it lack a quantifiable metric?"
+3. "Did I modify an employer name, job title, employment date, university name, or certification?"
+If the answer to (1) or (2) is YES, or the answer to (3) is YES, you must auto-correct the bullet and/or revert the modified metadata fields before outputting the final JSON.
+
 Return ONLY JSON: {"experiences": [{"id": "...", "bullets": ["...", "..."]}], "rationales": [{"section": "experience:[id]", "original": "...", "edited": "...", "reason": "..."}]}`;
 
   const userPrompt = `CANDIDATE EXPERIENCE:
