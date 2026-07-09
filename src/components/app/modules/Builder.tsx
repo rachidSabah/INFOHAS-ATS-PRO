@@ -1212,7 +1212,7 @@ ${resumeContext}
     <div className="space-y-4">
       {/* Header */}
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="min-w-0 flex-1">
+        <div className="min-w-[200px] flex-1">
           <h1 className="font-display text-2xl font-bold flex items-center gap-2">
             <Icon name="FilePlus2" className="w-6 h-6 text-brand" /> Resume Builder
           </h1>
