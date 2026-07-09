@@ -640,6 +640,11 @@ export interface AICallOptions {
   enableProviderSwitch?: boolean;
   agentType?: "optimizer" | "supervisor" | "guardian" | "assembler" | "emergency" | "simple" | "reasoning";
   providerId?: string;
+  /**
+   * Override the model name for this single call only.
+   * Does not mutate provider state. Used for benchmarking specific models.
+   */
+  modelOverride?: string;
 }
 
 export interface AICallResult {
@@ -827,7 +832,8 @@ async function callUserProviderSingleAttempt(
       max_tokens: opts.maxTokens ?? 4096,
       temperature: opts.temperature ?? 0.7,
     };
-    if (provider.modelName) chatOpts.model = provider.modelName;
+    const model = opts.modelOverride || provider.modelName;
+    if (model) chatOpts.model = model;
 
     try {
       const resp: any = await withTimeout(
@@ -911,7 +917,7 @@ async function callUserProviderSingleAttempt(
           apiKey: provider.apiKey,
           authType,
           headersJson: provider.headersJson,
-          model: provider.modelName || "gpt-4o-mini",
+          model: opts.modelOverride || provider.modelName || "gpt-4o-mini",
           messages,
           maxTokens: opts.maxTokens ?? provider.maxTokens ?? 4096,
           temperature: opts.temperature ?? provider.temperature ?? 0.7,
@@ -992,7 +998,7 @@ async function callUserProviderSingleAttempt(
   messages.push({ role: "user", content: opts.userPrompt });
 
   const body: Record<string, any> = {
-    model: provider.modelName || "gpt-4o-mini",
+    model: opts.modelOverride || provider.modelName || "gpt-4o-mini",
     messages,
     max_tokens: opts.maxTokens ?? provider.maxTokens ?? 4096,
     temperature: opts.temperature ?? provider.temperature ?? 0.7,
@@ -1295,7 +1301,7 @@ export async function callAI(opts: AICallOptions): Promise<AICallResult> {
           userPrompt: finalOpts.userPrompt,
           maxTokens: finalOpts.maxTokens,
           temperature: finalOpts.temperature,
-          model: provider.modelName,
+          model: finalOpts.modelOverride || provider.modelName,
         }),
         callTimeoutMs,
         "Puter.generate"

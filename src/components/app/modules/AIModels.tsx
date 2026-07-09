@@ -244,21 +244,16 @@ export function AIModels() {
     try {
       const start = Date.now();
       const { callAI } = await import("@/lib/ai");
-      
-      // Temporarily override the provider default model using a shallow patch
-      const originalModel = selected.modelName;
-      selected.modelName = testModel;
 
+      // Use a local override object — never mutate the `selected` state variable
       const res = await callAI({
         systemPrompt: "Respond in exactly one word: 'READY'. Do not write anything else.",
         userPrompt: "status check",
         maxTokens: 5,
         taskCategory: "interactive",
-        providerId: selected.id
+        providerId: selected.id,
+        modelOverride: testModel,
       });
-
-      // Restore original modelName
-      selected.modelName = originalModel;
 
       const latency = Date.now() - start;
       setBenchmarkResult({
@@ -277,6 +272,7 @@ export function AIModels() {
       setBenchmarking(false);
     }
   };
+
 
   const calculateEstimatedCost = () => {
     if (!selected || !testModel) return 0;
