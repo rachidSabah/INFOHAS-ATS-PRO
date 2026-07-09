@@ -22,6 +22,7 @@ import { detectLeaks, isClean } from "../leak-patterns";
 import { isForbiddenSection } from "../keyword-banks";
 import { exportResumePDF } from "../exporter";
 import { formatPolicyForPrompt, type OptimizationPolicy, checkPolicyCompliance } from "../directive-policy";
+import { validateSTAR, type STARValidationResult } from "../star-validator";
 
 // ============================================================================
 // Types
@@ -36,6 +37,8 @@ export interface QAResult extends PipelineResult {
   professionalTone?: ProfessionalToneResult;
   /** Directive compliance score — how well the output follows the OptimizationPolicy */
   directiveCompliance?: DirectiveComplianceResult;
+  /** Programmatic STAR method validation — bullets, active verbs, metrics, entity protection */
+  starValidation?: STARValidationResult;
   /** Overall confidence score (0-100) — used by the Reflection Agent trigger */
   confidence: number;
   /** Whether the Reflection Agent should be triggered */
@@ -204,6 +207,26 @@ export async function runQA(
     });
   }
 
+  // === Programmatic STAR Validation (new — deterministic, no AI required) ===
+  const starValidation: STARValidationResult = validateSTAR(optimizedResume, originalResume);
+  if (starValidation.totalBullets > 0) {
+    checks.push({
+      name: "STAR Method Validation",
+      passed: starValidation.passed,
+      score: starValidation.score,
+      details: starValidation.explanation,
+      errors: starValidation.errors.length > 0 ? starValidation.errors : undefined,
+    });
+    if (!starValidation.passed) {
+      console.warn(
+        `[QA] STAR validation FAILED — ${starValidation.totalBullets - starValidation.passingBullets}/${starValidation.totalBullets} bullet(s) failed.\n` +
+        `  - Passive/weak verbs: ${starValidation.passiveVerbCount}\n` +
+        `  - Missing metrics: ${starValidation.noMetricCount}\n` +
+        `  - Entity violations: ${starValidation.entityViolationCount}`
+      );
+    }
+  }
+
   // === Compute overall confidence (0-100) ===
   // Confidence is the average of all check scores, weighted by importance
   const weights: Record<string, number> = {
@@ -218,6 +241,7 @@ export async function runQA(
     "Professional Tone": 2,
     "Export Quality": 1.5,
     "Directive Compliance": 2.5,
+    "STAR Method Validation": 2.5,
   };
 
   let totalWeight = 0;
@@ -246,6 +270,7 @@ export async function runQA(
     exportQuality,
     professionalTone,
     directiveCompliance,
+    starValidation: starValidation.totalBullets > 0 ? starValidation : undefined,
     confidence,
     shouldReflect,
   };

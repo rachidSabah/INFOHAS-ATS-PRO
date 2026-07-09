@@ -26,6 +26,7 @@ import {
   ATS_PLATFORM_PROFILES,
   AIRLINE_COMPETENCY_ONTOLOGY
 } from "./enterprise/ats-intelligence-engine";
+import { validateSTAR, restoreViolatedEntities } from "./star-validator";
 
 export interface ParallelOptimizerInput {
   resume: ResumeData;
@@ -207,8 +208,37 @@ export async function runParallelOptimizer(
     (assembleResult.resume.summary || "").toLowerCase().includes(k.toLowerCase())
   ).length;
 
+  // ========================================================================
+  // STAR & Entity Auto-Correction Guard
+  // ========================================================================
+  // Deterministically fix entity violations (employer names, job titles, dates,
+  // institutions, certifications) that the AI changed, restoring originals.
+  // This runs BEFORE caching so we never cache a hallucinated entity.
+  const starResult = validateSTAR(assembleResult.resume, resume);
+
+  let finalResume = assembleResult.resume;
+  if (starResult.entityViolationCount > 0) {
+    finalResume = restoreViolatedEntities(assembleResult.resume, resume, starResult.entityViolations);
+    const violationSummary = starResult.entityViolations.map(
+      (v) => `${v.field}: "${v.originalValue}" restored (was "${v.optimizedValue}")`
+    ).join("; ");
+    warnings.push(`[STAR Guard] ${starResult.entityViolationCount} entity violation(s) auto-corrected: ${violationSummary}`);
+    console.warn(`[Parallel Pipeline] STAR entity guard restored ${starResult.entityViolationCount} field(s).`);
+  }
+
+  if (!starResult.passed && starResult.totalBullets > 0) {
+    const bulletWarnings = starResult.bulletResults
+      .filter((r) => !r.passes)
+      .map((r) => `[STAR] Exp ${r.experienceId} bullet ${r.bulletIndex + 1}: ${r.failures.join("; ")}`);
+    warnings.push(...bulletWarnings);
+    console.warn(
+      `[Parallel Pipeline] STAR validation: ${starResult.passingBullets}/${starResult.totalBullets} bullets pass. ` +
+      `Passive verbs: ${starResult.passiveVerbCount}, Missing metrics: ${starResult.noMetricCount}.`
+    );
+  }
+
   const result: ParallelOptimizerResult = {
-    resume: assembleResult.resume,
+    resume: finalResume,
     provider: summaryResult.provider,
     charCount,
     keywordsAdded,
