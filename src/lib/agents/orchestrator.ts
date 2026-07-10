@@ -69,6 +69,7 @@ import {
 import { processAIResponseHardened } from "../orchestrator-hardening";
 import { computeExperienceFingerprint } from "../experience-fingerprint";
 import { extractJobMemory } from "../job-memory";
+import { runChunkedOptimizer, isChunkingCandidate } from "../chunked-optimizer";
 
 // ============================================================================
 // AI response normalization helpers
@@ -2294,18 +2295,23 @@ CONTENT REQUIREMENTS:
 === ACTION-ORIENTED BULLETS & STAR METHOD ===
 8. Every optimized experience bullet point must strictly follow the STAR method (Situation, Task, Action, Result).
 9. Start EVERY experience bullet with an active, high-impact verb (e.g., Spearheaded, Orchestrated, Optimized, Streamlined, Coordinated — avoiding passive words like "responsible for", "assisted", "handled").
-10. End EVERY experience bullet with a quantifiable metric (e.g., percentages, dollar amounts, hours saved). If the source bullet does not contain a metric, use a proxy like hours saved, scale of operation, or frequency to construct a realistic metric without inventing false achievements.
+10. METRICS RULE — CRITICAL: Only use metrics (numbers, percentages, amounts) that are EXPLICITLY stated in the source resume. If the original bullet has no metric, write a strong qualitative bullet instead. NEVER invent, estimate, or approximate numbers. NEVER use bracket placeholders like [X], [Z]%, [B]%, [C], [D], [E], [number], [metric], [result] or any similar format — these are STRICTLY FORBIDDEN and will cause the output to be rejected.
 11. Keep sentences under 20 words. Be concise and impactful.
 12. NEVER use double periods (..) — always single period at end.
 13. NEVER repeat filler phrases like "demonstrating strong attention to detail" or "committed to excellence."
 14. Each bullet must be a unique, specific achievement or responsibility.
 
+=== BRACKET PLACEHOLDER PROHIBITION ===
+15. ABSOLUTE PROHIBITION: NEVER output any text containing square bracket placeholders such as [X], [Y], [Z], [A], [B], [C], [D], [E], [number], [metric], [insert], [value], [result], [amount], [percentage], or any variation. These tokens indicate fabricated metrics and will cause the entire response to be rejected.
+16. If you cannot write a bullet with a real metric from the source resume, write the bullet WITHOUT any metric rather than inserting a placeholder. Example — WRONG: "Served [X]+ clients daily." CORRECT: "Delivered trilingual customer service to a high-volume client base daily."
+
 === SELF-CORRECTION LOOP (INTERNAL REFLECTION) ===
-15. Before outputting the final JSON, you must run an internal reflection check on every single bullet point and the metadata:
+17. Before outputting the final JSON, you must run an internal reflection check on every single bullet point and the metadata:
     - "Does this bullet contain a passive verb like 'responsible for', 'assisted', or 'handled'?"
-    - "Does it lack a metric?"
+    - "Does it lack a metric?" → If so, is the bullet still strong without one? If not, strengthen the qualitative language.
     - "Did I modify an employer name, job title, date of employment, university name, or certification?"
-16. If the answer to any check is YES, you must auto-correct the output to comply with the rules.
+    - "Does ANY bullet contain a bracket placeholder like [X] or [Z]%?" → If YES, rewrite that bullet immediately.
+18. If the answer to any check is YES, you must auto-correct the output to comply with the rules.
 
 `;
 
@@ -2362,8 +2368,47 @@ CONTENT REQUIREMENTS:
   // === PRODUCTION HARDENING (v2025.01.15): Entity lock + mandatory pipeline ===
   console.info(`[Optimizer] Provider: ${result.provider}, Response length: ${result.text?.length ?? 0} chars, Tokens est: ${result.tokensEstimate}`);
 
-  // Reject local fallback — no AI provider actually executed
+  // Reject local fallback — no AI provider actually executed.
+  // === Feature 2: Surgical Chunking MapReduce fallback ===
+  // If all monolithic providers fell back to the local engine, try the chunked
+  // optimizer as a second chance before giving up entirely. Each chunk is a
+  // small, hyper-focused prompt that free models process near-instantly.
   if (result.isLocalEngine || result.provider === "Local Engine (offline mode)" || (result.text?.length ?? 0) < 500) {
+    if (isChunkingCandidate(resume)) {
+      console.info("[Optimizer] Monolithic call hit local engine — attempting Surgical Chunking fallback...");
+      try {
+        const chunked = await runChunkedOptimizer({ resume, jd, intelligenceContext });
+        const atLeastOneChunkSucceeded =
+          chunked.providersBullets || chunked.providersSkills || chunked.providersSummary;
+
+        if (atLeastOneChunkSucceeded) {
+          // Merge chunked results back into the resume
+          const mergedResume: typeof resume = {
+            ...resume,
+            ...(chunked.summary !== undefined ? { summary: chunked.summary } : {}),
+            ...(chunked.experience !== undefined ? { experience: chunked.experience } : {}),
+            ...(chunked.skills !== undefined ? { skills: chunked.skills } : {}),
+          };
+          const chunkProviders = [
+            chunked.providersBullets,
+            chunked.providersSkills,
+            chunked.providersSummary,
+          ]
+            .filter(Boolean)
+            .join(" + ");
+          console.info(`[ChunkedOptimizer] Merged result from: ${chunkProviders}`);
+          return {
+            resume: mergedResume,
+            provider: `MapReduce (${chunkProviders})`,
+            charCount: computeResumeCharCount(mergedResume),
+            keywordsAdded: 0,
+          };
+        }
+      } catch (chunkedErr) {
+        console.warn("[ChunkedOptimizer] Fallback also failed:", chunkedErr);
+      }
+    }
+
     throw new Error(
       "No AI provider available. Optimization could not be completed. " +
       "Configure an API provider in Settings or sign in to Puter."

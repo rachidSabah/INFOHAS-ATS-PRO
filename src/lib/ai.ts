@@ -12,6 +12,8 @@ import { isProviderInCooldown, markProvider429Cooldown, markProvider401Cooldown,
 // Re-export clearAllProviderCooldowns for backward compatibility (Optimizer.tsx imports it from ./ai)
 export { clearAllProviderCooldowns };
 import { buildStandardDirective } from "./optimizer-directive-engine";
+import { getPromptCache, setPromptCache, buildPromptHash } from "./prompt-cache";
+import { tryRotateProviderToken, isRotatableAuthError } from "./token-rotation";
 //
 // All AI calls are wrapped in failover with try/catch + provider rotation.
 
@@ -645,6 +647,7 @@ export interface AICallOptions {
    * Does not mutate provider state. Used for benchmarking specific models.
    */
   modelOverride?: string;
+  signal?: AbortSignal;
 }
 
 export interface AICallResult {
@@ -901,6 +904,12 @@ async function callUserProviderSingleAttempt(
       : (provider.timeout ?? 30) * 1000;
 
     const ac = new AbortController();
+    let onAbort: (() => void) | null = null;
+    if (opts.signal) {
+      if (opts.signal.aborted) ac.abort();
+      onAbort = () => ac.abort();
+      opts.signal.addEventListener("abort", onAbort);
+    }
     // Give the inner fetch a 5s buffer BEYOND the effective timeout so the
     // proxy's AbortController (which respects timeoutMs) fires first and
     // returns a proper timeout error — instead of the client fetch aborting
@@ -931,6 +940,9 @@ async function callUserProviderSingleAttempt(
       });
     } finally {
       clearTimeout(fetchTimer);
+      if (opts.signal && onAbort) {
+        opts.signal.removeEventListener("abort", onAbort);
+      }
     }
 
     const proxyData = (await proxyRes.json()) as any;
@@ -1145,6 +1157,36 @@ async function callUserProvider(
         }
       }
 
+      // === Feature 5: Silent Token Rotation ===
+      // If this is a rotat-able auth error (401/CreditsError/session expired),
+      // try to silently acquire a new anonymous token and retry once.
+      if (isRotatableAuthError(e) && typeof window !== "undefined") {
+        console.info(`[TokenRotation] Detected auth error for ${provider.name} — attempting silent token rotation...`);
+        try {
+          const rotationResult = await tryRotateProviderToken(provider);
+          if (rotationResult.success) {
+            console.info(`[TokenRotation] ${provider.name}: rotation succeeded — retrying...`);
+            // Build a rotated provider with the new token (if one was returned)
+            const rotatedProvider = rotationResult.newToken
+              ? { ...provider, apiKey: rotationResult.newToken }
+              : provider;
+            try {
+              const retryText = await callUserProviderSingleAttempt(rotatedProvider, opts);
+              if (retryText && retryText.trim().length > 0) {
+                console.info(`[TokenRotation] ${provider.name}: post-rotation retry succeeded`);
+                return retryText;
+              }
+            } catch (retryErr: any) {
+              console.warn(`[TokenRotation] ${provider.name}: post-rotation retry failed: ${retryErr?.message || retryErr}`);
+            }
+          } else {
+            console.warn(`[TokenRotation] ${provider.name}: rotation not possible — ${rotationResult.message}`);
+          }
+        } catch (rotErr: any) {
+          console.warn(`[TokenRotation] ${provider.name}: rotation error (non-fatal): ${rotErr?.message || rotErr}`);
+        }
+      }
+
       // Check if it's an authentication, credit/billing, or unauthorized error.
       // If so, do NOT rotate models on the same invalid/empty API key. Throw immediately.
       const isAuthOrBillingError =
@@ -1224,6 +1266,92 @@ async function callUserProvider(
 }
 
 /**
+ * Run a parallel speculative race across the top free providers.
+ * Returns the first successful response, and cancels all others.
+ */
+async function runSpeculativeRace(
+  opts: AICallOptions,
+  callTimeoutMs: number,
+  t0: number
+): Promise<AICallResult | null> {
+  const state: any = useApp.getState();
+  const providers: any[] = state?.providers || [];
+
+  // Filter available free/non-local providers
+  const available = providers.filter((p: any) => {
+    const cooldownId = p.id || p.name || p.type;
+    return (
+      isAvailableForSelection(p, opts.excludeProviderIds) &&
+      p.type !== "puter" &&
+      !isProviderInCooldown(cooldownId)
+    );
+  });
+
+  if (available.length < 2) {
+    return null; // Not enough active providers to race
+  }
+
+  // Sort by priority and take the top 3
+  const candidates = available
+    .sort((a: any, b: any) => (a.priority ?? 50) - (b.priority ?? 50))
+    .slice(0, 3);
+
+  console.log(`[ROUTER] Speculative parallel race starting with: ${candidates.map((c) => c.name).join(", ")}`);
+
+  const globalAc = new AbortController();
+  const raceTimer = setTimeout(() => globalAc.abort(), Math.min(30000, callTimeoutMs)); // Cap race attempt at 30s to keep it responsive
+
+  const promises = candidates.map(async (prov) => {
+    const provId = prov.id || prov.name || prov.type;
+    try {
+      const attemptOpts = { ...opts, signal: globalAc.signal };
+      // Give each attempt a 20s timeout limit to fail fast
+      const text = await withTimeout(
+        callUserProvider(prov, attemptOpts),
+        20000,
+        `${prov.name}.generate`
+      );
+
+      if (!text || text.trim().length === 0) throw new Error("Empty response");
+
+      // We have a winner! Cancel the other requests
+      globalAc.abort();
+      clearTimeout(raceTimer);
+
+      console.log(`[ROUTER] Speculative race won by: ${prov.name} in ${Math.round(performance.now() - t0)}ms`);
+      return {
+        text,
+        provider: `${prov.name} (Speculative Race)`,
+        latencyMs: Math.round(performance.now() - t0),
+        tokensEstimate: estTokens(opts.userPrompt + (opts.systemPrompt ?? "")),
+      };
+    } catch (err: any) {
+      if (globalAc.signal.aborted && !isTimeoutError(err)) {
+        throw new Error("Aborted by race winner");
+      }
+      const errMsg = err?.message || String(err);
+      if (err?.statusCode === 429 || /429/.test(errMsg) || /rate.?limit/i.test(errMsg) || /FreeUsageLimitError/i.test(errMsg)) {
+        markProvider429Cooldown(provId);
+      } else if (err?.statusCode === 401 || /401/.test(errMsg) || /billing/i.test(errMsg) || /payment/i.test(errMsg) || /CreditsError/i.test(errMsg)) {
+        markProvider401Cooldown(provId);
+      } else if (isTimeoutError(err)) {
+        markProviderTimeoutCooldown(provId);
+      }
+      throw err;
+    }
+  });
+
+  try {
+    const result = await Promise.any(promises);
+    return result;
+  } catch (err) {
+    console.warn("[ROUTER] All speculative race candidates failed. Falling back to sequential execution.");
+    clearTimeout(raceTimer);
+    return null;
+  }
+}
+
+/**
  * Main AI entrypoint. Tries user-default-provider → Puter → server (z-ai) → local fallback.
  */
 export async function callAI(opts: AICallOptions): Promise<AICallResult> {
@@ -1247,6 +1375,40 @@ export async function callAI(opts: AICallOptions): Promise<AICallResult> {
     const systemTokens = estTokens(systemText);
     const userBudget = Math.max(0, maxTokens - systemTokens);
     finalOpts.userPrompt = truncatePromptToTokenLimit(opts.userPrompt, userBudget);
+  }
+
+  // === Feature 4: Persistent Prompt Cache ===
+  // Check localStorage for a cached result before hitting any AI provider.
+  // Only for optimizer/document calls (where inputs are deterministic).
+  if (opts.isOptimizerCall && typeof window !== "undefined") {
+    try {
+      const hash = buildPromptHash(finalOpts);
+      const cached = getPromptCache(hash);
+      if (cached) {
+        console.info("[AI] Prompt cache hit — returning instantly without API call");
+        return cached;
+      }
+      // Store hash on opts so we can save the result when it comes back
+      (finalOpts as any).__cacheHash = hash;
+    } catch (cacheErr) {
+      console.warn("[AI] Cache read error (non-fatal):", cacheErr);
+    }
+  }
+
+  // If this is an optimizer call, let's try speculative parallel racing on free models
+  // to avoid waiting sequentially for timeouts/429s.
+  if (opts.isOptimizerCall && !opts.providerId && typeof window !== "undefined") {
+    try {
+      const speculativeResult = await runSpeculativeRace(finalOpts, callTimeoutMs, t0);
+      if (speculativeResult) {
+        // Save to persistent cache before returning
+        const cacheHash = (finalOpts as any).__cacheHash;
+        if (cacheHash) setPromptCache(cacheHash, speculativeResult);
+        return speculativeResult;
+      }
+    } catch (e) {
+      console.warn("[AI] Speculative race error:", e);
+    }
   }
 
   // Helper to check if a provider is excluded
@@ -1432,12 +1594,16 @@ export async function callAI(opts: AICallOptions): Promise<AICallResult> {
       assert(text !== "", "Provider response is empty");
       if (!text || text.length === 0) throw new ProviderReturnedEmptyResponse();
       circuitBreakerSuccess(primaryCooldownId, Math.round(performance.now() - t0));
-      return {
+      const primaryResult = {
         text,
         provider: provider.name,
         latencyMs: Math.round(performance.now() - t0),
         tokensEstimate: estTokens(finalOpts.userPrompt + (finalOpts.systemPrompt ?? "")),
       };
+      // Save to persistent prompt cache
+      const primCacheHash = (finalOpts as any).__cacheHash;
+      if (primCacheHash) setPromptCache(primCacheHash, primaryResult);
+      return primaryResult;
     } catch (e: any) {
       const eMsg = e?.message || String(e);
       const isRateOrQuotaOrAuthError = 
@@ -1543,12 +1709,16 @@ export async function callAI(opts: AICallOptions): Promise<AICallResult> {
       );
       assert(text !== "", "Provider response is empty");
       if (!text || text.length === 0) throw new ProviderReturnedEmptyResponse();
-      return {
+      const altResult = {
         text,
         provider: altProvider.name,
         latencyMs: Math.round(performance.now() - t0),
         tokensEstimate: estTokens(finalOpts.userPrompt + (finalOpts.systemPrompt ?? "")),
       };
+      // Save to persistent prompt cache
+      const altCacheHash = (finalOpts as any).__cacheHash;
+      if (altCacheHash) setPromptCache(altCacheHash, altResult);
+      return altResult;
     } catch (altErr: any) {
       const altErrMsg = altErr?.message || String(altErr);
       if (altErr?.statusCode === 429 || /429/.test(altErrMsg) || /rate.?limit/i.test(altErrMsg) || /FreeUsageLimitError/i.test(altErrMsg)) {

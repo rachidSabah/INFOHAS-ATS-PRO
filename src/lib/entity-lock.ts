@@ -571,7 +571,43 @@ export function restoreLockedEntities(optimized: ResumeData, locked: LockedEntit
     restored.dynamicSections = optimized.dynamicSections.map((s) => ({ ...s }));
   }
 
+  // === SANITIZE BRACKET PLACEHOLDERS ===
+  if (restored.summary) {
+    restored.summary = stripBracketPlaceholders(restored.summary);
+  }
+  if (restored.experience) {
+    restored.experience = restored.experience.map((exp) => ({
+      ...exp,
+      bullets: exp.bullets.map(stripBracketPlaceholders),
+    }));
+  }
+
   return restored;
+}
+
+/**
+ * Remove bracket placeholders like [X], [Z]%, [B]% from optimized text.
+ * Replaces with natural English descriptors or removes the placeholder.
+ */
+export function stripBracketPlaceholders(text: string): string {
+  if (!text) return text;
+  let clean = text;
+  
+  // Replace "by [Z]%" or "by [Z]" or "by [B]%" with "significantly" / "substantially"
+  clean = clean.replace(/\bby\s+\[[A-Za-z0-9]+\][+%\-]*/gi, "significantly");
+  
+  // Replace "[C] transactions" or "[D] new team members" with "multiple transactions" / "new team members"
+  clean = clean.replace(/\[[A-Za-z0-9]+\]\s+new\s+/gi, "new ");
+  clean = clean.replace(/\[[A-Za-z0-9]+\]\+/gi, "multiple");
+  clean = clean.replace(/\[[A-Za-z0-9]+\]/gi, "multiple");
+  
+  // Generic cleanup of remaining brackets just in case
+  clean = clean.replace(/\[[^\]]*\]/g, "");
+  
+  // Clean up punctuation spacing and double spaces
+  clean = clean.replace(/\s+/g, " ");
+  clean = clean.replace(/\s+([.,;!%])/g, "$1");
+  return clean.trim();
 }
 
 // ============================================================================
