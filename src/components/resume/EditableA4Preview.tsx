@@ -692,6 +692,54 @@ function SectionDividerInline({ title }: { title: string }) {
   );
 }
 
+function getFieldValue(resume: ResumeData, activeElement: any): string {
+  if (!activeElement) return "";
+  const { section, id, field, bulletIndex } = activeElement;
+  if (section === "basics") {
+    if (field === "name") return resume.name || "";
+    if (field === "headline") return resume.headline || "";
+    if (field === "location") return resume.contact?.location || "";
+    if (field === "phone") return resume.contact?.phone || "";
+    if (field === "email") return resume.contact?.email || "";
+    if (field === "dateOfBirth") return resume.dateOfBirth || "";
+  }
+  if (section === "summary") {
+    return resume.summary || "";
+  }
+  if (section === "experience" && id) {
+    const exp = resume.experience?.find((e) => e.id === id);
+    if (exp) {
+      if (field === "bullets" && bulletIndex !== undefined) {
+        return exp.bullets?.[bulletIndex] || "";
+      }
+      if (field === "bullets") {
+        return exp.bullets?.join("\n") || "";
+      }
+      return (exp as any)[field] || "";
+    }
+  }
+  if (section === "education" && id) {
+    const edu = resume.education?.find((e) => e.id === id);
+    if (edu) {
+      if (field === "highlights") {
+        return (edu.highlights ?? []).join(", ").replace(/^Modules: /, "");
+      }
+      return (edu as any)[field] || "";
+    }
+  }
+  if (section === "skills" && id) {
+    const s = resume.skills?.find((sk) => sk.id === id);
+    if (s) return s.name || "";
+  }
+  if (section === "languages" && id) {
+    const l = resume.languages?.find((lg) => lg.id === id);
+    if (l) {
+      return (l as any)[field] || "";
+    }
+  }
+  return "";
+}
+
 /** Inline editor drawer — slides up from bottom on desktop, full-screen on mobile */
 function EditorDrawer({ target, resume, onClose, onCommit, activeElement, setActiveElement }: {
   target: EditTarget;
@@ -703,6 +751,24 @@ function EditorDrawer({ target, resume, onClose, onCommit, activeElement, setAct
 }) {
   // local form state — keyed by target so it resets when target changes (controlled via key prop from parent)
   const [form, setForm] = useState<ResumeData>(resume);
+
+  // Sync form state when resume prop changes (e.g., from AI Copilot patches)
+  useEffect(() => {
+    setForm(resume);
+  }, [resume]);
+
+  // Whenever local form state changes, sync the activeElement value to the Copilot
+  useEffect(() => {
+    if (activeElement && setActiveElement) {
+      const liveVal = getFieldValue(form, activeElement);
+      if (liveVal !== activeElement.value) {
+        setActiveElement({
+          ...activeElement,
+          value: liveVal,
+        });
+      }
+    }
+  }, [form, activeElement, setActiveElement]);
 
   const save = () => {
     if (target === "header") {

@@ -236,10 +236,18 @@ Guidelines:
             const nextBullets = [...exp.bullets];
             nextBullets[bulletIndex] = textToApply;
             return { ...exp, bullets: nextBullets };
+          } else if (field === "bullets") {
+            return { ...exp, bullets: textToApply.split("\n").map((b) => b.trim()).filter(Boolean) };
           } else if (field === "title") {
             return { ...exp, title: textToApply };
           } else if (field === "company") {
             return { ...exp, company: textToApply };
+          } else if (field === "location") {
+            return { ...exp, location: textToApply };
+          } else if (field === "startDate") {
+            return { ...exp, startDate: textToApply };
+          } else if (field === "endDate") {
+            return { ...exp, endDate: textToApply };
           }
         }
         return exp;
@@ -250,6 +258,12 @@ Guidelines:
         if (edu.id === id) {
           if (field === "institution") return { ...edu, institution: textToApply };
           if (field === "degree") return { ...edu, degree: textToApply };
+          if (field === "location") return { ...edu, location: textToApply };
+          if (field === "startDate") return { ...edu, startDate: textToApply };
+          if (field === "endDate") return { ...edu, endDate: textToApply };
+          if (field === "highlights") {
+            return { ...edu, highlights: textToApply.trim() ? [`Modules: ${textToApply.replace(/^Modules: /, "")}`] : [] };
+          }
         }
         return edu;
       });
@@ -262,6 +276,33 @@ Guidelines:
         return s;
       });
       patch({ skills: nextResume.skills });
+    } else if (section === "languages" && id) {
+      nextResume.languages = nextResume.languages.map((l) => {
+        if (l.id === id) {
+          if (field === "name") return { ...l, name: textToApply };
+          if (field === "level") return { ...l, level: textToApply };
+        }
+        return l;
+      });
+      patch({ languages: nextResume.languages });
+    } else if (section === "basics") {
+      const contact = { ...resume.contact };
+      if (field === "name") {
+        patch({ name: textToApply });
+      } else if (field === "headline") {
+        patch({ headline: textToApply });
+      } else if (field === "dateOfBirth") {
+        patch({ dateOfBirth: textToApply });
+      } else if (field === "location") {
+        contact.location = textToApply;
+        patch({ contact });
+      } else if (field === "phone") {
+        contact.phone = textToApply;
+        patch({ contact });
+      } else if (field === "email") {
+        contact.email = textToApply;
+        patch({ contact });
+      }
     }
 
     // Save checkpoint log to IndexedDB (Requirement 7)
