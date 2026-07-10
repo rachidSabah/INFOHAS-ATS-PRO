@@ -944,6 +944,10 @@ export function verifyEntityIntegrity(
   }
 
   // === Check 8: Character count ===
+  // Limit is 6500 chars (JSON serialization of a full single-page resume).
+  // The old 4200 limit was too tight: a normal 2-experience resume with full
+  // bullets + skills + education easily exceeds it, causing every optimization
+  // attempt to be vetoed by the Guardian before the user could see any result.
   const charCount = JSON.stringify({
     summary: optimized.summary,
     experience: optimized.experience,
@@ -951,10 +955,10 @@ export function verifyEntityIntegrity(
     education: optimized.education,
     languages: optimized.languages,
   }).length;
-  if (charCount > 4200) {
+  if (charCount > 6500) {
     criticalFailures.push({
       type: "summary_corruption", // Reuse type for size violation
-      message: `Resume exceeds 4200 character limit: ${charCount} chars`,
+      message: `Resume exceeds 6500 character limit: ${charCount} chars`,
       actual: String(charCount),
     });
     score -= 10;

@@ -225,15 +225,23 @@ function checkLanguagesPreserved(optimized: ResumeData, source: ResumeData): Gua
   };
 }
 
-// ── Check 4b: Languages NOT in Skills (critical) ──────────────────────────
-// Languages must NEVER be merged into skills. If a language name appears in
-// skills, it's a data integrity violation.
+// ── Check 4b: Languages NOT in Skills (self-healing, non-critical) ───────────
+// If the AI leaked a language name into the skills array, silently remove it
+// here — the Languages section is already fully restored upstream by the
+// restoreLanguages pipeline step, so the duplicate entry in Skills is harmless
+// junk that we can purge rather than veto on.
+//
+// Downgraded from critical=true to critical=false because:
+//   • The languages_preserved check (critical) already guarantees Languages
+//     section integrity.
+//   • Vetoing on a skill-array duplicate caused an unrecoverable BLOCKED loop
+//     across all 3 retry attempts, returning the user's unmodified resume.
 function checkLanguagesNotInSkills(optimized: ResumeData, source: ResumeData): GuardianCheck {
   if (source.languages.length === 0) {
     return {
       name: "languages_not_in_skills",
       passed: true,
-      critical: true,
+      critical: false,
       detail: "No languages in source — skipping",
     };
   }
@@ -245,27 +253,31 @@ function checkLanguagesNotInSkills(optimized: ResumeData, source: ResumeData): G
     return {
       name: "languages_not_in_skills",
       passed: true,
-      critical: true,
+      critical: false,
       detail: "No named languages in source — skipping",
     };
   }
 
-  const skillNames = optimized.skills.map((s) => (s.name || "").toLowerCase().trim()).filter(Boolean);
-  const leaked = skillNames.filter((sn) => langNames.has(sn));
+  // Auto-heal: strip any leaked language names from the skills array in-place
+  const before = optimized.skills.length;
+  optimized.skills = optimized.skills.filter(
+    (s) => !langNames.has((s.name || "").toLowerCase().trim()),
+  );
+  const removed = before - optimized.skills.length;
 
-  if (leaked.length > 0) {
+  if (removed > 0) {
     return {
       name: "languages_not_in_skills",
-      passed: false,
-      critical: true,
-      detail: `Languages found in skills: [${leaked.join(", ")}]. Languages must remain in the Languages section, not skills.`,
+      passed: true, // healed — not a failure
+      critical: false,
+      detail: `Auto-removed ${removed} language name(s) that leaked into skills (self-healed)`,
     };
   }
 
   return {
     name: "languages_not_in_skills",
     passed: true,
-    critical: true,
+    critical: false,
     detail: "No language names leaked into skills",
   };
 }
