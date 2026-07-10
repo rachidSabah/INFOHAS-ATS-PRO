@@ -168,13 +168,26 @@ Return ONLY valid JSON with keys: name, headline, summary, skills, experience, e
       
       // Update pipelineResult if it exists so everything stays synced
       if (pipelineResult) {
-        const nextResult = { ...pipelineResult };
+        // Deep-clone afterATS and its nested scores to avoid mutating the frozen Zustand state
+        const nextResult = {
+          ...pipelineResult,
+          afterATS: pipelineResult.afterATS
+            ? {
+                ...pipelineResult.afterATS,
+                scores: { ...pipelineResult.afterATS.scores },
+                missingKeywords: [...(pipelineResult.afterATS.missingKeywords ?? [])],
+                matchedKeywords: [...(pipelineResult.afterATS.matchedKeywords ?? [])],
+              }
+            : null,
+        };
         if (nextResult.afterATS) {
           nextResult.afterATS.scores.ats = after.scores.ats;
           nextResult.afterATS.scores.keywordMatch = after.scores.keywords;
           // Move keyword from missing to matched
-          nextResult.afterATS.missingKeywords = nextResult.afterATS.missingKeywords.filter(k => k.toLowerCase() !== keyword.toLowerCase());
-          if (!nextResult.afterATS.matchedKeywords.some(k => k.toLowerCase() === keyword.toLowerCase())) {
+          nextResult.afterATS.missingKeywords = nextResult.afterATS.missingKeywords.filter(
+            (k) => k.toLowerCase() !== keyword.toLowerCase()
+          );
+          if (!nextResult.afterATS.matchedKeywords.some((k) => k.toLowerCase() === keyword.toLowerCase())) {
             nextResult.afterATS.matchedKeywords.push(keyword);
           }
         }
@@ -237,16 +250,18 @@ Guidelines:
 5. Do NOT use markdown formatting (e.g. **word**) inside the [PATCH] block fields. Plain text only.
 `;
 
-      const response = await callAI({
-        systemPrompt: `${systemPrompt}\n\nTARGET JOB:\n${jdParsed ? JSON.stringify({ title: jdParsed.title, company: jdParsed.company, keywords: jdParsed.keywords }) : "None"}\n\nCURRENT OPTIMIZED RESUME:\n${JSON.stringify(optimizedResume, null, 2)}`,
-        userPrompt: `Here is the conversation so far:
-${newMessages.map(m => `${m.role.toUpperCase()}: ${m.content}`).join("\n")}
-
-Respond to the last message and append a [PATCH] block with updates if appropriate.`,
+      const { ProviderRouter } = await import("@/lib/ai/services/router");
+      const response = await ProviderRouter.chat({
+        messages: [
+          {
+            role: "system",
+            content: `${systemPrompt}\n\nTARGET JOB:\n${jdParsed ? JSON.stringify({ title: jdParsed.title, company: jdParsed.company, keywords: jdParsed.keywords }) : "None"}\n\nCURRENT OPTIMIZED RESUME:\n${JSON.stringify(optimizedResume, null, 2)}`,
+          },
+          ...newMessages.map((m) => ({ role: m.role, content: m.content })),
+        ],
         maxTokens: 1500,
         temperature: 0.65,
-        taskCategory: "document"
-      });
+      }, { agentTask: "document" });
 
       const reply = response.text || "";
       let cleanReply = reply;
@@ -335,12 +350,21 @@ Respond to the last message and append a [PATCH] block with updates if appropria
           addATS(after);
           
           if (pipelineResult) {
-            const nextResult = { ...pipelineResult };
+            // Deep-clone afterATS and its nested scores to avoid mutating the frozen Zustand state
+            const nextResult = {
+              ...pipelineResult,
+              afterATS: pipelineResult.afterATS
+                ? {
+                    ...pipelineResult.afterATS,
+                    scores: { ...pipelineResult.afterATS.scores },
+                    missingKeywords: [...after.missingKeywords],
+                    matchedKeywords: [...after.matchedKeywords],
+                  }
+                : null,
+            };
             if (nextResult.afterATS) {
               nextResult.afterATS.scores.ats = after.scores.ats;
               nextResult.afterATS.scores.keywordMatch = after.scores.keywords;
-              nextResult.afterATS.missingKeywords = after.missingKeywords;
-              nextResult.afterATS.matchedKeywords = after.matchedKeywords;
             }
             setPipelineResult(nextResult);
           }

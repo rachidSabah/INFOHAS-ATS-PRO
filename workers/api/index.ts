@@ -1385,8 +1385,17 @@ app.get("/api/tasks/:id/events", async (c) => {
 
 // ============ CAREER MATERIALS (RAG) ============
 app.get("/api/career-materials", async (c) => {
-  const { results } = await c.env.DB.prepare("SELECT * FROM career_materials ORDER BY created_at DESC").all();
-  return c.json({ careerMaterials: results || [] });
+  try {
+    const { results } = await c.env.DB.prepare("SELECT * FROM career_materials ORDER BY created_at DESC").all();
+    return c.json({ careerMaterials: results || [] });
+  } catch (err: any) {
+    // Table doesn't exist yet — migration 0010 not applied. Return empty gracefully.
+    if (/no such table/i.test(err?.message || "")) {
+      console.warn("[career-materials] Table not found — run migration 0010_career_materials.sql");
+      return c.json({ careerMaterials: [] });
+    }
+    throw err;
+  }
 });
 
 app.post("/api/career-materials", async (c) => {
@@ -1394,19 +1403,33 @@ app.post("/api/career-materials", async (c) => {
   if (!body.id || !body.title || !body.contentText) {
     return c.json({ error: "Missing required fields: id, title, contentText" }, 400);
   }
-  const now = new Date().toISOString();
-  await c.env.DB.prepare(
-    "INSERT OR REPLACE INTO career_materials (id, title, content_text, category, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)"
-  ).bind(
-    body.id, body.title.trim(), body.contentText.trim(), body.category || 'project', now, now
-  ).run();
-
-  return c.json({ success: true });
+  try {
+    const now = new Date().toISOString();
+    await c.env.DB.prepare(
+      "INSERT OR REPLACE INTO career_materials (id, title, content_text, category, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)"
+    ).bind(
+      body.id, body.title.trim(), body.contentText.trim(), body.category || 'project', now, now
+    ).run();
+    return c.json({ success: true });
+  } catch (err: any) {
+    if (/no such table/i.test(err?.message || "")) {
+      return c.json({ error: "Career materials table not yet created. Apply migration 0010_career_materials.sql." }, 503);
+    }
+    throw err;
+  }
 });
 
 app.delete("/api/career-materials/:id", async (c) => {
   const id = c.req.param("id");
-  await c.env.DB.prepare("DELETE FROM career_materials WHERE id = ?").bind(id).run();
+  try {
+    await c.env.DB.prepare("DELETE FROM career_materials WHERE id = ?").bind(id).run();
+  } catch (err: any) {
+    if (/no such table/i.test(err?.message || "")) {
+      console.warn("[career-materials] Table not found — delete skipped");
+    } else {
+      throw err;
+    }
+  }
   return c.json({ success: true });
 });
 

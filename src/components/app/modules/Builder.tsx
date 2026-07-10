@@ -292,6 +292,23 @@ const DiffApprovalCard = ({
   );
 };
 
+const stripAst = (val: any): any => {
+  if (typeof val === "string") {
+    return val.replace(/\*\*|\*/g, "");
+  }
+  if (Array.isArray(val)) {
+    return val.map(stripAst);
+  }
+  if (val !== null && typeof val === "object") {
+    const res: any = {};
+    for (const k of Object.keys(val)) {
+      res[k] = stripAst(val[k]);
+    }
+    return res;
+  }
+  return val;
+};
+
 const cleanStringField = (val: any): string | undefined => {
   if (val === null || val === undefined) return undefined;
   if (Array.isArray(val)) {
@@ -1105,10 +1122,10 @@ I have prepared a comprehensive proposed patch to apply all 3 steps of optimizat
           body: JSON.stringify({ url: targetUrl })
         });
         if (scrapeRes.ok) {
-          const scrapeData: any = await scrapeRes.json();
+          const scrapeData = (await scrapeRes.json()) as any;
           if (scrapeData.success && scrapeData.job) {
             const newJdId = uid("jd");
-            const newJd: any = {
+            const newJd: JobDescription = {
               id: newJdId,
               title: scrapeData.job.title || "Scraped Position",
               company: scrapeData.job.company || "Scraped Employer",
@@ -1119,7 +1136,7 @@ I have prepared a comprehensive proposed patch to apply all 3 steps of optimizat
               requiredSkills: [],
               preferredSkills: [],
               technologies: [],
-              createdAt: new Date().toISOString(),
+              createdAt: new Date().toISOString()
             };
             addJD(newJd);
             setActiveJD(newJdId);
@@ -1139,18 +1156,41 @@ I have prepared a comprehensive proposed patch to apply all 3 steps of optimizat
     try {
       const { ProviderRouter } = await import("@/lib/ai/services/router");
       
-      let targetSystemPrompt = `You are an expert AI Resume Copilot integrated into a resume builder. Your job is to help the user improve their resume.
-You can:
-1. Rewrite and improve the professional summary
-2. Polish experience bullet points with action verbs and metrics
-3. Suggest skills and keywords relevant to the target job
-4. Improve formatting and ATS compatibility
-5. Generate a [PATCH] block with JSON to update resume fields
+      const systemPrompt = `You are a professional AI Resume Copilot.
+Your job is to help the candidate write, rewrite, and refine their resume.
+You have the candidate's current resume and the job description they are targeting.
+You can suggest changes to their resume. If you decide to make updates to the resume fields, you MUST append a special [PATCH] block at the very end of your response, followed by a valid JSON object representing a partial ResumeData structure.
 
-When you want to modify the resume, output a [PATCH] block containing a JSON object with any of these fields:
-{"summary": "...", "headline": "...", "experience": [{"id": "...", "bullets": ["...", "..."]}], "skills": [{"name": "...", "category": "..."}]}
+Example 1 (updating summary):
+I have updated your summary to sound more punchy.
+[PATCH]
+{
+  "summary": "Results-driven engineer..."
+}
 
-Always explain your changes in plain text BEFORE the [PATCH] block.`;
+Example 2 (updating experience bullets):
+I have updated the bullet points for your first role.
+[PATCH]
+{
+  "experience": [
+    {
+      "id": "e_1", // Use the correct ID from the experience list or fuzzy match
+      "bullets": [
+        "Led team of 5 engineers to deliver key dashboard, improving user engagement by 20%.",
+        "Optimized database queries, reducing latency by 45%."
+      ]
+    }
+  ]
+}
+
+Guidelines:
+1. Do NOT invent fake facts, companies, or dates.
+2. Maintain clean, professional language with no grammatical errors.
+3. Keep the text concise and suitable for a 1-page A4 format.
+4. ALWAYS append a [PATCH] block containing the updated fields automatically at the end of your response whenever you make any edits. Do NOT wait for the user to ask you to "insert" or "apply" it.
+5. Do NOT use markdown formatting (e.g. **word**) inside the [PATCH] block fields. Plain text only.`;
+
+      let targetSystemPrompt = systemPrompt;
       if (isInterviewActive) {
         const nextQ = interviewQuestionIdx + 1 < mockQuestions.length 
           ? `Question ${interviewQuestionIdx + 2}: ${mockQuestions[interviewQuestionIdx + 1]}`
@@ -1283,24 +1323,6 @@ ${resumeContext}
       setMessages((prev) => [...prev, { role: "assistant", content: cleanReply }]);
 
       if (patchData) {
-        // Programmatic helper to recursively strip asterisks from patch strings
-        const stripAst = (val: any): any => {
-          if (typeof val === "string") {
-            return val.replace(/\*\*|\*/g, "");
-          }
-          if (Array.isArray(val)) {
-            return val.map(stripAst);
-          }
-          if (val !== null && typeof val === "object") {
-            const res: any = {};
-            for (const k of Object.keys(val)) {
-              res[k] = stripAst(val[k]);
-            }
-            return res;
-          }
-          return val;
-        };
-
         const cleanedPatch = stripAst(patchData);
         console.log("[Copilot] Raw patch data:", patchData);
         console.log("[Copilot] Cleaned patch data:", cleanedPatch);
@@ -1579,7 +1601,11 @@ ${resumeContext}
         }
 
         console.log("[Copilot] Applying updated resume fields:", updatedResume);
-        const messageIndex = messages.length;
+        // The user message is added at index messages.length (via setMessages above),
+        // and the assistant reply is added at index messages.length + 1.
+        // We key the patch at the assistant message's future index so the
+        // DiffApprovalCard renders correctly next to the right chat bubble.
+        const messageIndex = messages.length + 1;
         setPendingPatches((prev) => ({
           ...prev,
           [messageIndex]: updatedResume,

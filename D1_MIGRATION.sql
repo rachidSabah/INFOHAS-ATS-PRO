@@ -126,3 +126,17 @@ CREATE TABLE IF NOT EXISTS optimization_checkpoints (
     FOREIGN KEY (session_id) REFERENCES optimization_sessions(id) ON DELETE CASCADE
 );
 CREATE INDEX IF NOT EXISTS idx_opt_checkpoints_session ON optimization_checkpoints(session_id, stage);
+
+-- ============================================================================
+-- 9. Career Materials (Career RAG / Knowledge Base)
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS career_materials (
+    id TEXT PRIMARY KEY,
+    title TEXT NOT NULL,
+    content_text TEXT NOT NULL,
+    category TEXT DEFAULT 'project', -- 'resume', 'cover_letter', 'certificate', 'project'
+    created_at TEXT DEFAULT (datetime('now')),
+    updated_at TEXT DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_career_materials_category ON career_materials(category);
+
