@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { Badge, Icon } from "@/components/shared";
+import { Badge, Icon, AICopilotPanel } from "@/components/shared";
 
 // ── Lightweight inline Markdown → JSX renderer for Copilot chat ────────────
 // Handles: **bold**, *italic*, `code`, # h1-h3, - bullets, ```code blocks```, \n newlines.
@@ -383,7 +383,7 @@ export function Builder() {
   const [spellCheckOpen, setSpellCheckOpen] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
   const { saveCount, restoreEntry, dismissRestore, triggerSave } = useAutoSave(resume);
-  const { snapshot, undo, redo, jumpTo, canUndo, canRedo, undoStack, totalUndos, totalRedos } = useUndoRedo(resume);
+  const { snapshot, undo, redo, jumpTo, canUndo, canRedo, undoStack, redoStack, totalUndos, totalRedos } = useUndoRedo(resume);
   const previewRef = useRef<HTMLDivElement>(null);
   const importFileRef = useRef<HTMLInputElement>(null);
 
@@ -393,6 +393,7 @@ export function Builder() {
   const [translateLang, setTranslateLang] = useState("en");
   const [translating, setTranslating] = useState(false);
   const [fixingIssueId, setFixingIssueId] = useState<string | null>(null);
+  const [activeElement, setActiveElement] = useState<any>(null);
 
   const translateResume = async () => {
     setTranslating(true);
@@ -2119,8 +2120,8 @@ ${resumeContext}
                 <div className="space-y-4">
                   <h3 className="font-semibold flex items-center gap-2"><Icon name="User" className="w-4 h-4 text-brand" /> Basic info</h3>
                   <div className="grid sm:grid-cols-2 gap-3">
-                    <Field label="Full name"><Input value={resume.name} onChange={(e) => patch({ name: e.target.value })} /></Field>
-                    <Field label="Headline / target role"><Input value={resume.headline ?? ""} onChange={(e) => patch({ headline: e.target.value })} placeholder="Senior Frontend Engineer" /></Field>
+                    <Field label="Full name"><Input value={resume.name} onChange={(e) => patch({ name: e.target.value })} onFocus={() => setActiveElement({ section: "basics", field: "name", value: resume.name })} /></Field>
+                    <Field label="Headline / target role"><Input value={resume.headline ?? ""} onChange={(e) => patch({ headline: e.target.value })} onFocus={() => setActiveElement({ section: "basics", field: "headline", value: resume.headline ?? "" })} placeholder="Senior Frontend Engineer" /></Field>
                     <Field label="Email"><Input value={resume.contact.email ?? ""} onChange={(e) => patch({ contact: { ...resume.contact, email: e.target.value } })} /></Field>
                     <Field label="Phone"><Input value={resume.contact.phone ?? ""} onChange={(e) => patch({ contact: { ...resume.contact, phone: e.target.value } })} placeholder="+1-415-555-0182" /></Field>
                     <Field label="Location"><Input value={resume.contact.location ?? ""} onChange={(e) => patch({ contact: { ...resume.contact, location: e.target.value } })} placeholder="San Francisco, CA" /></Field>
@@ -2132,6 +2133,7 @@ ${resumeContext}
                     <SmartTextarea
                       value={resume.summary ?? ""}
                       onChange={(v) => patch({ summary: v })}
+                      onFocus={() => setActiveElement({ section: "summary", field: "summary", value: resume.summary ?? "" })}
                       section="summary"
                       resume={resume}
                       jobDescriptionText={activeJD?.rawText}
@@ -2158,8 +2160,8 @@ ${resumeContext}
                         </Button>
                       </div>
                       <div className="grid sm:grid-cols-2 gap-3">
-                        <Field label="Title"><Input value={e.title} onChange={(ev) => updateExperience(e.id, { title: ev.target.value })} placeholder="Senior Engineer" /></Field>
-                        <Field label="Company"><Input value={e.company} onChange={(ev) => updateExperience(e.id, { company: ev.target.value })} placeholder="Acme Inc." /></Field>
+                        <Field label="Title"><Input value={e.title} onChange={(ev) => updateExperience(e.id, { title: ev.target.value })} onFocus={() => setActiveElement({ section: "experience", id: e.id, field: "title", value: e.title })} placeholder="Senior Engineer" /></Field>
+                        <Field label="Company"><Input value={e.company} onChange={(ev) => updateExperience(e.id, { company: ev.target.value })} onFocus={() => setActiveElement({ section: "experience", id: e.id, field: "company", value: e.company })} placeholder="Acme Inc." /></Field>
                         <Field label="Start (YYYY-MM)"><Input value={e.startDate} onChange={(ev) => updateExperience(e.id, { startDate: ev.target.value })} placeholder="2022-03" /></Field>
                         <Field label="End"><Input value={e.endDate} onChange={(ev) => updateExperience(e.id, { endDate: ev.target.value })} placeholder="Present or 2024-08" /></Field>
                       </div>
@@ -2173,6 +2175,7 @@ ${resumeContext}
                                 newBullets[bIdx] = v;
                                 updateExperience(e.id, { bullets: newBullets });
                               }}
+                              onFocus={() => setActiveElement({ section: "experience", id: e.id, field: "bullets", bulletIndex: bIdx, value: bullet })}
                               section="bullet"
                               context={e.title}
                               resume={resume}
@@ -2235,8 +2238,8 @@ ${resumeContext}
                         </Button>
                       </div>
                       <div className="grid sm:grid-cols-2 gap-3">
-                        <Field label="Institution"><Input value={ed.institution} onChange={(ev) => updateEducation(ed.id, { institution: ev.target.value })} /></Field>
-                        <Field label="Degree"><Input value={ed.degree} onChange={(ev) => updateEducation(ed.id, { degree: ev.target.value })} placeholder="B.S." /></Field>
+                        <Field label="Institution"><Input value={ed.institution} onChange={(ev) => updateEducation(ed.id, { institution: ev.target.value })} onFocus={() => setActiveElement({ section: "education", id: ed.id, field: "institution", value: ed.institution })} /></Field>
+                        <Field label="Degree"><Input value={ed.degree} onChange={(ev) => updateEducation(ed.id, { degree: ev.target.value })} onFocus={() => setActiveElement({ section: "education", id: ed.id, field: "degree", value: ed.degree })} placeholder="B.S." /></Field>
                         <Field label="Field"><Input value={ed.field ?? ""} onChange={(ev) => updateEducation(ed.id, { field: ev.target.value })} placeholder="Computer Science" /></Field>
                         <Field label="GPA (optional)"><Input value={ed.gpa ?? ""} onChange={(ev) => updateEducation(ed.id, { gpa: ev.target.value })} placeholder="3.8" /></Field>
                         <Field label="Start"><Input value={ed.startDate} onChange={(ev) => updateEducation(ed.id, { startDate: ev.target.value })} placeholder="2014-09" /></Field>
@@ -2257,7 +2260,7 @@ ${resumeContext}
                   <div className="grid sm:grid-cols-2 gap-2">
                     {resume.skills.map((s) => (
                       <div key={s.id} className="flex gap-2">
-                        <Input value={s.name} onChange={(ev) => updateSkill(s.id, { name: ev.target.value })} placeholder="React" />
+                        <Input value={s.name} onChange={(ev) => updateSkill(s.id, { name: ev.target.value })} onFocus={() => setActiveElement({ section: "skills", id: s.id, field: "name", value: s.name })} placeholder="React" />
                         <Input value={s.category ?? ""} onChange={(ev) => updateSkill(s.id, { category: ev.target.value })} placeholder="Frontend" className="w-32" />
                         <Button size="sm" variant="ghost" className="text-destructive" onClick={() => removeSkill(s.id)}>
                           <Icon name="X" className="w-3.5 h-3.5" />
@@ -2720,6 +2723,20 @@ ${resumeContext}
           </div>
         </div>
       </div>
+      <AICopilotPanel
+        resume={resume}
+        activeJD={activeJD}
+        atsScore={atsScore}
+        patch={patch}
+        undo={undo}
+        redo={redo}
+        canUndo={canUndo}
+        canRedo={canRedo}
+        undoStack={undoStack}
+        redoStack={redoStack}
+        activeElement={activeElement}
+        setActiveElement={setActiveElement}
+      />
     </div>
   );
 }

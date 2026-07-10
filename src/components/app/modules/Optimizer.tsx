@@ -9,7 +9,7 @@ import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Label } from "@/components/ui/label";
-import { Badge, Icon, ScoreRing } from "@/components/shared";
+import { Badge, Icon, ScoreRing, AICopilotPanel } from "@/components/shared";
 import { useApp, uid } from "@/lib/store";
 import { parseResumeFile, parseResumeText } from "@/lib/parser";
 import { scoreATS } from "@/lib/ats";
@@ -32,6 +32,7 @@ import type { ResumeData, JobDescription, ResumeSkill } from "@/lib/types";
 import { DiffPreview } from "@/components/resume/DiffPreview";
 import { ATSScoreSimulator } from "@/components/optimizer/ATSScoreSimulator";
 import { OptimizationSession } from "@/lib/agents/session-memory";
+import { useUndoRedo } from "@/lib/builder-hooks";
 
 // Lazy-load the V3 Pipeline Dashboard so it doesn't bloat the initial bundle
 const PipelineDashboardLazy = lazy(() =>
@@ -119,6 +120,15 @@ export function Optimizer() {
   ]);
   const [copilotInput, setCopilotInput] = useState("");
   const [copilotLoading, setCopilotLoading] = useState(false);
+  const [activeElement, setActiveElement] = useState<any>(null);
+  const { snapshot, undo, redo, canUndo, canRedo, undoStack, redoStack } = useUndoRedo(optimizedResume ?? undefined);
+
+  const patchOptimizedResume = (p: Partial<ResumeData>) => {
+    if (!optimizedResume) return;
+    const next = { ...optimizedResume, ...p };
+    setOptimizedResume(next);
+    updateResume(next.id, next);
+  };
 
   const detectedAtsDetails = jdParsed ? detectATSFromCompany(jdParsed.company || employer || "", jdParsed.url || "") : null;
 
@@ -1941,6 +1951,8 @@ Guidelines:
                           updateResume(next.id, p);
                         }}
                         scale={previewScale}
+                        activeElement={activeElement}
+                        setActiveElement={setActiveElement}
                       />
                     </div>
                   </div>
@@ -2390,6 +2402,22 @@ Guidelines:
           )
         )}
       </AnimatePresence>
+      {optimizedResume && (
+        <AICopilotPanel
+          resume={optimizedResume}
+          activeJD={jdParsed}
+          atsScore={afterReport}
+          patch={patchOptimizedResume}
+          undo={undo}
+          redo={redo}
+          canUndo={canUndo}
+          canRedo={canRedo}
+          undoStack={undoStack}
+          redoStack={redoStack}
+          activeElement={activeElement}
+          setActiveElement={setActiveElement}
+        />
+      )}
     </div>
   );
 }

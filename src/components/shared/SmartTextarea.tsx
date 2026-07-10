@@ -18,6 +18,7 @@ interface SmartTextareaProps {
   context?: string;
   rows?: number;
   disabled?: boolean;
+  onFocus?: () => void;
 }
 
 type SuggestStatus = "idle" | "loading" | "error";
@@ -44,7 +45,7 @@ function buildContext(resume?: ResumeData | null, jdText?: string): string {
   return parts.join("\n");
 }
 
-export function SmartTextarea({ value, onChange, section, placeholder, className, resume, jobDescriptionText, context, rows=3, disabled }: SmartTextareaProps) {
+export function SmartTextarea({ value, onChange, section, placeholder, className, resume, jobDescriptionText, context, rows=3, disabled, onFocus }: SmartTextareaProps) {
   const [suggestion, setSuggestion] = useState("");
   const [variants, setVariants] = useState<string[]>([]);
   const [currentVariant, setCurrentVariant] = useState(0);
@@ -289,6 +290,7 @@ export function SmartTextarea({ value, onChange, section, placeholder, className
         value={value}
         onChange={e => onType(e.target.value)}
         onKeyDown={handleKeyDown}
+        onFocus={onFocus}
         placeholder={placeholder || ''}
         rows={rows}
         disabled={disabled}

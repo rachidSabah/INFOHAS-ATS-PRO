@@ -12,9 +12,10 @@ import type { ResumeData } from "@/lib/types";
 // ============================================================================
 
 const DB_NAME = "ResumeBuilderDB";
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 const AUTO_SAVE_STORE = "autoSaves";
 const UNDO_STORE = "undoRedo";
+const AI_MODS_STORE = "aiModifications";
 
 async function openDB(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
@@ -26,6 +27,9 @@ async function openDB(): Promise<IDBDatabase> {
       }
       if (!db.objectStoreNames.contains(UNDO_STORE)) {
         db.createObjectStore(UNDO_STORE, { keyPath: "id" });
+      }
+      if (!db.objectStoreNames.contains(AI_MODS_STORE)) {
+        db.createObjectStore(AI_MODS_STORE, { keyPath: "id" });
       }
     };
     request.onsuccess = () => resolve(request.result);
@@ -180,4 +184,38 @@ export async function saveUndoRedo(resumeId: string, state: UndoRedoPersisted): 
 
 export async function clearUndoRedo(resumeId: string): Promise<void> {
   await dbDelete(UNDO_STORE, resumeId);
+}
+
+// ============================================================================
+// AI Modification History
+// ============================================================================
+
+export interface AIModification {
+  id: string;
+  resumeId: string;
+  userId: string;
+  originalContent: any;
+  aiGeneratedContent: any;
+  actionType: string;
+  modelUsed: string;
+  timestamp: number;
+  status: "accepted" | "rejected" | "pending";
+}
+
+export async function loadAIModifications(resumeId: string): Promise<AIModification[]> {
+  const data = await dbGet<AIModification[]>(AI_MODS_STORE, resumeId);
+  return data || [];
+}
+
+export async function saveAIModification(resumeId: string, mod: AIModification): Promise<void> {
+  const existing = await loadAIModifications(resumeId);
+  // Prevent duplicate ID insertion
+  const filtered = existing.filter(m => m.id !== mod.id);
+  filtered.push(mod);
+  // Keep up to 200 modification log entries
+  await dbPut(AI_MODS_STORE, resumeId, filtered.slice(-200));
+}
+
+export async function clearAIModifications(resumeId: string): Promise<void> {
+  await dbDelete(AI_MODS_STORE, resumeId);
 }

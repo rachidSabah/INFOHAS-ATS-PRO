@@ -150,3 +150,5 @@ export function StatPill({ icon, label, value }: { icon: string; label: string; 
     </div>
   );
 }
+
+export { AICopilotPanel } from "./shared/AICopilotPanel";

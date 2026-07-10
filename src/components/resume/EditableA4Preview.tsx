@@ -82,6 +82,8 @@ interface EditableA4PreviewProps {
   onChange: (patch: Partial<ResumeData>) => void;
   scale?: number;
   className?: string;
+  activeElement?: any;
+  setActiveElement?: (el: any) => void;
 }
 
 type EditTarget =
@@ -152,7 +154,7 @@ function renderHighlightedText(
   }) as any;
 }
 
-export function EditableA4Preview({ resume, onChange, scale = 0.7, className }: EditableA4PreviewProps) {
+export function EditableA4Preview({ resume, onChange, scale = 0.7, className, activeElement, setActiveElement }: EditableA4PreviewProps) {
   const [editing, setEditing] = useState<EditTarget>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const isTouch = useIsTouchDevice();
@@ -558,6 +560,8 @@ export function EditableA4Preview({ resume, onChange, scale = 0.7, className }: 
             resume={resume}
             onClose={() => setEditing(null)}
             onCommit={commit}
+            activeElement={activeElement}
+            setActiveElement={setActiveElement}
           />
         )}
       </AnimatePresence>
@@ -678,11 +682,13 @@ function SectionDividerInline({ title }: { title: string }) {
 }
 
 /** Inline editor drawer — slides up from bottom on desktop, full-screen on mobile */
-function EditorDrawer({ target, resume, onClose, onCommit }: {
+function EditorDrawer({ target, resume, onClose, onCommit, activeElement, setActiveElement }: {
   target: EditTarget;
   resume: ResumeData;
   onClose: () => void;
   onCommit: (p: Partial<ResumeData>) => void;
+  activeElement?: any;
+  setActiveElement?: (el: any) => void;
 }) {
   // local form state — keyed by target so it resets when target changes (controlled via key prop from parent)
   const [form, setForm] = useState<ResumeData>(resume);
@@ -743,12 +749,12 @@ function EditorDrawer({ target, resume, onClose, onCommit }: {
           {target === "header" && (
             <div className="space-y-3">
               <div className="grid sm:grid-cols-2 gap-3">
-                <Field label="Full name"><Input value={form.name} onChange={(v) => setForm({ ...form, name: v })} /></Field>
-                <Field label="Headline"><Input value={form.headline ?? ""} onChange={(v) => setForm({ ...form, headline: v })} /></Field>
-                <Field label="Location"><Input value={form.contact.location ?? ""} onChange={(v) => setForm({ ...form, contact: { ...form.contact, location: v } })} /></Field>
-                <Field label="Phone"><Input value={form.contact.phone ?? ""} onChange={(v) => setForm({ ...form, contact: { ...form.contact, phone: v } })} /></Field>
-                <Field label="Email"><Input value={form.contact.email ?? ""} onChange={(v) => setForm({ ...form, contact: { ...form.contact, email: v } })} /></Field>
-                <Field label="Date of birth (DD/MM/YYYY)"><Input value={form.dateOfBirth ?? ""} onChange={(v) => setForm({ ...form, dateOfBirth: v })} placeholder="10/01/2005" /></Field>
+                <Field label="Full name"><Input value={form.name} onChange={(v) => setForm({ ...form, name: v })} onFocus={() => setActiveElement && setActiveElement({ section: "basics", field: "name", value: form.name })} /></Field>
+                <Field label="Headline"><Input value={form.headline ?? ""} onChange={(v) => setForm({ ...form, headline: v })} onFocus={() => setActiveElement && setActiveElement({ section: "basics", field: "headline", value: form.headline ?? "" })} /></Field>
+                <Field label="Location"><Input value={form.contact.location ?? ""} onChange={(v) => setForm({ ...form, contact: { ...form.contact, location: v } })} onFocus={() => setActiveElement && setActiveElement({ section: "basics", field: "location", value: form.contact.location ?? "" })} /></Field>
+                <Field label="Phone"><Input value={form.contact.phone ?? ""} onChange={(v) => setForm({ ...form, contact: { ...form.contact, phone: v } })} onFocus={() => setActiveElement && setActiveElement({ section: "basics", field: "phone", value: form.contact.phone ?? "" })} /></Field>
+                <Field label="Email"><Input value={form.contact.email ?? ""} onChange={(v) => setForm({ ...form, contact: { ...form.contact, email: v } })} onFocus={() => setActiveElement && setActiveElement({ section: "basics", field: "email", value: form.contact.email ?? "" })} /></Field>
+                <Field label="Date of birth (DD/MM/YYYY)"><Input value={form.dateOfBirth ?? ""} onChange={(v) => setForm({ ...form, dateOfBirth: v })} onFocus={() => setActiveElement && setActiveElement({ section: "basics", field: "dateOfBirth", value: form.dateOfBirth ?? "" })} placeholder="10/01/2005" /></Field>
               </div>
             </div>
           )}
@@ -758,6 +764,7 @@ function EditorDrawer({ target, resume, onClose, onCommit }: {
               <TextArea
                 value={form.summary ?? ""}
                 onChange={(v) => setForm({ ...form, summary: v })}
+                onFocus={() => setActiveElement && setActiveElement({ section: "summary", field: "summary", value: form.summary ?? "" })}
                 rows={8}
                 placeholder="Ambitious Retail Sales Professional with..."
               />
@@ -817,16 +824,17 @@ function EditorDrawer({ target, resume, onClose, onCommit }: {
             return (
               <div className="space-y-3">
                 <div className="grid sm:grid-cols-2 gap-3">
-                  <Field label="Job title"><Input value={e.title} onChange={(v) => setForm({ ...form, experience: form.experience.map((x) => x.id === id ? { ...x, title: v } : x) })} /></Field>
-                  <Field label="Company"><Input value={e.company} onChange={(v) => setForm({ ...form, experience: form.experience.map((x) => x.id === id ? { ...x, company: v } : x) })} /></Field>
-                  <Field label="Location"><Input value={e.location ?? ""} onChange={(v) => setForm({ ...form, experience: form.experience.map((x) => x.id === id ? { ...x, location: v } : x) })} /></Field>
-                  <Field label="Start (Mon YYYY)"><Input value={e.startDate} onChange={(v) => setForm({ ...form, experience: form.experience.map((x) => x.id === id ? { ...x, startDate: v } : x) })} placeholder="May 2024" /></Field>
-                  <Field label="End"><Input value={e.endDate} onChange={(v) => setForm({ ...form, experience: form.experience.map((x) => x.id === id ? { ...x, endDate: v } : x) })} placeholder="Oct 2024 or Present" /></Field>
+                  <Field label="Job title"><Input value={e.title} onChange={(v) => setForm({ ...form, experience: form.experience.map((x) => x.id === id ? { ...x, title: v } : x) })} onFocus={() => setActiveElement && setActiveElement({ section: "experience", id, field: "title", value: e.title })} /></Field>
+                  <Field label="Company"><Input value={e.company} onChange={(v) => setForm({ ...form, experience: form.experience.map((x) => x.id === id ? { ...x, company: v } : x) })} onFocus={() => setActiveElement && setActiveElement({ section: "experience", id, field: "company", value: e.company })} /></Field>
+                  <Field label="Location"><Input value={e.location ?? ""} onChange={(v) => setForm({ ...form, experience: form.experience.map((x) => x.id === id ? { ...x, location: v } : x) })} onFocus={() => setActiveElement && setActiveElement({ section: "experience", id, field: "location", value: e.location ?? "" })} /></Field>
+                  <Field label="Start (Mon YYYY)"><Input value={e.startDate} onChange={(v) => setForm({ ...form, experience: form.experience.map((x) => x.id === id ? { ...x, startDate: v } : x) })} onFocus={() => setActiveElement && setActiveElement({ section: "experience", id, field: "startDate", value: e.startDate })} placeholder="May 2024" /></Field>
+                  <Field label="End"><Input value={e.endDate} onChange={(v) => setForm({ ...form, experience: form.experience.map((x) => x.id === id ? { ...x, endDate: v } : x) })} onFocus={() => setActiveElement && setActiveElement({ section: "experience", id, field: "endDate", value: e.endDate })} placeholder="Oct 2024 or Present" /></Field>
                 </div>
                 <Field label="Achievement bullets (one per line — start with action verbs)">
                   <TextArea
                     value={e.bullets.join("\n")}
                     onChange={(v) => setForm({ ...form, experience: form.experience.map((x) => x.id === id ? { ...x, bullets: v.split("\n") } : x) })}
+                    onFocus={() => setActiveElement && setActiveElement({ section: "experience", id, field: "bullets", value: e.bullets.join("\n") })}
                     rows={6}
                   />
                 </Field>
@@ -841,16 +849,17 @@ function EditorDrawer({ target, resume, onClose, onCommit }: {
             return (
               <div className="space-y-3">
                 <div className="grid sm:grid-cols-2 gap-3">
-                  <Field label="Degree"><Input value={ed.degree} onChange={(v) => setForm({ ...form, education: form.education.map((x) => x.id === id ? { ...x, degree: v } : x) })} /></Field>
-                  <Field label="Institution"><Input value={ed.institution} onChange={(v) => setForm({ ...form, education: form.education.map((x) => x.id === id ? { ...x, institution: v } : x) })} /></Field>
-                  <Field label="Location"><Input value={ed.location ?? ""} onChange={(v) => setForm({ ...form, education: form.education.map((x) => x.id === id ? { ...x, location: v } : x) })} /></Field>
-                  <Field label="Start"><Input value={ed.startDate} onChange={(v) => setForm({ ...form, education: form.education.map((x) => x.id === id ? { ...x, startDate: v } : x) })} placeholder="2024" /></Field>
-                  <Field label="End"><Input value={ed.endDate} onChange={(v) => setForm({ ...form, education: form.education.map((x) => x.id === id ? { ...x, endDate: v } : x) })} placeholder="2025" /></Field>
+                  <Field label="Degree"><Input value={ed.degree} onChange={(v) => setForm({ ...form, education: form.education.map((x) => x.id === id ? { ...x, degree: v } : x) })} onFocus={() => setActiveElement && setActiveElement({ section: "education", id, field: "degree", value: ed.degree })} /></Field>
+                  <Field label="Institution"><Input value={ed.institution} onChange={(v) => setForm({ ...form, education: form.education.map((x) => x.id === id ? { ...x, institution: v } : x) })} onFocus={() => setActiveElement && setActiveElement({ section: "education", id, field: "institution", value: ed.institution })} /></Field>
+                  <Field label="Location"><Input value={ed.location ?? ""} onChange={(v) => setForm({ ...form, education: form.education.map((x) => x.id === id ? { ...x, location: v } : x) })} onFocus={() => setActiveElement && setActiveElement({ section: "education", id, field: "location", value: ed.location ?? "" })} /></Field>
+                  <Field label="Start"><Input value={ed.startDate} onChange={(v) => setForm({ ...form, education: form.education.map((x) => x.id === id ? { ...x, startDate: v } : x) })} onFocus={() => setActiveElement && setActiveElement({ section: "education", id, field: "startDate", value: ed.startDate })} placeholder="2024" /></Field>
+                  <Field label="End"><Input value={ed.endDate} onChange={(v) => setForm({ ...form, education: form.education.map((x) => x.id === id ? { ...x, endDate: v } : x) })} onFocus={() => setActiveElement && setActiveElement({ section: "education", id, field: "endDate", value: ed.endDate })} placeholder="2025" /></Field>
                 </div>
                 <Field label="Modules (one line, comma-separated)">
                   <Input
                     value={(ed.highlights ?? []).join(", ").replace(/^Modules: /, "")}
                     onChange={(v) => setForm({ ...form, education: form.education.map((x) => x.id === id ? { ...x, highlights: v.trim() ? [`Modules: ${v.replace(/^Modules: /, "")}`] : [] } : x) })}
+                    onFocus={() => setActiveElement && setActiveElement({ section: "education", id, field: "highlights", value: (ed.highlights ?? []).join(", ").replace(/^Modules: /, "") })}
                     placeholder="Customer Service, CRM, Communication"
                   />
                 </Field>
@@ -926,23 +935,25 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 function Label({ className, children }: { className?: string; children: React.ReactNode }) {
   return <label className={`block font-medium ${className ?? ""}`}>{children}</label>;
 }
-function Input({ value, onChange, placeholder }: { value: string; onChange: (v: string) => void; placeholder?: string }) {
+function Input({ value, onChange, placeholder, onFocus }: { value: string; onChange: (v: string) => void; placeholder?: string; onFocus?: () => void }) {
   return (
     <input
       value={value}
       onChange={(e) => onChange(e.target.value)}
       placeholder={placeholder}
+      onFocus={onFocus}
       className="w-full h-9 px-3 rounded-md border border-input bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring"
     />
   );
 }
-function TextArea({ value, onChange, rows, placeholder }: { value: string; onChange: (v: string) => void; rows?: number; placeholder?: string }) {
+function TextArea({ value, onChange, rows, placeholder, onFocus }: { value: string; onChange: (v: string) => void; rows?: number; placeholder?: string; onFocus?: () => void }) {
   return (
     <textarea
       value={value}
       onChange={(e) => onChange(e.target.value)}
       rows={rows ?? 4}
       placeholder={placeholder}
+      onFocus={onFocus}
       className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-ring"
     />
   );
