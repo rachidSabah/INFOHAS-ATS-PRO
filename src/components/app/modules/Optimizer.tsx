@@ -2185,6 +2185,39 @@ Guidelines:
                     )}
                   </div>
 
+                  {/* Floating Quick Actions */}
+                  <div className="px-2 pt-2 flex items-center gap-1.5 overflow-x-auto scrollbar-none shrink-0 border-t border-border/40 bg-slate-50/20 dark:bg-slate-900/10">
+                    <span className="text-[9px] uppercase font-bold text-muted-foreground shrink-0 pl-1 mr-1 flex items-center gap-0.5">
+                      <Icon name="Wand2" className="w-2.5 h-2.5 text-brand" /> Quick:
+                    </span>
+                    <div className="flex items-center gap-1.5 pb-2">
+                      <button
+                        onClick={() => sendCopilotMessage("Rewrite the professional summary or experience bullets to make them highly punchy, action-oriented, and outcome-focused.")}
+                        className="text-[10px] whitespace-nowrap px-2.5 py-1 rounded-full border border-violet-200 dark:border-violet-800 bg-violet-50/50 dark:bg-violet-950/20 text-violet-700 dark:text-violet-300 hover:bg-violet-100 dark:hover:bg-violet-950/50 font-medium shadow-sm transition active:scale-95 cursor-pointer flex items-center gap-1"
+                      >
+                        <span>🚀 Make it Punchy</span>
+                      </button>
+                      <button
+                        onClick={() => sendCopilotMessage("Analyze my experience bullets and rewrite them to include placeholders [X%] or [Y] where metrics can be added.")}
+                        className="text-[10px] whitespace-nowrap px-2.5 py-1 rounded-full border border-emerald-200 dark:border-emerald-800 bg-emerald-50/50 dark:bg-emerald-950/20 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-100 dark:hover:bg-emerald-950/50 font-medium shadow-sm transition active:scale-95 cursor-pointer flex items-center gap-1"
+                      >
+                        <span>📈 Add Metrics</span>
+                      </button>
+                      <button
+                        onClick={() => sendCopilotMessage("Polish my resume summary and experience bullet points specifically for a Cabin Crew / Luxury Hospitality role, emphasizing safety, premium guest experience, and presentation standards.")}
+                        className="text-[10px] whitespace-nowrap px-2.5 py-1 rounded-full border border-amber-200 dark:border-amber-800 bg-amber-50/50 dark:bg-amber-950/20 text-amber-700 dark:text-amber-300 hover:bg-amber-100 dark:hover:bg-amber-950/50 font-medium shadow-sm transition active:scale-95 cursor-pointer flex items-center gap-1"
+                      >
+                        <span>✈️ Cabin Crew Polish</span>
+                      </button>
+                      <button
+                        onClick={() => sendCopilotMessage("Condense my resume text to make it extremely concise and fit neatly onto a single A4 page.")}
+                        className="text-[10px] whitespace-nowrap px-2.5 py-1 rounded-full border border-rose-200 dark:border-rose-800 bg-rose-50/50 dark:rose-950/20 text-rose-700 dark:text-rose-300 hover:bg-rose-100 dark:hover:bg-rose-950/50 font-medium shadow-sm transition active:scale-95 cursor-pointer flex items-center gap-1"
+                      >
+                        <span>🔍 Trim Fluff</span>
+                      </button>
+                    </div>
+                  </div>
+
                   {/* Input box */}
                   <div className="p-2 border-t border-border flex gap-1.5 bg-slate-50/50 dark:bg-slate-900/40 shrink-0">
                     <Input
