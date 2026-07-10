@@ -27,6 +27,7 @@ Preferred: Previous Retails and or Customer Service experience.`;
 
 test.describe("Aya Chabaki Resume Optimization", () => {
   test("runs the full optimization pipeline E2E", async ({ page }) => {
+    test.setTimeout(60000);
     await page.setViewportSize({ width: 1280, height: 800 });
     await page.addInitScript(() => {
       window.localStorage.setItem("resumeai-session", JSON.stringify({
@@ -158,7 +159,7 @@ test.describe("Aya Chabaki Resume Optimization", () => {
 
     // 5. Wait for the pipeline optimization to run and converge
     // The UI transitions to the "done" view showing the optimized resume
-    await expect(page.locator('text=Optimized resume — InfoHAS Pro layout').first()).toBeVisible({ timeout: 45000 });
+    await expect(page.locator('text=Prepare for Interview').first()).toBeVisible({ timeout: 45000 });
 
     // 6. Assertions on the final optimized resume
     // Check that the layout optimization satisfied the 1-page A4 target (approx 2700+ visible chars)

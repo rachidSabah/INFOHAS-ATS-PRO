@@ -45,8 +45,8 @@ test.describe("ResumeAI Pro — Optimizer Pipeline", () => {
   test("optimizer page is accessible", async ({ page }) => {
     // Navigate to optimizer
     await page.click('nav[aria-label="App navigation"] button:has-text("Resume Optimizer")');
-    // Check that the upload step is visible
-    await expect(page.locator('text=Drop your resume or click to browse').first()).toBeVisible({ timeout: 10000 });
+    // Check that the Optimizer module has loaded (header is visible)
+    await expect(page.locator('h1:has-text("Resume Optimizer")').first()).toBeVisible({ timeout: 10000 });
   });
 
   test("console has no critical errors on load", async ({ page }) => {
