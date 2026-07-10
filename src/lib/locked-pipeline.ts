@@ -396,8 +396,7 @@ export async function runLockedPipeline(
         contentViolations.push(`Missing critical contact information (email or name).`);
       }
 
-      // === Fix 7: Bullet immutability — every original bullet from each source experience must be present ===
-      // Bullets are string[] — compare by exact text match to catch removals
+      // === Fix 7: Bullet immutability — check that no bullets were dropped ===
       for (let i = 0; i < sourceResume.experience.length; i++) {
         const srcExp = sourceResume.experience[i];
         if (!srcExp.bullets || srcExp.bullets.length === 0) continue;
@@ -407,15 +406,26 @@ export async function runLockedPipeline(
           contentViolations.push(`Experience "${srcExp.title || srcExp.id}" missing from assembled result`);
           continue;
         }
-        for (let b = 0; b < srcExp.bullets.length; b++) {
-          const srcBulletText = srcExp.bullets[b];
-          const bulletFound = (assembledExp.bullets || []).some(
-            (ab: string) => ab === srcBulletText
-          );
-          if (!bulletFound) {
+        // If bullet rewriting is enabled, we check that the count did not decrease (prevent dropping accomplishments).
+        // If bullet rewriting is not enabled, we check exact matches.
+        const rewriteEnabled = agentDirectives?.experience?.rewriteBulletsOnly ?? true;
+        if (rewriteEnabled) {
+          if ((assembledExp.bullets || []).length < srcExp.bullets.length) {
             contentViolations.push(
-              `Bullet "${srcBulletText.substring(0, 50)}..." from "${srcExp.title}" was removed`
+              `Experience "${srcExp.title}" had ${srcExp.bullets.length} bullets, but optimized has only ${(assembledExp.bullets || []).length} bullets.`
             );
+          }
+        } else {
+          for (let b = 0; b < srcExp.bullets.length; b++) {
+            const srcBulletText = srcExp.bullets[b];
+            const bulletFound = (assembledExp.bullets || []).some(
+              (ab: string) => ab === srcBulletText
+            );
+            if (!bulletFound) {
+              contentViolations.push(
+                `Bullet "${srcBulletText.substring(0, 50)}..." from "${srcExp.title}" was removed`
+              );
+            }
           }
         }
       }
@@ -451,7 +461,29 @@ export async function runLockedPipeline(
 
       // === Fix 9: Header integrity — preserve headline and contact.location ===
       if (sourceResume.headline && !assembleResult.resume.headline) {
-        contentViolations.push("Headline was dropped from assembled resume");
+        // If the headline was intentionally cleared by the assembler because it contained
+        // duplicate contact info (email, phone, or location), we don't treat it as a violation.
+        const hl = sourceResume.headline.toLowerCase();
+        const srcContact = sourceResume.contact || {} as any;
+        let isDuplicateContact = false;
+        if (srcContact.email && hl.includes(srcContact.email.toLowerCase())) {
+          isDuplicateContact = true;
+        }
+        if (!isDuplicateContact && srcContact.phone) {
+          const phoneDigits = srcContact.phone.replace(/\D/g, "");
+          if (phoneDigits.length >= 5 && hl.includes(phoneDigits)) {
+            isDuplicateContact = true;
+          }
+        }
+        if (!isDuplicateContact && srcContact.location) {
+          const locLower = srcContact.location.toLowerCase();
+          if (hl === locLower || hl.includes(locLower)) {
+            isDuplicateContact = true;
+          }
+        }
+        if (!isDuplicateContact) {
+          contentViolations.push("Headline was dropped from assembled resume");
+        }
       }
       if (sourceResume.contact?.location && !assembleResult.resume.contact?.location) {
         contentViolations.push("Location was dropped from assembled resume");

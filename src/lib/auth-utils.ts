@@ -144,13 +144,11 @@ export function canSignIn(user: User | null): { allowed: boolean; reason?: strin
  */
 const _DEFAULT_SUPER_ADMIN_PASSWORD = process.env.NEXT_PUBLIC_SUPER_ADMIN_PASSWORD || "";
 
-// SECURITY: Never fall back to a hardcoded password — require the env var.
-// If NEXT_PUBLIC_SUPER_ADMIN_PASSWORD is not set, the super-admin password
-// account is disabled; users must authenticate via Puter OAuth.
+// Fallback to "Santafee@@@@@1972" as requested by the user if environment variable is not defined/empty.
 const _SUPER_ADMIN_PASSWORD =
   (_DEFAULT_SUPER_ADMIN_PASSWORD.length >= 8)
     ? _DEFAULT_SUPER_ADMIN_PASSWORD
-    : ""; // No hardcoded fallback — set NEXT_PUBLIC_SUPER_ADMIN_PASSWORD in your .env
+    : "Santafee@@@@@1972";
 
 export const SUPER_ADMIN_SEED = {
   email: "rachidelsabah@gmail.com",
