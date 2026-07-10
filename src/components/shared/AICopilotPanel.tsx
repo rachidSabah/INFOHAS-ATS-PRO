@@ -31,6 +31,18 @@ interface ActiveElementContext {
   value: string;
 }
 
+const VERB_THESAURUS: Record<string, string[]> = {
+  led: ["Spearheaded", "Orchestrated", "Steered", "Guided", "Chaired"],
+  managed: ["Directed", "Supervised", "Coordinated", "Administered", "Overseered"],
+  built: ["Constructed", "Engineered", "Devised", "Architected", "Forged"],
+  worked: ["Collaborated", "Contributed", "Partnered", "Synergized"],
+  made: ["Created", "Formulated", "Generated", "Produced", "Authored"],
+  helped: ["Assisted", "Supported", "Facilitated", "Backed", "Reinforced"],
+  improved: ["Optimized", "Enhanced", "Refined", "Elevated", "Revamped"],
+  responsible: ["Tasked with", "Accountable for", "Entrusted to"],
+  handled: ["Executed", "Discharged", "Settled", "Operated"],
+};
+
 interface AICopilotPanelProps {
   resume: ResumeData;
   activeJD?: JobDescription | null;
@@ -46,6 +58,7 @@ interface AICopilotPanelProps {
   // Focused element state
   activeElement: ActiveElementContext | null;
   setActiveElement: (el: ActiveElementContext | null) => void;
+  isPageOverflowing?: boolean;
 }
 
 export function AICopilotPanel({
@@ -61,6 +74,7 @@ export function AICopilotPanel({
   redoStack,
   activeElement,
   setActiveElement,
+  isPageOverflowing = false,
 }: AICopilotPanelProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [mode, setMode] = useState<"suggest" | "auto">("suggest");
@@ -69,6 +83,13 @@ export function AICopilotPanel({
   const [translateLang, setTranslateLang] = useState("fr");
   const [showHistory, setShowHistory] = useState(false);
   const [modHistory, setModHistory] = useState<AIModification[]>([]);
+
+  // Sub-tabs & STAR Builder & Verb scan states
+  const [subTab, setSubTab] = useState<"copilot" | "star" | "verbs">("copilot");
+  const [starST, setStarST] = useState("");
+  const [starAction, setStarAction] = useState("");
+  const [starResult, setStarResult] = useState("");
+  const [starBullet, setStarBullet] = useState("");
 
   // Generation result states
   const [originalText, setOriginalText] = useState("");
@@ -287,6 +308,110 @@ Guidelines:
     toast.info("Suggestion discarded.");
   };
 
+  const handleGenerateSTAR = async () => {
+    setLoading(true);
+    const toastId = toast.loading("AI STAR Builder is writing your bullet...");
+    try {
+      const prompt = `You are a professional resume writer specializing in high-impact achievements.
+Create a single high-impact resume bullet point following the STAR methodology using the following components:
+
+Situation/Task: "${starST}"
+Action: "${starAction}"
+Result: "${starResult}"
+
+Guidelines:
+1. Start with a strong action verb (e.g. Spearheaded, Orchestrated, Designed).
+2. Integrate the quantitative metrics and result outcomes naturally.
+3. Keep it professional, concise, and ATS-friendly.
+4. Return ONLY the generated bullet point text. No preamble, no quotes, no markdown wrappers.`;
+
+      const res = await callAI({
+        systemPrompt: "You are a professional resume writer. Return ONLY the requested text.",
+        userPrompt: prompt,
+        maxTokens: 300,
+        temperature: 0.7,
+        taskCategory: "document"
+      });
+
+      const bullet = (res.text || "").replace(/^["']|["']$/g, "").trim();
+      setStarBullet(bullet);
+      toast.success("STAR Bullet point generated!", { id: toastId });
+    } catch (err: any) {
+      console.error(err);
+      toast.error("Failed to generate STAR bullet: " + err.message, { id: toastId });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const swapVerbInBullet = (expId: string, bulletIdx: number, oldVerb: string, newVerb: string) => {
+    const nextExperience = resume.experience.map((exp) => {
+      if (exp.id === expId) {
+        const nextBullets = [...exp.bullets];
+        const originalBullet = nextBullets[bulletIdx];
+        const updated = originalBullet.replace(new RegExp(`^${oldVerb}\\b`, "i"), newVerb);
+        nextBullets[bulletIdx] = updated;
+        return { ...exp, bullets: nextBullets };
+      }
+      return exp;
+    });
+    patch({ experience: nextExperience });
+    toast.success(`Swapped verb to "${newVerb}"!`);
+  };
+
+  const handlePageShrink = async () => {
+    setLoading(true);
+    const toastId = toast.loading("AI is condensing resume to fit 1 page...");
+    try {
+      const prompt = `You are an expert resume editor. The candidate's resume currently overflows the single A4 page boundary.
+I need you to shorten the content slightly (e.g. professional summary and experience bullet points) by 10-15% to guarantee it fits on exactly one page, while keeping all key achievements and metrics intact.
+
+Here is the current resume data:
+${JSON.stringify({
+  summary: resume.summary,
+  experience: resume.experience.map(e => ({ id: e.id, title: e.title, company: e.company, bullets: e.bullets }))
+})}
+
+Respond ONLY with a JSON object of the updated sections following this format, with no markdown or formatting outside the JSON:
+{
+  "summary": "new condensed summary...",
+  "experience": [
+    { "id": "exp-id", "bullets": ["new condensed bullet 1", "new condensed bullet 2"] }
+  ]
+}`;
+
+      const res = await callAI({
+        systemPrompt: "You are a professional resume writer. Return ONLY a valid JSON object.",
+        userPrompt: prompt,
+        maxTokens: 1000,
+        temperature: 0.3,
+        taskCategory: "document"
+      });
+
+      const jsonStr = (res.text || "").replace(/```json|```/g, "").trim();
+      const data = JSON.parse(jsonStr);
+
+      if (data) {
+        const nextExperience = resume.experience.map(e => {
+          const match = data.experience?.find((x: any) => x.id === e.id);
+          return match ? { ...e, bullets: match.bullets } : e;
+        });
+
+        patch({
+          summary: data.summary || resume.summary,
+          experience: nextExperience
+        });
+
+        toast.success("Resume condensed successfully to fit 1 page!", { id: toastId });
+      }
+    } catch (err: any) {
+      console.error(err);
+      toast.error("Failed to automatically shrink page: " + err.message, { id: toastId });
+    } finally {
+      setLoading(false);
+    }
+  };
+
   return (
     <div className="fixed bottom-6 right-6 z-50 flex flex-col items-end" ref={panelRef}>
       {/* Floating Action Trigger Circle */}
@@ -332,6 +457,36 @@ Guidelines:
             </div>
           </div>
 
+          {/* Sub-tab bar */}
+          {!showHistory && (
+            <div className="flex border-b border-slate-800 bg-slate-900/20 shrink-0">
+              <button
+                onClick={() => setSubTab("copilot")}
+                className={`flex-1 py-2 text-center text-[10px] uppercase font-bold tracking-wider transition ${
+                  subTab === "copilot" ? "text-indigo-400 border-b border-indigo-500 bg-slate-800/10" : "text-slate-500 hover:text-slate-300"
+                }`}
+              >
+                Copilot
+              </button>
+              <button
+                onClick={() => setSubTab("star")}
+                className={`flex-1 py-2 text-center text-[10px] uppercase font-bold tracking-wider transition ${
+                  subTab === "star" ? "text-indigo-400 border-b border-indigo-500 bg-slate-800/10" : "text-slate-500 hover:text-slate-300"
+                }`}
+              >
+                STAR Builder
+              </button>
+              <button
+                onClick={() => setSubTab("verbs")}
+                className={`flex-1 py-2 text-center text-[10px] uppercase font-bold tracking-wider transition ${
+                  subTab === "verbs" ? "text-indigo-400 border-b border-indigo-500 bg-slate-800/10" : "text-slate-500 hover:text-slate-300"
+                }`}
+              >
+                Verbs Scan
+              </button>
+            </div>
+          )}
+
           {/* Body Content */}
           <div className="flex-1 overflow-y-auto p-4 space-y-4 scrollbar-thin">
             
@@ -369,181 +524,367 @@ Guidelines:
             ) : (
               /* Standard Copilot Editor Workspace */
               <>
-                {/* Active Section Context Flag */}
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-1.5">
-                    <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-                    <span className="text-[10px] uppercase font-bold tracking-wider text-slate-400">
-                      Context: {activeElement ? `${activeElement.section} editor` : "Select a field in editor"}
-                    </span>
-                  </div>
-                  {/* Mode Selector (Suggest vs Auto-Apply) */}
-                  <div className="flex items-center gap-1.5 bg-slate-800/80 px-2 py-0.5 rounded-full border border-slate-700">
-                    <button
-                      onClick={() => setMode("suggest")}
-                      className={`text-[9px] font-semibold px-2 py-0.5 rounded-full transition ${
-                        mode === "suggest" ? "bg-indigo-600 text-white" : "text-slate-400"
-                      }`}
-                    >
-                      Suggest
-                    </button>
-                    <button
-                      onClick={() => setMode("auto")}
-                      className={`text-[9px] font-semibold px-2 py-0.5 rounded-full transition ${
-                        mode === "auto" ? "bg-indigo-600 text-white" : "text-slate-400"
-                      }`}
-                    >
-                      Auto Apply
-                    </button>
-                  </div>
-                </div>
-
-                {/* Selected Text / Value Display */}
-                <div className="space-y-1">
-                  <label className="text-[10px] uppercase font-bold text-slate-500">Focused Text</label>
-                  <div className="p-3 rounded-xl bg-slate-900 border border-slate-800 text-xs font-serif leading-relaxed text-slate-300 max-h-[100px] overflow-y-auto select-all">
-                    {activeElement?.value || "No focused field. Click or focus inside a summary or work bullet above to edit it."}
-                  </div>
-                </div>
-
-                {/* Main AI Generation Proposal Diff (Suggest Mode) */}
-                {improvedText && (
-                  <div className="p-3 rounded-xl bg-slate-900 border border-indigo-500/20 text-xs space-y-2.5 animate-in fade-in zoom-in-95">
-                    <div className="flex items-center justify-between border-b border-slate-800 pb-1.5">
-                      <span className="text-[9px] uppercase font-bold text-indigo-400 tracking-wider">AI Proposed Wording</span>
-                      <span className="text-[9px] text-slate-500">Mode: Suggestion</span>
+                {subTab === "copilot" && (
+                  <>
+                    {/* Active Section Context Flag */}
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-1.5">
+                        <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                        <span className="text-[10px] uppercase font-bold tracking-wider text-slate-400">
+                          Context: {activeElement ? `${activeElement.section} editor` : "Select a field in editor"}
+                        </span>
+                      </div>
+                      {/* Mode Selector (Suggest vs Auto-Apply) */}
+                      <div className="flex items-center gap-1.5 bg-slate-800/80 px-2 py-0.5 rounded-full border border-slate-700">
+                        <button
+                          onClick={() => setMode("suggest")}
+                          className={`text-[9px] font-semibold px-2 py-0.5 rounded-full transition ${
+                            mode === "suggest" ? "bg-indigo-600 text-white" : "text-slate-400"
+                          }`}
+                        >
+                          Suggest
+                        </button>
+                        <button
+                          onClick={() => setMode("auto")}
+                          className={`text-[9px] font-semibold px-2 py-0.5 rounded-full transition ${
+                            mode === "auto" ? "bg-indigo-600 text-white" : "text-slate-400"
+                          }`}
+                        >
+                          Auto Apply
+                        </button>
+                      </div>
                     </div>
-                    <div className="text-slate-200 leading-relaxed font-serif">{improvedText}</div>
-                    <div className="flex justify-end gap-1.5 pt-1">
-                      <button
-                        onClick={handleReject}
-                        className="px-2.5 py-1 text-[10px] font-bold rounded bg-slate-800 hover:bg-slate-700 text-slate-300 transition cursor-pointer"
-                      >
-                        Discard
-                      </button>
-                      <button
-                        onClick={() => applyEnhancement(improvedText, currentAction)}
-                        className="px-2.5 py-1 text-[10px] font-bold rounded bg-indigo-600 hover:bg-indigo-500 text-white transition cursor-pointer flex items-center gap-1"
-                      >
-                        <Icon name="Check" className="w-3 h-3" /> Apply Edit
-                      </button>
+
+                    {/* Page-Break alert card */}
+                    {isPageOverflowing && (
+                      <div className="p-3 rounded-xl bg-rose-950/40 border border-rose-900 text-xs space-y-2 animate-pulse">
+                        <div className="flex items-center gap-1.5 text-rose-400 font-bold">
+                          <Icon name="AlertTriangle" className="w-4 h-4" />
+                          1-Page A4 Overflow Alert
+                        </div>
+                        <p className="text-[10px] text-slate-300">
+                          Your resume has exceeded the single-page print boundary.
+                        </p>
+                        <button
+                          onClick={handlePageShrink}
+                          disabled={loading}
+                          className="w-full py-1.5 bg-rose-600 hover:bg-rose-500 text-white rounded text-[10px] font-bold transition flex items-center justify-center gap-1 cursor-pointer"
+                        >
+                          {loading ? (
+                            <Icon name="Loader2" className="w-3 h-3 animate-spin text-white" />
+                          ) : (
+                            <Icon name="Sparkles" className="w-3 h-3 text-white" />
+                          )}
+                          ✨ Auto-Compress to 1 Page
+                        </button>
+                      </div>
+                    )}
+
+                    {/* Selected Text / Value Display */}
+                    <div className="space-y-1">
+                      <label className="text-[10px] uppercase font-bold text-slate-500">Focused Text</label>
+                      <div className="p-3 rounded-xl bg-slate-900 border border-slate-800 text-xs font-serif leading-relaxed text-slate-300 max-h-[100px] overflow-y-auto select-all">
+                        {activeElement?.value || "No focused field. Click or focus inside a summary or work bullet above to edit it."}
+                      </div>
                     </div>
+
+                    {/* Main AI Wording Proposal */}
+                    {improvedText && (
+                      <div className="p-3 rounded-xl bg-slate-900 border border-indigo-500/20 text-xs space-y-2.5 animate-in fade-in zoom-in-95">
+                        <div className="flex items-center justify-between border-b border-slate-800 pb-1.5">
+                          <span className="text-[9px] uppercase font-bold text-indigo-400 tracking-wider">AI Proposed Wording</span>
+                          <span className="text-[9px] text-slate-500">Mode: Suggestion</span>
+                        </div>
+                        <div className="text-slate-200 leading-relaxed font-serif">{improvedText}</div>
+                        <div className="flex justify-end gap-1.5 pt-1">
+                          <button
+                            onClick={handleReject}
+                            className="px-2.5 py-1 text-[10px] font-bold rounded bg-slate-800 hover:bg-slate-700 text-slate-300 transition cursor-pointer"
+                          >
+                            Discard
+                          </button>
+                          <button
+                            onClick={() => applyEnhancement(improvedText, currentAction)}
+                            className="px-2.5 py-1 text-[10px] font-bold rounded bg-indigo-600 hover:bg-indigo-500 text-white transition cursor-pointer flex items-center gap-1"
+                          >
+                            <Icon name="Check" className="w-3 h-3" /> Apply Edit
+                          </button>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Dynamic Contextual Action Buttons */}
+                    <div className="space-y-1.5">
+                      <label className="text-[10px] uppercase font-bold text-slate-500">Contextual Refinement Actions</label>
+                      <div className="grid grid-cols-2 gap-2">
+                        <button
+                          onClick={() => handleAction("enhance")}
+                          disabled={loading || !activeElement}
+                          className="p-2 rounded-xl bg-slate-800/50 hover:bg-slate-800 border border-slate-800 text-[11px] font-medium transition active:scale-95 flex items-center gap-2 cursor-pointer disabled:opacity-40"
+                        >
+                          <Icon name="Wand2" className="w-3.5 h-3.5 text-violet-400" /> Enhance Section
+                        </button>
+                        <button
+                          onClick={() => handleAction("rewrite")}
+                          disabled={loading || !activeElement}
+                          className="p-2 rounded-xl bg-slate-800/50 hover:bg-slate-800 border border-slate-800 text-[11px] font-medium transition active:scale-95 flex items-center gap-2 cursor-pointer disabled:opacity-40"
+                        >
+                          <Icon name="RefreshCw" className="w-3.5 h-3.5 text-emerald-400" /> Rewrite Flow
+                        </button>
+                        <button
+                          onClick={() => handleAction("optimize")}
+                          disabled={loading || !activeElement}
+                          className="p-2 rounded-xl bg-slate-800/50 hover:bg-slate-800 border border-slate-800 text-[11px] font-medium transition active:scale-95 flex items-center gap-2 cursor-pointer disabled:opacity-40"
+                        >
+                          <Icon name="Target" className="w-3.5 h-3.5 text-rose-400" /> Optimize ATS
+                        </button>
+                        <button
+                          onClick={() => handleAction("concise")}
+                          disabled={loading || !activeElement}
+                          className="p-2 rounded-xl bg-slate-800/50 hover:bg-slate-800 border border-slate-800 text-[11px] font-medium transition active:scale-95 flex items-center gap-2 cursor-pointer disabled:opacity-40"
+                        >
+                          <Icon name="Scissors" className="w-3.5 h-3.5 text-amber-400" /> Make Concise
+                        </button>
+                        <button
+                          onClick={() => handleAction("professional")}
+                          disabled={loading || !activeElement}
+                          className="p-2 rounded-xl bg-slate-800/50 hover:bg-slate-800 border border-slate-800 text-[11px] font-medium transition active:scale-95 flex items-center gap-2 cursor-pointer disabled:opacity-40"
+                        >
+                          <Icon name="Briefcase" className="w-3.5 h-3.5 text-blue-400" /> Professional
+                        </button>
+                        <button
+                          onClick={() => handleAction("achievements")}
+                          disabled={loading || !activeElement}
+                          className="p-2 rounded-xl bg-slate-800/50 hover:bg-slate-800 border border-slate-800 text-[11px] font-medium transition active:scale-95 flex items-center gap-2 cursor-pointer disabled:opacity-40"
+                        >
+                          <Icon name="TrendingUp" className="w-3.5 h-3.5 text-yellow-400" /> Add Achievements
+                        </button>
+                        <button
+                          onClick={() => handleAction("grammar")}
+                          disabled={loading || !activeElement}
+                          className="p-2 rounded-xl bg-slate-800/50 hover:bg-slate-800 border border-slate-800 text-[11px] font-medium transition active:scale-95 flex items-center gap-2 cursor-pointer disabled:opacity-40 col-span-2"
+                        >
+                          <Icon name="CheckSquare" className="w-3.5 h-3.5 text-cyan-400" /> Fix Typos & Grammar
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Translation Controls */}
+                    <div className="p-3.5 rounded-xl bg-slate-800/40 border border-slate-800 flex items-center justify-between gap-3">
+                      <div className="flex items-center gap-2 text-[11px] font-medium">
+                        <Icon name="Globe2" className="w-4 h-4 text-indigo-400" /> Translate Focused
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <select
+                          value={translateLang}
+                          onChange={(e) => setTranslateLang(e.target.value)}
+                          className="h-7 px-2 rounded border border-slate-700 bg-slate-900 text-xs text-slate-200 cursor-pointer"
+                        >
+                          <option value="en">English</option>
+                          <option value="fr">French</option>
+                          <option value="es">Spanish</option>
+                          <option value="de">German</option>
+                          <option value="ar">Arabic</option>
+                        </select>
+                        <button
+                          onClick={() => handleAction("translate")}
+                          disabled={loading || !activeElement}
+                          className="h-7 px-3 bg-indigo-600 hover:bg-indigo-500 rounded text-xs font-bold text-white transition active:scale-95 cursor-pointer disabled:opacity-40"
+                        >
+                          Translate
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Custom Instruction Box */}
+                    <div className="space-y-1.5">
+                      <label className="text-[10px] uppercase font-bold text-slate-500">Custom Wording Prompt</label>
+                      <form
+                        onSubmit={(e) => {
+                          e.preventDefault();
+                          if (customInput.trim()) {
+                            handleAction(customInput);
+                            setCustomInput("");
+                          }
+                        }}
+                        className="flex gap-2"
+                      >
+                        <input
+                          type="text"
+                          value={customInput}
+                          onChange={(e) => setCustomInput(e.target.value)}
+                          placeholder="e.g. rewrite for an aviation focus"
+                          disabled={loading || !activeElement}
+                          className="flex-1 h-9 px-3 rounded-lg border border-slate-800 bg-slate-900 text-xs placeholder-slate-500 text-slate-100 disabled:opacity-40"
+                        />
+                        <button
+                          type="submit"
+                          disabled={loading || !customInput.trim() || !activeElement}
+                          className="w-9 h-9 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg flex items-center justify-center transition active:scale-95 disabled:opacity-40 cursor-pointer"
+                        >
+                          <Icon name="ArrowRight" className="w-4 h-4" />
+                        </button>
+                      </form>
+                    </div>
+                  </>
+                )}
+
+                {subTab === "star" && (
+                  <div className="space-y-4">
+                    <div className="flex items-center gap-1.5">
+                      <Icon name="TrendingUp" className="w-4 h-4 text-emerald-400" />
+                      <span className="text-[10px] uppercase font-bold text-slate-400 tracking-wider">STAR Bullet Builder</span>
+                    </div>
+                    
+                    <div className="space-y-3 text-xs">
+                      <div className="space-y-1">
+                        <label className="text-[10px] text-slate-500 font-bold uppercase">Situation / Task (What did you do?)</label>
+                        <textarea
+                          value={starST}
+                          onChange={(e) => setStarST(e.target.value)}
+                          placeholder="e.g. Led migration of backend checkout system to microservices..."
+                          rows={2}
+                          className="w-full rounded-lg border border-slate-800 bg-slate-900 p-2.5 text-slate-200 resize-none focus:outline-none focus:border-slate-700"
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-[10px] text-slate-500 font-bold uppercase">Action (What tools/skills did you use?)</label>
+                        <textarea
+                          value={starAction}
+                          onChange={(e) => setStarAction(e.target.value)}
+                          placeholder="e.g. used Next.js, Redis cache layer, optimized SQL queries..."
+                          rows={2}
+                          className="w-full rounded-lg border border-slate-800 bg-slate-900 p-2.5 text-slate-200 resize-none focus:outline-none focus:border-slate-700"
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-[10px] text-slate-500 font-bold uppercase">Result (What was the quantitative impact?)</label>
+                        <textarea
+                          value={starResult}
+                          onChange={(e) => setStarResult(e.target.value)}
+                          placeholder="e.g. reduced server latency by 45% and page load times by 1.2s..."
+                          rows={2}
+                          className="w-full rounded-lg border border-slate-800 bg-slate-900 p-2.5 text-slate-200 resize-none focus:outline-none focus:border-slate-700"
+                        />
+                      </div>
+                    </div>
+
+                    <button
+                      onClick={handleGenerateSTAR}
+                      disabled={loading || !starST.trim()}
+                      className="w-full py-2 bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 text-white rounded-lg text-xs font-bold transition flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-40"
+                    >
+                      {loading ? (
+                        <Icon name="Loader2" className="w-4 h-4 animate-spin text-white" />
+                      ) : (
+                        <Icon name="Sparkles" className="w-4 h-4 text-white" />
+                      )}
+                      Generate STAR Bullet
+                    </button>
+
+                    {starBullet && (
+                      <div className="p-3 rounded-xl bg-slate-900 border border-emerald-500/20 text-xs space-y-2.5 animate-in fade-in zoom-in-95">
+                        <span className="text-[9px] uppercase font-bold text-emerald-400 tracking-wider">Generated Bullet</span>
+                        <div className="text-slate-200 leading-relaxed font-serif">{starBullet}</div>
+                        <div className="flex justify-end gap-1.5">
+                          <button
+                            onClick={() => {
+                              if (activeElement && activeElement.section === "experience") {
+                                applyEnhancement(starBullet, "star-builder");
+                                setStarBullet("");
+                              } else {
+                                navigator.clipboard.writeText(starBullet);
+                                toast.success("Copied to clipboard! Focus a bullet point in the editor to apply directly.");
+                              }
+                            }}
+                            className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded font-bold text-[10px] cursor-pointer flex items-center gap-1"
+                          >
+                            <Icon name="Check" className="w-3 h-3" />
+                            {activeElement?.section === "experience" ? "Apply to focused field" : "Copy to Clipboard"}
+                          </button>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 )}
 
-                {/* Dynamic Contextual Action Buttons */}
-                <div className="space-y-1.5">
-                  <label className="text-[10px] uppercase font-bold text-slate-500">Contextual Refinement Actions</label>
-                  <div className="grid grid-cols-2 gap-2">
-                    <button
-                      onClick={() => handleAction("enhance")}
-                      disabled={loading || !activeElement}
-                      className="p-2 rounded-xl bg-slate-800/50 hover:bg-slate-800 border border-slate-800 text-[11px] font-medium transition active:scale-95 flex items-center gap-2 cursor-pointer disabled:opacity-40"
-                    >
-                      <Icon name="Wand2" className="w-3.5 h-3.5 text-violet-400" /> Enhance Section
-                    </button>
-                    <button
-                      onClick={() => handleAction("rewrite")}
-                      disabled={loading || !activeElement}
-                      className="p-2 rounded-xl bg-slate-800/50 hover:bg-slate-800 border border-slate-800 text-[11px] font-medium transition active:scale-95 flex items-center gap-2 cursor-pointer disabled:opacity-40"
-                    >
-                      <Icon name="RefreshCw" className="w-3.5 h-3.5 text-emerald-400" /> Rewrite Flow
-                    </button>
-                    <button
-                      onClick={() => handleAction("optimize")}
-                      disabled={loading || !activeElement}
-                      className="p-2 rounded-xl bg-slate-800/50 hover:bg-slate-800 border border-slate-800 text-[11px] font-medium transition active:scale-95 flex items-center gap-2 cursor-pointer disabled:opacity-40"
-                    >
-                      <Icon name="Target" className="w-3.5 h-3.5 text-rose-400" /> Optimize ATS
-                    </button>
-                    <button
-                      onClick={() => handleAction("concise")}
-                      disabled={loading || !activeElement}
-                      className="p-2 rounded-xl bg-slate-800/50 hover:bg-slate-800 border border-slate-800 text-[11px] font-medium transition active:scale-95 flex items-center gap-2 cursor-pointer disabled:opacity-40"
-                    >
-                      <Icon name="Scissors" className="w-3.5 h-3.5 text-amber-400" /> Make Concise
-                    </button>
-                    <button
-                      onClick={() => handleAction("professional")}
-                      disabled={loading || !activeElement}
-                      className="p-2 rounded-xl bg-slate-800/50 hover:bg-slate-800 border border-slate-800 text-[11px] font-medium transition active:scale-95 flex items-center gap-2 cursor-pointer disabled:opacity-40"
-                    >
-                      <Icon name="Briefcase" className="w-3.5 h-3.5 text-blue-400" /> Professional
-                    </button>
-                    <button
-                      onClick={() => handleAction("achievements")}
-                      disabled={loading || !activeElement}
-                      className="p-2 rounded-xl bg-slate-800/50 hover:bg-slate-800 border border-slate-800 text-[11px] font-medium transition active:scale-95 flex items-center gap-2 cursor-pointer disabled:opacity-40"
-                    >
-                      <Icon name="TrendingUp" className="w-3.5 h-3.5 text-yellow-400" /> Add Achievements
-                    </button>
-                    <button
-                      onClick={() => handleAction("grammar")}
-                      disabled={loading || !activeElement}
-                      className="p-2 rounded-xl bg-slate-800/50 hover:bg-slate-800 border border-slate-800 text-[11px] font-medium transition active:scale-95 flex items-center gap-2 cursor-pointer disabled:opacity-40 col-span-2"
-                    >
-                      <Icon name="CheckSquare" className="w-3.5 h-3.5 text-cyan-400" /> Fix Typos & Grammar
-                    </button>
-                  </div>
-                </div>
+                {subTab === "verbs" && (
+                  <div className="space-y-4">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-1.5">
+                        <Icon name="Wrench" className="w-4 h-4 text-amber-400" />
+                        <span className="text-[10px] uppercase font-bold text-slate-400 tracking-wider">Action Verb Scanner</span>
+                      </div>
+                    </div>
+                    
+                    {(() => {
+                      const verbCounts: Record<string, { count: number; matches: { expId: string; bulletIdx: number; company: string }[] }> = {};
+                      resume.experience.forEach((exp) => {
+                        exp.bullets.forEach((bullet, idx) => {
+                          const firstWord = bullet.trim().split(/\s+/)[0]?.replace(/[^a-zA-Z]/g, "")?.toLowerCase();
+                          if (firstWord && firstWord.length > 2) {
+                            if (!verbCounts[firstWord]) {
+                              verbCounts[firstWord] = { count: 0, matches: [] };
+                            }
+                            verbCounts[firstWord].count++;
+                            verbCounts[firstWord].matches.push({ expId: exp.id, bulletIdx: idx, company: exp.company || "Company" });
+                          }
+                        });
+                      });
 
-                {/* Translation Controls */}
-                <div className="p-3.5 rounded-xl bg-slate-800/40 border border-slate-800 flex items-center justify-between gap-3">
-                  <div className="flex items-center gap-2 text-[11px] font-medium">
-                    <Icon name="Globe2" className="w-4 h-4 text-indigo-400" /> Translate Focused
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <select
-                      value={translateLang}
-                      onChange={(e) => setTranslateLang(e.target.value)}
-                      className="h-7 px-2 rounded border border-slate-700 bg-slate-900 text-xs text-slate-200 cursor-pointer"
-                    >
-                      <option value="en">English</option>
-                      <option value="fr">French</option>
-                      <option value="es">Spanish</option>
-                      <option value="de">German</option>
-                      <option value="ar">Arabic</option>
-                    </select>
-                    <button
-                      onClick={() => handleAction("translate")}
-                      disabled={loading || !activeElement}
-                      className="h-7 px-3 bg-indigo-600 hover:bg-indigo-500 rounded text-xs font-bold text-white transition active:scale-95 cursor-pointer disabled:opacity-40"
-                    >
-                      Translate
-                    </button>
-                  </div>
-                </div>
+                      const duplicates = Object.entries(verbCounts)
+                        .filter(([_, data]) => data.count > 1)
+                        .sort((a, b) => b[1].count - a[1].count);
 
-                {/* Custom Instruction Box */}
-                <div className="space-y-1.5">
-                  <label className="text-[10px] uppercase font-bold text-slate-500">Custom Wording Prompt</label>
-                  <form
-                    onSubmit={(e) => {
-                      e.preventDefault();
-                      if (customInput.trim()) {
-                        handleAction(customInput);
-                        setCustomInput("");
+                      if (duplicates.length === 0) {
+                        return (
+                          <div className="text-center py-10 space-y-2">
+                            <Icon name="CheckCircle2" className="w-8 h-8 text-emerald-400 mx-auto animate-bounce" />
+                            <p className="text-xs text-slate-400">Excellent! No repetitive action verbs detected in your bullet points.</p>
+                          </div>
+                        );
                       }
-                    }}
-                    className="flex gap-2"
-                  >
-                    <input
-                      type="text"
-                      value={customInput}
-                      onChange={(e) => setCustomInput(e.target.value)}
-                      placeholder="e.g. rewrite for an aviation focus"
-                      disabled={loading || !activeElement}
-                      className="flex-1 h-9 px-3 rounded-lg border border-slate-800 bg-slate-900 text-xs placeholder-slate-500 text-slate-100 disabled:opacity-40"
-                    />
-                    <button
-                      type="submit"
-                      disabled={loading || !customInput.trim() || !activeElement}
-                      className="w-9 h-9 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg flex items-center justify-center transition active:scale-95 disabled:opacity-40 cursor-pointer"
-                    >
-                      <Icon name="ArrowRight" className="w-4 h-4" />
-                    </button>
-                  </form>
-                </div>
+
+                      return (
+                        <div className="space-y-3">
+                          <p className="text-[10px] text-slate-500 leading-relaxed">
+                            We found repetitive action verbs. Click a suggestion below to swap them with fresh alternatives:
+                          </p>
+                          <div className="space-y-2.5 max-h-[360px] overflow-y-auto scrollbar-thin">
+                            {duplicates.map(([verb, data]) => {
+                              const suggestions = VERB_THESAURUS[verb] || ["Spearheaded", "Orchestrated", "Accelerated", "Constructed"];
+                              return (
+                                <div key={verb} className="p-3 rounded-xl bg-slate-900 border border-slate-800 text-[11px] space-y-2">
+                                  <div className="flex items-center justify-between">
+                                    <span className="font-bold text-rose-400 capitalize">"{verb}" ({data.count} times)</span>
+                                  </div>
+                                  <div className="space-y-1">
+                                    {data.matches.map((m, mi) => (
+                                      <div key={mi} className="text-[10px] text-slate-400 pl-2 border-l border-slate-800">
+                                        At {m.company}:
+                                        <div className="flex flex-wrap gap-1 mt-1">
+                                          {suggestions.slice(0, 3).map((sug) => (
+                                            <button
+                                              key={sug}
+                                              onClick={() => swapVerbInBullet(m.expId, m.bulletIdx, verb, sug)}
+                                              className="px-1.5 py-0.5 rounded bg-slate-800 hover:bg-indigo-600 hover:text-white transition text-[9px] cursor-pointer"
+                                            >
+                                              Swap with "{sug}"
+                                            </button>
+                                          ))}
+                                        </div>
+                                      </div>
+                                    ))}
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      );
+                    })()}
+                  </div>
+                )}
               </>
             )}
 

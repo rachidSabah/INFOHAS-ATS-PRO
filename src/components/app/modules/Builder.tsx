@@ -394,6 +394,7 @@ export function Builder() {
   const [translating, setTranslating] = useState(false);
   const [fixingIssueId, setFixingIssueId] = useState<string | null>(null);
   const [activeElement, setActiveElement] = useState<any>(null);
+  const [isPageOverflowing, setIsPageOverflowing] = useState(false);
 
   const translateResume = async () => {
     setTranslating(true);
@@ -2465,7 +2466,7 @@ ${resumeContext}
                 </div>
                 <div className="rounded-xl bg-secondary/60 p-2 sm:p-4 overflow-auto" style={{ maxHeight: "calc(100vh - 160px)" }}>
                   <div className="relative" style={{ transform: `scale(${scale})`, transformOrigin: "top center", width: "100%", height: "fit-content" }}>
-                    <A4Preview resume={resume} scale={scale} ref={previewRef} />
+                    <A4Preview resume={resume} scale={scale} ref={previewRef} showHeatmap={showHeatmap} onOverflowChange={setIsPageOverflowing} />
                     {showHeatmap && (
                       <div
                         className="absolute inset-0 pointer-events-none rounded-sm"
@@ -2736,6 +2737,7 @@ ${resumeContext}
         redoStack={redoStack}
         activeElement={activeElement}
         setActiveElement={setActiveElement}
+        isPageOverflowing={isPageOverflowing}
       />
     </div>
   );

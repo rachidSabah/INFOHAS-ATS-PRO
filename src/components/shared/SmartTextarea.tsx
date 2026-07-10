@@ -51,8 +51,48 @@ export function SmartTextarea({ value, onChange, section, placeholder, className
   const [currentVariant, setCurrentVariant] = useState(0);
   const [status, setStatus] = useState<SuggestStatus>("idle");
   const [showPopover, setShowPopover] = useState(false);
+  const [selection, setSelection] = useState<{ start: number; end: number; text: string; top: number; left: number } | null>(null);
   const debRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const textareaRef = useRef<HTMLDivElement>(null);
+
+  const handleSelectionChange = (e: React.SyntheticEvent<HTMLTextAreaElement>) => {
+    const target = e.currentTarget;
+    const start = target.selectionStart;
+    const end = target.selectionEnd;
+    if (start !== end) {
+      const text = target.value.substring(start, end).trim();
+      if (text.length > 0) {
+        setSelection({ start, end, text, top: -45, left: Math.max(10, target.clientWidth / 2 - 110) });
+        return;
+      }
+    }
+    setSelection(null);
+  };
+
+  const optimizeSelection = async (action: "rewrite" | "star") => {
+    if (!selection) return;
+    setStatus("loading");
+    const text = selection.text;
+    
+    let prompt = "";
+    if (action === "rewrite") {
+      prompt = (ctxMemo ? `Context:\n${ctxMemo}\n\n` : "") +
+        `Rewrite this selected phrase to make it highly professional, active, and ATS-friendly: "${text}". Keep same length. Return ONLY the rewritten phrase.`;
+    } else {
+      prompt = (ctxMemo ? `Context:\n${ctxMemo}\n\n` : "") +
+        `Upgrade this selected resume bullet point to follow the STAR methodology, injecting a strong action verb and an estimated quantitative metric (e.g. percentages, values, time saved): "${text}". Return ONLY the rewritten bullet.`;
+    }
+    
+    const optimized = await callAI(prompt);
+    if (optimized) {
+      const before = value.substring(0, selection.start);
+      const after = value.substring(selection.end);
+      onChange(before + optimized + after);
+      toast.success("Selection updated successfully!");
+    }
+    setSelection(null);
+    setStatus("idle");
+  };
 
   // Build full context for AI prompts
   const ctxMemo = buildContext(resume, jobDescriptionText);
@@ -291,11 +331,45 @@ export function SmartTextarea({ value, onChange, section, placeholder, className
         onChange={e => onType(e.target.value)}
         onKeyDown={handleKeyDown}
         onFocus={onFocus}
+        onMouseUp={handleSelectionChange}
+        onKeyUp={handleSelectionChange}
+        onSelect={handleSelectionChange}
         placeholder={placeholder || ''}
         rows={rows}
         disabled={disabled}
         className={className}
       />
+
+      {selection && (
+        <div
+          className="absolute z-[60] flex items-center gap-1.5 p-1.5 rounded-lg border border-brand/20 bg-card/90 backdrop-blur-md shadow-lg animate-in fade-in slide-in-from-bottom-2 duration-200"
+          style={{
+            top: `${selection.top}px`,
+            left: `${selection.left}px`,
+          }}
+        >
+          <button
+            onClick={() => optimizeSelection("rewrite")}
+            className="text-[10px] px-2.5 py-1 rounded bg-secondary hover:bg-brand hover:text-white font-semibold transition flex items-center gap-1"
+          >
+            <Icon name="Sparkles" className="w-3.5 h-3.5 text-brand hover:text-inherit" />
+            Rewrite Selected
+          </button>
+          <button
+            onClick={() => optimizeSelection("star")}
+            className="text-[10px] px-2.5 py-1 rounded bg-secondary hover:bg-brand hover:text-white font-semibold transition flex items-center gap-1"
+          >
+            <Icon name="TrendingUp" className="w-3.5 h-3.5 text-emerald-500 hover:text-inherit" />
+            STAR Metric
+          </button>
+          <button
+            onClick={() => setSelection(null)}
+            className="p-1 rounded hover:bg-destructive/10 text-muted-foreground hover:text-destructive"
+          >
+            <Icon name="X" className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      )}
 
       {/* Auto-complete suggestion hint (inline, below text) */}
       {suggestion && status === "idle" && !showPopover && (

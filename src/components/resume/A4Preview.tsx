@@ -6,6 +6,8 @@ import { useApp } from "@/lib/store";
 import { RenderDocumentPreview } from "./RenderDocumentPreview";
 import { toRenderDocument } from "@/lib/render-document";
 
+import { renderHighlightedText, safeRender } from "@/lib/ats-highlighter";
+
 interface A4PreviewProps {
   resume: ResumeData;
   scale?: number;
@@ -16,6 +18,8 @@ interface A4PreviewProps {
    * Set true everywhere for consistent output across all renderers.
    */
   useRenderDocument?: boolean;
+  showHeatmap?: boolean;
+  onOverflowChange?: (overflows: boolean) => void;
 }
 
 /**
@@ -33,11 +37,14 @@ interface A4PreviewProps {
  * the wrapper exactly. This way the parent layout sees a correctly-sized box.
  */
 export const A4Preview = forwardRef<HTMLDivElement, A4PreviewProps>(function A4Preview(
-  { resume, scale = 1, className, useRenderDocument = false },
+  { resume, scale = 1, className, useRenderDocument = false, showHeatmap = false, onOverflowChange },
   ref
 ) {
   const accent = resume.accentColor || "#1154A3";
   const Template = TEMPLATE_MAP[resume.template] ?? ATSProfessionalTemplate;
+  
+  const atsReports = useApp((s) => s.atsReports);
+  const latestReport = atsReports.find((r) => r.resumeId === resume.id);
 
   const innerRef = useRef<HTMLDivElement>(null);
   const [overflows, setOverflows] = useState(false);
@@ -52,7 +59,9 @@ export const A4Preview = forwardRef<HTMLDivElement, A4PreviewProps>(function A4P
       const actualHeight = el.scrollHeight || el.clientHeight || el.offsetHeight;
       const percent = (actualHeight / a4HeightPx) * 100;
       setFillPercent(Math.round(percent));
-      setOverflows(actualHeight > a4HeightPx + 2); // 2px tolerance
+      const hasOverflow = actualHeight > a4HeightPx + 2;
+      setOverflows(hasOverflow); // 2px tolerance
+      if (onOverflowChange) onOverflowChange(hasOverflow);
     };
 
     checkHeight();
@@ -104,7 +113,7 @@ export const A4Preview = forwardRef<HTMLDivElement, A4PreviewProps>(function A4P
           left: 0,
         }}
       >
-        <Template resume={resume} accent={accent} />
+        <Template resume={resume} accent={accent} showHeatmap={showHeatmap} latestReport={latestReport} />
 
         {/* ============ Page-Break Indicator Line ============ */}
         {overflows && (
@@ -190,7 +199,7 @@ const RenderDocumentA4Preview = forwardRef<HTMLDivElement, A4PreviewProps>(funct
   );
 });
 
-const TEMPLATE_MAP: Record<string, React.FC<{ resume: ResumeData; accent: string }>> = {
+const TEMPLATE_MAP: Record<string, React.FC<{ resume: ResumeData; accent: string; showHeatmap?: boolean; latestReport?: any }>> = {
   "ats-professional": ATSProfessionalTemplate,
   executive: ExecutiveTemplate,
   modern: ModernTemplate,
@@ -533,7 +542,23 @@ function fmtDate(d?: string) {
   return d;
 }
 
-function ATSProfessionalTemplate({ resume, accent }: { resume: ResumeData; accent: string }) {
+function ATSProfessionalTemplate({
+  resume,
+  accent,
+  showHeatmap = false,
+  latestReport
+}: {
+  resume: ResumeData;
+  accent: string;
+  showHeatmap?: boolean;
+  latestReport?: any;
+}) {
+  const renderHText = (textVal: any) => {
+    const raw = safeRender(textVal);
+    if (!showHeatmap) return raw;
+    return renderHighlightedText(raw, true, latestReport?.matchedKeywords || [], latestReport?.detectedCliches || []) as any;
+  };
+
   // Suppress the headline when it merely duplicates contact fields
   // already shown in the contact row below (prevents triple-printing).
   const showHeadline =
@@ -558,7 +583,7 @@ function ATSProfessionalTemplate({ resume, accent }: { resume: ResumeData; accen
 
       {resume.summary && (
         <Section title="PROFESSIONAL SUMMARY" accent={accent}>
-          <p className="text-[9.5pt] text-slate-700">{resume.summary}</p>
+          <p className="text-[9.5pt] text-slate-700">{renderHText(resume.summary)}</p>
         </Section>
       )}
 
@@ -577,7 +602,7 @@ function ATSProfessionalTemplate({ resume, accent }: { resume: ResumeData; accen
                   {e.bullets.map((b, i) => (
                     <li key={i} className="text-[9.5pt] text-slate-700 pl-3 relative">
                       <span className="absolute left-0 top-2 w-1 h-1 rounded-full" style={{ background: accent }} />
-                      {b}
+                      {renderHText(b)}
                     </li>
                   ))}
                 </ul>
@@ -610,7 +635,7 @@ function ATSProfessionalTemplate({ resume, accent }: { resume: ResumeData; accen
           <div className="text-[9.5pt] text-slate-700 flex flex-wrap gap-x-2 gap-y-1">
             {resume.skills.map((s, i) => (
               <span key={s.id}>
-                {s.name}{i < resume.skills.length - 1 && <span className="text-slate-400"> •</span>}
+                {renderHText(s.name)}{i < resume.skills.length - 1 && <span className="text-slate-400"> •</span>}
               </span>
             ))}
           </div>

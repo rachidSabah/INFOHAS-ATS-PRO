@@ -47,24 +47,113 @@ export function Badge({ children, variant = "default", className }: { children: 
   return <span className={cn("inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium", variants[variant], className)}>{children}</span>;
 }
 
+interface Particle {
+  id: number;
+  x: number;
+  y: number;
+  size: number;
+  color: string;
+}
+
 export function ScoreRing({ value, size = 120, stroke = 10, label }: { value: number; size?: number; stroke?: number; label?: string }) {
+  const [displayValue, setDisplayValue] = React.useState(0);
+  const [particles, setParticles] = React.useState<Particle[]>([]);
+  const prevValueRef = React.useRef(0);
+
+  // Numeric count-up/down animation
+  React.useEffect(() => {
+    let start = displayValue;
+    const end = value;
+    if (start === end) return;
+    
+    // Trigger particle burst if score increased
+    if (end > prevValueRef.current && prevValueRef.current > 0) {
+      const colors = ["#10B981", "#3B82F6", "#F59E0B", "#8B5CF6", "#EC4899"];
+      const newParticles = Array.from({ length: 14 }).map((_, i) => {
+        const angle = (i / 14) * 2 * Math.PI + (Math.random() - 0.5) * 0.3;
+        const distance = size / 2 + Math.random() * 20;
+        return {
+          id: Math.random() + i,
+          x: Math.cos(angle) * distance,
+          y: Math.sin(angle) * distance,
+          size: 4 + Math.random() * 5,
+          color: colors[Math.floor(Math.random() * colors.length)]
+        };
+      });
+      setParticles(newParticles);
+      setTimeout(() => setParticles([]), 800);
+    }
+    prevValueRef.current = end;
+
+    const duration = 800; // ms
+    const startTime = performance.now();
+
+    let animId: number;
+    const step = (now: number) => {
+      const progress = Math.min((now - startTime) / duration, 1);
+      // Ease out quad
+      const easeProgress = progress * (2 - progress);
+      const current = Math.round(start + (end - start) * easeProgress);
+      setDisplayValue(current);
+
+      if (progress < 1) {
+        animId = requestAnimationFrame(step);
+      }
+    };
+    animId = requestAnimationFrame(step);
+    return () => cancelAnimationFrame(animId);
+  }, [value, size]);
+
   const radius = (size - stroke) / 2;
   const circ = 2 * Math.PI * radius;
-  const off = circ - (value / 100) * circ;
-  const color = value >= 85 ? "#10B981" : value >= 70 ? "#1154A3" : value >= 50 ? "#F59E0B" : "#DC2626";
+  const off = circ - (displayValue / 100) * circ;
+  const color = displayValue >= 85 ? "#10B981" : displayValue >= 70 ? "#1154A3" : displayValue >= 50 ? "#F59E0B" : "#DC2626";
+
   return (
     <div className="relative inline-flex items-center justify-center" style={{ width: size, height: size }}>
+      <style>{`
+        @keyframes particle-fly-fade {
+          0% {
+            transform: translate(0px, 0px) scale(1);
+            opacity: 1;
+          }
+          100% {
+            opacity: 0;
+            transform: translate(var(--x, 0px), var(--y, 0px)) scale(0.2);
+          }
+        }
+      `}</style>
+      
+      {/* Particle Burst Overlay */}
+      {particles.map((p) => (
+        <span
+          key={p.id}
+          className="absolute rounded-full pointer-events-none"
+          style={{
+            width: p.size,
+            height: p.size,
+            backgroundColor: p.color,
+            boxShadow: `0 0 8px ${p.color}`,
+            "--x": `${p.x}px`,
+            "--y": `${p.y}px`,
+            animation: "particle-fly-fade 0.8s forwards cubic-bezier(0.1, 0.8, 0.3, 1)",
+            zIndex: 10
+          } as React.CSSProperties}
+        />
+      ))}
+
+      {/* SVG score circle */}
       <svg width={size} height={size} className="-rotate-90">
-        <circle cx={size / 2} cy={size / 2} r={radius} fill="none" stroke="currentColor" className="text-muted" strokeWidth={stroke} />
+        <circle cx={size / 2} cy={size / 2} r={radius} fill="none" stroke="currentColor" className="text-muted/20" strokeWidth={stroke} />
         <circle
           cx={size / 2} cy={size / 2} r={radius} fill="none" stroke={color} strokeWidth={stroke}
           strokeDasharray={circ} strokeDashoffset={off} strokeLinecap="round"
-          style={{ transition: "stroke-dashoffset 0.8s ease" }}
+          style={{ transition: "stroke-dashoffset 0.1s ease" }}
         />
       </svg>
       <div className="absolute inset-0 flex flex-col items-center justify-center">
-        <span className="text-2xl font-bold font-display" style={{ color }}>{value}</span>
-        {label && <span className="text-[10px] uppercase tracking-wide text-muted-foreground">{label}</span>}
+        <span className="text-2xl font-bold font-display" style={{ color }}>{displayValue}</span>
+        {label && <span className="text-[9px] uppercase tracking-wide text-muted-foreground font-semibold">{label}</span>}
       </div>
     </div>
   );

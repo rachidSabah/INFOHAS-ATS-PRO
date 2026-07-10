@@ -121,6 +121,7 @@ export function Optimizer() {
   const [copilotInput, setCopilotInput] = useState("");
   const [copilotLoading, setCopilotLoading] = useState(false);
   const [activeElement, setActiveElement] = useState<any>(null);
+  const [isPageOverflowing, setIsPageOverflowing] = useState(false);
   const { snapshot, undo, redo, canUndo, canRedo, undoStack, redoStack } = useUndoRedo(optimizedResume ?? undefined);
 
   const patchOptimizedResume = (p: Partial<ResumeData>) => {
@@ -1953,6 +1954,7 @@ Guidelines:
                         scale={previewScale}
                         activeElement={activeElement}
                         setActiveElement={setActiveElement}
+                        onOverflowChange={setIsPageOverflowing}
                       />
                     </div>
                   </div>
@@ -2416,6 +2418,7 @@ Guidelines:
           redoStack={redoStack}
           activeElement={activeElement}
           setActiveElement={setActiveElement}
+          isPageOverflowing={isPageOverflowing}
         />
       )}
     </div>
