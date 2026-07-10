@@ -69,6 +69,7 @@ interface EditableA4PreviewProps {
   activeElement?: any;
   setActiveElement?: (el: any) => void;
   onOverflowChange?: (overflows: boolean) => void;
+  optimizingSection?: string | null;
 }
 
 type EditTarget =
@@ -85,7 +86,7 @@ const BLACK_FALLBACK = "#000000";
 
 // Imported renderHighlightedText from shared ats-highlighter helper
 
-export function EditableA4Preview({ resume, onChange, scale = 0.7, className, activeElement, setActiveElement, onOverflowChange }: EditableA4PreviewProps) {
+export function EditableA4Preview({ resume, onChange, scale = 0.7, className, activeElement, setActiveElement, onOverflowChange, optimizingSection }: EditableA4PreviewProps) {
   const [editing, setEditing] = useState<EditTarget>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const isTouch = useIsTouchDevice();
@@ -228,7 +229,7 @@ export function EditableA4Preview({ resume, onChange, scale = 0.7, className, ac
             }}
           >
           {/* ============ HEADER (editable) — two-column: 70% left, 30% right photo ============ */}
-          <EditableBlock isEditing={editing === "header"} onEdit={() => setEditing("header")} label="Edit header" isTouch={isTouch}>
+          <EditableBlock isEditing={editing === "header"} onEdit={() => setEditing("header")} label="Edit header" isTouch={isTouch} isOptimizing={optimizingSection === "all" || optimizingSection === "header"}>
             <header className="relative" style={{ paddingRight: resume.photoUrl ? "36mm" : 0, minHeight: resume.photoUrl ? "42mm" : "auto" }}>
               {/* Photo — top-right, 30×40mm.
                   - If a photo exists: render it, tappable to replace.
@@ -328,7 +329,7 @@ export function EditableA4Preview({ resume, onChange, scale = 0.7, className, ac
           <div style={{ marginTop: "3mm" }}>
             {/* SUMMARY */}
             {resume.summary && (
-              <EditableBlock isEditing={editing === "summary"} onEdit={() => setEditing("summary")} label="Edit summary" isTouch={isTouch}>
+              <EditableBlock isEditing={editing === "summary"} onEdit={() => setEditing("summary")} label="Edit summary" isTouch={isTouch} isOptimizing={optimizingSection === "all" || optimizingSection === "summary"}>
                 <InfohasSection title="PROFESSIONAL PROFILE">
                   <p style={{ margin: 0, textAlign: "justify", color: BLACK, lineHeight: 1.2 }}>{renderHText(resume.summary)}</p>
                 </InfohasSection>
@@ -346,6 +347,7 @@ export function EditableA4Preview({ resume, onChange, scale = 0.7, className, ac
                     onEdit={() => setEditing(`experience:${e.id}`)}
                     label="Edit experience"
                     isTouch={isTouch}
+                    isOptimizing={optimizingSection === "all" || optimizingSection === "experience" || optimizingSection === `experience:${e.id}`}
                   >
                     <div style={{ marginBottom: "1mm" }}>
                       <div style={{ marginBottom: "0.3mm", lineHeight: 1.2, display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: "2mm" }}>
@@ -378,6 +380,7 @@ export function EditableA4Preview({ resume, onChange, scale = 0.7, className, ac
                     onEdit={() => setEditing(`education:${ed.id}`)}
                     label="Edit education"
                     isTouch={isTouch}
+                    isOptimizing={optimizingSection === "all" || optimizingSection === "education" || optimizingSection === `education:${ed.id}`}
                   >
                     <div style={{ marginBottom: "1mm", lineHeight: 1.2 }}>
                       <div style={{ lineHeight: 1.2, display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: "2mm" }}>
@@ -407,7 +410,7 @@ export function EditableA4Preview({ resume, onChange, scale = 0.7, className, ac
 
             {/* KEY COMPETENCIES (moved after Education to match target format) */}
             {resume.skills.length > 0 && (
-              <EditableBlock isEditing={editing === "skills"} onEdit={() => setEditing("skills")} label="Edit skills" isTouch={isTouch}>
+              <EditableBlock isEditing={editing === "skills"} onEdit={() => setEditing("skills")} label="Edit skills" isTouch={isTouch} isOptimizing={optimizingSection === "all" || optimizingSection === "skills"}>
                 <InfohasSection title="KEY COMPETENCIES">
                   <ul style={{ margin: 0, paddingLeft: `${L.bulletIndentMm}mm`, listStyleType: "•", lineHeight: 1.2 }}>
                     {groupSkillsByCategory(resume.skills).slice(0, 4).map((g, i) => (
@@ -422,7 +425,7 @@ export function EditableA4Preview({ resume, onChange, scale = 0.7, className, ac
 
             {/* LANGUAGES — single line format */}
             {resume.languages.length > 0 && (
-              <EditableBlock isEditing={editing === "languages"} onEdit={() => setEditing("languages")} label="Edit languages" isTouch={isTouch}>
+              <EditableBlock isEditing={editing === "languages"} onEdit={() => setEditing("languages")} label="Edit languages" isTouch={isTouch} isOptimizing={optimizingSection === "all" || optimizingSection === "languages"}>
                 <InfohasSection title="LANGUAGES">
                   <div style={{ color: BLACK, lineHeight: 1.2 }}>
                     • {resume.languages.map((l) => safeRender(l.name)).join(", ")}
@@ -571,12 +574,14 @@ function EditableBlock({
   label,
   children,
   isTouch = false,
+  isOptimizing = false,
 }: {
   isEditing: boolean;
   onEdit: () => void;
   label: string;
   children: React.ReactNode;
   isTouch?: boolean;
+  isOptimizing?: boolean;
 }) {
   return (
     <div
@@ -590,12 +595,24 @@ function EditableBlock({
       // On touch devices, tapping anywhere in the block opens the editor.
       // On desktop, we keep the click target limited to the pencil FAB so users
       // can still select/copy text from the resume body.
-      onClick={isTouch && !isEditing ? onEdit : undefined}
+      onClick={isTouch && !isEditing && !isOptimizing ? onEdit : undefined}
     >
       {children}
-      {/* Pencil FAB — hidden only while editing (the editor modal takes over).
+
+      {/* Ghost-Loading Shimmer Overlay */}
+      {isOptimizing && (
+        <div className="absolute inset-0 bg-white/60 dark:bg-slate-900/60 backdrop-blur-[1px] flex flex-col items-center justify-center z-20 pointer-events-auto rounded transition-all duration-300">
+          <div className="absolute inset-0 bg-slate-150/40 dark:bg-slate-800/40 animate-pulse" />
+          <div className="relative flex items-center gap-2 px-3 py-1.5 rounded-full bg-white dark:bg-slate-850 border border-slate-200 dark:border-slate-800 shadow-sm">
+            <Icon name="Sparkles" className="w-3.5 h-3.5 text-brand animate-spin" />
+            <span className="text-[10px] font-bold text-slate-700 dark:text-slate-200 tracking-wider uppercase animate-pulse">AI Enhancing...</span>
+          </div>
+        </div>
+      )}
+
+      {/* Pencil FAB — hidden only while editing or optimizing (the editor modal takes over).
           On touch devices it is always visible; on desktop it appears on hover. */}
-      {!isEditing && (
+      {!isEditing && !isOptimizing && (
         <button
           onClick={(e) => {
             // Stop propagation so the touch-mode parent onClick doesn't fire twice.

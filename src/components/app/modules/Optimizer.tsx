@@ -16,7 +16,7 @@ import { scoreATS } from "@/lib/ats";
 import { analyzeATS } from "@/lib/agents/ats-analysis";
 import { callAI, extractJSON } from "@/lib/ai";
 import { validateResumeForExport } from "@/lib/ai-response-processor";
-import { exportResumePDF, exportResumeDOCX, exportResumeTXT, exportResumeDOC } from "@/lib/exporter";
+import { exportResumePDF, exportResumeDOCX, exportResumeTXT, exportResumeDOC, validateExportCompleteness } from "@/lib/exporter";
 import { EditableA4Preview } from "@/components/resume/EditableA4Preview";
 import { AIRLINE_ATS_PROFILES, AIRLINE_OPTIONS, DEFAULT_APP_SETTINGS, type AppSettings } from "@/lib/ats-directives";
 import { INDUSTRY_PROFILES, INDUSTRY_OPTIONS, type IndustryAtsProfile, detectATSFromCompany, type AtsDetails } from "@/lib/industry-ats";
@@ -122,6 +122,105 @@ export function Optimizer() {
   const [copilotLoading, setCopilotLoading] = useState(false);
   const [activeElement, setActiveElement] = useState<any>(null);
   const [isPageOverflowing, setIsPageOverflowing] = useState(false);
+  const [bypassModal, setBypassModal] = useState<{
+    open: boolean;
+    format: "pdf" | "docx" | "doc" | "txt";
+    errors: string[];
+  } | null>(null);
+
+  const triggerExport = async (format: "pdf" | "docx" | "doc" | "txt") => {
+    if (!optimizedResume) return;
+
+    // 1. Run the clean check
+    const exportCheck = validateResumeForExport(optimizedResume);
+    if (!exportCheck.valid && !exportCheck.cleanedResume) {
+      toast.error("Resume contains errors and cannot be exported. Please regenerate.");
+      return;
+    }
+    const r = exportCheck.cleanedResume || optimizedResume;
+
+    // 2. Validate quality gates
+    const gateResult = validateExportCompleteness(resume, r);
+    if (!gateResult.ok) {
+      setBypassModal({
+        open: true,
+        format,
+        errors: gateResult.errors,
+      });
+      return;
+    }
+
+    // 3. If gates pass, execute normal export
+    try {
+      if (format === "pdf") {
+        const res = await exportResumePDF(r, { enforceOnePage: true }, undefined, resume);
+        if (res.ok) {
+          incUsage("downloads");
+          toast.success("PDF exported — 1 A4 page.");
+        } else {
+          toast.error(res.error || "Export failed.");
+        }
+      } else if (format === "doc") {
+        exportResumeDOC(r, "professional", resume);
+        incUsage("downloads");
+        log({ actor: "you", action: "Exported resume (DOC)", category: "export", details: `Times New Roman 12pt · @page A4 · ${pipelineResult?.charCount ?? "?"} chars`, severity: "info" });
+        toast.success("DOC exported — strict A4 one-page layout.");
+        if (exportCheck.cleanedResume) toast.warning("Cleaned error leaks from resume before export.");
+      } else if (format === "docx") {
+        await exportResumeDOCX(r, undefined, resume);
+        incUsage("downloads");
+        toast.success("DOCX exported.");
+        if (exportCheck.cleanedResume) toast.warning("Cleaned error leaks from resume before export.");
+      } else if (format === "txt") {
+        exportResumeTXT(r, resume);
+        incUsage("downloads");
+        toast.success("TXT exported.");
+        if (exportCheck.cleanedResume) toast.warning("Cleaned error leaks from resume before export.");
+      }
+    } catch (e: any) {
+      toast.error(e.message || "Export failed.");
+    }
+  };
+
+  const handleBypassExport = async () => {
+    if (!bypassModal || !optimizedResume) return;
+    const format = bypassModal.format;
+    setBypassModal(null);
+
+    const exportCheck = validateResumeForExport(optimizedResume);
+    const r = exportCheck.cleanedResume || optimizedResume;
+
+    try {
+      if (format === "pdf") {
+        const res = await exportResumePDF(r, { enforceOnePage: true }, undefined, resume, true);
+        if (res.ok) {
+          incUsage("downloads");
+          toast.success("PDF exported anyway.");
+        } else {
+          toast.error(res.error || "Export failed.");
+        }
+      } else if (format === "doc") {
+        exportResumeDOC(r, "professional", resume, true);
+        incUsage("downloads");
+        log({ actor: "you", action: "Exported resume (DOC)", category: "export", details: `Times New Roman 12pt · @page A4 · ${pipelineResult?.charCount ?? "?"} chars`, severity: "info" });
+        toast.success("DOC exported anyway.");
+        if (exportCheck.cleanedResume) toast.warning("Cleaned error leaks from resume before export.");
+      } else if (format === "docx") {
+        await exportResumeDOCX(r, undefined, resume, true);
+        incUsage("downloads");
+        toast.success("DOCX exported anyway.");
+        if (exportCheck.cleanedResume) toast.warning("Cleaned error leaks from resume before export.");
+      } else if (format === "txt") {
+        exportResumeTXT(r, resume, true);
+        incUsage("downloads");
+        toast.success("TXT exported anyway.");
+        if (exportCheck.cleanedResume) toast.warning("Cleaned error leaks from resume before export.");
+      }
+    } catch (e: any) {
+      toast.error(e.message || "Export failed.");
+    }
+  };
+
   const { snapshot, undo, redo, canUndo, canRedo, undoStack, redoStack } = useUndoRedo(optimizedResume ?? undefined);
 
   const patchOptimizedResume = (p: Partial<ResumeData>) => {
@@ -1955,6 +2054,7 @@ Guidelines:
                         activeElement={activeElement}
                         setActiveElement={setActiveElement}
                         onOverflowChange={setIsPageOverflowing}
+                        optimizingSection={copilotLoading ? activeElement?.section || "all" : aiThinking ? "all" : null}
                       />
                     </div>
                   </div>
@@ -2277,47 +2377,12 @@ Guidelines:
                 <CardHeader><CardTitle className="text-base">Download your optimized resume</CardTitle></CardHeader>
                 <CardContent>
                   <div className="flex flex-wrap gap-2">
-                    <Button onClick={async () => {
-                      // FINAL validation before PDF export — no error leaks allowed
-                      const exportCheck = validateResumeForExport(optimizedResume);
-                      if (!exportCheck.valid && exportCheck.cleanedResume) {
-                        toast.warning("Cleaned error leaks from resume before export.");
-                        const r = await exportResumePDF(exportCheck.cleanedResume, { enforceOnePage: true }, undefined, resume);
-                        if (r.ok) { incUsage("downloads"); toast.success("PDF exported — 1 A4 page."); } else toast.error(r.error || "Export failed.");
-                      } else if (!exportCheck.valid) {
-                        toast.error("Resume contains errors and cannot be exported. Please regenerate.");
-                      } else {
-                        const r = await exportResumePDF(optimizedResume, { enforceOnePage: true }, undefined, resume);
-                        if (r.ok) { incUsage("downloads"); toast.success("PDF exported — 1 A4 page."); } else toast.error(r.error || "Export failed.");
-                      }
-                    }} className="bg-brand hover:bg-brand-dark text-white gap-2"><Icon name="Download" className="w-4 h-4" /> optimized_resume.pdf</Button>
-                    <Button variant="outline" onClick={() => {
-                      const exportCheck = validateResumeForExport(optimizedResume);
-                      const r = exportCheck.cleanedResume || optimizedResume;
-                      exportResumeDOC(r, "professional", resume);
-                      incUsage("downloads");
-                      log({ actor: "you", action: "Exported resume (DOC)", category: "export", details: `Times New Roman 12pt · @page A4 · ${pipelineResult?.charCount ?? "?"} chars`, severity: "info" });
-                      toast.success("DOC exported — strict A4 one-page layout.");
-                      if (exportCheck.cleanedResume) toast.warning("Cleaned error leaks from resume before export.");
-                    }} className="gap-2" title="Strict A4 one-page Word document (Times New Roman 12pt, @page A4)">
+                    <Button onClick={() => triggerExport("pdf")} className="bg-brand hover:bg-brand-dark text-white gap-2"><Icon name="Download" className="w-4 h-4" /> optimized_resume.pdf</Button>
+                    <Button variant="outline" onClick={() => triggerExport("doc")} className="gap-2" title="Strict A4 one-page Word document (Times New Roman 12pt, @page A4)">
                       <Icon name="FileText" className="w-4 h-4" /> .doc
                     </Button>
-                    <Button variant="outline" onClick={async () => {
-                      const exportCheck = validateResumeForExport(optimizedResume);
-                      const r = exportCheck.cleanedResume || optimizedResume;
-                      await exportResumeDOCX(r, undefined, resume);
-                      incUsage("downloads");
-                      toast.success("DOCX exported.");
-                      if (exportCheck.cleanedResume) toast.warning("Cleaned error leaks from resume before export.");
-                    }} className="gap-2"><Icon name="FileType" className="w-4 h-4" /> .docx</Button>
-                    <Button variant="outline" onClick={() => {
-                      const exportCheck = validateResumeForExport(optimizedResume);
-                      const r = exportCheck.cleanedResume || optimizedResume;
-                      exportResumeTXT(r, resume);
-                      incUsage("downloads");
-                      toast.success("TXT exported.");
-                      if (exportCheck.cleanedResume) toast.warning("Cleaned error leaks from resume before export.");
-                    }} className="gap-2"><Icon name="FileText" className="w-4 h-4" /> .txt</Button>
+                    <Button variant="outline" onClick={() => triggerExport("docx")} className="gap-2"><Icon name="FileType" className="w-4 h-4" /> .docx</Button>
+                    <Button variant="outline" onClick={() => triggerExport("txt")} className="gap-2"><Icon name="FileText" className="w-4 h-4" /> .txt</Button>
                   </div>
                   <div className="mt-4 rounded-lg bg-secondary p-3 text-xs">
                     <div className="font-semibold mb-1">Files generated:</div>
@@ -2421,6 +2486,58 @@ Guidelines:
           isPageOverflowing={isPageOverflowing}
         />
       )}
+
+      <AnimatePresence>
+        {bypassModal && bypassModal.open && (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-950/60 backdrop-blur-sm">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 10 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 10 }}
+              transition={{ duration: 0.2 }}
+              className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl shadow-2xl max-w-lg w-full overflow-hidden"
+            >
+              <div className="p-6 border-b border-slate-100 dark:border-slate-800 flex items-start gap-4">
+                <div className="p-3 bg-amber-500/10 rounded-full text-amber-500 shrink-0">
+                  <Icon name="AlertTriangle" className="w-6 h-6" />
+                </div>
+                <div>
+                  <h3 className="text-lg font-bold text-slate-900 dark:text-white">Quality Gate Verification</h3>
+                  <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
+                    Your optimized resume does not meet some target quality metrics. Review the details below:
+                  </p>
+                </div>
+              </div>
+
+              <div className="p-6 max-h-[300px] overflow-y-auto space-y-3 bg-slate-50/50 dark:bg-slate-950/20">
+                {bypassModal.errors.map((error, idx) => (
+                  <div key={idx} className="flex gap-2.5 items-start text-sm text-slate-700 dark:text-slate-300">
+                    <Icon name="AlertCircle" className="w-4 h-4 text-amber-500 shrink-0 mt-0.5" />
+                    <span>{error}</span>
+                  </div>
+                ))}
+              </div>
+
+              <div className="p-6 border-t border-slate-100 dark:border-slate-800 flex justify-end gap-3 bg-white dark:bg-slate-900">
+                <Button
+                  variant="outline"
+                  onClick={() => setBypassModal(null)}
+                  className="text-slate-700 dark:text-slate-300"
+                >
+                  Close & Optimize
+                </Button>
+                <Button
+                  onClick={handleBypassExport}
+                  className="bg-amber-600 hover:bg-amber-700 text-white shadow-md gap-2"
+                >
+                  <Icon name="Download" className="w-4 h-4" />
+                  Dismiss & Download Anyway
+                </Button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

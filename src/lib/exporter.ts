@@ -525,9 +525,9 @@ interface PDFOptions {
   enforceOnePage?: boolean;
 }
 
-export async function exportResumePDF(resume: ResumeData, opts: PDFOptions = {}, layout?: ResumeLayoutModel, sourceResume?: ResumeData | null): Promise<{ ok: boolean; pages: number; error?: string }> {
+export async function exportResumePDF(resume: ResumeData, opts: PDFOptions = {}, layout?: ResumeLayoutModel, sourceResume?: ResumeData | null, bypassQualityGates = false): Promise<{ ok: boolean; pages: number; error?: string }> {
   // ── EXPORT GATE ──────────────────────────────────────────────────────
-  const gateResult = validateExportCompleteness(sourceResume ?? null, resume);
+  const gateResult = validateExportCompleteness(sourceResume ?? null, resume, bypassQualityGates);
   if (!gateResult.ok) {
     const msg = gateResult.errors.join("\n");
     throw new Error(`Export cancelled: data-loss detected.\n${msg}`);
@@ -1159,9 +1159,9 @@ function formatDate(d?: string): string {
 
 // ---------- TXT ----------
 
-export function exportResumeTXT(resume: ResumeData, sourceResume?: ResumeData | null) {
+export function exportResumeTXT(resume: ResumeData, sourceResume?: ResumeData | null, bypassQualityGates = false) {
   // ── EXPORT GATE ──────────────────────────────────────────────────────
-  const gateResult = validateExportCompleteness(sourceResume ?? null, resume);
+  const gateResult = validateExportCompleteness(sourceResume ?? null, resume, bypassQualityGates);
   if (!gateResult.ok) {
     const msg = gateResult.errors.join("\n");
     throw new Error(`Export cancelled: data-loss detected.\n${msg}`);
@@ -1231,9 +1231,9 @@ export function exportResumeTXT(resume: ResumeData, sourceResume?: ResumeData | 
 // Times New Roman 12pt, single column, left-aligned headers. This is the strict
 // one-page layout the aviation ATS directive requires.
 
-export function exportResumeDOC(resume: ResumeData, template: "professional" | "modern" | "minimal" = "professional", sourceResume?: ResumeData | null) {
+export function exportResumeDOC(resume: ResumeData, template: "professional" | "modern" | "minimal" = "professional", sourceResume?: ResumeData | null, bypassQualityGates = false) {
   // ── EXPORT GATE ──────────────────────────────────────────────────────
-  const gateResult = validateExportCompleteness(sourceResume ?? null, resume);
+  const gateResult = validateExportCompleteness(sourceResume ?? null, resume, bypassQualityGates);
   if (!gateResult.ok) {
     const msg = gateResult.errors.join("\n");
     throw new Error(`Export cancelled: data-loss detected.\n${msg}`);
@@ -1328,8 +1328,12 @@ async function validateRenderParity(resume: ResumeData, layout?: ResumeLayoutMod
  */
 export function validateExportCompleteness(
   source: ResumeData | null,
-  optimized: ResumeData
+  optimized: ResumeData,
+  bypassQualityGates = false
 ): { ok: true } | { ok: false; errors: string[] } {
+  if (bypassQualityGates) {
+    return { ok: true };
+  }
   const errors: string[] = [];
 
   if (!source) {
@@ -1442,10 +1446,10 @@ export function validateExportCompleteness(
 
 // ---------- DOCX ----------
 
-export async function exportResumeDOCX(resume: ResumeData, layout?: ResumeLayoutModel, sourceResume?: ResumeData | null) {
+export async function exportResumeDOCX(resume: ResumeData, layout?: ResumeLayoutModel, sourceResume?: ResumeData | null, bypassQualityGates = false) {
   // ── EXPORT GATE: Section-level completeness check ─────────────────────
   // Compare against source resume (if available) to detect data loss.
-  const gateResult = validateExportCompleteness(sourceResume ?? null, resume);
+  const gateResult = validateExportCompleteness(sourceResume ?? null, resume, bypassQualityGates);
   if (!gateResult.ok) {
     const msg = gateResult.errors.join("\n");
     console.error("[Export Gate] BLOCKED export — data loss detected:\n", msg);
