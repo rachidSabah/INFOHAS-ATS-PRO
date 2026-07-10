@@ -1313,6 +1313,9 @@ export async function callAI(opts: AICallOptions): Promise<AICallResult> {
     const { getPuterProvider } = await import("./providers/puter-provider");
     const puterProvider = getPuterProvider();
     try {
+      const hasFallbacks = getOrderedFallbackProviders(opts.excludeProviderIds).length > 0;
+      const puterTimeoutMs = hasFallbacks ? Math.min(25000, callTimeoutMs) : callTimeoutMs;
+
       const resp = await withTimeout(
         puterProvider.generate({
           systemPrompt: finalOpts.systemPrompt,
@@ -1321,7 +1324,7 @@ export async function callAI(opts: AICallOptions): Promise<AICallResult> {
           temperature: finalOpts.temperature,
           model: finalOpts.modelOverride || provider.modelName,
         }),
-        callTimeoutMs,
+        puterTimeoutMs,
         "Puter.generate"
       );
 
@@ -1418,9 +1421,12 @@ export async function callAI(opts: AICallOptions): Promise<AICallResult> {
   // Try primary provider only if not in cooldown and not excluded
   if (!isProviderInCooldown(primaryCooldownId) && !isExcluded(primaryCooldownId)) {
     try {
+      const hasFallbacks = getOrderedFallbackProviders(opts.excludeProviderIds).length > 0;
+      const primaryTimeoutMs = hasFallbacks ? Math.min(25000, callTimeoutMs) : callTimeoutMs;
+
       const text = await withTimeout(
         callUserProvider(provider, finalOpts),
-        callTimeoutMs,
+        primaryTimeoutMs,
         `${provider.name}.generate`
       );
       assert(text !== "", "Provider response is empty");
