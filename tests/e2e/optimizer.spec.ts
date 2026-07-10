@@ -36,6 +36,10 @@ test.describe("ResumeAI Pro — Optimizer Pipeline", () => {
     });
     await page.goto(BASE_URL);
     await page.waitForLoadState("load");
+    // Wait for hydration to prevent flaky clicks and race conditions
+    await expect(page.locator('text=Welcome back').first()).toBeVisible({ timeout: 15000 });
+    await page.waitForFunction(() => typeof (window as any).useApp !== "undefined", { timeout: 10000 }).catch(() => {});
+    await page.waitForTimeout(1000);
   });
 
   test("homepage loads successfully", async ({ page }) => {
