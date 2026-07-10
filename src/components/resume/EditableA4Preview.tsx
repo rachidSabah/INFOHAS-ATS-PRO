@@ -330,7 +330,7 @@ export function EditableA4Preview({ resume, onChange, scale = 0.7, className, ac
             {/* SUMMARY */}
             {resume.summary && (
               <EditableBlock isEditing={editing === "summary"} onEdit={() => setEditing("summary")} label="Edit summary" isTouch={isTouch} isOptimizing={optimizingSection === "all" || optimizingSection === "summary"}>
-                <InfohasSection title="PROFESSIONAL PROFILE">
+                <InfohasSection title="PROFESSIONAL SUMMARY">
                   <p style={{ margin: 0, textAlign: "justify", color: BLACK, lineHeight: 1.2 }}>{renderHText(resume.summary)}</p>
                 </InfohasSection>
               </EditableBlock>
@@ -372,7 +372,7 @@ export function EditableA4Preview({ resume, onChange, scale = 0.7, className, ac
             {/* EDUCATION — section header once, then all entries */}
             {resume.education.length > 0 && (
               <>
-                <SectionDividerInline title="EDUCATION" />
+                <SectionDividerInline title="EDUCATION & PROFESSIONAL DEVELOPMENT" />
                 {resume.education.slice(0, 3).map((ed) => (
                   <EditableBlock
                     key={ed.id}
@@ -385,7 +385,10 @@ export function EditableA4Preview({ resume, onChange, scale = 0.7, className, ac
                     <div style={{ marginBottom: "1mm", lineHeight: 1.2 }}>
                       <div style={{ lineHeight: 1.2, display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: "2mm" }}>
                         <span style={{ flex: 1, minWidth: 0 }}>
-                          <span style={{ fontWeight: 700, color: BLACK }}>{safeRender(ed.degree)}</span>
+                          <span style={{ fontWeight: 700, color: BLACK }}>
+                            {safeRender(ed.degree)}
+                            {ed.field ? ` in ${safeRender(ed.field)}` : ""}
+                          </span>
                           {ed.institution && <span style={{ color: BLACK }}> | {safeRender(ed.institution)}</span>}
                           {ed.location && <span style={{ color: BLACK }}> | {safeRender(ed.location)}</span>}
                         </span>
@@ -411,7 +414,7 @@ export function EditableA4Preview({ resume, onChange, scale = 0.7, className, ac
             {/* KEY COMPETENCIES (moved after Education to match target format) */}
             {resume.skills.length > 0 && (
               <EditableBlock isEditing={editing === "skills"} onEdit={() => setEditing("skills")} label="Edit skills" isTouch={isTouch} isOptimizing={optimizingSection === "all" || optimizingSection === "skills"}>
-                <InfohasSection title="KEY COMPETENCIES">
+                <InfohasSection title="CORE COMPETENCIES & SKILLS">
                   <ul style={{ margin: 0, paddingLeft: `${L.bulletIndentMm}mm`, listStyleType: "•", lineHeight: 1.2 }}>
                     {groupSkillsByCategory(resume.skills).slice(0, 4).map((g, i) => (
                       <li key={i} style={{ marginBottom: 0, color: BLACK, lineHeight: 1.2, textAlign: "justify" }}>
@@ -423,13 +426,17 @@ export function EditableA4Preview({ resume, onChange, scale = 0.7, className, ac
               </EditableBlock>
             )}
 
-            {/* LANGUAGES — single line format */}
+            {/* LANGUAGES — bullet list with proficiency */}
             {resume.languages.length > 0 && (
               <EditableBlock isEditing={editing === "languages"} onEdit={() => setEditing("languages")} label="Edit languages" isTouch={isTouch} isOptimizing={optimizingSection === "all" || optimizingSection === "languages"}>
                 <InfohasSection title="LANGUAGES">
-                  <div style={{ color: BLACK, lineHeight: 1.2 }}>
-                    • {resume.languages.map((l) => safeRender(l.name)).join(", ")}
-                  </div>
+                  <ul style={{ margin: 0, paddingLeft: `${L.bulletIndentMm}mm`, listStyleType: "•", lineHeight: 1.2 }}>
+                    {resume.languages.map((l) => (
+                      <li key={l.id} style={{ color: BLACK, lineHeight: 1.2 }}>
+                        {safeRender(l.name)}{l.proficiency ? ` (${safeRender(l.proficiency)})` : ""}
+                      </li>
+                    ))}
+                  </ul>
                 </InfohasSection>
               </EditableBlock>
             )}
@@ -472,23 +479,58 @@ export function EditableA4Preview({ resume, onChange, scale = 0.7, className, ac
               </InfohasSection>
             )}
 
-            {/* DYNAMIC SECTIONS — renders any section type not covered by static fields above */}
-            {resume.dynamicSections && resume.dynamicSections.length > 0 && resume.dynamicSections.map((ds) => (
-              <InfohasSection key={ds.id} title={ds.title.toUpperCase()}>
-                {ds.content && (
-                  <p style={{ margin: 0, color: BLACK, lineHeight: 1.2, textAlign: "justify" }}>
-                    {renderHText(ds.content)}
-                  </p>
-                )}
-                {ds.bullets && ds.bullets.length > 0 && (
-                  <ul style={{ margin: "0.3mm 0 0 0", paddingLeft: `${L.bulletIndentMm}mm`, listStyleType: "•", lineHeight: 1.2 }}>
-                    {ds.bullets.map((b, i) => (
-                      <li key={i} style={{ color: BLACK, lineHeight: 1.2 }}>{renderHText(b)}</li>
-                    ))}
-                  </ul>
-                )}
-              </InfohasSection>
-            ))}
+            {/* DYNAMIC SECTIONS — renders any section type not covered by static fields above.
+                 Skips sections whose title overlaps with structured fields (same logic as render-document.ts)
+                 to prevent content duplication and A4 overflow. */}
+            {resume.dynamicSections && resume.dynamicSections.length > 0 && (() => {
+              // Set of normalized titles that have already been rendered by structured sections
+              const STRUCTURED_SECTION_TITLES_PREVIEW = new Set([
+                "professional summary", "summary", "professional profile",
+                "professional experience", "experience", "work experience",
+                "education", "vocational training", "academic background",
+                "core competencies & skills", "skills", "core competencies",
+                "key competencies", "key skills", "technical skills", "competencies",
+                "languages", "additional information", "certifications",
+                "projects", "personal information", "personal details",
+                "contact", "contact information", "personal",
+                "date of birth", "nationality",
+              ]);
+              const normalizeTitle = (t: string) =>
+                t.toLowerCase().replace(/[^a-z0-9\s]/g, "").replace(/\s+/g, " ").trim();
+
+              return resume.dynamicSections
+                .filter((ds) => {
+                  const normTitle = normalizeTitle(ds.title);
+                  if (!normTitle) return false;
+                  // Skip if it matches a known structured section
+                  if (STRUCTURED_SECTION_TITLES_PREVIEW.has(normTitle)) return false;
+                  // Skip if it's a subset or superset of any known structured section
+                  const isOverlap = Array.from(STRUCTURED_SECTION_TITLES_PREVIEW).some(
+                    (t) => normTitle.includes(t) || t.includes(normTitle)
+                  );
+                  if (isOverlap) return false;
+                  // Skip if content contains contact / personal info already in the header
+                  const PERSONAL_RE = /date\s*of\s*birth|dob\s*:|[\w.+-]+@[\w-]+\.[\w.-]+|[+]?\d{8,}/i;
+                  if (PERSONAL_RE.test(ds.content || "") || PERSONAL_RE.test(ds.title)) return false;
+                  return true;
+                })
+                .map((ds) => (
+                  <InfohasSection key={ds.id} title={ds.title.toUpperCase()}>
+                    {ds.content && (
+                      <p style={{ margin: 0, color: BLACK, lineHeight: 1.2, textAlign: "justify" }}>
+                        {renderHText(ds.content)}
+                      </p>
+                    )}
+                    {ds.bullets && ds.bullets.length > 0 && (
+                      <ul style={{ margin: "0.3mm 0 0 0", paddingLeft: `${L.bulletIndentMm}mm`, listStyleType: "•", lineHeight: 1.2 }}>
+                        {ds.bullets.map((b, i) => (
+                          <li key={i} style={{ color: BLACK, lineHeight: 1.2 }}>{renderHText(b)}</li>
+                        ))}
+                      </ul>
+                    )}
+                  </InfohasSection>
+                ));
+            })()}
 
             {/* ADDITIONAL INFORMATION */}
             {resume.additionalInfo && (
@@ -1053,9 +1095,19 @@ function Button({ children, onClick, variant, className }: { children: React.Rea
 function groupSkillsByCategory(skills: ResumeData["skills"]): { category: string; items: string[] }[] {
   const map = new Map<string, string[]>();
   for (const s of skills) {
-    const cat = s.category || "General";
+    let cat = s.category?.trim();
+    let name = s.name;
+    if (!cat) {
+      const colonIdx = name.indexOf(":");
+      if (colonIdx > 0 && colonIdx < 35) {
+        cat = name.slice(0, colonIdx).trim();
+        name = name.slice(colonIdx + 1).trim();
+      } else {
+        cat = "General";
+      }
+    }
     if (!map.has(cat)) map.set(cat, []);
-    map.get(cat)!.push(s.name);
+    map.get(cat)!.push(name);
   }
   return Array.from(map.entries()).map(([category, items]) => ({ category, items }));
 }

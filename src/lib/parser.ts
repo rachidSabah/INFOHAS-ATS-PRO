@@ -176,7 +176,9 @@ export function secondaryParser(text: string, fileName: string): ResumeData {
 
   // Populate dynamicSections from the engine to capture any
   // non-standard sections parsed from the source resume
-  const dynamicSections = extractSectionsFromResume(baseResume);
+  const dynamicSections = extractSectionsFromResume(baseResume).filter(
+    (s) => !["summary", "experience", "education", "skills", "languages", "additionalinformation", "certifications", "projects", "achievements"].includes(s.normalizedTitle)
+  );
 
   return {
     ...baseResume,
@@ -307,7 +309,9 @@ export function heuristicParser(text: string, fileName: string): ResumeData {
 
   // Populate dynamicSections from the engine to capture any
   // non-standard sections parsed from the source resume
-  const heuristicDynamicSections = extractSectionsFromResume(baseHeuristicResume);
+  const heuristicDynamicSections = extractSectionsFromResume(baseHeuristicResume).filter(
+    (s) => !["summary", "experience", "education", "skills", "languages", "additionalinformation", "certifications", "projects", "achievements"].includes(s.normalizedTitle)
+  );
 
   return {
     ...baseHeuristicResume,
@@ -1948,7 +1952,9 @@ Return ONLY a JSON object with this EXACT structure (do not output any prose, ex
       fileName,
     };
 
-    const dynamicSections = extractSectionsFromResume(baseResume);
+    const dynamicSections = extractSectionsFromResume(baseResume).filter(
+      (s) => !["summary", "experience", "education", "skills", "languages", "additionalinformation", "certifications", "projects", "achievements"].includes(s.normalizedTitle)
+    );
     return {
       ...baseResume,
       dynamicSections,

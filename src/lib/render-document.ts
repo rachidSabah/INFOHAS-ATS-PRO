@@ -45,7 +45,7 @@ const SECTION_TITLES: Record<RenderSectionType, string> = {
   personalInformation: "PERSONAL INFORMATION",
   professionalProfile: "PROFESSIONAL SUMMARY",
   professionalExperience: "PROFESSIONAL EXPERIENCE",
-  education: "EDUCATION",
+  education: "EDUCATION & PROFESSIONAL DEVELOPMENT",
   skills: "CORE COMPETENCIES & SKILLS",
   languages: "LANGUAGES",
   additionalInformation: "ADDITIONAL INFORMATION",
@@ -182,22 +182,16 @@ function buildSkillsSection(resume: ResumeData): RenderDocumentSection | null {
 
 function buildLanguagesSection(resume: ResumeData): RenderDocumentSection | null {
   if (!resume.languages?.length) return null;
-  const items: RenderContentItem[] = [];
-  for (const l of resume.languages) {
-    const note = (l as any).note ? ` (${(l as any).note})` : "";
-    items.push({
-      kind: "text",
-      text: `${l.name} – ${l.proficiency}${note}`,
-    });
-  }
-  // Also render as a single bullet line if prefer compact
   return {
     type: "languages",
     title: SECTION_TITLES.languages,
     items: [
       {
         kind: "bullets",
-        bullets: resume.languages.map(l => `${l.name} (${l.proficiency})`),
+        bullets: resume.languages.map(l => {
+          const note = (l as any).note ? ` — ${(l as any).note}` : "";
+          return `${l.name}${l.proficiency ? ` (${l.proficiency})` : ""}${note}`;
+        }),
         level: 0,
       },
     ],
@@ -347,11 +341,16 @@ function normalizeSectionTitle(title: string): string {
  const STRUCTURED_SECTION_TITLES = new Set([
    "professional summary",
    "summary",
+   "professional profile",
    "professional experience",
    "experience",
    "work experience",
    "education",
+   "education professional development",
+   "education  professional development",
+   "vocational training",
    "core competencies & skills",
+   "core competencies and skills",
    "skills",
    "core competencies",
    "key skills",
@@ -412,7 +411,7 @@ export function toRenderDocument(
   const renderedSections = new Set<string>();
   const order = (L.sectionOrder && L.sectionOrder.length > 0)
     ? L.sectionOrder
-    : ["summary", "skills", "experience", "education", "languages", "certifications", "projects", "additionalInfo"];
+    : ["summary", "experience", "education", "skills", "languages", "certifications", "projects", "additionalInfo"];
 
   for (const sectionKey of order) {
     const builder = builders[sectionKey];

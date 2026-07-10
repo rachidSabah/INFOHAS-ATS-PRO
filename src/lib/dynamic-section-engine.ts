@@ -678,7 +678,22 @@ export function mergeDynamicSections(
   const restored: string[] = [];
   const alreadyPresent: string[] = [];
 
+  const standardTitles = [
+    "summary",
+    "experience",
+    "education",
+    "skills",
+    "languages",
+    "additionalinformation",
+    "certifications",
+    "projects",
+    "achievements",
+  ];
+
   for (const origSection of originalSections) {
+    if (standardTitles.includes(origSection.normalizedTitle)) {
+      continue;
+    }
     if (existingTitles.has(origSection.normalizedTitle)) {
       alreadyPresent.push(origSection.title);
       continue;
@@ -817,7 +832,21 @@ export function runDynamicSectionPipeline(
     const existingNormTitles = new Set(
       (mergedResume.dynamicSections || []).map((ds) => ds.normalizedTitle)
     );
+    const standardTitles = [
+      "summary",
+      "experience",
+      "education",
+      "skills",
+      "languages",
+      "additionalinformation",
+      "certifications",
+      "projects",
+      "achievements",
+    ];
     for (const srcDs of sourceResume.dynamicSections) {
+      if (standardTitles.includes(srcDs.normalizedTitle)) {
+        continue;
+      }
       if (!existingNormTitles.has(srcDs.normalizedTitle)) {
         if (!mergedResume.dynamicSections) {
           mergedResume.dynamicSections = [];
