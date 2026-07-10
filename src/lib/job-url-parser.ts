@@ -95,6 +95,89 @@ export async function parseJobUrl(
   url: string,
   options: ParseJobUrlOptions = {},
 ): Promise<ParseJobUrlResult> {
+  // CLIENT-SIDE REDIRECTION: If running in the browser, direct fetches will fail
+  // due to CORS. Delegate fetching and parsing to the server-side scraper proxy.
+  if (typeof window !== "undefined") {
+    try {
+      const res = await fetch("/api/jd-scrape", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url }),
+      });
+      if (res.ok) {
+        const data = (await res.json()) as any;
+        const parsedJob: ParsedJob = {
+          title: data.title || "",
+          url: data.url || url,
+          rawText: data.text || "",
+          responsibilities: [],
+          requiredSkills: [],
+          preferredSkills: [],
+          technologies: [],
+          keywords: [],
+          source: "client-proxy-api",
+          metadata: {
+            urlReachable: true,
+            htmlSize: data.text?.length || 0,
+            textExtracted: true,
+            textLength: data.text?.length || 0,
+            hasMetaDescription: !!data.diagnostics?.hasMetaDescription,
+            hasOpenGraph: !!data.diagnostics?.hasOpenGraph,
+            hasJsonLd: !!data.diagnostics?.hasJsonLd,
+            jsonLdCount: data.diagnostics?.jsonLdCount || 0,
+            stagesRun: ["client-proxy"],
+            stageResults: {},
+            aiUsed: false,
+            fetchedAt: new Date().toISOString(),
+          },
+        };
+        return {
+          ok: true,
+          parsedJob,
+          metadata: parsedJob.metadata,
+        };
+      } else {
+        const data = (await res.json().catch(() => ({}))) as any;
+        return {
+          ok: false,
+          error: data.error || `Proxy request failed with HTTP ${res.status}`,
+          metadata: {
+            urlReachable: false,
+            htmlSize: 0,
+            textExtracted: false,
+            textLength: 0,
+            hasMetaDescription: false,
+            hasOpenGraph: false,
+            hasJsonLd: false,
+            jsonLdCount: 0,
+            stagesRun: ["client-proxy-failed"],
+            stageResults: {},
+            aiUsed: false,
+            fetchedAt: new Date().toISOString(),
+          },
+        };
+      }
+    } catch (e: any) {
+      return {
+        ok: false,
+        error: `Proxy request error: ${e?.message}`,
+        metadata: {
+          urlReachable: false,
+          htmlSize: 0,
+          textExtracted: false,
+          textLength: 0,
+          hasMetaDescription: false,
+          hasOpenGraph: false,
+          hasJsonLd: false,
+          jsonLdCount: 0,
+          stagesRun: ["client-proxy-error"],
+          stageResults: {},
+          aiUsed: false,
+          fetchedAt: new Date().toISOString(),
+        },
+      };
+    }
+  }
   const maxHtmlSize = options.maxHtmlSize ?? 5_000_000;
   const maxTextForAI = options.maxTextForAI ?? 20_000;
   const runAI = options.runAIExtraction ?? !!options.aiCaller;

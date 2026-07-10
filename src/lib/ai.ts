@@ -1145,12 +1145,30 @@ async function callUserProvider(
         }
       }
 
+      // Check if it's an authentication, credit/billing, or unauthorized error.
+      // If so, do NOT rotate models on the same invalid/empty API key. Throw immediately.
+      const isAuthOrBillingError =
+        e?.statusCode === 401 ||
+        e?.statusCode === 403 ||
+        /unauthorized/i.test(eMsg) ||
+        /invalid.api.key/i.test(eMsg) ||
+        /billing/i.test(eMsg) ||
+        /credits/i.test(eMsg) ||
+        /payment.method/i.test(eMsg) ||
+        /CreditsError/i.test(eMsg);
+
+      if (isAuthOrBillingError) {
+        throw e;
+      }
+
       // 2. Try model rotation if alternate keys failed or were not present
       const enabledModels = provider.enabledModels as string[] | undefined;
       const currentModel = provider.modelName || provider.model || "";
       if (enabledModels && enabledModels.length > 1) {
         const otherModels = enabledModels.filter((m: string) => m !== currentModel);
-        for (const altModel of otherModels) {
+        // Limit to at most 3 alternate models to prevent timeout/budget exhaustion on large model list
+        const maxAltModels = otherModels.slice(0, 3);
+        for (const altModel of maxAltModels) {
           console.log(`[PROVIDER] Rotating model to "${altModel}" for ${provider.name}...`);
           try {
             const altProvider = { ...provider, modelName: altModel, model: altModel };
