@@ -30,6 +30,9 @@ export const ALLOWED_PROVIDER_HOSTS = new Set([
   // New free-tier providers
   "api.cerebras.ai",
   "api.sambanova.ai",
+  // GitHub Models
+  "models.inference.ai.azure.com",
+  "models.inference.github.com",
 ]);
 
 /**
