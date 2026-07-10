@@ -15,18 +15,18 @@ CREATE INDEX IF NOT EXISTS idx_resumes_user_id ON resumes(user_id);
 CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
 CREATE INDEX IF NOT EXISTS idx_cover_letters_user_id ON cover_letters(user_id);
 CREATE INDEX IF NOT EXISTS idx_job_descriptions_user_id ON job_descriptions(user_id);
-CREATE INDEX IF NOT EXISTS idx_interviews_user_id ON interviews(user_id);
+CREATE INDEX IF NOT EXISTS idx_interviews_user_id ON interview_packages(user_id);
 CREATE INDEX IF NOT EXISTS idx_ats_reports_resume_id ON ats_reports(resume_id);
-CREATE INDEX IF NOT EXISTS idx_ats_reports_job_description_id ON ats_reports(job_description_id);
+CREATE INDEX IF NOT EXISTS idx_ats_reports_jd_id ON ats_reports(jd_id);
 CREATE INDEX IF NOT EXISTS idx_audit_logs_user_id ON audit_logs(user_id);
 CREATE INDEX IF NOT EXISTS idx_audit_logs_action ON audit_logs(action);
 CREATE INDEX IF NOT EXISTS idx_ai_providers_name ON ai_providers(name);
-CREATE INDEX IF NOT EXISTS idx_prompts_provider_id ON prompts(provider_id);
-CREATE INDEX IF NOT EXISTS idx_settings_key ON settings(key);
+CREATE INDEX IF NOT EXISTS idx_prompts_provider_id ON prompt_templates(provider_id);
+-- CREATE INDEX IF NOT EXISTS idx_settings_key ON settings(key); -- settings table does not exist
 CREATE INDEX IF NOT EXISTS idx_downloads_user_id ON downloads(user_id);
 CREATE INDEX IF NOT EXISTS idx_resumes_user_created ON resumes(user_id, created_at DESC);
-CREATE INDEX IF NOT EXISTS idx_interviews_user_created ON interviews(user_id, created_at DESC);
-CREATE INDEX IF NOT EXISTS idx_audit_logs_created_at ON audit_logs(created_at);
+CREATE INDEX IF NOT EXISTS idx_interviews_user_created ON interview_packages(user_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_audit_logs_timestamp ON audit_logs(timestamp);
 
 -- === UNIQUE INDEX for users.email (if not already unique) ===
 CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email_unique ON users(email);
@@ -56,7 +56,7 @@ DELETE FROM resumes WHERE user_id IS NOT NULL AND user_id != '' AND user_id NOT 
 DELETE FROM cover_letters WHERE resume_id IS NOT NULL AND resume_id != '' AND resume_id NOT IN (SELECT id FROM resumes);
 
 -- Remove interviews that reference non-existent resumes
-DELETE FROM interviews WHERE resume_id IS NOT NULL AND resume_id != '' AND resume_id NOT IN (SELECT id FROM resumes);
+DELETE FROM interview_packages WHERE resume_id IS NOT NULL AND resume_id != '' AND resume_id NOT IN (SELECT id FROM resumes);
 
 -- Remove ATS reports that reference non-existent resumes
 DELETE FROM ats_reports WHERE resume_id IS NOT NULL AND resume_id != '' AND resume_id NOT IN (SELECT id FROM resumes);

@@ -8,4 +8,4 @@
 -- SQLite / D1: ALTER TABLE ... ADD COLUMN only supports adding a column with
 -- a DEFAULT value (NOT NULL constraint requires DEFAULT in SQLite).
 
-ALTER TABLE ai_tasks ADD COLUMN IF NOT EXISTS username TEXT NOT NULL DEFAULT 'anonymous';
+ALTER TABLE ai_tasks ADD COLUMN username TEXT NOT NULL DEFAULT 'anonymous';
