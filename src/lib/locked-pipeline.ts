@@ -104,6 +104,7 @@ export async function runLockedPipeline(
   optimizationPolicy?: string | null,
   feedback?: string,
   baselineResume?: ResumeData, // Added for Localized Diff-Only Processing
+  onChunk?: (chunk: string) => void,
 ): Promise<LockedPipelineResult> {
   const agentDirectives = directiveConfig?.agentDirectives;
   const warnings: string[] = [];
@@ -235,7 +236,7 @@ export async function runLockedPipeline(
         const secondaryProviderId = secondaryProvider.id || secondaryProvider.name || secondaryProvider.type;
         console.info(`[Model Arena] Running Primary (${primaryProvider.id}) and Secondary (${secondaryProviderId}) in parallel...`);
         const [pRes, sRes] = await Promise.all([
-          runBulletOnlyOptimizer(idReadyResume, jd, intelligenceContext, directiveConfig, excludeProviderIds, optimizationPolicy, feedback, baselineResume).catch(e => {
+          runBulletOnlyOptimizer(idReadyResume, jd, intelligenceContext, directiveConfig, excludeProviderIds, optimizationPolicy, feedback, baselineResume, onChunk).catch(e => {
             console.warn("[Model Arena] Primary failed:", e);
             return null;
           }),
@@ -263,7 +264,7 @@ export async function runLockedPipeline(
           optimizerResult = pRes || sRes;
         }
       } else {
-        optimizerResult = await runBulletOnlyOptimizer(idReadyResume, jd, intelligenceContext, directiveConfig, excludeProviderIds, optimizationPolicy, feedback, baselineResume);
+        optimizerResult = await runBulletOnlyOptimizer(idReadyResume, jd, intelligenceContext, directiveConfig, excludeProviderIds, optimizationPolicy, feedback, baselineResume, onChunk);
       }
 
       if (!optimizerResult) {

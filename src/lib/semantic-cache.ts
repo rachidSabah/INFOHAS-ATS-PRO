@@ -125,17 +125,16 @@ export function clearSemanticCache(): void {
 }
 
 // Register with unified CacheManager facade (ADR-005)
-try {
-  const { CacheManager } = require("./cache");
-  CacheManager.register({
-    name: "semantic",
-    clear: clearSemanticCache,
-    getStats: getSemanticCacheStats,
-    get size() {
-      return cache.size;
-    }
-  });
-} catch (e) {
-  // Safe failover
-}
+import("./cache")
+  .then(({ CacheManager }) => {
+    CacheManager.register({
+      name: "semantic",
+      clear: clearSemanticCache,
+      getStats: getSemanticCacheStats,
+      get size() {
+        return cache.size;
+      }
+    });
+  })
+  .catch(() => {});
 

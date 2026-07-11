@@ -219,6 +219,27 @@ export function PipelineProgressView({ progress, isRunning, result, error, onRet
         </AnimatePresence>
       </div>
 
+      {/* Live optimization text stream */}
+      {progress?.streamedText && (
+        <motion.div
+          initial={{ opacity: 0, scale: 0.98 }}
+          animate={{ opacity: 1, scale: 1 }}
+          className="mt-3 rounded-xl border border-zinc-800 bg-zinc-950 p-4 font-mono text-xs text-emerald-400 shadow-inner max-h-64 overflow-y-auto"
+        >
+          <div className="flex items-center justify-between border-b border-zinc-900 pb-2 mb-2">
+            <span className="text-[10px] text-zinc-500 uppercase tracking-wider flex items-center gap-1.5 font-bold">
+              <span className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse" />
+              Live AI Optimizer Output
+            </span>
+            <span className="text-[10px] text-zinc-600 font-bold">{progress.streamedText.length} chars generated</span>
+          </div>
+          <pre className="whitespace-pre-wrap break-all leading-relaxed font-mono font-medium text-emerald-300 dark:text-emerald-400 selection:bg-emerald-900">
+            {progress.streamedText}
+            <span className="inline-block w-1.5 h-3.5 bg-emerald-400 animate-pulse ml-0.5 align-middle" />
+          </pre>
+        </motion.div>
+      )}
+
       {/* Error + retry */}
       {error && onRetry && (
         <div className="mt-3 flex items-center justify-between gap-2 p-3 rounded-lg bg-red-50 dark:bg-red-950/20 border border-red-200 dark:border-red-900">

@@ -11,8 +11,8 @@ import type { ResumeData, JobDescription } from "../types";
 // The locked pipeline expects the NEW optimizer contract:
 //   { summary, headline, skills, experiences: [{id, bullets}] }
 // The legacy path expects the flat/full resume JSON shape.
-vi.mock("../ai", () => ({
-  callAI: vi.fn().mockImplementation((opts: any) => {
+vi.mock("../ai", () => {
+  const mockCallAIImpl = (opts: any) => {
     // Check if this is the reflection agent call (systemPrompt mentions "Reflection Agent")
     if (opts.systemPrompt?.includes("Reflection Agent")) {
       return Promise.resolve({
@@ -171,19 +171,31 @@ vi.mock("../ai", () => ({
       provider: "test-provider",
       usage: { promptTokens: 500, completionTokens: 800 },
     });
-  }),
-  extractJSON: vi.fn((text: string) => JSON.parse(text)),
-  getOptimizerDirective: vi.fn(() => "Test directive"),
-  selectProviderForAgent: vi.fn().mockImplementation(() => {
-    return Promise.resolve({ id: "test-provider", name: "test-provider", type: "mock", isActive: true });
-  }),
-  getOrderedFallbackProviders: vi.fn().mockImplementation(() => {
-    return [];
-  }),
-  OPTIMIZER_CALL_TIMEOUT_MS: 120000,
-  PIPELINE_STEP_CALL_TIMEOUT_MS: 90000,
-  OptimizationProviderExhaustedError: class extends Error {},
-}));
+  };
+
+  return {
+    callAI: vi.fn().mockImplementation((opts: any) => mockCallAIImpl(opts)),
+    callAIStreamed: vi.fn().mockImplementation(async (opts: any, onChunk: any) => {
+      const res = await mockCallAIImpl(opts);
+      if (onChunk && res?.text) {
+        onChunk(res.text);
+      }
+      return res;
+    }),
+    extractJSON: vi.fn((text: string) => JSON.parse(text)),
+    getOptimizerDirective: vi.fn(() => "Test directive"),
+    selectProviderForAgent: vi.fn().mockImplementation(() => {
+      return Promise.resolve({ id: "test-provider", name: "test-provider", type: "mock", isActive: true });
+    }),
+    getOrderedFallbackProviders: vi.fn().mockImplementation(() => {
+      return [];
+    }),
+    clearAllProviderCooldowns: vi.fn(),
+    OPTIMIZER_CALL_TIMEOUT_MS: 120000,
+    PIPELINE_STEP_CALL_TIMEOUT_MS: 90000,
+    OptimizationProviderExhaustedError: class extends Error {},
+  };
+});
 
 // Mock store
 vi.mock("../store", () => ({

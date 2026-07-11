@@ -29,7 +29,7 @@
 "use client";
 
 import type { ResumeData, ResumeSkill, JobDescription, AgentDirectives, OptimizerDirectiveConfig } from "./types";
-import { callAI, extractJSON, OPTIMIZER_CALL_TIMEOUT_MS } from "./ai";
+import { callAI, callAIStreamed, extractJSON, OPTIMIZER_CALL_TIMEOUT_MS } from "./ai";
 import { buildBulletDirective } from "./optimizer-directive-engine";
 import { cleanupGrammar, repairMalformedJSON, stripMarkdown } from "./ai-response-processor";
 import type { OptimizerOutput } from "./resume-assembler";
@@ -348,6 +348,7 @@ export async function runBulletOnlyOptimizer(
   optimizationPolicy?: string | null,
   feedback?: string,
   baselineResume?: ResumeData, // Added for Localized Diff-Only Processing
+  onChunk?: (chunk: string) => void,
 ): Promise<BulletOnlyOptimizerResult> {
   // FAST-FAIL: Structural validation before any AI call
   const structuralWarnings: string[] = [];
@@ -401,7 +402,7 @@ export async function runBulletOnlyOptimizer(
 
   const agentDirectives = directiveConfig?.agentDirectives;
   const temp = agentDirectives?.supervisor?.temperature ?? 0.15;
-  const result = await callAI({
+  const result = await callAIStreamed({
     systemPrompt,
     isOptimizerCall: true,
     userPrompt,
@@ -412,6 +413,8 @@ export async function runBulletOnlyOptimizer(
     excludeProviderIds,
     enableRetries: agentDirectives?.supervisor?.enableRetries,
     enableProviderSwitch: agentDirectives?.supervisor?.enableProviderSwitch,
+  }, (chunk) => {
+    if (onChunk) onChunk(chunk);
   });
 
   // Reject local fallback

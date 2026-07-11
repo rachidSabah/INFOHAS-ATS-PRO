@@ -88,17 +88,16 @@ export function invalidateJobCache(title: string, company: string): void {
 }
 
 // Register with unified CacheManager facade (ADR-005)
-try {
-  const { CacheManager } = require("./cache");
-  CacheManager.register({
-    name: "job-memory",
-    clear: clearJobCache,
-    getStats: getJobCacheStats,
-    get size() {
-      return cache.size;
-    }
-  });
-} catch (e) {
-  // Safe failover
-}
+import("./cache")
+  .then(({ CacheManager }) => {
+    CacheManager.register({
+      name: "job-memory",
+      clear: clearJobCache,
+      getStats: getJobCacheStats,
+      get size() {
+        return cache.size;
+      }
+    });
+  })
+  .catch(() => {});
 

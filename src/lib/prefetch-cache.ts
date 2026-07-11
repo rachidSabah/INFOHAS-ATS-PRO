@@ -52,19 +52,18 @@ export const prefetchCache = {
 };
 
 // Register with unified CacheManager facade (ADR-005)
-try {
-  const { CacheManager } = require("./cache");
-  CacheManager.register({
-    name: "prefetch",
-    clear: () => prefetchCache.clear(),
-    getStats: () => prefetchCache.getStats(),
-    get size() {
-      return Object.keys(cache.jobIntelligence).length +
-        Object.keys(cache.companyIntelligence).length +
-        Object.keys(cache.skillGap).length;
-    }
-  });
-} catch (e) {
-  // Safe failover
-}
+import("./cache")
+  .then(({ CacheManager }) => {
+    CacheManager.register({
+      name: "prefetch",
+      clear: () => prefetchCache.clear(),
+      getStats: () => prefetchCache.getStats(),
+      get size() {
+        return Object.keys(cache.jobIntelligence).length +
+          Object.keys(cache.companyIntelligence).length +
+          Object.keys(cache.skillGap).length;
+      }
+    });
+  })
+  .catch(() => {});
 

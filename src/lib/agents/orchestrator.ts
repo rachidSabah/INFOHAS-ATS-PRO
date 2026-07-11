@@ -497,6 +497,8 @@ export interface PipelineProgress {
   etaSeconds: number;
   /** Latest log line */
   log: string;
+  /** Real-time AI stream content (if available) */
+  streamedText?: string;
 }
 
 export interface PipelineStep {
@@ -706,7 +708,7 @@ async function _runOptimizationPipelineInner(input: PipelineInput, watchdog: Opt
 
   // === Progress emitter ===
   const pipelineStartTime = Date.now();
-  const emitProgress = (stepIndex: number, message: string) => {
+  const emitProgress = (stepIndex: number, message: string, streamedText?: string) => {
     if (!input.onProgress) return;
     const step = steps[stepIndex];
     const elapsedMs = Date.now() - pipelineStartTime;
@@ -724,6 +726,7 @@ async function _runOptimizationPipelineInner(input: PipelineInput, watchdog: Opt
       percent,
       etaSeconds,
       log: message,
+      streamedText,
     });
   };
 
@@ -1039,7 +1042,20 @@ ${jobMemory.industry}`);
           } else {
             // Run the locked pipeline
             const { runLockedPipeline } = await import("../locked-pipeline");
-            const lockedResult = await runLockedPipeline(resume, jd, intelligenceContext, directiveConfig, optimizationPolicy, undefined, baselineResume);
+            let accumulatedText = "";
+            const lockedResult = await runLockedPipeline(
+              resume,
+              jd,
+              intelligenceContext,
+              directiveConfig,
+              optimizationPolicy,
+              undefined,
+              baselineResume,
+              (chunk) => {
+                accumulatedText += chunk;
+                emitProgress(3, `Optimizing resume: generating rewritten content…`, accumulatedText);
+              }
+            );
 
             optimizeResult = {
               resume: lockedResult.resume,
