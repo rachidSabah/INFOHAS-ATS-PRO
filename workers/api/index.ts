@@ -3,6 +3,8 @@
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { logger } from "hono/logger";
+import { getDb, schema } from "./db";
+import { eq, and, desc } from "drizzle-orm";
 
 export interface Env {
   DB: D1Database;
@@ -188,24 +190,23 @@ async function verifyNextAuthJwt(token: string, secret: string): Promise<string 
  */
 async function lookupSessionToken(token: string, db: D1Database): Promise<string | null> {
   try {
-    if (!ALLOWED_USER_ID_PATTERN.test(token) && token.length < 128) {
-      // Session tokens are typically longer opaque strings — allow them
-    }
-    const row = await db
-      .prepare("SELECT user_id, expires_at FROM sessions WHERE token = ? LIMIT 1")
-      .bind(token)
-      .first<{ user_id: string; expires_at: string }>();
+    const drizzleDb = getDb({ DB: db });
+    const row = await drizzleDb
+      .select({ userId: schema.sessions.userId, expiresAt: schema.sessions.expiresAt })
+      .from(schema.sessions)
+      .where(eq(schema.sessions.token, token))
+      .get();
 
     if (!row) return null;
 
     // Check expiry
-    const expiresAt = new Date(row.expires_at).getTime();
+    const expiresAt = new Date(row.expiresAt).getTime();
     if (Date.now() > expiresAt) {
       console.warn("[Worker] Session token expired");
       return null;
     }
 
-    return row.user_id;
+    return row.userId;
   } catch (err) {
     console.warn("[Worker] Session token lookup error:", err instanceof Error ? err.message : err);
     return null;
@@ -628,7 +629,13 @@ app.delete("/api/users/:id", async (c) => {
 app.get("/api/resumes", async (c) => {
   const userId = getUserId(c.req.raw);
   if (!userId) return c.json({ resumes: [] });
-  const { results } = await c.env.DB.prepare("SELECT * FROM resumes WHERE user_id = ? ORDER BY updated_at DESC").bind(userId).all();
+  const drizzleDb = getDb(c.env);
+  const results = await drizzleDb
+    .select()
+    .from(schema.resumes)
+    .where(eq(schema.resumes.userId, userId))
+    .orderBy(desc(schema.resumes.updatedAt))
+    .all();
   const resumes = (results || []).map(parseDbResume);
   return c.json({ resumes });
 });
@@ -636,12 +643,28 @@ app.get("/api/resumes", async (c) => {
 /** Ensure the user exists in the users table — auto-create if missing. */
 async function ensureUserExists(db: D1Database, userId: string): Promise<void> {
   if (userId === "anonymous") return; // skip for anonymous
-  const existing = await db.prepare("SELECT id FROM users WHERE id = ?").bind(userId).first();
+  const drizzleDb = getDb({ DB: db });
+  const existing = await drizzleDb
+    .select({ id: schema.users.id })
+    .from(schema.users)
+    .where(eq(schema.users.id, userId))
+    .get();
+
   if (!existing) {
     const now = new Date().toISOString();
-    await db.prepare(
-      "INSERT INTO users (id, email, username, name, role, status, provider, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
-    ).bind(userId, `${userId}@placeholder.local`, userId, userId, "user", "active", "email", now, now).run();
+    await drizzleDb
+      .insert(schema.users)
+      .values({
+        id: userId,
+        email: `${userId}@placeholder.local`,
+        name: userId,
+        role: "user",
+        status: "active",
+        provider: "email",
+        createdAt: now,
+        updatedAt: now,
+      })
+      .run();
   }
 }
 

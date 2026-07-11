@@ -28,5 +28,6 @@ export { AgentRegistry } from './agent-registry';
 export type { AgentMetadata } from './agent-registry';
 export { MCPAdapter } from './mcp-adapter';
 export type { MCPTool, MCPToolSchema } from './mcp-adapter';
+export * from './plugins';
 
 

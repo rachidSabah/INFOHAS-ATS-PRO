@@ -59,14 +59,17 @@ describe('Human Approval Gate in runOptimizationPipeline', () => {
       id: 'r-1',
       name: 'Jane Doe',
       headline: 'Software Engineer',
+      contact: { email: 'jane@example.com', phone: '123-456-7890', location: 'New York' },
       summary: 'Experienced dev',
       skills: [],
       experience: [],
       education: [],
       languages: [],
+      projects: [],
+      certifications: [],
       createdAt: '',
       updatedAt: '',
-      template: 'default',
+      template: 'ats-professional',
     };
 
     mockJD = {

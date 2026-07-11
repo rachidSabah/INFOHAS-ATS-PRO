@@ -29,6 +29,7 @@ import { runOptimizationPipeline, type PipelineResult, type PipelineProgress } f
 import { createPlan } from "./pipeline-planner";
 import { analyzeCompanyIntelligence, analyzeSkillGap } from "./company-skill-agents";
 import { callAI, extractJSON } from "../ai";
+import { CoverLetterPlugin, InterviewPlugin } from "../plugin-sdk";
 import {
   type GlobalPipelineContext,
   type AgentState,
@@ -1286,33 +1287,27 @@ async function runCoverLetterAgent(resume: ResumeData, jd: JobDescription, compa
 
     const candidateSummary = `${resume.name}${resume.headline ? `, ${resume.headline}` : ""}`;
     const experienceSummary = resume.experience.slice(0, 3).map((e) => `${e.title} at ${e.company}`).join("; ");
-    const skillsSummary = resume.skills.slice(0, 10).map((s) => s.name).join(", ");
     const jobTitle = jd.title ?? "the role";
-    const jobSummary = jd.rawText?.slice(0, 800) ?? jd.keywords.join(", ");
 
-    const result = await withRetry(() => callAI({
-      systemPrompt: `You are a professional cover letter writer. Write a compelling, personalized cover letter of at least 400 words (minimum 2,500 characters). Structure: opening paragraph (hook + role interest), body (2-3 paragraphs matching experience to job requirements), closing (call to action). Plain text only — no headers, no markdown.`,
-      userPrompt: `Write a full cover letter for the following:
+    const plugin = new CoverLetterPlugin();
+    const mockCtx = {
+      resumeId: resume.id,
+      resume,
+      directive: {
+        id: "d-cover-letter",
+        resumeId: resume.id,
+        version: 1,
+        targetJobTitle: jd.title,
+        targetCompany: company,
+        jobDescription: jd.rawText,
+        createdAt: new Date().toISOString(),
+      },
+      metadata: {},
+    };
 
-CANDIDATE: ${candidateSummary}
-EXPERIENCE: ${experienceSummary}
-KEY SKILLS: ${skillsSummary}
-
-TARGET ROLE: ${jobTitle} at ${company || "the company"}
-JOB REQUIREMENTS: ${jobSummary}
-
-Instructions:
-- Address to: "Dear Hiring Team" or "Dear ${company || "the company"} Recruitment Team"
-- Open by expressing genuine interest in ${jobTitle} at ${company || "the company"}
-- In the body, connect the candidate's experience to 2-3 specific job requirements
-- Use professional, confident language — avoid generic phrases
-- Close with a clear call to action requesting an interview
-- Write at least 400 words
-
-Write the complete cover letter now:`,
-      maxTokens: 1200,
-      taskCategory: "document",
-    }), 1, "cover-letter");
+    const resCtx = await plugin.run(mockCtx);
+    const text = resCtx.metadata.coverLetter as string || "";
+    const result = { text, provider: "CoverLetterPlugin" };
 
     // === OUTPUT VALIDATION ===
     // Cover letter must be at least 500 characters. If the AI returned a
@@ -1385,34 +1380,25 @@ async function runInterviewAgent(
       return;
     }
 
-    const result = await withRetry(() => callAI({
-      systemPrompt: "You are an expert interview coach. Generate a tailored interview package based on the candidate's resume and the target job. You MUST return ONLY valid JSON — no prose, no markdown fences, no explanations. The JSON must have a top-level 'questions' array.",
-      userPrompt: `CANDIDATE RESUME: ${JSON.stringify({ name: resume.name, headline: resume.headline, experience: resume.experience.map((e) => ({ title: e.title, company: e.company, bullets: e.bullets.slice(0, 2) })), skills: resume.skills.map((s) => s.name) })}
+    const plugin = new InterviewPlugin();
+    const mockCtx = {
+      resumeId: resume.id,
+      resume,
+      directive: {
+        id: "d-interview",
+        resumeId: resume.id,
+        version: 1,
+        targetJobTitle: jd.title,
+        targetCompany: company,
+        jobDescription: jd.rawText,
+        createdAt: new Date().toISOString(),
+      },
+      metadata: {},
+    };
 
-JOB: ${jd.title ?? "Role"} at ${company || "the company"}
-JD: ${jd.rawText?.slice(0, 1500) ?? jd.keywords.join(", ")}
-
-${companyIntel ? `COMPANY INTELLIGENCE: values=${companyIntel.values?.join(", ")}, valued competencies=${companyIntel.valuedCompetencies?.join(", ")}` : ""}
-${skillGap ? `SKILL GAPS (focus questions here): critical=${skillGap.missingSkills?.critical?.join(", ")}` : ""}
-
-Generate exactly 9 interview questions (3 behavioral, 3 technical, 2 situational, 1 company-fit). For each question, provide a recommended answer, 3 talking points, and 2 follow-up questions.
-
-CRITICAL: Return ONLY this exact JSON shape (no other text):
-{"questions":[{"category":"Behavioral","question":"...","difficulty":"medium","recommendedAnswer":"...","talkingPoints":["...","...","..."],"followUps":["...","..."]}],"readinessScore":75,"weakAreas":["..."],"companyInsights":["..."]}
-
-The 'questions' array MUST contain exactly 9 objects. The 'readinessScore' MUST be a number between 1 and 100. Do NOT wrap the questions in any other key — use 'questions' as the top-level array.`,
-      maxTokens: 3000,
-      taskCategory: "document",
-    }), 1, "interview");
-
-    let data: any;
-    try { data = extractJSON<any>(result.text); }
-    catch {
-      // The AI returned non-JSON (prose, markdown, or empty). Log it so we
-      // can debug, then fall through to the fallback generator below.
-      console.warn("[InterviewAgent] AI did not return JSON. Response preview:", result.text?.slice(0, 200));
-      data = {};
-    }
+    const resCtx = await plugin.run(mockCtx);
+    const questions = resCtx.metadata.interviewQuestions as any[] || [];
+    let data: any = { questions };
 
     // === AGGRESSIVE DEFENSIVE NORMALIZATION ===
     // The AI may return questions under a different key name (e.g.

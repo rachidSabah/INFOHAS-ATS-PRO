@@ -8,7 +8,8 @@
 
 "use client";
 
-import type { Plugin, PluginManifest, HealthStatus } from "./interfaces/plugin";
+import type { Plugin } from "./interfaces/plugin";
+import type { PluginManifest, HealthStatus } from "./types";
 import type { ServiceContainer } from "./service-container";
 
 export interface MCPToolSchema {
@@ -53,11 +54,7 @@ export class MCPAdapter implements Plugin {
   }
 
   async healthCheck(): Promise<HealthStatus> {
-    return {
-      status: "healthy",
-      timestamp: new Date().toISOString(),
-      details: { registeredTools: this.tools.size },
-    };
+    return "healthy";
   }
 
   /**

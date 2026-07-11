@@ -375,7 +375,7 @@ export class ProviderRouter {
                 );
                 
                 // Swap alternate key with current primary key in store
-                const currentPrimaryKey = provider.apiKey;
+                const currentPrimaryKey = provider.apiKey || "";
                 const newAlternateKeys = [...(provider.alternateApiKeys || [])];
                 newAlternateKeys[ki] = currentPrimaryKey;
                 useApp.getState().updateProvider(provider.id, {
