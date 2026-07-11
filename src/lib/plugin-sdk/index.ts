@@ -24,3 +24,9 @@ export { EventBus } from './event-bus';
 export type { EventHandler } from './event-bus';
 export { HookSystem } from './hook-system';
 export type { HookName } from './hook-system';
+export { AgentRegistry } from './agent-registry';
+export type { AgentMetadata } from './agent-registry';
+export { MCPAdapter } from './mcp-adapter';
+export type { MCPTool, MCPToolSchema } from './mcp-adapter';
+
+

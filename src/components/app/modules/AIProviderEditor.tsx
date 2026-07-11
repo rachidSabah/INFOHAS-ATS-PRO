@@ -170,6 +170,7 @@ export function ProviderEditor({ provider, onClose, onSave }: {
                       type: form.type,
                       baseUrl: form.baseUrl,
                       apiKey: form.apiKey,
+                      alternateApiKeys: form.alternateApiKeys,
                       headersJson: form.headersJson,
                       authType: form.authType,
                       timeout: form.timeout,

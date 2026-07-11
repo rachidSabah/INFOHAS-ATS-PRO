@@ -145,3 +145,19 @@ export function getCacheStats(): {
     tokens: tokenCache.size,
   };
 }
+
+// Register with unified CacheManager facade (ADR-005)
+try {
+  const { CacheManager } = require("./cache");
+  CacheManager.register({
+    name: "provider",
+    clear: invalidateAllCaches,
+    getStats: getCacheStats,
+    get size() {
+      return providerCache.size + modelCache.size + enabledModelCache.size + sessionCache.size + tokenCache.size;
+    }
+  });
+} catch (e) {
+  // Safe failover
+}
+

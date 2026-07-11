@@ -37,4 +37,34 @@ export const prefetchCache = {
   setSkillGap: (resumeId: string, jdId: string, val: SkillGapIntelligence): void => {
     cache.skillGap[`${resumeId}:${jdId}`] = val;
   },
+  clear: (): void => {
+    cache.jobIntelligence = {};
+    cache.companyIntelligence = {};
+    cache.skillGap = {};
+  },
+  getStats: () => {
+    return {
+      jobIntelligence: Object.keys(cache.jobIntelligence).length,
+      companyIntelligence: Object.keys(cache.companyIntelligence).length,
+      skillGap: Object.keys(cache.skillGap).length,
+    };
+  }
 };
+
+// Register with unified CacheManager facade (ADR-005)
+try {
+  const { CacheManager } = require("./cache");
+  CacheManager.register({
+    name: "prefetch",
+    clear: () => prefetchCache.clear(),
+    getStats: () => prefetchCache.getStats(),
+    get size() {
+      return Object.keys(cache.jobIntelligence).length +
+        Object.keys(cache.companyIntelligence).length +
+        Object.keys(cache.skillGap).length;
+    }
+  });
+} catch (e) {
+  // Safe failover
+}
+

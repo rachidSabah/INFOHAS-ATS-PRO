@@ -192,3 +192,19 @@ export function getCacheStats(): { jobAnalysis: number; companyResearch: number;
     atsReport: [...atsReportCache.values()].filter((e) => e.expiresAt > now).length,
   };
 }
+
+// Register with unified CacheManager facade (ADR-005)
+try {
+  const { CacheManager } = require("./cache");
+  CacheManager.register({
+    name: "ai",
+    clear: clearAllCaches,
+    getStats: getCacheStats,
+    get size() {
+      return jobAnalysisCache.size + companyResearchCache.size + atsReportCache.size;
+    }
+  });
+} catch (e) {
+  // Safe failover
+}
+

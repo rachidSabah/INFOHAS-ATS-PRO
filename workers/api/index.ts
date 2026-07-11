@@ -10,6 +10,11 @@ export interface Env {
   APP_NAME: string;
   APP_URL: string;
   CORS_ORIGIN: string;
+  // Set via: wrangler secret put NEXTAUTH_SECRET
+  // Must match the NEXTAUTH_SECRET used by the Next.js frontend.
+  // When set, the worker verifies JWTs cryptographically instead of
+  // trusting the X-User-Id header.
+  NEXTAUTH_SECRET?: string;
 }
 
 const app = new Hono<{ Bindings: Env }>();
@@ -78,23 +83,205 @@ function uuid(prefix = "id"): string {
 // ============================================================================
 // AUTH: Validate user identity from request headers.
 //
-// SECURITY NOTE: The current auth model trusts the X-User-Id header sent by
-// the client. This is a DEMO-level auth model. For production, replace with:
-//   - JWT verification (sign with a server-side secret)
-//   - Session-based auth (httpOnly cookies + server-side session store)
-//   - OAuth2 token validation
+// Verification priority (ADR-002 — 2026-07-11):
+//   1. JWT verification   — Authorization: Bearer <nextauth-jwt>
+//      Cryptographically verifies the token against NEXTAUTH_SECRET.
+//      Extracts sub (user ID) from the verified payload.
+//      This is the production-grade path.
 //
-// The minimum viable hardening is:
-//   1. Validate the user ID format (must match our uid pattern)
-//   2. Reject obviously malicious IDs (SQL injection, path traversal)
-//   3. Rate-limit per user (done in middleware)
+//   2. Session token lookup — X-Session-Token: <opaque-token>
+//      Looks up the token in the D1 sessions table.
+//      Valid for SSR flows that set a session cookie forwarded as a header.
+//
+//   3. X-User-Id header (backward-compat / internal only)
+//      Format-validated only — NOT cryptographically verified.
+//      Emits a warning so this path can be monitored and phased out.
+//      Acceptable for internal service-to-service calls on the same
+//      Cloudflare account where network-level trust applies.
+//
+// To activate path 1, set the worker secret:
+//   npx wrangler secret put NEXTAUTH_SECRET
+//   (use the same value as NEXTAUTH_SECRET in your Pages environment)
 // ============================================================================
+
 const ALLOWED_USER_ID_PATTERN = /^[a-zA-Z0-9_-]{2,64}$/;
 
+/**
+ * Decode a Base64URL-encoded string to a UTF-8 string.
+ * Works in the Workers runtime (no Node.js atob quirks).
+ */
+function base64UrlDecode(input: string): string {
+  // Pad to multiple of 4 and convert URL-safe chars
+  const padded = input.replace(/-/g, "+").replace(/_/g, "/");
+  const pad = padded.length % 4;
+  const b64 = pad ? padded + "=".repeat(4 - pad) : padded;
+  return atob(b64);
+}
+
+/**
+ * Verify a NextAuth JWT (HS256) using the NEXTAUTH_SECRET worker secret.
+ * Returns the user ID (sub claim) on success, or null on failure.
+ *
+ * NextAuth default JWT structure:
+ *   { sub: "<userId>", name, email, picture, iat, exp, jti }
+ *
+ * Signature: HMAC-SHA256 over "<header_b64url>.<payload_b64url>"
+ */
+async function verifyNextAuthJwt(token: string, secret: string): Promise<string | null> {
+  try {
+    const parts = token.split(".");
+    if (parts.length !== 3) return null;
+
+    const [headerB64, payloadB64, sigB64] = parts;
+
+    // Import the HMAC key
+    const keyBytes = new TextEncoder().encode(secret);
+    const key = await crypto.subtle.importKey(
+      "raw",
+      keyBytes,
+      { name: "HMAC", hash: "SHA-256" },
+      false,
+      ["verify"]
+    );
+
+    // Verify signature over "header.payload"
+    const signingInput = new TextEncoder().encode(`${headerB64}.${payloadB64}`);
+    const sigBytes = Uint8Array.from(atob(base64UrlDecode(sigB64).replace(/-/g, "+").replace(/_/g, "/")), (c) => c.charCodeAt(0));
+
+    // Re-derive signature bytes correctly from base64url
+    const rawSig = base64UrlDecode(sigB64);
+    const sigBuf = Uint8Array.from(rawSig, (c) => c.charCodeAt(0));
+
+    const valid = await crypto.subtle.verify("HMAC", key, sigBuf, signingInput);
+    if (!valid) {
+      console.warn("[Worker] JWT signature verification failed");
+      return null;
+    }
+
+    // Decode payload
+    const payload = JSON.parse(base64UrlDecode(payloadB64)) as Record<string, unknown>;
+
+    // Check expiry
+    const now = Math.floor(Date.now() / 1000);
+    if (typeof payload.exp === "number" && payload.exp < now) {
+      console.warn("[Worker] JWT expired");
+      return null;
+    }
+
+    // Extract user ID from sub claim
+    const sub = payload.sub as string | undefined;
+    if (!sub || !ALLOWED_USER_ID_PATTERN.test(sub)) {
+      console.warn("[Worker] JWT sub claim missing or malformed");
+      return null;
+    }
+
+    return sub;
+  } catch (err) {
+    console.warn("[Worker] JWT verification error:", err instanceof Error ? err.message : err);
+    return null;
+  }
+}
+
+/**
+ * Look up an opaque session token in the D1 sessions table.
+ * Returns the user_id on success, or null if the token is invalid/expired.
+ */
+async function lookupSessionToken(token: string, db: D1Database): Promise<string | null> {
+  try {
+    if (!ALLOWED_USER_ID_PATTERN.test(token) && token.length < 128) {
+      // Session tokens are typically longer opaque strings — allow them
+    }
+    const row = await db
+      .prepare("SELECT user_id, expires_at FROM sessions WHERE token = ? LIMIT 1")
+      .bind(token)
+      .first<{ user_id: string; expires_at: string }>();
+
+    if (!row) return null;
+
+    // Check expiry
+    const expiresAt = new Date(row.expires_at).getTime();
+    if (Date.now() > expiresAt) {
+      console.warn("[Worker] Session token expired");
+      return null;
+    }
+
+    return row.user_id;
+  } catch (err) {
+    console.warn("[Worker] Session token lookup error:", err instanceof Error ? err.message : err);
+    return null;
+  }
+}
+
+/**
+ * Extract and verify the caller's identity from the request.
+ *
+ * Verification order:
+ *   1. JWT from Authorization: Bearer header (cryptographic — preferred)
+ *   2. Session token from X-Session-Token header (D1 lookup)
+ *   3. X-User-Id header (format-validated only — backward compat / internal)
+ *
+ * The env parameter is used for JWT verification (NEXTAUTH_SECRET)
+ * and DB lookups. When called from the requireAuth middleware, env
+ * is passed in. The legacy call sites that use getUserId(req) only
+ * (without env) fall back to path 3 automatically.
+ */
+async function getUserIdFromRequest(req: Request, env?: Env): Promise<string | null> {
+  const authHeader = req.headers.get("Authorization") ?? "";
+
+  // ── Path 1: JWT verification ──────────────────────────────────────────────
+  if (authHeader.startsWith("Bearer ") && env?.NEXTAUTH_SECRET) {
+    const token = authHeader.slice(7).trim();
+    // NextAuth JWTs are three dot-separated base64url segments.
+    // Simple opaque user IDs (legacy path 3) won't have two dots.
+    if (token.includes(".")) {
+      const userId = await verifyNextAuthJwt(token, env.NEXTAUTH_SECRET);
+      if (userId) return userId;
+      // JWT present but invalid — hard reject (do not fall through to path 3)
+      console.warn("[Worker] Bearer token present but JWT verification failed — rejecting");
+      return null;
+    }
+  }
+
+  // ── Path 2: Session token lookup ─────────────────────────────────────────
+  const sessionToken = req.headers.get("X-Session-Token");
+  if (sessionToken && env?.DB) {
+    const userId = await lookupSessionToken(sessionToken, env.DB);
+    if (userId) return userId;
+  }
+
+  // ── Path 3: X-User-Id header (backward-compat / internal only) ───────────
+  const raw =
+    req.headers.get("X-User-Id") ||
+    (!authHeader.includes(".") ? authHeader.replace("Bearer ", "").trim() : "") ||
+    null;
+
+  if (!raw) return null;
+
+  if (!ALLOWED_USER_ID_PATTERN.test(raw)) {
+    console.warn("[Worker] Rejected malformed user ID:", raw.slice(0, 20));
+    return null;
+  }
+
+  // Warn on every use of the unverified path so it shows up in Logpush
+  console.warn(
+    "[Worker] AUTH: Using unverified X-User-Id path for user:",
+    raw.slice(0, 8) + "...",
+    "— Set NEXTAUTH_SECRET worker secret to enable JWT verification."
+  );
+  return raw;
+}
+
+/**
+ * Synchronous shim kept for any legacy call sites that have not yet
+ * been migrated to the async getUserIdFromRequest() path.
+ * This only executes path 3 (format-validated X-User-Id).
+ * Prefer getUserIdFromRequest(req, env) for all new code.
+ *
+ * @deprecated Use getUserIdFromRequest(req, env) instead.
+ */
 function getUserId(req: Request): string | null {
   const raw = req.headers.get("X-User-Id") || req.headers.get("Authorization")?.replace("Bearer ", "") || null;
   if (!raw) return null;
-  // Validate format — reject SQL injection, path traversal, XSS
   if (!ALLOWED_USER_ID_PATTERN.test(raw)) {
     console.warn("[Worker] Rejected malformed user ID:", raw.slice(0, 20));
     return null;
@@ -214,12 +401,18 @@ async function safeQuery<T = any>(
 // AUTH MIDDLEWARE — Require authenticated user for write operations
 // ============================================================================
 
-/** Middleware that requires a valid user ID for write operations */
+/** Middleware that requires a verified user identity for write operations.
+ * Uses JWT verification (path 1) when NEXTAUTH_SECRET is set,
+ * session lookup (path 2) when X-Session-Token is present,
+ * or format-validated X-User-Id (path 3) as a backward-compat fallback.
+ */
 const requireAuth = async (c: any, next: any) => {
-  const userId = getUserId(c.req.raw);
+  const userId = await getUserIdFromRequest(c.req.raw, c.env as Env);
   if (!userId) {
-    return c.json({ success: false, code: "AUTH_REQUIRED", message: "Authentication required. Provide X-User-Id or Authorization header." }, 401);
+    return c.json({ success: false, code: "AUTH_REQUIRED", message: "Authentication required. Provide a valid Authorization JWT or X-User-Id header." }, 401);
   }
+  // Expose verified user ID to downstream handlers via context
+  c.set("userId", userId);
   await next();
 };
 

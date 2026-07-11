@@ -360,8 +360,15 @@ Guidelines:
 5. Do NOT use markdown formatting (e.g. **word**) inside the [PATCH] block fields. Plain text only.
 `;
 
-      const { ProviderRouter } = await import("@/lib/ai/services/router");
-      const response = await ProviderRouter.chat({
+      const { callAIStreamed } = await import("@/lib/ai");
+
+      // Insert placeholder for assistant response to stream into
+      setCopilotMessages((prev) => [...prev, { role: "assistant" as const, content: "" }]);
+
+      let accumulatedText = "";
+      const response = await callAIStreamed({
+        systemPrompt: `${systemPrompt}\n\nTARGET JOB:\n${jdParsed ? JSON.stringify({ title: jdParsed.title, company: jdParsed.company, keywords: jdParsed.keywords }) : "None"}\n\nCURRENT OPTIMIZED RESUME:\n${JSON.stringify(optimizedResume, null, 2)}`,
+        userPrompt: textToSend,
         messages: [
           {
             role: "system",
@@ -371,7 +378,30 @@ Guidelines:
         ],
         maxTokens: 1500,
         temperature: 0.65,
-      }, { agentTask: "document" });
+        taskCategory: "document"
+      }, (chunk) => {
+        accumulatedText += chunk;
+        let visibleText = accumulatedText;
+        if (visibleText.includes("[PATCH]")) {
+          visibleText = visibleText.split("[PATCH]")[0];
+        }
+        visibleText = visibleText
+          .replace(/\[PATCH\]\s*$/i, "")
+          .replace(/```json\s*$/i, "")
+          .replace(/```\s*$/i, "")
+          .trim();
+
+        setCopilotMessages((prev) => {
+          const next = [...prev];
+          if (next.length > 0) {
+            next[next.length - 1] = {
+              role: "assistant",
+              content: visibleText
+            };
+          }
+          return next;
+        });
+      });
 
       const reply = response.text || "";
       let cleanReply = reply;
@@ -404,7 +434,13 @@ Guidelines:
         .replace(/```\s*$/i, "")
         .trim();
 
-      setCopilotMessages((prev) => [...prev, { role: "assistant" as const, content: cleanReply }]);
+      setCopilotMessages((prev) => {
+        const next = [...prev];
+        if (next.length > 0) {
+          next[next.length - 1] = { role: "assistant" as const, content: cleanReply };
+        }
+        return next;
+      });
 
       if (patchData) {
         const nextResume = { ...optimizedResume };

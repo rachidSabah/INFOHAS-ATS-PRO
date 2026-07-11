@@ -64,7 +64,7 @@
     "planner": {
       "description": "Expert planning specialist for complex features and refactoring",
       "mode": "subagent",
-      "prompt": "{file:.opencode/prompts/agents/planner.txt}",
+      "prompt": "{file:node_modules/ecc-universal/.opencode/prompts/agents/planner.txt}",
       "tools": {
         "read": true,
         "bash": true
@@ -73,7 +73,7 @@
     "code-reviewer": {
       "description": "Expert code review specialist for quality, security, and maintainability",
       "mode": "subagent",
-      "prompt": "{file:.opencode/prompts/agents/code-reviewer.txt}",
+      "prompt": "{file:node_modules/ecc-universal/.opencode/prompts/agents/code-reviewer.txt}",
       "tools": {
         "read": true,
         "bash": true
@@ -82,7 +82,7 @@
     "security-reviewer": {
       "description": "Security vulnerability detection and remediation specialist",
       "mode": "subagent",
-      "prompt": "{file:.opencode/prompts/agents/security-reviewer.txt}",
+      "prompt": "{file:node_modules/ecc-universal/.opencode/prompts/agents/security-reviewer.txt}",
       "tools": {
         "read": true,
         "bash": true,
@@ -93,7 +93,7 @@
     "tdd-guide": {
       "description": "Test-Driven Development specialist enforcing write-tests-first, 80%+ coverage",
       "mode": "subagent",
-      "prompt": "{file:.opencode/prompts/agents/tdd-guide.txt}",
+      "prompt": "{file:node_modules/ecc-universal/.opencode/prompts/agents/tdd-guide.txt}",
       "tools": {
         "read": true,
         "write": true,
@@ -104,7 +104,7 @@
     "build-error-resolver": {
       "description": "Build and TypeScript error resolution specialist",
       "mode": "subagent",
-      "prompt": "{file:.opencode/prompts/agents/build-error-resolver.txt}",
+      "prompt": "{file:node_modules/ecc-universal/.opencode/prompts/agents/build-error-resolver.txt}",
       "tools": {
         "read": true,
         "write": true,
@@ -115,7 +115,7 @@
     "architect": {
       "description": "Software architecture specialist for system design and scalability",
       "mode": "subagent",
-      "prompt": "{file:.opencode/prompts/agents/architect.txt}",
+      "prompt": "{file:node_modules/ecc-universal/.opencode/prompts/agents/architect.txt}",
       "tools": {
         "read": true,
         "bash": true
@@ -124,7 +124,7 @@
     "e2e-runner": {
       "description": "End-to-end testing specialist using Playwright",
       "mode": "subagent",
-      "prompt": "{file:.opencode/prompts/agents/e2e-runner.txt}",
+      "prompt": "{file:node_modules/ecc-universal/.opencode/prompts/agents/e2e-runner.txt}",
       "tools": {
         "read": true,
         "write": true,
@@ -135,7 +135,7 @@
     "doc-updater": {
       "description": "Documentation and codemap specialist",
       "mode": "subagent",
-      "prompt": "{file:.opencode/prompts/agents/doc-updater.txt}",
+      "prompt": "{file:node_modules/ecc-universal/.opencode/prompts/agents/doc-updater.txt}",
       "tools": {
         "read": true,
         "write": true,
@@ -146,7 +146,7 @@
     "refactor-cleaner": {
       "description": "Dead code cleanup and consolidation specialist",
       "mode": "subagent",
-      "prompt": "{file:.opencode/prompts/agents/refactor-cleaner.txt}",
+      "prompt": "{file:node_modules/ecc-universal/.opencode/prompts/agents/refactor-cleaner.txt}",
       "tools": {
         "read": true,
         "write": true,
@@ -157,7 +157,7 @@
     "database-reviewer": {
       "description": "PostgreSQL / Prisma database specialist for query optimization and schema design",
       "mode": "subagent",
-      "prompt": "{file:.opencode/prompts/agents/database-reviewer.txt}",
+      "prompt": "{file:node_modules/ecc-universal/.opencode/prompts/agents/database-reviewer.txt}",
       "tools": {
         "read": true,
         "write": true,
@@ -168,7 +168,7 @@
     "python-reviewer": {
       "description": "Expert Python code reviewer for PEP 8, type hints, and security",
       "mode": "subagent",
-      "prompt": "{file:.opencode/prompts/agents/python-reviewer.txt}",
+      "prompt": "{file:node_modules/ecc-universal/.opencode/prompts/agents/python-reviewer.txt}",
       "tools": {
         "read": true,
         "bash": true
@@ -177,7 +177,7 @@
     "harness-optimizer": {
       "description": "Analyze and improve agent harness configuration for reliability, cost, and throughput",
       "mode": "subagent",
-      "prompt": "{file:.opencode/prompts/agents/harness-optimizer.txt}",
+      "prompt": "{file:node_modules/ecc-universal/.opencode/prompts/agents/harness-optimizer.txt}",
       "tools": {
         "read": true,
         "bash": true,
@@ -188,83 +188,83 @@
   "command": {
     "plan": {
       "description": "Create a detailed implementation plan for complex features",
-      "template": "{file:.opencode/commands/plan.md}\n\n$ARGUMENTS",
+      "template": "{file:node_modules/ecc-universal/.opencode/commands/plan.md}\n\n$ARGUMENTS",
       "agent": "planner",
       "subtask": true
     },
     "tdd": {
       "description": "Enforce TDD workflow with 80%+ test coverage",
-      "template": "{file:.opencode/commands/tdd.md}\n\n$ARGUMENTS",
+      "template": "{file:node_modules/ecc-universal/.opencode/commands/tdd.md}\n\n$ARGUMENTS",
       "agent": "tdd-guide",
       "subtask": true
     },
     "code-review": {
       "description": "Review code for quality, security, and maintainability",
-      "template": "{file:.opencode/commands/code-review.md}\n\n$ARGUMENTS",
+      "template": "{file:node_modules/ecc-universal/.opencode/commands/code-review.md}\n\n$ARGUMENTS",
       "agent": "code-reviewer",
       "subtask": true
     },
     "security": {
       "description": "Run comprehensive security review",
-      "template": "{file:.opencode/commands/security.md}\n\n$ARGUMENTS",
+      "template": "{file:node_modules/ecc-universal/.opencode/commands/security.md}\n\n$ARGUMENTS",
       "agent": "security-reviewer",
       "subtask": true
     },
     "build-fix": {
       "description": "Fix build and TypeScript errors with minimal changes",
-      "template": "{file:.opencode/commands/build-fix.md}\n\n$ARGUMENTS",
+      "template": "{file:node_modules/ecc-universal/.opencode/commands/build-fix.md}\n\n$ARGUMENTS",
       "agent": "build-error-resolver",
       "subtask": true
     },
     "e2e": {
       "description": "Generate and run E2E tests with Playwright",
-      "template": "{file:.opencode/commands/e2e.md}\n\n$ARGUMENTS",
+      "template": "{file:node_modules/ecc-universal/.opencode/commands/e2e.md}\n\n$ARGUMENTS",
       "agent": "e2e-runner",
       "subtask": true
     },
     "refactor-clean": {
       "description": "Remove dead code and consolidate duplicates",
-      "template": "{file:.opencode/commands/refactor-clean.md}\n\n$ARGUMENTS",
+      "template": "{file:node_modules/ecc-universal/.opencode/commands/refactor-clean.md}\n\n$ARGUMENTS",
       "agent": "refactor-cleaner",
       "subtask": true
     },
     "orchestrate": {
       "description": "Orchestrate multiple agents for complex tasks",
-      "template": "{file:.opencode/commands/orchestrate.md}\n\n$ARGUMENTS",
+      "template": "{file:node_modules/ecc-universal/.opencode/commands/orchestrate.md}\n\n$ARGUMENTS",
       "agent": "planner",
       "subtask": true
     },
     "learn": {
       "description": "Extract patterns and learnings from session",
-      "template": "{file:.opencode/commands/learn.md}\n\n$ARGUMENTS"
+      "template": "{file:node_modules/ecc-universal/.opencode/commands/learn.md}\n\n$ARGUMENTS"
     },
     "checkpoint": {
       "description": "Save verification state and progress",
-      "template": "{file:.opencode/commands/checkpoint.md}\n\n$ARGUMENTS"
+      "template": "{file:node_modules/ecc-universal/.opencode/commands/checkpoint.md}\n\n$ARGUMENTS"
     },
     "verify": {
       "description": "Run verification loop",
-      "template": "{file:.opencode/commands/verify.md}\n\n$ARGUMENTS"
+      "template": "{file:node_modules/ecc-universal/.opencode/commands/verify.md}\n\n$ARGUMENTS"
     },
     "eval": {
       "description": "Run evaluation against criteria",
-      "template": "{file:.opencode/commands/eval.md}\n\n$ARGUMENTS"
+      "template": "{file:node_modules/ecc-universal/.opencode/commands/eval.md}\n\n$ARGUMENTS"
     },
     "update-docs": {
       "description": "Update documentation",
-      "template": "{file:.opencode/commands/update-docs.md}\n\n$ARGUMENTS",
+      "template": "{file:node_modules/ecc-universal/.opencode/commands/update-docs.md}\n\n$ARGUMENTS",
       "agent": "doc-updater",
       "subtask": true
     },
     "test-coverage": {
       "description": "Analyze test coverage",
-      "template": "{file:.opencode/commands/test-coverage.md}\n\n$ARGUMENTS",
+      "template": "{file:node_modules/ecc-universal/.opencode/commands/test-coverage.md}\n\n$ARGUMENTS",
       "agent": "tdd-guide",
       "subtask": true
     },
     "skill-create": {
       "description": "Generate skills from patterns and learnings",
-      "template": "{file:.opencode/commands/skill-create.md}\n\n$ARGUMENTS"
+      "template": "{file:node_modules/ecc-universal/.opencode/commands/skill-create.md}\n\n$ARGUMENTS"
     }
   },
   "shell": "pwsh"

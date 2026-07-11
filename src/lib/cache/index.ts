@@ -11,9 +11,13 @@ export type { DedupeOptions, DedupeStats } from './request-dedup';
 export { CacheInvalidationService, createDefaultInvalidationRules } from './cache-invalidation';
 export type { InvalidationEvent, InvalidationStrategy, InvalidationRule } from './cache-invalidation';
 
+export { CacheManager } from './manager';
+export type { CacheBucket } from './manager';
+
 export type {
   KVNamespace, D1Database, D1PreparedStatement, D1Result,
   R2Bucket, R2Object, R2ObjectBody, R2PutOptions, R2GetOptions,
   Queue, DurableObjectNamespace, DurableObjectStub,
   CloudflareBindings,
 } from './cloudflare-types';
+

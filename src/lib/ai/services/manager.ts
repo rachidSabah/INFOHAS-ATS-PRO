@@ -231,7 +231,7 @@ export class ProviderManager {
    */
   static async fetchModelsForConfig(config: Partial<AIProvider>): Promise<{ ok: boolean; models: string[]; error?: string }> {
     try {
-      // Use the CORS proxy route instead of calling the provider API directly
+      // 1. Try primary key first
       const res = await fetch("/api/providers/models", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -243,16 +243,49 @@ export class ProviderManager {
         }),
       });
 
-      if (!res.ok) {
+      let errMessage = "";
+      if (res.ok) {
+        const data = (await res.json()) as any;
+        if (data.models && data.models.length > 0) {
+          return { ok: true, models: data.models };
+        }
+      } else {
         const err = (await res.json().catch(() => ({ error: `HTTP ${res.status}` }))) as any;
-        return { ok: false, models: [], error: err.error || `Failed to fetch models (${res.status})` };
+        errMessage = err.error || `Failed to fetch models (${res.status})`;
       }
 
-      const data = (await res.json()) as any;
-      if (data.models && data.models.length > 0) {
-        return { ok: true, models: data.models };
+      // 2. Try alternate keys if primary failed
+      const alternateKeys = config.alternateApiKeys;
+      if (alternateKeys && alternateKeys.length > 0) {
+        console.log(`[ProviderManager] Primary API key failed for prefetch. Trying ${alternateKeys.length} alternate keys...`);
+        for (let i = 0; i < alternateKeys.length; i++) {
+          const altKey = alternateKeys[i];
+          if (!altKey || altKey.trim() === "") continue;
+          try {
+            const altRes = await fetch("/api/providers/models", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                baseUrl: config.baseUrl,
+                apiKey: altKey,
+                authType: config.authType,
+                headersJson: config.headersJson,
+              }),
+            });
+            if (altRes.ok) {
+              const data = (await altRes.json()) as any;
+              if (data.models && data.models.length > 0) {
+                console.log(`[ProviderManager] Alternate API key #${i + 1} succeeded for prefetch.`);
+                return { ok: true, models: data.models };
+              }
+            }
+          } catch (altErr) {
+            // continue
+          }
+        }
       }
-      return { ok: false, models: [], error: "No models returned from the API." };
+
+      return { ok: false, models: [], error: errMessage || "No models returned from the API." };
     } catch (e: any) {
       return { ok: false, models: [], error: e?.message || "Failed to fetch models" };
     }

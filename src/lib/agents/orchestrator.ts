@@ -478,6 +478,8 @@ export interface PipelineInput {
   onProgress?: (progress: PipelineProgress) => void;
   /** Optional: baseline resume for diff-only processing */
   baselineResume?: ResumeData;
+  /** Optional: human approval gate callback to block and confirm critical pipeline steps */
+  requestApproval?: (stepName: string, details: string) => Promise<boolean>;
 }
 
 export interface PipelineProgress {
@@ -1236,7 +1238,7 @@ ${jobMemory.industry}`);
         log("Resume Optimizer", `Skipping V3 pipeline (locked pipeline already produced validated output).`);
       } else {
         try {
-          const { runV3PostOptimizationPipeline } = await import("../v3-agents");
+          const { runV3PostOptimizationPipeline } = await import("./supervisor");
           log("Resume Optimizer", `Running V3 post-optimization agents: Keyword Embedding → Fact Verification → Layout Optimization...`);
           emitProgress(3, `V3 agents: embedding keywords, verifying facts, optimizing layout...`);
 
@@ -1499,6 +1501,16 @@ ${jobMemory.industry}`);
       // Skip the throw — continue to QA step
     }
 
+    if (input.requestApproval && result.optimizedResume) {
+      const approved = await input.requestApproval(
+        "Apply Optimized Resume",
+        "The AI Optimizer has finished drafting adjustments. Do you approve applying these changes to your resume sections?"
+      );
+      if (!approved) {
+        throw new Error("Optimization cancelled: User rejected applying the draft optimizations.");
+      }
+    }
+
     step.completedAt = new Date().toISOString();
     step.durationMs = Date.now() - new Date(step.startedAt).getTime();
     step.status = "completed";
@@ -1543,6 +1555,16 @@ ${jobMemory.industry}`);
     const qaLog = `${passedChecks}/${totalChecks} checks passed. Confidence: ${result.qa.confidence}/100. ${result.qa.factualConsistency?.passed ? "No fabrication detected." : `⚠ ${result.qa.factualConsistency?.issueCount} factual issues.`}`;
     log("Quality Assurance", qaLog);
     emitProgress(4, qaLog);
+
+    if (input.requestApproval) {
+      const approved = await input.requestApproval(
+        "Finalize Optimized Resume",
+        `Quality Assurance completed: ${passedChecks}/${totalChecks} checks passed. Confidence: ${result.qa.confidence}/100. Do you approve saving and finalising the optimized resume?`
+      );
+      if (!approved) {
+        throw new Error("Optimization cancelled: User rejected the final quality checks.");
+      }
+    }
 
     // === HARDENED QA GATES (v2025.01.15) ===
     // Fabricated employers, education, and certifications are HARD FAILURES.
@@ -2083,7 +2105,7 @@ async function optimizeResumeStandard(
   if (deepAgenticMode) {
     try {
       console.info("[Optimizer] Deep Agentic Mode: Orchestrating via DynamicMultiAgentSupervisor.");
-      const { runDynamicMultiAgentOptimization } = await import("../multi-agent/dynamic-supervisor");
+      const { runDynamicMultiAgentOptimization } = await import("./supervisor");
       const supervisorResult = await runDynamicMultiAgentOptimization(
         resume,
         jd.rawText || jd.keywords.join("\n"),

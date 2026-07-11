@@ -1887,3 +1887,8 @@ export function resetSupervisor(): void {
   }
   setState((prev) => prev); // notify listeners
 }
+
+// Re-export parallel supervisor layers for unified entry point access (ADR-004)
+export { runV3PostOptimizationPipeline } from "../v3-agents";
+export { runDynamicMultiAgentOptimization } from "../multi-agent/dynamic-supervisor";
+

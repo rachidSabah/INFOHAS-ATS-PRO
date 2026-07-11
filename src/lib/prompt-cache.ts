@@ -223,3 +223,20 @@ export function getPromptCacheStats(): { total: number; valid: number; expired: 
     return { total: 0, valid: 0, expired: 0 };
   }
 }
+
+// Register with unified CacheManager facade (ADR-005)
+try {
+  const { CacheManager } = require("./cache");
+  CacheManager.register({
+    name: "prompt",
+    clear: clearPromptCache,
+    getStats: getPromptCacheStats,
+    get size() {
+      if (typeof window === "undefined") return 0;
+      return Object.keys(window.localStorage).filter((k) => k.startsWith(CACHE_PREFIX)).length;
+    }
+  });
+} catch (e) {
+  // Safe failover for build/Node environment where require/cache might differ
+}
+

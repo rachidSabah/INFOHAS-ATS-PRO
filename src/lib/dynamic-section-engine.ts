@@ -685,9 +685,6 @@ export function mergeDynamicSections(
     "skills",
     "languages",
     "additionalinformation",
-    "certifications",
-    "projects",
-    "achievements",
   ];
 
   for (const origSection of originalSections) {
@@ -839,9 +836,6 @@ export function runDynamicSectionPipeline(
       "skills",
       "languages",
       "additionalinformation",
-      "certifications",
-      "projects",
-      "achievements",
     ];
     for (const srcDs of sourceResume.dynamicSections) {
       if (standardTitles.includes(srcDs.normalizedTitle)) {
