@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -19,6 +19,41 @@ export function Settings() {
   const updateUserEmail = useApp((s) => s.updateUserEmail);
   const changePassword = useApp((s) => s.changePassword);
   const log = useApp((s) => s.log);
+  const setView = useApp((s) => s.setView);
+
+  // MCP Servers State
+  const [mcpServers, setMcpServers] = useState<Record<string, any>>({});
+  const [loadingMcp, setLoadingMcp] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+    const fetchMcp = async () => {
+      setLoadingMcp(true);
+      try {
+        const res = await fetch("/api/mcp");
+        const data = (await res.json()) as any;
+        if (!active) return;
+        const servers = data.mcpServers || {};
+        const enriched: Record<string, any> = {};
+        for (const [name, cfg] of Object.entries(servers)) {
+          let cachedTools = [];
+          try {
+            cachedTools = JSON.parse(localStorage.getItem(`mcp_tools_${name}`) || "[]");
+          } catch {}
+          enriched[name] = {
+            ...(cfg as any),
+            status: cachedTools.length > 0 ? "healthy" : "untested",
+          };
+        }
+        setMcpServers(enriched);
+      } catch {}
+      finally {
+        if (active) setLoadingMcp(false);
+      }
+    };
+    fetchMcp();
+    return () => { active = false; };
+  }, []);
 
   // Profile form state
   const [name, setName] = useState(user?.name ?? "");
@@ -248,6 +283,74 @@ export function Settings() {
             </div>
             <Switch checked={theme === "dark"} onCheckedChange={toggleTheme} />
           </div>
+        </CardContent>
+      </Card>
+
+      {/* Integrations & MCP Tools */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-lg flex items-center gap-2">
+            <Icon name="Plug" className="w-4 h-4 text-brand" /> Integrations & MCP Tools
+          </CardTitle>
+          <CardDescription>
+            Expose local command line or HTTP/SSE tools to your AI Resume Assistant.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          {loadingMcp ? (
+            <div className="flex items-center gap-2 p-3 text-xs text-muted-foreground">
+              <Icon name="Loader2" className="w-3.5 h-3.5 animate-spin text-brand" />
+              Loading configurations...
+            </div>
+          ) : Object.keys(mcpServers).length === 0 ? (
+            <div className="rounded-lg border border-border border-dashed p-4 text-center">
+              <p className="text-xs text-muted-foreground mb-3">
+                No Model Context Protocol (MCP) servers registered yet.
+              </p>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setView("integrations")}
+                className="text-xs gap-1.5"
+              >
+                <Icon name="Plus" className="w-3.5 h-3.5" /> Configure MCP Tools
+              </Button>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              <div className="grid gap-2 sm:grid-cols-2">
+                {Object.entries(mcpServers).map(([name, cfg]) => (
+                  <div
+                    key={name}
+                    className="p-3 rounded-lg border border-border bg-secondary/30 flex items-center justify-between gap-3 text-xs"
+                  >
+                    <div className="min-w-0">
+                      <div className="font-semibold truncate">{name}</div>
+                      <div className="text-[10px] text-muted-foreground truncate">
+                        {cfg.type === "sse" ? cfg.url : `${cfg.command} ${cfg.args?.join(" ") || ""}`}
+                      </div>
+                    </div>
+                    <Badge
+                      variant={cfg.status === "healthy" ? "success" : "outline"}
+                      className="text-[9px] px-1.5 py-0 capitalize"
+                    >
+                      {cfg.status}
+                    </Badge>
+                  </div>
+                ))}
+              </div>
+              <div className="flex justify-end pt-1">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setView("integrations")}
+                  className="text-xs gap-1.5"
+                >
+                  <Icon name="Settings" className="w-3.5 h-3.5" /> Manage MCP Servers
+                </Button>
+              </div>
+            </div>
+          )}
         </CardContent>
       </Card>
 

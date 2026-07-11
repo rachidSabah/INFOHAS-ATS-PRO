@@ -85,11 +85,53 @@ export function AICopilotPanel({
   const [modHistory, setModHistory] = useState<AIModification[]>([]);
 
   // Sub-tabs & STAR Builder & Verb scan states
-  const [subTab, setSubTab] = useState<"copilot" | "star" | "verbs">("copilot");
+  const [subTab, setSubTab] = useState<"copilot" | "star" | "verbs" | "mcp">("copilot");
   const [starST, setStarST] = useState("");
   const [starAction, setStarAction] = useState("");
   const [starResult, setStarResult] = useState("");
   const [starBullet, setStarBullet] = useState("");
+
+  // MCP States
+  const [mcpServers, setMcpServers] = useState<Record<string, any>>({});
+  const [loadingMcp, setLoadingMcp] = useState(false);
+  const [selectedMcpServer, setSelectedMcpServer] = useState<string | null>(null);
+
+  // Load MCP servers config for Copilot Panel
+  useEffect(() => {
+    if (subTab === "mcp") {
+      const fetchMcp = async () => {
+        setLoadingMcp(true);
+        try {
+          const res = await fetch("/api/mcp");
+          const data = (await res.json()) as any;
+          const servers = data.mcpServers || {};
+          const enriched: Record<string, any> = {};
+          let firstServer: string | null = null;
+          for (const [name, cfg] of Object.entries(servers)) {
+            if (!firstServer) firstServer = name;
+            let cachedTools = [];
+            try {
+              cachedTools = JSON.parse(localStorage.getItem(`mcp_tools_${name}`) || "[]");
+            } catch {}
+            enriched[name] = {
+              ...(cfg as any),
+              status: cachedTools.length > 0 ? "healthy" : "untested",
+              tools: cachedTools,
+            };
+          }
+          setMcpServers(enriched);
+          if (firstServer && !selectedMcpServer) {
+            setSelectedMcpServer(firstServer);
+          }
+        } catch (e) {
+          console.error("Failed to load MCP config for Copilot:", e);
+        } finally {
+          setLoadingMcp(false);
+        }
+      };
+      fetchMcp();
+    }
+  }, [subTab]);
 
   // Generation result states
   const [originalText, setOriginalText] = useState("");
@@ -525,6 +567,14 @@ Respond ONLY with a JSON object of the updated sections following this format, w
               >
                 Verbs Scan
               </button>
+              <button
+                onClick={() => setSubTab("mcp")}
+                className={`flex-1 py-2 text-center text-[10px] uppercase font-bold tracking-wider transition ${
+                  subTab === "mcp" ? "text-indigo-400 border-b border-indigo-500 bg-slate-800/10" : "text-slate-500 hover:text-slate-300"
+                }`}
+              >
+                MCP Tools
+              </button>
             </div>
           )}
 
@@ -924,6 +974,109 @@ Respond ONLY with a JSON object of the updated sections following this format, w
                         </div>
                       );
                     })()}
+                  </div>
+                )}
+
+                {subTab === "mcp" && (
+                  <div className="space-y-4">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-1.5">
+                        <Icon name="Cpu" className="w-4 h-4 text-indigo-400" />
+                        <span className="text-[10px] uppercase font-bold text-slate-400 tracking-wider">Model Context Protocol</span>
+                      </div>
+                    </div>
+
+                    {loadingMcp ? (
+                      <div className="flex items-center justify-center py-8">
+                        <Icon name="Loader2" className="w-5 h-5 animate-spin text-indigo-500" />
+                      </div>
+                    ) : Object.keys(mcpServers).length === 0 ? (
+                      <div className="text-center py-8 space-y-2">
+                        <Icon name="Cpu" className="w-8 h-8 text-slate-600 mx-auto" />
+                        <p className="text-xs text-slate-400">No MCP servers registered.</p>
+                      </div>
+                    ) : (
+                      <div className="space-y-3">
+                        <div className="flex gap-1.5 overflow-x-auto pb-1 scrollbar-thin">
+                          {Object.keys(mcpServers).map((name) => {
+                            const isSel = selectedMcpServer === name;
+                            const isHealthy = mcpServers[name].status === "healthy";
+                            return (
+                              <button
+                                key={name}
+                                onClick={() => setSelectedMcpServer(name)}
+                                className={`px-2 py-1 rounded text-[9px] font-bold uppercase tracking-wide shrink-0 transition flex items-center gap-1 ${
+                                  isSel
+                                    ? "bg-indigo-600 text-white"
+                                    : "bg-slate-800 text-slate-400 hover:text-slate-200"
+                                }`}
+                              >
+                                <span className={`w-1.5 h-1.5 rounded-full ${isHealthy ? "bg-emerald-400" : "bg-slate-500"}`} />
+                                {name}
+                              </button>
+                            );
+                          })}
+                        </div>
+
+                        {selectedMcpServer && mcpServers[selectedMcpServer] && (
+                          <div className="space-y-2.5">
+                            <div className="p-3 rounded-xl bg-slate-900 border border-slate-800 space-y-1.5">
+                              <div className="flex items-center justify-between">
+                                <span className="text-[10px] font-bold text-slate-400 uppercase">Server Status</span>
+                                <span className={`text-[9px] px-1.5 py-0.5 rounded font-bold uppercase tracking-wider ${
+                                  mcpServers[selectedMcpServer].status === "healthy"
+                                    ? "bg-emerald-950 text-emerald-400 border border-emerald-800/40"
+                                    : "bg-slate-950 text-slate-400 border border-slate-800/40"
+                                }`}>
+                                  {mcpServers[selectedMcpServer].status}
+                                </span>
+                              </div>
+                              <p className="text-[10px] text-slate-400 font-mono truncate">
+                                {mcpServers[selectedMcpServer].type === "sse"
+                                  ? mcpServers[selectedMcpServer].url
+                                  : `${mcpServers[selectedMcpServer].command} ${mcpServers[selectedMcpServer].args?.join(" ") || ""}`
+                                }
+                              </p>
+                            </div>
+
+                            <span className="text-[9px] uppercase font-bold text-slate-500 tracking-wider block">
+                              Exposed Capabilities ({mcpServers[selectedMcpServer].tools?.length || 0})
+                            </span>
+
+                            <div className="space-y-2 max-h-[220px] overflow-y-auto scrollbar-thin pr-1">
+                              {!mcpServers[selectedMcpServer].tools || mcpServers[selectedMcpServer].tools.length === 0 ? (
+                                <p className="text-[10px] text-slate-500 italic">No tools discovered. Run test connection in settings.</p>
+                              ) : (
+                                mcpServers[selectedMcpServer].tools.map((tool: any) => (
+                                  <div key={tool.name} className="p-2.5 rounded-lg border border-slate-800/60 bg-slate-950/40 space-y-1">
+                                    <div className="flex items-center justify-between">
+                                      <span className="font-mono text-[10px] font-bold text-indigo-400">{tool.name}</span>
+                                    </div>
+                                    <p className="text-[10px] text-slate-400 leading-relaxed">{tool.description}</p>
+                                    {tool.inputSchema?.properties && Object.keys(tool.inputSchema.properties).length > 0 && (
+                                      <div className="pt-1 space-y-0.5">
+                                        <span className="text-[8px] uppercase font-bold text-slate-500 tracking-wider">Params:</span>
+                                        <div className="p-1 rounded bg-slate-900/60 font-mono text-[8px] text-slate-400 flex flex-wrap gap-x-2 gap-y-0.5">
+                                          {Object.entries(tool.inputSchema.properties).map(([pName, pSpec]: [string, any]) => {
+                                            const isReq = tool.inputSchema.required?.includes(pName);
+                                            return (
+                                              <span key={pName} className="flex gap-0.5">
+                                                <span className={isReq ? "text-rose-400" : ""}>{pName}</span>
+                                                <span className="text-slate-600">({pSpec.type})</span>
+                                              </span>
+                                            );
+                                          })}
+                                        </div>
+                                      </div>
+                                    )}
+                                  </div>
+                                ))
+                              )}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </div>
                 )}
               </>

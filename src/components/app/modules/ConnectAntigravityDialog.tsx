@@ -62,6 +62,7 @@ const STEPS = [
 export function ConnectAntigravityDialog() {
   const storeProvider = useApp((s) => s.providers.find((p) => p.id === "p_antigravity"));
   const isAuthorizedInStore = !!storeProvider?.apiKey && storeProvider?.isActive;
+  const setView = useApp((s) => s.setView);
 
   const [state, setState] = useState<ConnectState>("idle");
   const [token, setToken] = useState("");
@@ -319,6 +320,21 @@ export function ConnectAntigravityDialog() {
               <p className="text-[11px] text-blue-700 dark:text-blue-300">
                 Your Google token is stored only in your browser session and never sent to any third-party server.
               </p>
+            </div>
+
+            <div className="pt-2.5 border-t border-border mt-1">
+              <p className="text-[10px] text-muted-foreground flex items-center gap-1">
+                <Icon name="Plug" className="w-3.5 h-3.5 text-brand" />
+                Want to connect custom local tools?
+              </p>
+              <Button
+                variant="link"
+                size="sm"
+                onClick={() => setView("integrations")}
+                className="text-[11px] p-0 text-brand font-semibold h-auto mt-0.5"
+              >
+                Configure MCP Servers &rarr;
+              </Button>
             </div>
           </div>
         )}

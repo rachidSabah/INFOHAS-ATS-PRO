@@ -19,6 +19,16 @@ import { scoreATS } from "@/lib/ats";
 import { exportResumePDF } from "@/lib/exporter";
 import { toast } from "sonner";
 import type { ResumeData } from "@/lib/types";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+
 
 // ============================================================================
 // Shared helpers
@@ -2342,8 +2352,26 @@ export function AiAchievement() {
 
 export function Integrations() {
   const resume = useResume();
+  const setView = useApp((s) => s.setView);
   const [emailTo, setEmailTo] = useState("");
   const [qrOpen, setQrOpen] = useState(false);
+  const [activeTab, setActiveTab] = useState("exports");
+
+  // MCP States
+  const [servers, setServers] = useState<Record<string, any>>({});
+  const [loadingConfig, setLoadingConfig] = useState(false);
+  const [selectedServerName, setSelectedServerName] = useState<string | null>(null);
+  const [testingServerName, setTestingServerName] = useState<string | null>(null);
+
+  // Dialog state
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const [isEditMode, setIsEditMode] = useState(false);
+  const [formName, setFormName] = useState("");
+  const [formType, setFormType] = useState<"stdio" | "sse">("stdio");
+  const [formCommand, setFormCommand] = useState("");
+  const [formArgs, setFormArgs] = useState("");
+  const [formUrl, setFormUrl] = useState("");
+  const [formEnv, setFormEnv] = useState("");
 
   const emailExport = () => {
     if (!resume) { toast.error("Create a resume first"); return; }
@@ -2430,32 +2458,399 @@ export function Integrations() {
     toast.success("Copied to clipboard in JSON Resume Schema!");
   };
 
+  const loadConfig = async () => {
+    setLoadingConfig(true);
+    try {
+      const res = await fetch("/api/mcp");
+      const data = (await res.json()) as any;
+      const mcpServers = data.mcpServers || {};
+
+      const enriched: Record<string, any> = {};
+      for (const [name, cfg] of Object.entries(mcpServers)) {
+        let cachedTools = [];
+        try {
+          cachedTools = JSON.parse(localStorage.getItem(`mcp_tools_${name}`) || "[]");
+        } catch {}
+        enriched[name] = {
+          ...(cfg as any),
+          status: cachedTools.length > 0 ? "healthy" : "untested",
+          tools: cachedTools
+        };
+      }
+      setServers(enriched);
+    } catch (err) {
+      toast.error("Failed to load MCP configurations.");
+    } finally {
+      setLoadingConfig(false);
+    }
+  };
+
+  useEffect(() => {
+    if (activeTab === "mcp") {
+      loadConfig();
+    }
+  }, [activeTab]);
+
+  const testConnection = async (serverName: string, config: any) => {
+    setTestingServerName(serverName);
+    const toastId = toast.loading(`Testing connection to ${serverName}...`);
+    try {
+      const res = await fetch("/api/mcp/test", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          type: config.type || "stdio",
+          command: config.command,
+          args: config.args,
+          url: config.url,
+          env: config.env
+        })
+      });
+      const data = (await res.json()) as any;
+      if (!res.ok || data.error) {
+        throw new Error(data.error || "Handshake failed");
+      }
+
+      localStorage.setItem(`mcp_tools_${serverName}`, JSON.stringify(data.tools || []));
+      setServers(prev => ({
+        ...prev,
+        [serverName]: {
+          ...prev[serverName],
+          status: "healthy",
+          tools: data.tools || []
+        }
+      }));
+      toast.success(`Success! Discovered ${data.tools?.length || 0} tool(s) on ${serverName}.`, { id: toastId });
+    } catch (err: any) {
+      setServers(prev => ({
+        ...prev,
+        [serverName]: {
+          ...prev[serverName],
+          status: "error",
+          error: err.message
+        }
+      }));
+      toast.error(`Connection failed: ${err.message}`, { id: toastId });
+    } finally {
+      setTestingServerName(null);
+    }
+  };
+
+  const saveServer = async () => {
+    if (!formName.trim()) {
+      toast.error("Server name is required");
+      return;
+    }
+
+    let parsedArgs = [];
+    if (formType === "stdio" && formArgs.trim()) {
+      try {
+        parsedArgs = JSON.parse(formArgs.trim());
+        if (!Array.isArray(parsedArgs)) throw new Error();
+      } catch (e) {
+        toast.error("Arguments must be a valid JSON array, e.g. [\"-y\", \"some-package\"]");
+        return;
+      }
+    }
+
+    let parsedEnv = {};
+    if (formType === "stdio" && formEnv.trim()) {
+      try {
+        parsedEnv = JSON.parse(formEnv.trim());
+      } catch (e) {
+        toast.error("Environment variables must be a valid JSON object, e.g. {\"API_KEY\": \"xyz\"}");
+        return;
+      }
+    }
+
+    const config = formType === "stdio" ? {
+      command: formCommand,
+      args: parsedArgs,
+      env: parsedEnv
+    } : {
+      type: "sse",
+      url: formUrl
+    };
+
+    const toastId = toast.loading("Saving configuration...");
+    try {
+      const res = await fetch("/api/mcp", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: formName.trim(), config })
+      });
+      if (!res.ok) throw new Error("Failed to save config");
+
+      toast.success(`Server ${formName} saved!`, { id: toastId });
+      setDialogOpen(false);
+      loadConfig();
+    } catch (err: any) {
+      toast.error(err.message, { id: toastId });
+    }
+  };
+
+  const deleteServer = async (serverName: string) => {
+    if (!confirm(`Delete MCP server "${serverName}"?`)) return;
+    const toastId = toast.loading(`Deleting ${serverName}...`);
+    try {
+      const res = await fetch(`/api/mcp?name=${encodeURIComponent(serverName)}`, {
+        method: "DELETE"
+      });
+      if (!res.ok) throw new Error("Failed to delete config");
+
+      localStorage.removeItem(`mcp_tools_${serverName}`);
+      toast.success(`${serverName} deleted!`, { id: toastId });
+      loadConfig();
+    } catch (err: any) {
+      toast.error(err.message, { id: toastId });
+    }
+  };
+
+  const openAddDialog = () => {
+    setIsEditMode(false);
+    setFormName("");
+    setFormType("stdio");
+    setFormCommand("");
+    setFormArgs("");
+    setFormUrl("");
+    setFormEnv("");
+    setDialogOpen(true);
+  };
+
+  const openEditDialog = (name: string, cfg: any) => {
+    setIsEditMode(true);
+    setFormName(name);
+    setFormType(cfg.type === "sse" ? "sse" : "stdio");
+    setFormCommand(cfg.command || "");
+    setFormArgs(cfg.args ? JSON.stringify(cfg.args) : "");
+    setFormUrl(cfg.url || "");
+    setFormEnv(cfg.env ? JSON.stringify(cfg.env) : "");
+    setDialogOpen(true);
+  };
+
   const shareUrl = typeof window !== "undefined" ? `${window.location.origin}/r/${resume?.id || ""}` : "";
 
   return (
     <div className="space-y-6">
-      <div><h1 className="font-display text-2xl font-bold flex items-center gap-2"><Icon name="Plug" className="w-6 h-6 text-brand" /> Integrations</h1><p className="text-sm text-muted-foreground mt-1">Export and share your resume across platforms.</p></div>
-      <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
-        <Card><CardContent className="p-4"><div className="flex items-center gap-3 mb-3"><Icon name="Linkedin" className="w-8 h-8 text-[#0A66C2]" /><div><div className="font-semibold text-sm">LinkedIn Export</div><div className="text-xs text-muted-foreground">Push content to LinkedIn</div></div></div><Button size="sm" variant="outline" onClick={linkedinExport} className="w-full gap-2"><Icon name="ExternalLink" className="w-3.5 h-3.5" /> Export to LinkedIn</Button></CardContent></Card>
-        <Card><CardContent className="p-4"><div className="flex items-center gap-3 mb-3"><Icon name="Mail" className="w-8 h-8 text-[#EA4335]" /><div><div className="font-semibold text-sm">Email Export</div><div className="text-xs text-muted-foreground">Send to recruiter</div></div></div><Input value={emailTo} onChange={(e) => setEmailTo(e.target.value)} placeholder="recruiter@company.com" className="mb-2 h-8 text-xs" /><Button size="sm" variant="outline" onClick={emailExport} className="w-full gap-2"><Icon name="Send" className="w-3.5 h-3.5" /> Send via Email</Button></CardContent></Card>
-        <Card><CardContent className="p-4"><div className="flex items-center gap-3 mb-3"><Icon name="MessageCircle" className="w-8 h-8 text-[#25D366]" /><div><div className="font-semibold text-sm">WhatsApp Share</div><div className="text-xs text-muted-foreground">Share via WhatsApp</div></div></div><Button size="sm" variant="outline" onClick={whatsappShare} className="w-full gap-2"><Icon name="Share2" className="w-3.5 h-3.5" /> Share on WhatsApp</Button></CardContent></Card>
-        <Card><CardContent className="p-4"><div className="flex items-center gap-3 mb-3"><Icon name="FileText" className="w-8 h-8 text-[#000000]" /><div><div className="font-semibold text-sm">Notion Sync</div><div className="text-xs text-muted-foreground">Format for Notion</div></div></div><Button size="sm" variant="outline" onClick={notionExport} className="w-full gap-2"><Icon name="Copy" className="w-3.5 h-3.5" /> Copy for Notion</Button></CardContent></Card>
-        <Card><CardContent className="p-4"><div className="flex items-center gap-3 mb-3"><Icon name="HardDrive" className="w-8 h-8 text-[#4285F4]" /><div><div className="font-semibold text-sm">Google Drive</div><div className="text-xs text-muted-foreground">Backup as JSON</div></div></div><Button size="sm" variant="outline" onClick={gdriveBackup} className="w-full gap-2"><Icon name="Download" className="w-3.5 h-3.5" /> Download Backup</Button></CardContent></Card>
-        <Card><CardContent className="p-4"><div className="flex items-center gap-3 mb-3"><Icon name="Calendar" className="w-8 h-8 text-[#4285F4]" /><div><div className="font-semibold text-sm">Calendar</div><div className="text-xs text-muted-foreground">Schedule interview</div></div></div><Button size="sm" variant="outline" onClick={() => { window.open("https://calendar.google.com/calendar/render?action=TEMPLATE&text=Interview&dates=20260620T100000Z/20260620T110000Z&details=Interview%20scheduled%20from%20ResumeAI%20Pro"); toast.success("Calendar opened"); }} className="w-full gap-2"><Icon name="Plus" className="w-3.5 h-3.5" /> Add to Calendar</Button></CardContent></Card>
-        <Card><CardContent className="p-4"><div className="flex items-center gap-3 mb-3"><Icon name="QrCode" className="w-8 h-8 text-[#9333EA]" /><div><div className="font-semibold text-sm">QR Code Share</div><div className="text-xs text-muted-foreground">Mobile access code</div></div></div><Button size="sm" variant="outline" onClick={() => { if (!resume) { toast.error("Create a resume first"); return; } setQrOpen(true); }} className="w-full gap-2"><Icon name="QrCode" className="w-3.5 h-3.5" /> Show QR Code</Button></CardContent></Card>
-        <Card><CardContent className="p-4"><div className="flex items-center gap-3 mb-3"><Icon name="Code" className="w-8 h-8 text-[#059669]" /><div><div className="font-semibold text-sm">JSON Resume</div><div className="text-xs text-muted-foreground">jsonresume.org Schema</div></div></div><Button size="sm" variant="outline" onClick={jsonResumeExport} className="w-full gap-2"><Icon name="Copy" className="w-3.5 h-3.5" /> Copy JSON Schema</Button></CardContent></Card>
-        <Card><CardContent className="p-4"><div className="flex items-center gap-3 mb-3"><Icon name="FileDown" className="w-8 h-8 text-[#DC2626]" /><div><div className="font-semibold text-sm">Markdown Export</div><div className="text-xs text-muted-foreground">Download as .md file</div></div></div><Button size="sm" variant="outline" onClick={markdownExport} className="w-full gap-2"><Icon name="Download" className="w-3.5 h-3.5" /> Download Markdown</Button></CardContent></Card>
+      {/* Page Header */}
+      <div>
+        <h1 className="font-display text-2xl font-bold flex items-center gap-2">
+          <Icon name="Plug" className="w-6 h-6 text-brand" /> Integrations
+        </h1>
+        <p className="text-sm text-muted-foreground mt-1">
+          Export your resume, share pages, or register Model Context Protocol (MCP) tool endpoints.
+        </p>
       </div>
 
+      <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
+        <TabsList>
+          <TabsTrigger value="exports" className="gap-1.5">
+            <Icon name="Share2" className="w-3.5 h-3.5" /> Sharing & Exports
+          </TabsTrigger>
+          <TabsTrigger value="mcp" className="gap-1.5">
+            <Icon name="Cpu" className="w-3.5 h-3.5" /> MCP Tools
+          </TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="exports" className="space-y-4">
+          <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
+            <Card><CardContent className="p-4"><div className="flex items-center gap-3 mb-3"><Icon name="Linkedin" className="w-8 h-8 text-[#0A66C2]" /><div><div className="font-semibold text-sm">LinkedIn Export</div><div className="text-xs text-muted-foreground">Push content to LinkedIn</div></div></div><Button size="sm" variant="outline" onClick={linkedinExport} className="w-full gap-2"><Icon name="ExternalLink" className="w-3.5 h-3.5" /> Export to LinkedIn</Button></CardContent></Card>
+            <Card><CardContent className="p-4"><div className="flex items-center gap-3 mb-3"><Icon name="Mail" className="w-8 h-8 text-[#EA4335]" /><div><div className="font-semibold text-sm">Email Export</div><div className="text-xs text-muted-foreground">Send to recruiter</div></div></div><Input value={emailTo} onChange={(e) => setEmailTo(e.target.value)} placeholder="recruiter@company.com" className="mb-2 h-8 text-xs" /><Button size="sm" variant="outline" onClick={emailExport} className="w-full gap-2"><Icon name="Send" className="w-3.5 h-3.5" /> Send via Email</Button></CardContent></Card>
+            <Card><CardContent className="p-4"><div className="flex items-center gap-3 mb-3"><Icon name="MessageCircle" className="w-8 h-8 text-[#25D366]" /><div><div className="font-semibold text-sm">WhatsApp Share</div><div className="text-xs text-muted-foreground">Share via WhatsApp</div></div></div><Button size="sm" variant="outline" onClick={whatsappShare} className="w-full gap-2"><Icon name="Share2" className="w-3.5 h-3.5" /> Share on WhatsApp</Button></CardContent></Card>
+            <Card><CardContent className="p-4"><div className="flex items-center gap-3 mb-3"><Icon name="FileText" className="w-8 h-8 text-[#000000]" /><div><div className="font-semibold text-sm">Notion Sync</div><div className="text-xs text-muted-foreground">Format for Notion</div></div></div><Button size="sm" variant="outline" onClick={notionExport} className="w-full gap-2"><Icon name="Copy" className="w-3.5 h-3.5" /> Copy for Notion</Button></CardContent></Card>
+            <Card><CardContent className="p-4"><div className="flex items-center gap-3 mb-3"><Icon name="HardDrive" className="w-8 h-8 text-[#4285F4]" /><div><div className="font-semibold text-sm">Google Drive</div><div className="text-xs text-muted-foreground">Backup as JSON</div></div></div><Button size="sm" variant="outline" onClick={gdriveBackup} className="w-full gap-2"><Icon name="Download" className="w-3.5 h-3.5" /> Download Backup</Button></CardContent></Card>
+            <Card><CardContent className="p-4"><div className="flex items-center gap-3 mb-3"><Icon name="Calendar" className="w-8 h-8 text-[#4285F4]" /><div><div className="font-semibold text-sm">Calendar</div><div className="text-xs text-muted-foreground">Schedule interview</div></div></div><Button size="sm" variant="outline" onClick={() => { window.open("https://calendar.google.com/calendar/render?action=TEMPLATE&text=Interview&dates=20260620T100000Z/20260620T110000Z&details=Interview%20scheduled%20from%20ResumeAI%20Pro"); toast.success("Calendar opened"); }} className="w-full gap-2"><Icon name="Plus" className="w-3.5 h-3.5" /> Add to Calendar</Button></CardContent></Card>
+            <Card><CardContent className="p-4"><div className="flex items-center gap-3 mb-3"><Icon name="QrCode" className="w-8 h-8 text-[#9333EA]" /><div><div className="font-semibold text-sm">QR Code Share</div><div className="text-xs text-muted-foreground">Mobile access code</div></div></div><Button size="sm" variant="outline" onClick={() => { if (!resume) { toast.error("Create a resume first"); return; } setQrOpen(true); }} className="w-full gap-2"><Icon name="QrCode" className="w-3.5 h-3.5" /> Show QR Code</Button></CardContent></Card>
+            <Card><CardContent className="p-4"><div className="flex items-center gap-3 mb-3"><Icon name="Code" className="w-8 h-8 text-[#059669]" /><div><div className="font-semibold text-sm">JSON Resume</div><div className="text-xs text-muted-foreground">jsonresume.org Schema</div></div></div><Button size="sm" variant="outline" onClick={jsonResumeExport} className="w-full gap-2"><Icon name="Copy" className="w-3.5 h-3.5" /> Copy JSON Schema</Button></CardContent></Card>
+            <Card><CardContent className="p-4"><div className="flex items-center gap-3 mb-3"><Icon name="FileDown" className="w-8 h-8 text-[#DC2626]" /><div><div className="font-semibold text-sm">Markdown Export</div><div className="text-xs text-muted-foreground">Download as .md file</div></div></div><Button size="sm" variant="outline" onClick={markdownExport} className="w-full gap-2"><Icon name="Download" className="w-3.5 h-3.5" /> Download Markdown</Button></CardContent></Card>
+          </div>
+        </TabsContent>
+
+        <TabsContent value="mcp" className="space-y-6">
+          <div className="flex items-center justify-between flex-wrap gap-2">
+            <div>
+              <h2 className="text-lg font-bold flex items-center gap-2">
+                <Icon name="Cpu" className="w-5 h-5 text-brand" /> Model Context Protocol (MCP) Servers
+              </h2>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                Register server tools that local AI models can invoke automatically.
+              </p>
+            </div>
+            <Button onClick={openAddDialog} className="bg-brand hover:bg-brand-dark text-white gap-1.5">
+              <Icon name="Plus" className="w-4 h-4" /> Register MCP Server
+            </Button>
+          </div>
+
+          {loadingConfig ? (
+            <div className="flex items-center justify-center p-12">
+              <Icon name="Loader2" className="w-8 h-8 animate-spin text-brand" />
+            </div>
+          ) : Object.keys(servers).length === 0 ? (
+            <Card className="border-dashed p-10 text-center">
+              <Icon name="Cpu" className="w-10 h-10 text-muted-foreground/60 mx-auto mb-3" />
+              <div className="font-semibold text-sm">No MCP servers registered</div>
+              <p className="text-xs text-muted-foreground mt-1 max-w-sm mx-auto">
+                Model Context Protocol allows external tools (like Chrome DevTools, File managers, or Web Search APIs) to connect directly to your AI.
+              </p>
+              <Button size="sm" onClick={openAddDialog} className="mt-4 bg-brand hover:bg-brand-dark text-white">
+                Register your first server
+              </Button>
+            </Card>
+          ) : (
+            <div className="grid gap-6 md:grid-cols-3">
+              {/* Server List */}
+              <div className="md:col-span-1 space-y-3">
+                <span className="text-[10px] uppercase font-bold text-muted-foreground tracking-wider">Registered Servers</span>
+                {Object.entries(servers).map(([name, cfg]) => {
+                  const statusColor = cfg.status === "healthy" ? "success" : cfg.status === "error" ? "danger" : "outline";
+                  const isSelected = selectedServerName === name;
+                  return (
+                    <Card
+                      key={name}
+                      onClick={() => setSelectedServerName(name)}
+                      className={`cursor-pointer transition-all hover:border-brand/40 ${isSelected ? "border-brand bg-brand-light/10 shadow-premium" : "border-border"}`}
+                    >
+                      <CardContent className="p-4 space-y-3">
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="min-w-0">
+                            <div className="font-semibold text-sm flex items-center gap-1.5">
+                              <Icon name="Cpu" className="w-4 h-4 text-brand shrink-0" />
+                              <span className="truncate">{name}</span>
+                            </div>
+                            <span className="text-[10px] text-muted-foreground capitalize mt-0.5 block">
+                              {cfg.type === "sse" ? "SSE (URL)" : "Stdio (Command)"}
+                            </span>
+                          </div>
+                          <Badge variant={statusColor as any} className="capitalize text-[9px] px-1.5 py-0">
+                            {cfg.status}
+                          </Badge>
+                        </div>
+
+                        <div className="text-xs font-mono bg-secondary/60 p-2 rounded truncate max-w-full text-foreground/80">
+                          {cfg.type === "sse" ? cfg.url : `${cfg.command} ${cfg.args?.join(" ") || ""}`}
+                        </div>
+
+                        <div className="flex items-center justify-between border-t border-border/60 pt-2 text-xs">
+                          <span className="text-[10px] text-muted-foreground">
+                            {cfg.tools?.length || 0} tool(s) discovered
+                          </span>
+                          <div className="flex gap-1">
+                            <button
+                              onClick={(e) => { e.stopPropagation(); testConnection(name, cfg); }}
+                              disabled={testingServerName === name}
+                              className="p-1 rounded hover:bg-secondary text-muted-foreground hover:text-brand"
+                              title="Test Connection"
+                            >
+                              <Icon
+                                name={testingServerName === name ? "Loader2" : "Zap"}
+                                className={`w-3.5 h-3.5 ${testingServerName === name ? "animate-spin text-brand" : "text-amber-500"}`}
+                              />
+                            </button>
+                            <button
+                              onClick={(e) => { e.stopPropagation(); openEditDialog(name, cfg); }}
+                              className="p-1 rounded hover:bg-secondary text-muted-foreground hover:text-foreground"
+                              title="Edit Server"
+                            >
+                              <Icon name="Pencil" className="w-3.5 h-3.5" />
+                            </button>
+                            <button
+                              onClick={(e) => { e.stopPropagation(); deleteServer(name); }}
+                              className="p-1 rounded hover:bg-secondary text-muted-foreground hover:text-destructive"
+                              title="Delete Server"
+                            >
+                              <Icon name="Trash2" className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        </div>
+                      </CardContent>
+                    </Card>
+                  );
+                })}
+              </div>
+
+              {/* Tools list */}
+              <div className="md:col-span-2 space-y-3">
+                <span className="text-[10px] uppercase font-bold text-muted-foreground tracking-wider">
+                  Discovered Tools {selectedServerName ? `for ${selectedServerName}` : ""}
+                </span>
+
+                {selectedServerName && servers[selectedServerName] ? (
+                  <Card className="border-border">
+                    <CardHeader className="p-4 border-b border-border bg-secondary/30">
+                      <CardTitle className="text-sm font-semibold flex items-center justify-between">
+                        <span>Tools Explorer</span>
+                        <Badge variant="outline" className="text-[10px] font-mono font-medium">
+                          {servers[selectedServerName].tools?.length || 0} available
+                        </Badge>
+                      </CardTitle>
+                      <CardDescription className="text-xs">
+                        The following capabilities will be exposed to the AI Copilot.
+                      </CardDescription>
+                    </CardHeader>
+                    <CardContent className="p-4 space-y-4">
+                      {servers[selectedServerName].status === "error" && servers[selectedServerName].error && (
+                        <div className="p-3 rounded-lg bg-destructive/10 border border-destructive/30 flex items-start gap-2">
+                          <Icon name="AlertTriangle" className="w-4 h-4 text-destructive shrink-0 mt-0.5" />
+                          <div className="text-xs text-destructive">
+                            <span className="font-semibold block">Handshake Error:</span>
+                            {servers[selectedServerName].error}
+                          </div>
+                        </div>
+                      )}
+
+                      {!servers[selectedServerName].tools || servers[selectedServerName].tools.length === 0 ? (
+                        <div className="text-center py-10 text-xs text-muted-foreground">
+                          No tools discovered. Click the connection test (Zap icon) to start handshake.
+                        </div>
+                      ) : (
+                        <div className="space-y-4 max-h-[350px] overflow-y-auto pr-1">
+                          {servers[selectedServerName].tools.map((tool: any) => (
+                            <div key={tool.name} className="p-3 rounded-lg border border-border bg-secondary/15 space-y-2">
+                              <div className="flex items-center justify-between">
+                                <span className="font-mono text-xs font-bold text-brand">{tool.name}</span>
+                                <Badge variant="outline" className="text-[9px] uppercase tracking-wide">
+                                  Action Tool
+                                </Badge>
+                              </div>
+                              <p className="text-xs text-muted-foreground">{tool.description}</p>
+                              {tool.inputSchema?.properties && Object.keys(tool.inputSchema.properties).length > 0 && (
+                                <div className="space-y-1">
+                                  <span className="text-[10px] uppercase font-bold text-muted-foreground/80 block">Arguments:</span>
+                                  <div className="grid gap-1.5 p-2 bg-secondary/50 rounded-md font-mono text-[10px] text-foreground/80">
+                                    {Object.entries(tool.inputSchema.properties).map(([argName, argSpec]: [string, any]) => {
+                                      const isReq = tool.inputSchema.required?.includes(argName);
+                                      return (
+                                        <div key={argName} className="flex justify-between">
+                                          <span>{argName}: <span className="text-muted-foreground">({argSpec.type})</span></span>
+                                          {isReq && <span className="text-rose-500 font-bold text-[9px] uppercase">Required</span>}
+                                        </div>
+                                      );
+                                    })}
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </CardContent>
+                  </Card>
+                ) : (
+                  <Card className="border-dashed p-10 text-center text-xs text-muted-foreground">
+                    Select a registered server from the list to view its tools.
+                  </Card>
+                )}
+              </div>
+            </div>
+          )}
+        </TabsContent>
+      </Tabs>
+
+      {/* QR Code Share Modal */}
       {qrOpen && resume && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-in fade-in duration-200">
           <Card className="max-w-sm w-full p-6 text-center space-y-4 animate-in zoom-in-95 duration-200 shadow-premium relative bg-card border border-border">
-            <Button
-              variant="ghost"
-              size="icon"
-              className="absolute right-3 top-3"
-              onClick={() => setQrOpen(false)}
-            >
+            <Button variant="ghost" size="icon" className="absolute right-3 top-3" onClick={() => setQrOpen(false)}>
               <Icon name="X" className="w-4 h-4" />
             </Button>
             <div className="font-display text-lg font-bold">QR Code Share</div>
@@ -2472,6 +2867,119 @@ export function Integrations() {
           </Card>
         </div>
       )}
+
+      {/* Register / Edit MCP Dialog */}
+      <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
+        <DialogContent className="max-w-md bg-card border border-border shadow-premium text-foreground">
+          <DialogHeader>
+            <DialogTitle className="text-md font-bold">
+              {isEditMode ? "Edit MCP Server" : "Register MCP Server"}
+            </DialogTitle>
+            <DialogDescription className="text-xs text-muted-foreground">
+              Expose local tools to your resume assistant using Model Context Protocol.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4 py-2 text-xs">
+            {/* Server Name */}
+            <div className="space-y-1.5">
+              <Label className="text-[10px] uppercase tracking-wider text-muted-foreground font-bold">Server Name</Label>
+              <Input
+                value={formName}
+                onChange={(e) => setFormName(e.target.value)}
+                placeholder="e.g. chrome-devtools"
+                disabled={isEditMode}
+                className="h-9 text-xs"
+              />
+            </div>
+
+            {/* Transport Type */}
+            <div className="space-y-1.5">
+              <Label className="text-[10px] uppercase tracking-wider text-muted-foreground font-bold">Transport Type</Label>
+              <div className="flex gap-2">
+                <Button
+                  size="sm"
+                  variant={formType === "stdio" ? "default" : "outline"}
+                  onClick={() => setFormType("stdio")}
+                  className="flex-1 text-xs"
+                >
+                  Stdio (Command)
+                </Button>
+                <Button
+                  size="sm"
+                  variant={formType === "sse" ? "default" : "outline"}
+                  onClick={() => setFormType("sse")}
+                  className="flex-1 text-xs"
+                >
+                  SSE (URL Stream)
+                </Button>
+              </div>
+            </div>
+
+            {formType === "stdio" ? (
+              <>
+                {/* Command */}
+                <div className="space-y-1.5">
+                  <Label className="text-[10px] uppercase tracking-wider text-muted-foreground font-bold">Executable Command</Label>
+                  <Input
+                    value={formCommand}
+                    onChange={(e) => setFormCommand(e.target.value)}
+                    placeholder="e.g. npx, node, python"
+                    className="h-9 text-xs font-mono"
+                  />
+                </div>
+
+                {/* Arguments */}
+                <div className="space-y-1.5">
+                  <Label className="text-[10px] uppercase tracking-wider text-muted-foreground font-bold">
+                    Arguments (JSON Array)
+                  </Label>
+                  <Input
+                    value={formArgs}
+                    onChange={(e) => setFormArgs(e.target.value)}
+                    placeholder='e.g. ["-y", "chrome-devtools-mcp@latest"]'
+                    className="h-9 text-xs font-mono"
+                  />
+                </div>
+
+                {/* Env Variables */}
+                <div className="space-y-1.5">
+                  <Label className="text-[10px] uppercase tracking-wider text-muted-foreground font-bold">
+                    Environment Variables (JSON Object - Optional)
+                  </Label>
+                  <Input
+                    value={formEnv}
+                    onChange={(e) => setFormEnv(e.target.value)}
+                    placeholder='e.g. {"PORT": 9222}'
+                    className="h-9 text-xs font-mono"
+                  />
+                </div>
+              </>
+            ) : (
+              /* SSE URL */
+              <div className="space-y-1.5">
+                <Label className="text-[10px] uppercase tracking-wider text-muted-foreground font-bold">SSE Endpoint URL</Label>
+                <Input
+                  value={formUrl}
+                  onChange={(e) => setFormUrl(e.target.value)}
+                  placeholder="e.g. http://localhost:3000/sse"
+                  className="h-9 text-xs font-mono"
+                />
+              </div>
+            )}
+          </div>
+
+          <DialogFooter className="gap-2">
+            <Button variant="outline" size="sm" onClick={() => setDialogOpen(false)} className="text-xs">
+              Cancel
+            </Button>
+            <Button onClick={saveServer} size="sm" className="bg-brand hover:bg-brand-dark text-white text-xs">
+              Save Server
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
+
