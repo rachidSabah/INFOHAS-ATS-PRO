@@ -90,7 +90,7 @@ export class OpenAICompatibleProvider implements AIProviderAdapter {
     }
 
     const data = (await res.json()) as any;
-    const text = data?.choices?.[0]?.message?.content ?? "";
+    const text = data?.choices?.[0]?.message?.content ?? data?.choices?.[0]?.message?.reasoning_content ?? data?.choices?.[0]?.message?.reasoning ?? "";
     return {
       text,
       provider: this.type,

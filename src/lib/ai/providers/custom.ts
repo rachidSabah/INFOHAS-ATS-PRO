@@ -99,10 +99,9 @@ export class CustomProvider implements AIProviderAdapter {
     }
     const data = (await res.json()) as any;
 
-    // Extract text via responsePath, or fall back to common paths
     const text = config.responsePath
       ? this.extractPath(data, config.responsePath)
-      : (data?.choices?.[0]?.message?.content ?? data?.content?.[0]?.text ?? data?.text ?? data?.output ?? "");
+      : (data?.choices?.[0]?.message?.content ?? data?.choices?.[0]?.message?.reasoning_content ?? data?.choices?.[0]?.message?.reasoning ?? data?.content?.[0]?.text ?? data?.text ?? data?.output ?? "");
 
     return {
       text: typeof text === "string" ? text : JSON.stringify(text),

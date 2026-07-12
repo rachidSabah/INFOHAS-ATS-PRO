@@ -167,12 +167,23 @@ export async function POST(req: NextRequest) {
         const v = (acc as Record<string, unknown>)?.[m[1]];
         return m[2] !== undefined ? (v as unknown[])?.[parseInt(m[2], 10)] : v;
       }, data) ?? "";
-    } else if (data?.choices?.[0]?.message?.content) { text = data.choices[0].message.content; }
-    else if (Array.isArray(data?.content) && data.content[0]?.text) { text = data.content[0].text; }
-    else if (data?.candidates?.[0]?.content?.parts?.[0]?.text) { text = data.candidates[0].content.parts[0].text; }
-    else if (typeof data?.text === "string") { text = data.text; }
-    else if (typeof data?.content === "string") { text = data.content; }
-    else { text = JSON.stringify(data); }
+    } else if (data?.choices?.[0]?.message?.content) {
+      text = data.choices[0].message.content;
+    } else if (data?.choices?.[0]?.message?.reasoning_content) {
+      text = data.choices[0].message.reasoning_content;
+    } else if (data?.choices?.[0]?.message?.reasoning) {
+      text = data.choices[0].message.reasoning;
+    } else if (Array.isArray(data?.content) && data.content[0]?.text) {
+      text = data.content[0].text;
+    } else if (data?.candidates?.[0]?.content?.parts?.[0]?.text) {
+      text = data.candidates[0].content.parts[0].text;
+    } else if (typeof data?.text === "string") {
+      text = data.text;
+    } else if (typeof data?.content === "string") {
+      text = data.content;
+    } else {
+      text = JSON.stringify(data);
+    }
 
     return NextResponse.json({ ok: true, latencyMs, text });
   } catch (e: unknown) {
