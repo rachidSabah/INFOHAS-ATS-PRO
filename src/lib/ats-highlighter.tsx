@@ -23,9 +23,6 @@ export function safeRender(v: any): string {
   return String(v);
 }
 
-/**
- * Parses text and highlights matched target keywords and detected clichés.
- */
 export function renderHighlightedText(
   text: string,
   heatmapMode: boolean,
@@ -33,8 +30,11 @@ export function renderHighlightedText(
   cliches: string[] = []
 ): React.ReactNode {
   if (!text) return "";
-  if (!heatmapMode) return text;
   
+  // Split by bold segments: **bold** or *bold*
+  const boldRegex = /(\*\*[^*]+\*\*|\*[^*]+\*)/g;
+  const parts = text.split(boldRegex);
+
   const keywords = [...matchedKeywords];
   const buzzwords = [...cliches];
   
@@ -44,41 +44,56 @@ export function renderHighlightedText(
     ...buzzwords.map(b => ({ text: b, type: "cliche" as const }))
   ].sort((a, b) => b.text.length - a.text.length);
 
-  if (allTargets.length === 0) return text;
+  // Helper to highlight words inside a string segment
+  const highlightText = (str: string, isBold: boolean, keyPrefix: string): React.ReactNode => {
+    if (!heatmapMode || allTargets.length === 0) {
+      return isBold ? <strong key={keyPrefix} className="font-bold text-slate-900">{str}</strong> : str;
+    }
 
-  // Build a regex pattern matching any of the targets
-  const escaped = allTargets
-    .map(t => t.text.replace(/[-\/\\^$*+?.()|[\]{}]/g, "\\$&"))
-    .filter(Boolean);
-  if (escaped.length === 0) return text;
-  
-  const regex = new RegExp(`\\b(${escaped.join("|")})\\b`, "gi");
+    const escaped = allTargets
+      .map(t => t.text.replace(/[-\/\\^$*+?.()|[\]{}]/g, "\\$&"))
+      .filter(Boolean);
+    if (escaped.length === 0) {
+      return isBold ? <strong key={keyPrefix} className="font-bold text-slate-900">{str}</strong> : str;
+    }
 
-  const parts = text.split(regex);
-  if (parts.length <= 1) return text;
+    const regex = new RegExp(`\\b(${escaped.join("|")})\\b`, "gi");
+    const subParts = str.split(regex);
+
+    return subParts.map((subPart, idx) => {
+      const match = allTargets.find(t => t.text.toLowerCase() === subPart.toLowerCase());
+      if (match) {
+        const isKeyword = match.type === "keyword";
+        return (
+          <span
+            key={`${keyPrefix}-${idx}`}
+            style={{
+              backgroundColor: isKeyword ? "rgba(16, 185, 129, 0.15)" : "rgba(239, 68, 68, 0.15)",
+              borderBottom: isKeyword ? "2px dashed #10B981" : "2px dashed #EF4444",
+              padding: "0.2px 1.5px",
+              borderRadius: "2px",
+              fontWeight: isBold ? "bold" : 500,
+              color: isBold ? "#0f172a" : undefined,
+              cursor: "help",
+              position: "relative"
+            }}
+            title={isKeyword ? "Matched target job keyword!" : "Generic cliché word. Try to replace with action/metrics."}
+          >
+            {subPart}
+          </span>
+        );
+      }
+      return isBold ? <strong key={`${keyPrefix}-${idx}`} className="font-bold text-slate-900">{subPart}</strong> : subPart;
+    });
+  };
 
   return parts.map((part, idx) => {
-    const match = allTargets.find(t => t.text.toLowerCase() === part.toLowerCase());
-    if (match) {
-      const isKeyword = match.type === "keyword";
-      return (
-        <span
-          key={idx}
-          style={{
-            backgroundColor: isKeyword ? "rgba(16, 185, 129, 0.15)" : "rgba(239, 68, 68, 0.15)",
-            borderBottom: isKeyword ? "2px dashed #10B981" : "2px dashed #EF4444",
-            padding: "0.2px 1.5px",
-            borderRadius: "2px",
-            fontWeight: 500,
-            cursor: "help",
-            position: "relative"
-          }}
-          title={isKeyword ? "Matched target job keyword!" : "Generic cliché word. Try to replace with action/metrics."}
-        >
-          {part}
-        </span>
-      );
+    if (part.startsWith("**") && part.endsWith("**")) {
+      return highlightText(part.slice(2, -2), true, `bold-${idx}`);
     }
-    return part;
+    if (part.startsWith("*") && part.endsWith("*")) {
+      return highlightText(part.slice(1, -1), true, `bold-${idx}`);
+    }
+    return highlightText(part, false, `plain-${idx}`);
   }) as any;
 }

@@ -555,8 +555,7 @@ function ATSProfessionalTemplate({
 }) {
   const renderHText = (textVal: any) => {
     const raw = safeRender(textVal);
-    if (!showHeatmap) return raw;
-    return renderHighlightedText(raw, true, latestReport?.matchedKeywords || [], latestReport?.detectedCliches || []) as any;
+    return renderHighlightedText(raw, showHeatmap, latestReport?.matchedKeywords || [], latestReport?.detectedCliches || []) as any;
   };
 
   // Suppress the headline when it merely duplicates contact fields

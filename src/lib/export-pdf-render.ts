@@ -84,6 +84,7 @@ export async function exportResumePDFRenderDoc(
     };
 
     const drawWrapped = (text: string, w: number) => {
+      text = (text || "").replace(/\*\*|\*/g, "");
       doc.setFont(fontName, "normal");
       doc.setFontSize(currentBodyFontSize);
       doc.setTextColor(bodyRgb[0], bodyRgb[1], bodyRgb[2]);
@@ -99,6 +100,7 @@ export async function exportResumePDFRenderDoc(
     };
 
     const drawBulletLine = (text: string, w: number, indent = 0) => {
+      text = (text || "").replace(/\*\*|\*/g, "");
       doc.setFont(fontName, "normal");
       doc.setFontSize(currentBodyFontSize);
       doc.setTextColor(bodyRgb[0], bodyRgb[1], bodyRgb[2]);

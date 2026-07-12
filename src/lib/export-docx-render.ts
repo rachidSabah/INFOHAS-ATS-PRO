@@ -136,6 +136,35 @@ export async function exportResumeDOCXRenderDoc(
   return await Packer.toBlob(doc);
 }
 
+function parseMarkdownToTextRuns(
+  text: string | null | undefined,
+  baseOptions: { size: number; font: string; color: string; bold?: boolean; italics?: boolean }
+): TextRun[] {
+  if (!text) return [];
+  const boldRegex = /(\*\*[^*]+\*\*|\*[^*]+\*)/g;
+  const parts = text.split(boldRegex);
+  return parts.map((part) => {
+    if (part.startsWith("**") && part.endsWith("**")) {
+      return new TextRun({
+        ...baseOptions,
+        text: part.slice(2, -2),
+        bold: true,
+      });
+    }
+    if (part.startsWith("*") && part.endsWith("*")) {
+      return new TextRun({
+        ...baseOptions,
+        text: part.slice(1, -1),
+        bold: true,
+      });
+    }
+    return new TextRun({
+      ...baseOptions,
+      text: part,
+    });
+  }).filter(run => (run as any).text !== "");
+}
+
 function renderContentItem(
   item: RenderContentItem,
   children: Paragraph[],
@@ -148,16 +177,13 @@ function renderContentItem(
       children.push(new Paragraph({
         alignment: AlignmentType.JUSTIFIED,
         spacing: { after: 60 },
-        children: [
-          new TextRun({
-            text: item.text,
-            size: (item.fontSizePt ?? L.bodyFontSizePt) * 2,
-            font: L.fontFamily,
-            color: bodyHex,
-            bold: item.bold,
-            italics: item.italic,
-          }),
-        ],
+        children: parseMarkdownToTextRuns(item.text, {
+          size: (item.fontSizePt ?? L.bodyFontSizePt) * 2,
+          font: L.fontFamily,
+          color: bodyHex,
+          bold: item.bold,
+          italics: item.italic,
+        }),
       }));
       break;
 
@@ -167,7 +193,11 @@ function renderContentItem(
           bullet: { level: item.level ?? 0 },
           alignment: AlignmentType.JUSTIFIED,
           spacing: { after: 30 },
-          children: [new TextRun({ text: b, size: L.bodyFontSizePt * 2, font: L.fontFamily, color: bodyHex })],
+          children: parseMarkdownToTextRuns(b, {
+            size: L.bodyFontSizePt * 2,
+            font: L.fontFamily,
+            color: bodyHex,
+          }),
         }));
       }
       break;
@@ -183,8 +213,20 @@ function renderContentItem(
         tabStops: docxTabStops,
         spacing: { after: 20 },
         children: [
-          new TextRun({ text: leftText, bold: true, size: L.bodyFontSizePt * 2, font: L.fontFamily, color: bodyHex }),
-          ...(rightCell?.text ? [new TextRun({ text: "\t" + rightCell.text, bold: true, size: L.bodyFontSizePt * 2, font: L.fontFamily, color: bodyHex })] : []),
+          ...parseMarkdownToTextRuns(leftText, {
+            size: L.bodyFontSizePt * 2,
+            font: L.fontFamily,
+            color: bodyHex,
+            bold: true,
+          }),
+          ...(rightCell?.text
+            ? parseMarkdownToTextRuns("\t" + rightCell.text, {
+                size: L.bodyFontSizePt * 2,
+                font: L.fontFamily,
+                color: bodyHex,
+                bold: true,
+              })
+            : []),
         ],
       }));
       break;
@@ -199,14 +241,16 @@ function renderNestedBullets(
   bodyHex: string,
 ): void {
   for (const group of item.groups) {
-    // First bullet: "Category: item1, item2, item3"
-    const text = `${group.label}: ${group.items.join(", ")}`;
     children.push(new Paragraph({
       bullet: { level: 0 },
       spacing: { after: 30 },
       children: [
         new TextRun({ text: `${group.label}: `, bold: true, size: L.bodyFontSizePt * 2, font: L.fontFamily, color: bodyHex }),
-        new TextRun({ text: group.items.join(", "), size: L.bodyFontSizePt * 2, font: L.fontFamily, color: bodyHex }),
+        ...parseMarkdownToTextRuns(group.items.join(", "), {
+          size: L.bodyFontSizePt * 2,
+          font: L.fontFamily,
+          color: bodyHex,
+        }),
       ],
     }));
   }

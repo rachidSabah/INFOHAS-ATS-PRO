@@ -15,6 +15,21 @@ interface RenderNodePreviewProps {
   style?: React.CSSProperties;
 }
 
+function renderFormattedText(text: string | null | undefined): React.ReactNode {
+  if (!text) return "";
+  const boldRegex = /(\*\*[^*]+\*\*|\*[^*]+\*)/g;
+  const parts = text.split(boldRegex);
+  return parts.map((part, idx) => {
+    if (part.startsWith("**") && part.endsWith("**")) {
+      return <strong key={idx} className="font-bold">{part.slice(2, -2)}</strong>;
+    }
+    if (part.startsWith("*") && part.endsWith("*")) {
+      return <strong key={idx} className="font-bold">{part.slice(1, -1)}</strong>;
+    }
+    return part;
+  });
+}
+
 /**
  * Render a single RenderNode to its visual representation.
  */
@@ -95,7 +110,7 @@ function RenderNodeElement({
     case "text-line":
       return (
         <p style={{ ...baseStyle, margin: 0 }}>
-          {node.content}
+          {renderFormattedText(node.content)}
         </p>
       );
 
@@ -114,7 +129,7 @@ function RenderNodeElement({
           }}
         >
           <span style={{ flexShrink: 0 }}>•</span>
-          <span>{node.content}</span>
+          <span>{renderFormattedText(node.content)}</span>
         </div>
       );
 
@@ -123,7 +138,7 @@ function RenderNodeElement({
       // Table cells from the same row are grouped by parentId
       return (
         <div style={baseStyle}>
-          {node.content}
+          {renderFormattedText(node.content)}
         </div>
       );
 
@@ -137,7 +152,7 @@ function RenderNodeElement({
             marginBottom: "0.5mm",
           }}
         >
-          {node.content}
+          {renderFormattedText(node.content)}
         </div>
       );
 
@@ -151,7 +166,7 @@ function RenderNodeElement({
               : "6.4mm",
           }}
         >
-          • {node.content}
+          • {renderFormattedText(node.content)}
         </div>
       );
 
