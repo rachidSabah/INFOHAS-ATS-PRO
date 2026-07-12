@@ -49,6 +49,43 @@ export class CustomProvider implements AIProviderAdapter {
       ? `${config.baseUrl}${config.baseUrl.includes("?") ? "&" : "?"}api_key=${encodeURIComponent(config.apiKey)}`
       : config.baseUrl;
 
+    // CORS proxy fallback for browser clients calling third-party provider APIs
+    const isLocal = config.baseUrl.includes("localhost") || config.baseUrl.includes("127.0.0.1") || config.baseUrl.includes("0.0.0.0");
+    if (typeof window !== "undefined" && !isLocal) {
+      const proxyRes = await fetch("/api/providers/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          baseUrl: config.baseUrl,
+          apiKey: config.apiKey,
+          authType: config.authType,
+          headersJson: config.headersJson,
+          model,
+          messages: req.messages,
+          maxTokens: req.maxTokens ?? config.maxTokens,
+          temperature: req.temperature ?? config.temperature,
+          responsePath: config.responsePath,
+          timeoutMs: config.timeout,
+        }),
+        signal: req.signal ?? AbortSignal.timeout(config.timeout),
+      });
+      const latencyMs = Math.round(performance.now() - t0);
+      if (!proxyRes.ok) {
+        const errText = await proxyRes.text().catch(() => "");
+        throw new ProviderError(`Proxy: ${errText.slice(0, 200)}`, proxyRes.status, latencyMs);
+      }
+      const data = (await proxyRes.json()) as any;
+      if (!data.ok) {
+        throw new ProviderError(`Proxy: ${data.error || "Unknown proxy error"}`, 500, latencyMs);
+      }
+      return {
+        text: data.text,
+        provider: this.type,
+        model,
+        latencyMs,
+      };
+    }
+
     const res = await fetch(url, {
       method: "POST",
       headers,

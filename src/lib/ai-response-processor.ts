@@ -632,7 +632,8 @@ export function validateResumeForExport(resume: ResumeData): {
  * Returns null if the resume is unsalvageable (too many leaks).
  */
 function stripLeaksFromResume(resume: ResumeData): ResumeData | null {
-  const clean = (text: string): string => {
+  const clean = (text: string | undefined | null): string => {
+    if (!text) return "";
     let cleaned = text;
     for (const pattern of LEAK_PATTERNS) {
       cleaned = cleaned.replace(pattern, "");
