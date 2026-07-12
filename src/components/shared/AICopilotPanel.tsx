@@ -43,6 +43,21 @@ const VERB_THESAURUS: Record<string, string[]> = {
   handled: ["Executed", "Discharged", "Settled", "Operated"],
 };
 
+function renderFormattedText(text: string | null | undefined): React.ReactNode {
+  if (!text) return "";
+  const boldRegex = /(\*\*[^*]+\*\*|\*[^*]+\*)/g;
+  const parts = text.split(boldRegex);
+  return parts.map((part, idx) => {
+    if (part.startsWith("**") && part.endsWith("**")) {
+      return <strong key={idx} className="font-bold text-slate-100">{part.slice(2, -2)}</strong>;
+    }
+    if (part.startsWith("*") && part.endsWith("*")) {
+      return <strong key={idx} className="font-bold text-slate-100">{part.slice(1, -1)}</strong>;
+    }
+    return part;
+  });
+}
+
 interface AICopilotPanelProps {
   resume: ResumeData;
   activeJD?: JobDescription | null;
@@ -703,7 +718,7 @@ Respond ONLY with a JSON object of the updated sections following this format, w
                           <span className="text-[9px] uppercase font-bold text-indigo-400 tracking-wider">AI Proposed Wording</span>
                           <span className="text-[9px] text-slate-500">Mode: Suggestion</span>
                         </div>
-                        <div className="text-slate-200 leading-relaxed font-serif">{improvedText}</div>
+                        <div className="text-slate-200 leading-relaxed font-serif">{renderFormattedText(improvedText)}</div>
                         <div className="flex justify-end gap-1.5 pt-1">
                           <button
                             onClick={handleReject}

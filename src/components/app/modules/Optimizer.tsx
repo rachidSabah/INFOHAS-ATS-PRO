@@ -41,6 +41,21 @@ const PipelineDashboardLazy = lazy(() =>
 
 type Step = "upload" | "jd" | "analyze" | "optimize" | "done";
 
+function renderFormattedText(text: string | null | undefined): React.ReactNode {
+  if (!text) return "";
+  const boldRegex = /(\*\*[^*]+\*\*|\*[^*]+\*)/g;
+  const parts = text.split(boldRegex);
+  return parts.map((part, idx) => {
+    if (part.startsWith("**") && part.endsWith("**")) {
+      return <strong key={idx} className="font-bold text-slate-900 dark:text-slate-100">{part.slice(2, -2)}</strong>;
+    }
+    if (part.startsWith("*") && part.endsWith("*")) {
+      return <strong key={idx} className="font-bold text-slate-900 dark:text-slate-100">{part.slice(1, -1)}</strong>;
+    }
+    return part;
+  });
+}
+
 export function Optimizer() {
   const resumes = useApp((s) => s.resumes);
   const jds = useApp((s) => s.jobDescriptions);
@@ -2321,9 +2336,9 @@ Guidelines:
                               {/* Simple paragraph/bullet renderer */}
                               {msg.content.split("\n").map((line, li) => {
                                 if (line.trim().startsWith("-") || line.trim().startsWith("*")) {
-                                  return <li key={li}>{line.trim().substring(1).trim()}</li>;
+                                  return <li key={li}>{renderFormattedText(line.trim().substring(1).trim())}</li>;
                                 }
-                                return <p key={li} className="mb-1">{line}</p>;
+                                return <p key={li} className="mb-1">{renderFormattedText(line)}</p>;
                               })}
                             </div>
                           ) : (
