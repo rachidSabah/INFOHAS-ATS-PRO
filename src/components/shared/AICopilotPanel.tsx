@@ -224,7 +224,7 @@ Guidelines:
 1. Do NOT invent dates, names, or fake stats.
 2. Return ONLY the optimized text. No preamble, no quotes, no markdown wrappers.
 3. Keep the output length similar to or slightly shorter than the original, unless asked otherwise.
-4. Do NOT use markdown bold (**text**). If you need to emphasize keywords or changes, use single asterisks (*text*) instead.`;
+4. Use standard markdown bold (**text**) to highlight key keywords or target role optimizations if necessary.`;
   };
 
   const handleAction = async (action: string) => {
@@ -244,12 +244,12 @@ Guidelines:
       const res = await callAI({
         systemPrompt: "You are a professional resume writer. Return ONLY the requested text.",
         userPrompt: prompt,
-        maxTokens: 500,
+        maxTokens: 2500,
         temperature: 0.3,
         taskCategory: "document",
       });
 
-      const cleanedText = (res.text || "").replace(/^["']|["']$/g, "").trim().replace(/\*\*/g, "*");
+      const cleanedText = (res.text || "").replace(/^["']|["']$/g, "").trim();
 
       if (!cleanedText) {
         throw new Error("Received empty response from AI provider.");
@@ -272,9 +272,6 @@ Guidelines:
 
   // Apply the generated suggestion to the state
   const applyEnhancement = async (textToApply: string, actionName: string, modelName = "AI Copilot") => {
-    // Standardize bold formatting: replace double asterisks with single asterisks
-    textToApply = textToApply.replace(/\*\*/g, "*");
-
     if (!activeElement) {
       // Fallback: apply to summary if nothing focused
       patch({ summary: textToApply });
@@ -427,7 +424,7 @@ Guidelines:
       const res = await callAI({
         systemPrompt: "You are a professional resume writer. Return ONLY the requested text.",
         userPrompt: prompt,
-        maxTokens: 300,
+        maxTokens: 2000,
         temperature: 0.7,
         taskCategory: "document"
       });
@@ -482,7 +479,7 @@ Respond ONLY with a JSON object of the updated sections following this format, w
       const res = await callAI({
         systemPrompt: "You are a professional resume writer. Return ONLY a valid JSON object.",
         userPrompt: prompt,
-        maxTokens: 1000,
+        maxTokens: 2500,
         temperature: 0.3,
         taskCategory: "document"
       });
