@@ -847,8 +847,11 @@ function EditorDrawer({ target, resume, onClose, onCommit, activeElement, setAct
   // the effect. Instead, we key on `section+id+field` (stable strings) and use a ref to detect
   // changes to the field identity, then read from the latest activeElement via a ref.
   const activeElementRef = React.useRef<any>(null);
-  activeElementRef.current = activeElement;
   const fieldKey = activeElement ? `${activeElement.section}:${activeElement.id ?? ""}:${activeElement.field ?? ""}` : "";
+
+  useEffect(() => {
+    activeElementRef.current = activeElement;
+  }, [activeElement]);
 
 
   useEffect(() => {
@@ -857,8 +860,8 @@ function EditorDrawer({ target, resume, onClose, onCommit, activeElement, setAct
     if (liveVal !== activeElementRef.current.value) {
       setActiveElement({ ...activeElementRef.current, value: liveVal });
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [form, fieldKey]); // fieldKey changes when user focuses a different field; form changes on edit
+
 
 
   const save = () => {
