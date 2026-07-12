@@ -149,6 +149,18 @@ export function AICopilotPanel({
     }
   }, [activeElement]);
 
+  // Pre-populate active element with a default if it's null, so the panel is active on load
+  useEffect(() => {
+    if (!activeElement && setActiveElement && resume) {
+      if (resume.summary) {
+        setActiveElement({ section: "summary", field: "summary", value: resume.summary });
+      } else if (resume.experience?.[0]) {
+        const exp = resume.experience[0];
+        setActiveElement({ section: "experience", id: exp.id, field: "bullets", value: (exp.bullets ?? []).join("\n") });
+      }
+    }
+  }, [activeElement, resume, setActiveElement]);
+
   // Load IndexedDB modification history logs on mount or whenever resume changes
   useEffect(() => {
     if (resume?.id) {
@@ -496,7 +508,11 @@ Respond ONLY with a JSON object of the updated sections following this format, w
   };
 
   return (
-    <div className="fixed bottom-6 right-6 z-50 flex flex-col items-end" ref={panelRef}>
+    <div
+      className="fixed bottom-6 right-6 z-[90] flex flex-col items-end"
+      ref={panelRef}
+      onClick={(e) => e.stopPropagation()}
+    >
       {/* Floating Action Trigger Circle */}
       {!isOpen && (
         <button
