@@ -223,7 +223,8 @@ ${instruction}
 Guidelines:
 1. Do NOT invent dates, names, or fake stats.
 2. Return ONLY the optimized text. No preamble, no quotes, no markdown wrappers.
-3. Keep the output length similar to or slightly shorter than the original, unless asked otherwise.`;
+3. Keep the output length similar to or slightly shorter than the original, unless asked otherwise.
+4. Do NOT use markdown bold (**text**). If you need to emphasize keywords or changes, use single asterisks (*text*) instead.`;
   };
 
   const handleAction = async (action: string) => {
@@ -248,7 +249,7 @@ Guidelines:
         taskCategory: "document",
       });
 
-      const cleanedText = (res.text || "").replace(/^["']|["']$/g, "").trim();
+      const cleanedText = (res.text || "").replace(/^["']|["']$/g, "").trim().replace(/\*\*/g, "*");
 
       if (!cleanedText) {
         throw new Error("Received empty response from AI provider.");
@@ -271,6 +272,9 @@ Guidelines:
 
   // Apply the generated suggestion to the state
   const applyEnhancement = async (textToApply: string, actionName: string, modelName = "AI Copilot") => {
+    // Standardize bold formatting: replace double asterisks with single asterisks
+    textToApply = textToApply.replace(/\*\*/g, "*");
+
     if (!activeElement) {
       // Fallback: apply to summary if nothing focused
       patch({ summary: textToApply });

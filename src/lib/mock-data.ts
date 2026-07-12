@@ -90,7 +90,9 @@ export const SEED_PROVIDERS: AIProvider[] = [
       "mimo-v2.5-free",
       "minimax-m2.5-free",
       "nemotron-3-super-free",
+      "nemotron-3-ultra-free",
       "north-mini-code-free",
+      "hy3-free-stealth",
       // ── Good fallbacks ──
       "big-pickle",
       "qwen3-30b-a3b-free",
