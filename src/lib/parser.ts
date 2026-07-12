@@ -180,10 +180,82 @@ export function secondaryParser(text: string, fileName: string): ResumeData {
     (s) => !["summary", "experience", "education", "skills", "languages", "additionalinformation", "certifications", "projects", "achievements"].includes(s.normalizedTitle)
   );
 
-  return {
+  return cleanupParsedResume({
     ...baseResume,
     dynamicSections,
-  };
+  });
+}
+
+export function cleanupParsedResume(resume: ResumeData): ResumeData {
+  const cleaned = { ...resume };
+
+  // 1. Clean up Languages
+  if (Array.isArray(cleaned.languages)) {
+    const validLanguages: typeof cleaned.languages = [];
+    const seenLangs = new Set<string>();
+
+    for (const lang of cleaned.languages) {
+      let name = (lang.name || "").trim();
+      // Remove generic descriptions like "Trilingual Communication", "Linguistic Skills"
+      if (/trilingual|bilingual|multilingual|communication|linguistic|skills/i.test(name)) {
+        continue;
+      }
+      // Remove trailing/leading punctuation and parenthesis fragments
+      name = name.replace(/^[^a-zA-Z\s]+|[^a-zA-Z\s\(\)]+$/g, "").trim();
+      // Clean up parentheses, e.g. "Arabic (Native" -> "Arabic"
+      name = name.replace(/\s*\(.*$/, "").trim();
+      
+      const lowerName = name.toLowerCase();
+      // Validate it is a known language or looks like one
+      if (lowerName.length > 2 && !seenLangs.has(lowerName)) {
+        seenLangs.add(lowerName);
+        validLanguages.push({
+          ...lang,
+          name: name.charAt(0).toUpperCase() + name.slice(1),
+          proficiency: lang.proficiency || "fluent"
+        });
+      }
+    }
+    cleaned.languages = validLanguages;
+  }
+
+  // 2. Clean up Skills
+  if (Array.isArray(cleaned.skills)) {
+    const validSkills: typeof cleaned.skills = [];
+    const seenSkills = new Set<string>();
+
+    for (const skill of cleaned.skills) {
+      const rawName = (skill.name || "").trim();
+      if (!rawName) continue;
+
+      // Split if it contains commas, semicolons, or bullet/bar characters
+      const parts = rawName.split(/[,;•|]/);
+      for (const part of parts) {
+        let name = part.trim();
+        // Remove trailing/leading punctuation like parenthese fragments
+        name = name.replace(/^[\s\(\)•\-\*]+|[\s\(\)•\-\*]+$/g, "").trim();
+        
+        // Skip if it looks like a language declaration inside skills
+        if (/^(?:languages|language)\s*:/i.test(name) || /^(?:english|french|arabic|spanish|german|chinese)\)?$/i.test(name)) {
+          continue;
+        }
+
+        const lowerName = name.toLowerCase();
+        // Filter out short/empty names or duplicates
+        if (name.length > 1 && name.length < 60 && !isForbiddenSkill(name) && !seenSkills.has(lowerName)) {
+          seenSkills.add(lowerName);
+          validSkills.push({
+            id: skill.id || `s-${Math.random().toString(36).slice(2, 9)}`,
+            name,
+            category: skill.category || "General"
+          });
+        }
+      }
+    }
+    cleaned.skills = validSkills;
+  }
+
+  return cleaned;
 }
 
 export function heuristicParser(text: string, fileName: string): ResumeData {
@@ -313,10 +385,10 @@ export function heuristicParser(text: string, fileName: string): ResumeData {
     (s) => !["summary", "experience", "education", "skills", "languages", "additionalinformation", "certifications", "projects", "achievements"].includes(s.normalizedTitle)
   );
 
-  return {
+  return cleanupParsedResume({
     ...baseHeuristicResume,
     dynamicSections: heuristicDynamicSections,
-  };
+  });
 }
 
 export async function parseResumeFile(file: File): Promise<ResumeData> {
@@ -1955,10 +2027,10 @@ Return ONLY a JSON object with this EXACT structure (do not output any prose, ex
     const dynamicSections = extractSectionsFromResume(baseResume).filter(
       (s) => !["summary", "experience", "education", "skills", "languages", "additionalinformation", "certifications", "projects", "achievements"].includes(s.normalizedTitle)
     );
-    return {
+    return cleanupParsedResume({
       ...baseResume,
       dynamicSections,
-    };
+    });
   } catch (error) {
     console.error("[parser] AI parsing failed, falling back to heuristic parser:", error);
     return extractResumeFromText(text, fileName);
