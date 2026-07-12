@@ -127,7 +127,7 @@ export function useUndoRedo(resume: ResumeData | undefined, maxHistory = 100) {
         const next = [
           ...prev,
           {
-            data: { ...resume },
+            data: JSON.parse(JSON.stringify(resume)),
             timestamp: Date.now(),
             label: label ?? undefined,
             sessionId,

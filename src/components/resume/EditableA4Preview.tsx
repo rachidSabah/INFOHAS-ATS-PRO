@@ -1,6 +1,7 @@
 "use client";
 
-import { useRef, useState, useEffect } from "react";
+import React, { useRef, useState, useEffect } from "react";
+
 import { motion, AnimatePresence } from "framer-motion";
 import { Icon } from "@/components/shared";
 import { renderHighlightedText, safeRender } from "@/lib/ats-highlighter";
@@ -155,6 +156,45 @@ export function EditableA4Preview({ resume, onChange, scale = 0.7, className, ac
     setEditing(null);
   };
 
+  /**
+   * openSection — COPILOT FIX (Phase C)
+   *
+   * Root cause: previously `setEditing(target)` opened the drawer but left
+   * `activeElement` as null. The Copilot's action buttons are all gated on
+   * `!activeElement`, so they remained disabled until the user manually focused
+   * a field inside the drawer. Most users never did this, making Copilot appear broken.
+   *
+   * Fix: simultaneously set the editing target AND pre-populate `activeElement`
+   * with the primary field of the section being opened, so Copilot is immediately
+   * active when the drawer appears — no manual field click required.
+   */
+  const openSection = (target: EditTarget) => {
+    setEditing(target);
+    if (!setActiveElement || !target) return;
+    if (target === "summary") {
+      setActiveElement({ section: "summary", field: "summary", value: resume.summary ?? "" });
+    } else if (target === "header") {
+      setActiveElement({ section: "basics", field: "name", value: resume.name ?? "" });
+    } else if (target === "skills") {
+      setActiveElement({ section: "skills", field: "skills", value: (resume.skills ?? []).map(s => s.name).join(", ") });
+    } else if (target === "languages") {
+      setActiveElement({ section: "languages", field: "languages", value: (resume.languages ?? []).map(l => l.name).join(", ") });
+    } else if (target.startsWith("experience:")) {
+      const id = target.replace("experience:", "");
+      const exp = resume.experience?.find(e => e.id === id);
+      if (exp) {
+        setActiveElement({ section: "experience", id, field: "bullets", value: (exp.bullets ?? []).join("\n") });
+      }
+    } else if (target.startsWith("education:")) {
+      const id = target.replace("education:", "");
+      const edu = resume.education?.find(e => e.id === id);
+      if (edu) {
+        setActiveElement({ section: "education", id, field: "degree", value: edu.degree ?? "" });
+      }
+    }
+  };
+
+
   const onPhotoUpload = (files: FileList | null) => {
     if (!files?.[0]) return;
     const file = files[0];
@@ -229,7 +269,7 @@ export function EditableA4Preview({ resume, onChange, scale = 0.7, className, ac
             }}
           >
           {/* ============ HEADER (editable) — two-column: 70% left, 30% right photo ============ */}
-          <EditableBlock isEditing={editing === "header"} onEdit={() => setEditing("header")} label="Edit header" isTouch={isTouch} isOptimizing={optimizingSection === "all" || optimizingSection === "header"}>
+          <EditableBlock isEditing={editing === "header"} onEdit={() => openSection("header")} label="Edit header" isTouch={isTouch} isOptimizing={optimizingSection === "all" || optimizingSection === "header"}>
             <header className="relative" style={{ paddingRight: resume.photoUrl ? "36mm" : 0, minHeight: resume.photoUrl ? "42mm" : "auto" }}>
               {/* Photo — top-right, 30×40mm.
                   - If a photo exists: render it, tappable to replace.
@@ -329,7 +369,7 @@ export function EditableA4Preview({ resume, onChange, scale = 0.7, className, ac
           <div style={{ marginTop: "3mm" }}>
             {/* SUMMARY */}
             {resume.summary && (
-              <EditableBlock isEditing={editing === "summary"} onEdit={() => setEditing("summary")} label="Edit summary" isTouch={isTouch} isOptimizing={optimizingSection === "all" || optimizingSection === "summary"}>
+              <EditableBlock isEditing={editing === "summary"} onEdit={() => openSection("summary")} label="Edit summary" isTouch={isTouch} isOptimizing={optimizingSection === "all" || optimizingSection === "summary"}>
                 <InfohasSection title="PROFESSIONAL SUMMARY">
                   <p style={{ margin: 0, textAlign: "justify", color: BLACK, lineHeight: 1.2 }}>{renderHText(resume.summary)}</p>
                 </InfohasSection>
@@ -344,7 +384,8 @@ export function EditableA4Preview({ resume, onChange, scale = 0.7, className, ac
                   <EditableBlock
                     key={e.id}
                     isEditing={editing === `experience:${e.id}`}
-                    onEdit={() => setEditing(`experience:${e.id}`)}
+                    onEdit={() => openSection(`experience:${e.id}`)}
+
                     label="Edit experience"
                     isTouch={isTouch}
                     isOptimizing={optimizingSection === "all" || optimizingSection === "experience" || optimizingSection === `experience:${e.id}`}
@@ -377,7 +418,8 @@ export function EditableA4Preview({ resume, onChange, scale = 0.7, className, ac
                   <EditableBlock
                     key={ed.id}
                     isEditing={editing === `education:${ed.id}`}
-                    onEdit={() => setEditing(`education:${ed.id}`)}
+                    onEdit={() => openSection(`education:${ed.id}`)}
+
                     label="Edit education"
                     isTouch={isTouch}
                     isOptimizing={optimizingSection === "all" || optimizingSection === "education" || optimizingSection === `education:${ed.id}`}
@@ -413,7 +455,7 @@ export function EditableA4Preview({ resume, onChange, scale = 0.7, className, ac
 
             {/* KEY COMPETENCIES (moved after Education to match target format) */}
             {resume.skills.length > 0 && (
-              <EditableBlock isEditing={editing === "skills"} onEdit={() => setEditing("skills")} label="Edit skills" isTouch={isTouch} isOptimizing={optimizingSection === "all" || optimizingSection === "skills"}>
+              <EditableBlock isEditing={editing === "skills"} onEdit={() => openSection("skills")} label="Edit skills" isTouch={isTouch} isOptimizing={optimizingSection === "all" || optimizingSection === "skills"}>
                 <InfohasSection title="CORE COMPETENCIES & SKILLS">
                   <ul style={{ margin: 0, paddingLeft: `${L.bulletIndentMm}mm`, listStyleType: "•", lineHeight: 1.2 }}>
                     {groupSkillsByCategory(resume.skills).slice(0, 4).map((g, i) => (
@@ -428,7 +470,7 @@ export function EditableA4Preview({ resume, onChange, scale = 0.7, className, ac
 
             {/* LANGUAGES — bullet list with proficiency */}
             {resume.languages.length > 0 && (
-              <EditableBlock isEditing={editing === "languages"} onEdit={() => setEditing("languages")} label="Edit languages" isTouch={isTouch} isOptimizing={optimizingSection === "all" || optimizingSection === "languages"}>
+              <EditableBlock isEditing={editing === "languages"} onEdit={() => openSection("languages")} label="Edit languages" isTouch={isTouch} isOptimizing={optimizingSection === "all" || optimizingSection === "languages"}>
                 <InfohasSection title="LANGUAGES">
                   <ul style={{ margin: 0, paddingLeft: `${L.bulletIndentMm}mm`, listStyleType: "•", lineHeight: 1.2 }}>
                     {resume.languages.map((l) => (
@@ -799,18 +841,25 @@ function EditorDrawer({ target, resume, onClose, onCommit, activeElement, setAct
     setForm(resume);
   }, [resume]);
 
-  // Whenever local form state changes, sync the activeElement value to the Copilot
+  // Whenever local form state changes, sync the activeElement value to the Copilot.
+  // LOOP FIX: `activeElement` is an object — including it directly in deps caused an infinite
+  // loop because `setActiveElement` creates a new object reference each call, which re-triggers
+  // the effect. Instead, we key on `section+id+field` (stable strings) and use a ref to detect
+  // changes to the field identity, then read from the latest activeElement via a ref.
+  const activeElementRef = React.useRef<any>(null);
+  activeElementRef.current = activeElement;
+  const fieldKey = activeElement ? `${activeElement.section}:${activeElement.id ?? ""}:${activeElement.field ?? ""}` : "";
+
+
   useEffect(() => {
-    if (activeElement && setActiveElement) {
-      const liveVal = getFieldValue(form, activeElement);
-      if (liveVal !== activeElement.value) {
-        setActiveElement({
-          ...activeElement,
-          value: liveVal,
-        });
-      }
+    if (!activeElementRef.current || !setActiveElement) return;
+    const liveVal = getFieldValue(form, activeElementRef.current);
+    if (liveVal !== activeElementRef.current.value) {
+      setActiveElement({ ...activeElementRef.current, value: liveVal });
     }
-  }, [form, activeElement, setActiveElement]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [form, fieldKey]); // fieldKey changes when user focuses a different field; form changes on edit
+
 
   const save = () => {
     if (target === "header") {

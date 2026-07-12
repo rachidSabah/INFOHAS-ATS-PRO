@@ -257,20 +257,41 @@ export async function callAIStreamed(opts: AICallOptions, onChunk: (chunk: strin
   if (!opts.preferServer && !opts.preferLocal && typeof window !== "undefined" && window.puter?.ai?.chat) {
     if (!isPuterInCooldown()) {
       try {
-        const messages = opts.messages
+        // Messages are now built with truncated prompt above (see truncatedMessages below).
+
+
+        // ADR-002: Temperature must be pinned per use-case — never left to a default 0.7 for
+        // structured tasks. The caller may pass opts.temperature explicitly (authoritative).
+        // Otherwise we infer from context: optimizer calls → 0.3 (low variance), chat → 0.7.
+        const resolvedTemperature = opts.temperature !== undefined
+          ? opts.temperature
+          : opts.isOptimizerCall
+            ? 0.3   // Structured resume suggestions — low variance
+            : 0.7;  // General chat
+
+
+        // Enforce token budget on this path (the Puter streaming path bypasses ProviderRouter
+        // which is the normal truncation point — apply it here explicitly).
+        const truncatedUserPrompt = truncatePromptToTokenLimit(
+          opts.userPrompt,
+          MAX_INPUT_TOKENS
+        );
+
+        const truncatedMessages = opts.messages
           ? opts.messages
           : opts.systemPrompt
             ? [
                 { role: "system", content: opts.systemPrompt },
-                { role: "user", content: opts.userPrompt },
+                { role: "user", content: truncatedUserPrompt },
               ]
-            : [{ role: "user", content: opts.userPrompt }];
+            : [{ role: "user", content: truncatedUserPrompt }];
 
         const chatOpts: any = {
           max_tokens: opts.maxTokens ?? 4096,
-          temperature: opts.temperature ?? 0.7,
+          temperature: resolvedTemperature,
           stream: true,
         };
+
 
         try {
           const state: any = useApp.getState();
@@ -285,10 +306,11 @@ export async function callAIStreamed(opts: AICallOptions, onChunk: (chunk: strin
         }
 
         const response: any = await withTimeout(
-          window.puter.ai.chat(messages, chatOpts),
+          window.puter.ai.chat(truncatedMessages, chatOpts),
           60000,
           "Puter AI chat (streamed)"
         );
+
 
         let fullText = "";
         for await (const part of response as AsyncIterable<any>) {

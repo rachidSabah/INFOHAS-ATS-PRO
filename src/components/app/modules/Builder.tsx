@@ -349,8 +349,9 @@ export function Builder() {
   const setActiveJD = useApp((s) => s.setActiveJD);
 
   const resume = useMemo(() => resumes.find((r) => r.id === activeId) ?? resumes[0], [resumes, activeId]);
-  const autoSave = useAutoSave(resume);
-  const undoRedo = useUndoRedo(resume);
+  // NOTE: useAutoSave and useUndoRedo are instantiated below (lines 385-386) where their
+  // return values are actually destructured and used. The duplicate calls here were removed
+  // to eliminate two diverging IndexedDB-persisted stacks and a doubled auto-save write load.
   const activeJD = useMemo(() => jobDescriptions.find(j => j.id === activeJdId), [jobDescriptions, activeJdId]);
   const atsScore = useLiveATSScore(resume, activeJD);
   const sectionScores = useSectionCompleteness(resume);
