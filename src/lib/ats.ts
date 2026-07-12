@@ -17,7 +17,19 @@ const CLICHE_BUZZWORDS = [
   "go-getter", "self-motivated", "results-driven", "hard-working", "proven track record"
 ];
 
-export function scoreATS(resume: ResumeData, jd?: JobDescription): ATSReport {
+export function scoreATS(resumeRaw: ResumeData, jd?: JobDescription): ATSReport {
+  // Defensive normalization to prevent crashes if any arrays are undefined/null
+  const resume: ResumeData = {
+    ...resumeRaw,
+    experience: resumeRaw.experience || [],
+    education: resumeRaw.education || [],
+    skills: resumeRaw.skills || [],
+    projects: resumeRaw.projects || [],
+    certifications: resumeRaw.certifications || [],
+    languages: resumeRaw.languages || [],
+    achievements: resumeRaw.achievements || [],
+  };
+
   const formatting = scoreFormatting(resume);
   const keywords = scoreKeywords(resume, jd);
   const content = scoreContent(resume);

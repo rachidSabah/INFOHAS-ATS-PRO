@@ -262,19 +262,30 @@ Return ONLY valid JSON with keys: name, headline, summary, skills, experience, e
         throw new Error("AI returned an invalid JSON response. Please try again.");
       }
 
-      // Preserve ID and other top-level fields
-      updatedResume.id = optimizedResume.id;
-      updatedResume.createdAt = optimizedResume.createdAt;
-      updatedResume.updatedAt = new Date().toISOString();
-      updatedResume.template = optimizedResume.template;
-      updatedResume.photoUrl = optimizedResume.photoUrl;
+      // Merge and preserve ID, other top-level fields, and any fields the AI omitted
+      const mergedResume: ResumeData = {
+        ...optimizedResume,
+        ...updatedResume,
+        experience: updatedResume.experience ?? optimizedResume.experience ?? [],
+        education: updatedResume.education ?? optimizedResume.education ?? [],
+        skills: updatedResume.skills ?? optimizedResume.skills ?? [],
+        projects: updatedResume.projects ?? optimizedResume.projects ?? [],
+        certifications: updatedResume.certifications ?? optimizedResume.certifications ?? [],
+        languages: updatedResume.languages ?? optimizedResume.languages ?? [],
+        achievements: updatedResume.achievements ?? optimizedResume.achievements ?? [],
+        id: optimizedResume.id,
+        createdAt: optimizedResume.createdAt,
+        updatedAt: new Date().toISOString(),
+        template: optimizedResume.template,
+        photoUrl: optimizedResume.photoUrl,
+      };
 
       // Update state and store
-      setOptimizedResume(updatedResume);
-      updateResume(updatedResume.id, updatedResume);
+      setOptimizedResume(mergedResume);
+      updateResume(mergedResume.id, mergedResume);
 
       // Re-calculate local report
-      const after = scoreATS(updatedResume, jdParsed);
+      const after = scoreATS(mergedResume, jdParsed);
       
       // Update pipelineResult if it exists so everything stays synced
       if (pipelineResult) {
