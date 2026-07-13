@@ -66,7 +66,7 @@ export function deduplicateResume(resume: ResumeData): { resume: ResumeData; dup
     const seen = new Set<string>();
     const uniqueExp: typeof deduped.experience = [];
     for (const exp of deduped.experience) {
-      const key = `${(exp.company || "").toLowerCase().trim()}|${(exp.title || "").toLowerCase().trim()}`;
+      const key = `${(exp.company || "").toLowerCase().trim()}|${(exp.title || "").toLowerCase().trim()}|${(exp.startDate || "").toLowerCase().trim()}`;
       if (!seen.has(key)) {
         seen.add(key);
         // Also deduplicate bullets within this entry

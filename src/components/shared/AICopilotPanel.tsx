@@ -199,7 +199,9 @@ export function AICopilotPanel({
         instruction = "Enhance the wording, make it highly outcome-oriented, start with strong verbs, and polish the structure. Keep the truth and the facts identical.";
         break;
       case "rewrite":
-        instruction = "Rephrase this content to improve the writing quality, professional tone, and lexical variety.";
+        instruction = activeJD?.title
+          ? `Rephrase and rewrite this content targeting the role of "${activeJD.title}"${activeJD.company ? ` at ${activeJD.company}` : ""}. Improve professional tone and lexical variety. Replace any job title references in the text with "${activeJD.title}" to match the target position. Do NOT reference any previous or unrelated job titles.`
+          : "Rephrase this content to improve the writing quality, professional tone, and lexical variety.";
         break;
       case "optimize":
         instruction = `Optimize this content for ATS. Inject matching keywords naturally without stuffing. Context: ${jdContext}`;
@@ -239,7 +241,7 @@ Guidelines:
 1. Do NOT invent dates, names, or fake stats.
 2. Return ONLY the optimized text. No preamble, no quotes, no markdown wrappers.
 3. Keep the output length similar to or slightly shorter than the original, unless asked otherwise.
-4. Use standard markdown bold (**text**) to highlight key keywords or target role optimizations if necessary.`;
+4. Do NOT use any asterisks (*), markdown bold (**text**), or any other markdown formatting. Return plain text only.`;
   };
 
   const handleAction = async (action: string) => {
@@ -257,14 +259,20 @@ Guidelines:
     try {
       const prompt = getPromptForAction(action, targetText);
       const res = await callAI({
-        systemPrompt: "You are a professional resume writer. Return ONLY the requested text.",
+        systemPrompt: "You are a professional resume writer. Return ONLY the requested text. Never use asterisks or markdown formatting of any kind.",
         userPrompt: prompt,
         maxTokens: 2500,
         temperature: 0.3,
         taskCategory: "document",
       });
 
-      const cleanedText = (res.text || "").replace(/^["']|["']$/g, "").trim();
+      // Strip leading/trailing quotes AND any markdown bold (**text**) or italic (*text*)
+      // so that the text applied to the resume is always clean plain text.
+      const cleanedText = (res.text || "")
+        .replace(/^["']|["']$/g, "")
+        .replace(/\*\*([^*]+)\*\*/g, "$1")
+        .replace(/\*([^*]+)\*/g, "$1")
+        .trim();
 
       if (!cleanedText) {
         throw new Error("Received empty response from AI provider.");

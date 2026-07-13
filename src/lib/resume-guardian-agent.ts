@@ -699,7 +699,10 @@ function checkSkillCategoriesPreserved(optimized: ResumeData, source: ResumeData
   const srcCategories = new Set<string>();
   for (const s of source.skills) {
     if (s.category?.trim()) {
-      srcCategories.add(s.category.trim().toLowerCase());
+      const cat = s.category.trim().toLowerCase();
+      if (!/^(general|job.relevant|transferable)$/i.test(cat)) {
+        srcCategories.add(cat);
+      }
     }
   }
 
@@ -717,7 +720,10 @@ function checkSkillCategoriesPreserved(optimized: ResumeData, source: ResumeData
   const optCategories = new Set<string>();
   for (const s of optimized.skills) {
     if (s.category?.trim()) {
-      optCategories.add(s.category.trim().toLowerCase());
+      const cat = s.category.trim().toLowerCase();
+      if (!/^(general|job.relevant|transferable)$/i.test(cat)) {
+        optCategories.add(cat);
+      }
     }
   }
 

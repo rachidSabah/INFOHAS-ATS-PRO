@@ -934,11 +934,11 @@ export function verifyEntityIntegrity(
   // === Check 6: Duplicate detection ===
   const uniqueExpKeys = new Set<string>();
   for (const exp of optimized.experience) {
-    const key = `${(exp.company || "").toLowerCase().trim()}|${(exp.title || "").toLowerCase().trim()}`;
+    const key = `${(exp.company || "").toLowerCase().trim()}|${(exp.title || "").toLowerCase().trim()}|${(exp.startDate || "").toLowerCase().trim()}`;
     if (uniqueExpKeys.has(key)) {
       criticalFailures.push({
         type: "duplicate_experience",
-        message: `Duplicate experience entry detected: ${exp.title} at ${exp.company}`,
+        message: `Duplicate experience entry detected: ${exp.title} at ${exp.company} (${exp.startDate})`,
       });
       score -= 10;
     }
