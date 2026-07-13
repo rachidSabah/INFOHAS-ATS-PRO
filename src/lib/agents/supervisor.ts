@@ -1815,27 +1815,56 @@ export function restoreFromSnapshot(): boolean {
 
   const restoredState = snapshot.state;
 
-  // === Recovery logic: if the pipeline was still running when the snapshot
-  // was taken, we can't resume the in-flight AI calls. Mark any "running"
-  // agents as "pending" so the user can re-trigger them. Log a "recover"
-  // timeline entry so the user sees what happened. ===
+  // === Rebuild agents from AGENT_DEFINITIONS, then overlay snapshot
+  // state for matching agents. This guarantees state.agents always
+  // contains exactly the canonical set — stale/phantom agents from
+  // localStorage (e.g. "Parser Validation", "Render Validation") are
+  // never restored. ===
   const recoveredAgents: Record<string, AgentState> = {};
-  for (const [id, agent] of Object.entries(restoredState.agents)) {
-    if (agent.status === "running") {
+
+  for (const def of AGENT_DEFINITIONS) {
+    const id = def.id;
+    const snapshotAgent = restoredState.agents[id];
+
+    if (snapshotAgent && snapshotAgent.status === "running") {
+      // Running at snapshot time → reset to pending (can't resume AI calls)
       recoveredAgents[id] = {
-        ...agent,
+        id: id as AgentId,
+        name: def.name,
+        icon: def.icon,
         status: "pending" as AgentStatus,
         log: `Recovered from snapshot (was running at ${snapshot.timestamp}). Re-run to resume.`,
       };
       appendTimelineEntry({
         timestamp: new Date().toISOString(),
         agentId: id as AgentId,
-        agentName: agent.name,
+        agentName: def.name,
         event: "recover",
-        message: `${agent.name} recovered from snapshot — was running, now pending.`,
+        message: `${def.name} recovered from snapshot — was running, now pending.`,
       });
+    } else if (snapshotAgent) {
+      // Snapshot exists — preserve runtime fields (status, log, error, durations)
+      // but always use canonical name/icon from AGENT_DEFINITIONS
+      recoveredAgents[id] = {
+        id: id as AgentId,
+        name: def.name,
+        icon: def.icon,
+        status: snapshotAgent.status ?? "pending",
+        startedAt: snapshotAgent.startedAt,
+        completedAt: snapshotAgent.completedAt,
+        durationMs: snapshotAgent.durationMs,
+        error: snapshotAgent.error,
+        log: snapshotAgent.log,
+        cached: snapshotAgent.cached,
+      };
     } else {
-      recoveredAgents[id] = agent;
+      // No snapshot state — start fresh as pending
+      recoveredAgents[id] = {
+        id: id as AgentId,
+        name: def.name,
+        icon: def.icon,
+        status: "pending" as AgentStatus,
+      };
     }
   }
 
@@ -1846,6 +1875,12 @@ export function restoreFromSnapshot(): boolean {
     events: restoredState.events,
     isRunning: false, // never restore isRunning=true — the user must re-trigger
   };
+
+  // Persist the cleaned state back to localStorage. Without this,
+  // stale/phantom agents would remain in the saved snapshot and reappear
+  // on the next page load — the fix would only last one session. With
+  // this save, a single page load permanently cleans up the snapshot.
+  saveSnapshot(state);
 
   // Notify listeners
   for (const listener of listeners) {
