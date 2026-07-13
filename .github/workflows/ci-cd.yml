@@ -136,18 +136,16 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
       - run: npm ci
-      - name: Build for Pages (vercel build + next-on-pages)
+      - name: Build for Pages (next-on-pages)
         env:
           NEXT_PUBLIC_APP_URL: ${{ vars.NEXT_PUBLIC_APP_URL || 'https://resumeai.pro' }}
           NEXT_PUBLIC_OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
           NEXT_PUBLIC_ZAI_API_KEY: ${{ secrets.ZAI_API_KEY }}
           NEXT_PUBLIC_GOOGLE_CLIENT_ID: ${{ secrets.NEXT_PUBLIC_GOOGLE_CLIENT_ID }}
         run: |
-          # next-on-pages --skip-build requires .vercel/output/config.json which only
-          # exists after `vercel build`. Run vercel build first, then pass --skip-build
-          # so next-on-pages transforms the output without re-building.
-          npx vercel build --prod --yes
-          npx @cloudflare/next-on-pages@1.13.16 --skip-build
+          # Run next-on-pages directly. It wraps vercel build to run locally/offline
+          # without requiring Vercel authentication or accounts, generating .vercel/output.
+          npx @cloudflare/next-on-pages@1.13.16
       - name: Deploy to Cloudflare Pages
         id: deploy
         uses: cloudflare/wrangler-action@v3
