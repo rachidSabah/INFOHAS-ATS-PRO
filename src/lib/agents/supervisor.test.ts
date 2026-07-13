@@ -3,6 +3,8 @@ import {
   getSupervisorState,
   resetSupervisor,
   setContext,
+  syncCoreAgentStatusesFromPipeline,
+  NON_PIPELINE_AGENT_IDS,
   type SupervisorState,
 } from "./supervisor";
 import type { ResumeData, JobDescription } from "../types";
@@ -170,8 +172,8 @@ describe("finalizeSupervisorStatus — Supervisor self-wait bug (regression)", (
     // The supervisor agent must exist in the map.
     expect(agentIds).toContain("supervisor");
     // But when computing stillRunning, the supervisor must be excluded.
-    // We verify this by simulating the filter logic:
-    const nonPipelineAgents = ["application-tracker", "salary", "job-search"];
+    // We verify this against the REAL skip set exported by the module.
+    const nonPipelineAgents = NON_PIPELINE_AGENT_IDS;
     const pipelineAgents = Object.values(state.agents).filter(
       (a: any) => !nonPipelineAgents.includes(a.id) && a.id !== "supervisor",
     );
@@ -179,5 +181,109 @@ describe("finalizeSupervisorStatus — Supervisor self-wait bug (regression)", (
     for (const a of pipelineAgents) {
       expect(a.id).not.toBe("supervisor");
     }
+  });
+});
+
+// ============================================================================
+// finalizeSupervisorStatus — unwired agents must not block completion
+// ============================================================================
+//
+// Bug: "resume-repair" and "content-expansion" are declared in AGENT_DEFINITIONS
+// (so they render in the dashboard) but are NEVER dispatched by
+// runPostOptimizationAgents — only Cover Letter, Interview Prep and Career Coach
+// run. They therefore remained "pending" forever. finalizeSupervisorStatus()
+// treated them as pipeline agents that must reach a terminal state, so the
+// Supervisor hung in "running" ("Waiting for 2 agent(s): Resume Repair, Content
+// Expansion"). Fix: they are now part of NON_PIPELINE_AGENT_IDS, so they are
+// excluded from the still-running check and marked "skipped".
+//
+// These tests assert the contract against the REAL exported skip set, so the
+// regression is caught if either agent is ever removed from the set.
+
+describe("finalizeSupervisorStatus — unwired agents must not block completion (regression)", () => {
+  it("the real skip set includes the unwired V3.5 agents", () => {
+    expect(NON_PIPELINE_AGENT_IDS).toContain("resume-repair");
+    expect(NON_PIPELINE_AGENT_IDS).toContain("content-expansion");
+  });
+
+  it("resume-repair and content-expansion are excluded from the still-running check", () => {
+    const state = getSupervisorState();
+    const pipelineAgents = Object.values(state.agents).filter(
+      (a: any) => !NON_PIPELINE_AGENT_IDS.includes(a.id) && a.id !== "supervisor",
+    );
+    const ids = pipelineAgents.map((a: any) => a.id);
+    expect(ids).not.toContain("resume-repair");
+    expect(ids).not.toContain("content-expansion");
+  });
+
+  it("all genuinely-executed pipeline agents remain in the still-running check", () => {
+    const state = getSupervisorState();
+    const pipelineAgents = Object.values(state.agents).filter(
+      (a: any) => !NON_PIPELINE_AGENT_IDS.includes(a.id) && a.id !== "supervisor",
+    );
+    const ids = pipelineAgents.map((a: any) => a.id);
+    for (const expected of [
+      "job-intelligence", "company-intelligence", "skill-gap",
+      "ats-analysis", "optimizer", "qa", "reflection",
+      "cover-letter", "interview", "career-coach",
+    ]) {
+      expect(ids).toContain(expected);
+    }
+  });
+});
+
+// ============================================================================
+// syncCoreAgentStatusesFromPipeline — V3.5 agents become terminal
+// ============================================================================
+//
+// Bug: "resume-repair" and "content-expansion" run inside the V2 pipeline but
+// were never synced to the Supervisor agent map, so they stayed "pending" and
+// hung the Supervisor. After sync they must reach a terminal state so the
+// Supervisor can complete.
+
+describe("syncCoreAgentStatusesFromPipeline — V3.5 agents become terminal", () => {
+  function minimalResult(overrides: Record<string, unknown> = {}): any {
+    return {
+      optimizedResume: makeResume(),
+      steps: [],
+      status: "completed",
+      provider: "test",
+      charCount: 3000,
+      metCharTarget: true,
+      ...overrides,
+    };
+  }
+
+  it("resume-repair → completed and content-expansion → skipped when only repair ran", () => {
+    resetSupervisor();
+    syncCoreAgentStatusesFromPipeline(minimalResult({
+      resumeRepairRan: true,
+      contentExpansionRan: false,
+    }));
+    const agents = getSupervisorState().agents;
+    expect(agents["resume-repair"].status).toBe("completed");
+    expect(agents["content-expansion"].status).toBe("skipped");
+  });
+
+  it("both → completed when content expansion also ran", () => {
+    resetSupervisor();
+    syncCoreAgentStatusesFromPipeline(minimalResult({
+      resumeRepairRan: true,
+      contentExpansionRan: true,
+    }));
+    const agents = getSupervisorState().agents;
+    expect(agents["resume-repair"].status).toBe("completed");
+    expect(agents["content-expansion"].status).toBe("completed");
+  });
+
+  it("neither agent is left 'pending' (the state that previously hung the Supervisor)", () => {
+    resetSupervisor();
+    syncCoreAgentStatusesFromPipeline(minimalResult({
+      resumeRepairRan: undefined,
+      contentExpansionRan: undefined,
+    }));
+    const agents = getSupervisorState().agents;
+    expect(agents["resume-repair"].status).not.toBe("pending");
+    expect(agents["content-expansion"].status).not.toBe("pending");
   });
 });

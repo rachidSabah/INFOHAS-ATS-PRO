@@ -211,6 +211,28 @@ for (const def of AGENT_DEFINITIONS) {
   state.agents[def.id] = { id: def.id, name: def.name, icon: def.icon, status: "pending" };
 }
 
+/**
+ * Agents that are declared in the dashboard but are NOT executed as standalone
+ * pipeline steps. These are excluded from the Supervisor's "still running"
+ * computation and, if still "pending" at finalize time, marked "skipped" so the
+ * Supervisor can always reach a terminal state (a safety net against hangs).
+ *
+ * Set = standalone tools (Application Tracker / Salary / Job Search) + the two
+ * V3.5 agents "Resume Repair" and "Content Expansion".
+ *
+ * NOTE: Resume Repair and Content Expansion DO run — but inside the V2 pipeline
+ * (orchestrator.ts), not as steps in result.steps. They are synced to
+ * "completed"/"skipped" via syncCoreAgentStatusesFromPipeline() from the
+ * resumeRepairRan / contentExpansionRan flags. They remain in this set ONLY as a
+ * fallback: if that sync is ever missed, the skip-net here guarantees they can
+ * never stay "pending" and hang the Supervisor (the original defect:
+ * "Waiting for 2 agent(s): Resume Repair, Content Expansion").
+ */
+export const NON_PIPELINE_AGENT_IDS: AgentId[] = [
+  "application-tracker", "salary", "job-search",
+  "resume-repair", "content-expansion",
+];
+
 // ============================================================================
 // State management — with auto-persistence
 // ============================================================================
@@ -475,7 +497,7 @@ function deepClone<T>(obj: T): T {
  * This fixes the "impossible state" defect where core agents showed "Pending"
  * while the Supervisor showed "Completed".
  */
-function syncCoreAgentStatusesFromPipeline(result: PipelineResult): void {
+export function syncCoreAgentStatusesFromPipeline(result: PipelineResult): void {
   // The V2 pipeline steps array (indices: 0=JI, 1=Company+SkillGap, 2=ATS-before, 3=Optimizer, 4=QA, 5=Reflection)
   const steps = result.steps;
 
@@ -511,6 +533,26 @@ function syncCoreAgentStatusesFromPipeline(result: PipelineResult): void {
       });
     }
   }
+
+  // === V3.5 agents that run INSIDE the V2 pipeline (orchestrator.ts) ===
+  // They are not separate entries in result.steps, so we sync them explicitly
+  // from the flags the pipeline reports. This is what makes them render as
+  // "completed"/"skipped" in the dashboard instead of being stuck "pending"
+  // (which previously left the Supervisor hanging in "running").
+  updateAgent("resume-repair", {
+    status: result.resumeRepairRan === false ? "skipped" : "completed",
+    completedAt: new Date().toISOString(),
+    log: result.resumeRepairRan
+      ? "Repaired structural issues / restored integrity from optimizer output."
+      : "Not run this pass.",
+  });
+  updateAgent("content-expansion", {
+    status: result.contentExpansionRan ? "completed" : "skipped",
+    completedAt: new Date().toISOString(),
+    log: result.contentExpansionRan
+      ? "Expanded sparse content to fill the page naturally."
+      : "Not required — content already met the target length.",
+  });
 
   // Research agent — mark as completed (it ran inside JI)
   updateAgent("research", {
@@ -568,10 +610,11 @@ function finalizeSupervisorStatus(): void {
     "cover-letter", "interview", "career-coach",
   ];
 
-  // Non-pipeline agents (standalone tools)
-  const nonPipelineAgents: AgentId[] = [
-    "application-tracker", "salary", "job-search",
-  ];
+  // Agents declared in the dashboard but not executed in this pipeline run.
+  // Excluded from the "still running" check and marked "skipped" below.
+  // (Standalone tools + V3.5 Resume Repair / Content Expansion, which
+  // runPostOptimizationAgents never dispatches — see NON_PIPELINE_AGENT_IDS.)
+  const nonPipelineAgents = NON_PIPELINE_AGENT_IDS;
 
   // Check if any PIPELINE agent is still in a non-terminal state
   const pipelineAgents = agentList.filter(

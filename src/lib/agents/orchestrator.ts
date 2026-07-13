@@ -571,6 +571,18 @@ export interface PipelineResult {
     presentKeywords: string[];
     score: number;
   };
+  /**
+   * Whether the Resume Repair agent actually ran during this pipeline pass.
+   * It runs unconditionally inside the V2 pipeline, so this is normally true.
+   * Surfaced so the Supervisor's status map can reflect it as "completed".
+   */
+  resumeRepairRan?: boolean;
+  /**
+   * Whether the Content Expansion agent actually ran during this pipeline pass.
+   * It only runs when the optimized resume is below the char target, so this
+   * may be false (in which case the Supervisor marks it "skipped").
+   */
+  contentExpansionRan?: boolean;
 }
 
 export interface ReflectionResult {
@@ -1225,6 +1237,7 @@ ${jobMemory.industry}`);
         const { runResumeRepair, DEFAULT_REPAIR_CONFIG } = await import("./resume-repair-agent");
         const repairResult = await runResumeRepair(result.optimizedResume, resume, DEFAULT_REPAIR_CONFIG);
         result.optimizedResume = repairResult.resume;
+        result.resumeRepairRan = true;
         if (repairResult.repairs.length > 0) {
           log("Resume Optimizer", `✓ ResumeRepairAgent: ${repairResult.repairs.length} repair(s) applied (confidence: ${repairResult.confidence}%)`);
           for (const r of repairResult.repairs) {
@@ -1295,6 +1308,7 @@ ${jobMemory.industry}`);
                 result.optimizedResume!, jd, result.jobIntelligence, DEFAULT_EXPANSION_CONFIG,
               );
               result.optimizedResume = expansionResult.resume;
+              result.contentExpansionRan = true;
               result.charCount = expansionResult.finalCharCount;
               result.metCharTarget = expansionResult.finalCharCount >= 2800 && expansionResult.finalCharCount <= 3800;
               if (expansionResult.expandedSections.length > 0) {
