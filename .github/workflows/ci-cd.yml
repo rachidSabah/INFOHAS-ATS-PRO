@@ -136,6 +136,8 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
       - run: npm ci
+      - name: Install pnpm (next-on-pages wraps vercel build, which spawns pnpm)
+        run: npm install -g pnpm
       - name: Build for Pages (next-on-pages)
         env:
           NEXT_PUBLIC_APP_URL: ${{ vars.NEXT_PUBLIC_APP_URL || 'https://resumeai.pro' }}
@@ -152,7 +154,7 @@ jobs:
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          command: pages deploy .vercel/output/static --project-name=resumeai-pro-${{ github.ref == 'refs/heads/main' && 'prod' || 'preview' }}
+          command: pages deploy .vercel/output/static --project-name=resumeai-pro${{ github.ref == 'refs/heads/main' && '' || '-preview' }}
 
   # ----------------------------------------------------------
   # 4. Deploy Workers (Hono API)
