@@ -1,5 +1,8 @@
 "use client";
 
+import { recordAI, setFlightScope } from "@/lib/ai/flight-recorder";
+setFlightScope({ scope: "cover-letter", feature: "Cover Letter", module: "src.components.app.modules.CoverLetter" });
+
 import { useState, useMemo } from "react";
 import { motion } from "framer-motion";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -113,7 +116,7 @@ INDUSTRY WRITING GUIDANCE: ${industryProfile.writingGuidance}
 INDUSTRY KEYWORDS: ${industryProfile.priorityKeywords.join(", ")}
 ` : "";
 
-      const result = await callAI({
+      const result = await recordAI({
         systemPrompt: `You are an Expert Cover Letter Writer, Senior Recruiter, and ATS Specialist. You write highly personalized, recruiter-grade cover letters that sound human and professional. You NEVER fabricate experience, skills, or achievements — you only use information from the candidate's resume. You adapt language to the detected industry. Always return ONLY valid JSON.
 
 TONE: ${selectedTone}

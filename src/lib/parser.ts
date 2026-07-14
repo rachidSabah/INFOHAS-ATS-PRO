@@ -1,5 +1,8 @@
-// ResumeAI Pro — client-side resume parser for PDF / DOCX / TXT
 "use client";
+
+import { recordAI, setFlightScope } from "@/lib/ai/flight-recorder";
+setFlightScope({ scope: "resume-parser", feature: "Resume Parser", module: "src.lib.parser" });
+
 
 import type { ResumeData } from "./types";
 import { uid } from "./store";
@@ -1918,7 +1921,7 @@ Return ONLY a JSON object with this EXACT structure (do not output any prose, ex
 }`;
 
   try {
-    const aiResult = await callAI({
+    const aiResult = await recordAI({
       systemPrompt,
       userPrompt,
       maxTokens: 3500,

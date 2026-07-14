@@ -6,12 +6,16 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Button } from "@/components/ui/button";
 import { Badge, Icon, ScoreRing } from "@/components/shared";
 import { useApp, uid } from "@/lib/store";
-import { callAI, extractJSON } from "@/lib/ai";
 import { detectIndustry, INDUSTRY_PROFILES } from "@/lib/industry-ats";
-import { exportInterviewPDF, exportInterviewDOCX } from "@/lib/exporter";
+import { exportInterviewPDF, exportInterviewDOCX, exportInterviewJSON, exportInterviewMarkdown } from "@/lib/exporter";
 import { InterviewSession, InterviewSkeleton } from "@/components/interview/InterviewSession";
+import { VideoInterviewSession } from "@/components/interview/VideoInterviewSession";
+import { generateInterviewQuestions, toInterviewPackage, type GeneratedPackage } from "@/lib/interview/ai";
+import { INTERVIEW_PERSONAS } from "@/lib/interview/personas";
+import { setFlightRecordSink } from "@/lib/ai/flight-recorder";
 import { toast } from "sonner";
 import type { InterviewPackage, InterviewQuestion } from "@/lib/types";
+import type { InterviewSessionRecord } from "@/hooks/interview/types";
 import { AviationAcademy } from "@/components/interview/AviationAcademy";
 
 const CATEGORIES = [
@@ -28,8 +32,13 @@ export function Interview() {
   const interviews = useApp((s) => s.interviews);
   const resumes = useApp((s) => s.resumes);
   const jds = useApp((s) => s.jobDescriptions);
+  const atsReports = useApp((s) => s.atsReports);
+  const reviewReports = useApp((s) => s.reviewReports);
+  const interviewSessions = useApp((s) => s.interviewSessions);
   const addInterview = useApp((s) => s.addInterview);
   const removeInterview = useApp((s) => s.removeInterview);
+  const addInterviewSession = useApp((s) => s.addInterviewSession);
+  const removeInterviewSession = useApp((s) => s.removeInterviewSession);
   const incUsage = useApp((s) => s.incUsage);
   const log = useApp((s) => s.log);
   const setView = useApp((s) => s.setView);
@@ -37,9 +46,11 @@ export function Interview() {
   const [generating, setGenerating] = useState(false);
   const [expanded, setExpanded] = useState<string | null>(null);
   const [practiceSession, setPracticeSession] = useState<InterviewPackage | null>(null);
+  const [videoSession, setVideoSession] = useState<InterviewPackage | null>(null);
+  const [videoGenerated, setVideoGenerated] = useState<GeneratedPackage | null>(null);
   const [selectedResumeId, setSelectedResumeId] = useState<string>(resumes[0]?.id ?? "");
   const [selectedJdId, setSelectedJdId] = useState<string>(jds[0]?.id ?? "");
-  const [selectedAirlineId, setSelectedAirlineId] = useState<string>("generic");
+  const [selectedPersonaIds, setSelectedPersonaIds] = useState<string[]>(["hr", "hiring-manager", "cabin-crew-manager", "chief-purser", "safety-trainer", "panel"]);
   const [activeSubTab, setActiveSubTab] = useState<"standard" | "aviation-academy">("standard");
   const [completedQuestions, setCompletedQuestions] = useState<Set<string>>(new Set());
   const [readinessData, setReadinessData] = useState<{ score: number; strengths: string[]; weaknesses: string[]; topicsToReview: string[]; skillsToReview: string[]; focusAreas: string[] } | null>(null);
@@ -71,149 +82,51 @@ export function Interview() {
     setGenerating(true);
     setReadinessData(null);
     try {
-      const resumeContext = JSON.stringify({
-        name: selectedResume.name,
-        headline: selectedResume.headline,
-        summary: selectedResume.summary,
-        experience: selectedResume.experience.map((e) => ({
-          title: e.title,
-          company: e.company,
-          location: e.location,
-          bullets: e.bullets,
-        })),
-        skills: selectedResume.skills.map((s) => s.name),
-        education: selectedResume.education.map((ed) => ({ degree: ed.degree, institution: ed.institution })),
-        languages: selectedResume.languages.map((l) => l.name),
-        certifications: selectedResume.certifications.map((c) => c.name),
+      // Find the ATS analysis + review report that match this resume+JD pair,
+      // so the generator can adapt questions to missing skills & competencies.
+      const atsReport = atsReports.find((a) => a.resumeId === selectedResume.id);
+      const reviewReport = reviewReports.find((r) => r.resumeId === selectedResume.id && (!r.jdId || r.jdId === selectedJd.id)) ?? reviewReports.find((r) => r.resumeId === selectedResume.id);
+
+      const generated = await generateInterviewQuestions({
+        resume: selectedResume,
+        jd: selectedJd,
+        atsReport,
+        reviewReport,
+        personaIds: selectedPersonaIds,
+        difficultyBias: "adaptive",
       });
 
-      const jdContext = selectedJd.rawText ?? JSON.stringify({
-        title: selectedJd.title,
-        company: selectedJd.company,
-        responsibilities: selectedJd.responsibilities,
-        requiredSkills: selectedJd.requiredSkills,
-        preferredSkills: selectedJd.preferredSkills,
-        keywords: selectedJd.keywords,
+      const pkg = toInterviewPackage(generated, {
+        resume: selectedResume,
+        jd: selectedJd,
+        atsReport,
+        reviewReport,
+        personaIds: selectedPersonaIds,
+        difficultyBias: "adaptive",
       });
 
-      const airlineContext = selectedAirlineId !== "generic" ? `
-TARGET AIRLINE PRESET: ${selectedAirlineId.toUpperCase()}
-AIRLINE WORKFLOW & PREPARATION ALIGNMENT:
-${selectedAirlineId === "qatar" ? "- Primary interview stage incorporates a Sonru asynchronous video interview invitation before panel rounds.\n- Highlight 5-star customer hospitality, visuals, and high-volume Doha hub operation answers." : ""}
-${selectedAirlineId === "emirates" ? "- Emirates Group Oracle ATS utilizes automated video assessment, physical assessment day stages, and group activities.\n- Emphasize safety (SEP), strict grooming standards, and Crew Resource Management (CRM)." : ""}
-${selectedAirlineId === "etihad" ? "- Etihad recruitment involves Oracle Cloud ATS, online assessments, assessment centers (group discussions), and panel rounds.\n- Focus on luxury brand representation and crew cohesion." : ""}
-${selectedAirlineId === "gulf" ? "- Gulf Air recruitment targets security compliance, Bahrain network service standards, and physical training readiness." : ""}
-${selectedAirlineId === "riyadh" ? "- Riyadh Air targets brand new futuristic guest services, digital-first hospitality, and ambassadorship standards." : ""}
-- Ensure behavioral and situational questions reflect these specific airline operational constraints and interview styles.
-` : "";
-
-      const industryContext = industryProfile ? `
-INDUSTRY: ${industryProfile.label}
-INDUSTRY KEYWORDS: ${industryProfile.priorityKeywords.join(", ")}
-INDUSTRY WRITING GUIDANCE: ${industryProfile.writingGuidance}
-` : "";
-
-      const result = await callAI({
-        systemPrompt: `You are an Expert Interview Coach and Senior Recruiter. You generate highly personalized interview preparation packages tailored to the candidate's resume and the job description. You NEVER ask about technologies or experiences not present in the resume. You NEVER fabricate answers — all answers reference real experience from the resume. You adapt questions to the detected industry. Always return ONLY valid JSON.
-
-${industryContext}
-${airlineContext}`,
-        userPrompt: `CANDIDATE'S RESUME (primary source — use ONLY this information for answers):
-${resumeContext}
-
-JOB DESCRIPTION:
-${jdContext}
-
-COMPANY: ${selectedJd.company || "the company"}
-JOB TITLE: ${selectedJd.title || "the role"}
-INDUSTRY: ${industryProfile?.label || "Generic"}
-
-Generate a comprehensive interview preparation package with 9-15 questions:
-- 3-5 Technical questions (about technologies/skills IN the resume)
-- 3-5 Behavioral questions (STAR method, past experiences from the resume)
-- 2-3 Situational questions (hypothetical scenarios relevant to the role)
-- 1-3 Company-specific questions (about the company's values/culture/products)
-
-For each question provide:
-- category: "technical" | "behavioral" | "situational" | "hr" | "company"
-- question: the interview question
-- difficulty: "easy" | "medium" | "hard"
-- recommendedAnswer: recruiter-grade answer using the candidate's REAL experience
-- talkingPoints: 3-5 bullet points for the answer
-- starExample: { situation, task, action, result } (for behavioral/situational)
-- followUps: 2-3 follow-up questions
-
-Also provide:
-- readinessScore: 0-100 (how prepared the candidate is)
-- strengths: 3-5 areas where the candidate is strong
-- weaknesses: 3-5 areas to improve
-- topicsToReview: 3-5 topics to study before the interview
-- skillsToReview: 3-5 skills to brush up on
-- focusAreas: 3-5 likely interview focus areas for this role/company
-
-Return JSON:
-{
-  "questions": [ { "category": "...", "question": "...", "difficulty": "...", "recommendedAnswer": "...", "talkingPoints": [...], "starExample": {...}, "followUps": [...] } ],
-  "readinessScore": 78,
-  "strengths": ["..."],
-  "weaknesses": ["..."],
-  "topicsToReview": ["..."],
-  "skillsToReview": ["..."],
-  "focusAreas": ["..."]
-}`,
-        maxTokens: 6000,
-        temperature: 0.5,
-        taskCategory: "document",
-      });
-
-      let data: { questions: any[]; readinessScore?: number; strengths?: string[]; weaknesses?: string[]; topicsToReview?: string[]; skillsToReview?: string[]; focusAreas?: string[] };
-      try {
-        data = extractJSON<any>(result.text);
-      } catch {
-        throw new Error("Failed to parse AI response. Please try again.");
-      }
-
-      const questions: InterviewQuestion[] = (data.questions ?? []).map((q: any) => ({
-        id: uid("q"),
-        category: q.category || "hr",
-        question: q.question || "",
-        difficulty: q.difficulty || "medium",
-        recommendedAnswer: q.recommendedAnswer || "",
-        talkingPoints: Array.isArray(q.talkingPoints) ? q.talkingPoints : [],
-        starExample: q.starExample,
-        followUps: Array.isArray(q.followUps) ? q.followUps : [],
-      }));
-
+      const questions: InterviewQuestion[] = generated.questions;
       if (!questions.length) throw new Error("AI returned no questions.");
 
-      const pkg: InterviewPackage = {
-        id: uid("iv"),
-        resumeId: selectedResume.id,
-        jdId: selectedJd.id,
-        company: selectedJd.company,
-        role: selectedJd.title,
-        questions,
-        createdAt: new Date().toISOString(),
-      };
       addInterview(pkg);
       setReadinessData({
-        score: data.readinessScore ?? 75,
-        strengths: data.strengths ?? [],
-        weaknesses: data.weaknesses ?? [],
-        topicsToReview: data.topicsToReview ?? [],
-        skillsToReview: data.skillsToReview ?? [],
-        focusAreas: data.focusAreas ?? [],
+        score: generated.readinessScore ?? 75,
+        strengths: generated.strengths ?? [],
+        weaknesses: generated.weaknesses ?? [],
+        topicsToReview: generated.topicsToReview ?? [],
+        skillsToReview: generated.skillsToReview ?? [],
+        focusAreas: generated.focusAreas ?? [],
       });
       setCompletedQuestions(new Set());
       incUsage("interviewPreps");
       log({
         actor: "you",
-        action: "Interview prep generated (dynamic)",
+        action: "Interview prep generated (dynamic, adaptive)",
         category: "ai",
-        details: `${questions.length} questions · ${industryProfile?.label ?? "Generic"} · readiness ${data.readinessScore ?? 75}/100 via ${result.provider}`,
+        details: `${questions.length} questions · ${industryProfile?.label ?? "Generic"} · readiness ${generated.readinessScore ?? 75}/100` + (generated.adaptationNote ? ` · ${generated.adaptationNote}` : ""),
         severity: "info",
       });
-      toast.success(`${questions.length} questions generated — readiness ${data.readinessScore ?? 75}/100`);
+      toast.success(`${questions.length} questions generated — readiness ${generated.readinessScore ?? 75}/100`);
     } catch (e: any) {
       toast.error(e?.message || "Generation failed.");
     } finally {
@@ -242,7 +155,35 @@ Return JSON:
     ? Math.round((completedQuestions.size / latestQuestions.length) * 100)
     : 0;
 
-  // === Practice session mode ===
+  // === Video interview (Sonru-style) mode ===
+  if (videoSession) {
+    return (
+      <VideoInterviewSession
+        pkg={videoSession}
+        resume={selectedResume ?? undefined}
+        jd={selectedJd ?? undefined}
+        generated={videoGenerated ?? undefined}
+        onClose={() => { setVideoSession(null); setVideoGenerated(null); }}
+        onComplete={(sessionId, records) => {
+          const rec: InterviewSessionRecord = {
+            id: sessionId,
+            resumeId: videoSession.resumeId,
+            jdId: videoSession.jdId,
+            company: videoSession.company,
+            role: videoSession.role,
+            status: "completed",
+            recordings: records,
+            startedAt: new Date().toISOString(),
+            completedAt: new Date().toISOString(),
+          };
+          addInterviewSession(rec);
+          toast.success(`Interview saved — ${records.length} recordings.`);
+        }}
+      />
+    );
+  }
+
+  // === Practice session mode (text/voice) ===
   if (practiceSession) {
     return <InterviewSession pkg={practiceSession} onClose={() => setPracticeSession(null)} />;
   }
@@ -302,10 +243,33 @@ Return JSON:
           </div>
 
           {activeSubTab === "standard" && (
-            <Button onClick={generate} disabled={generating || !selectedResume || !selectedJd} className="bg-brand hover:bg-brand-dark text-white gap-2">
-              {generating ? <Icon name="Loader2" className="w-4 h-4 animate-spin" /> : <Icon name="Sparkles" className="w-4 h-4" />}
-              {generating ? "Generating…" : "Generate package"}
-            </Button>
+            <div className="flex items-center gap-2 flex-wrap">
+              <Button onClick={generate} disabled={generating || !selectedResume || !selectedJd} className="bg-brand hover:bg-brand-dark text-white gap-2">
+                {generating ? <Icon name="Loader2" className="w-4 h-4 animate-spin" /> : <Icon name="Sparkles" className="w-4 h-4" />}
+                {generating ? "Generating…" : "Generate package"}
+              </Button>
+              <Button
+                variant="outline"
+                onClick={() => {
+                  if (!latestPkg) {
+                    toast.error("Generate a package first, then start the video interview.");
+                    return;
+                  }
+                  setVideoGenerated(null);
+                  setVideoSession(latestPkg);
+                }}
+                disabled={!latestPkg}
+                className="gap-2 border-brand text-brand hover:bg-brand-light"
+                title="Start a Sonru-style video interview"
+              >
+                <Icon name="Video" className="w-4 h-4" /> Start Video Interview
+              </Button>
+              <a href="/interview/device-check" className="inline-flex">
+                <Button variant="ghost" size="sm" className="gap-1.5" title="Check your camera & microphone">
+                  <Icon name="Camera" className="w-4 h-4" /> Device Check
+                </Button>
+              </a>
+            </div>
           )}
         </div>
       </div>
@@ -333,20 +297,32 @@ Return JSON:
               </select>
             </div>
             <div className="space-y-1.5">
-              <label className="text-[10px] uppercase tracking-wide text-muted-foreground font-semibold">Target Airline Preset</label>
-              <select value={selectedAirlineId} onChange={(e) => setSelectedAirlineId(e.target.value)} className="w-full h-9 px-2 rounded-md border border-input bg-background text-sm">
-                <option value="generic">Generic / Multi-Airline</option>
-                <option value="emirates">Emirates</option>
-                <option value="qatar">Qatar Airways</option>
-                <option value="etihad">Etihad Airways</option>
-                <option value="gulf">Gulf Air</option>
-                <option value="saudia">Saudia</option>
-                <option value="oman">Oman Air</option>
-                <option value="kuwait">Kuwait Airways</option>
-                <option value="arabia">Air Arabia</option>
-                <option value="flydubai">flydubai</option>
-                <option value="riyadh">Riyadh Air</option>
-              </select>
+              <label className="text-[10px] uppercase tracking-wide text-muted-foreground font-semibold">Interviewer Personas</label>
+              <div className="flex flex-wrap gap-1.5">
+                {INTERVIEW_PERSONAS.map((p) => {
+                  const active = selectedPersonaIds.includes(p.id);
+                  return (
+                    <button
+                      key={p.id}
+                      type="button"
+                      onClick={() =>
+                        setSelectedPersonaIds((prev) =>
+                          prev.includes(p.id) ? prev.filter((id) => id !== p.id) : [...prev, p.id]
+                        )
+                      }
+                      className="text-xs px-2 py-1 rounded-full border flex items-center gap-1 transition-colors"
+                      style={{
+                        borderColor: active ? p.accent : "var(--border)",
+                        background: active ? `${p.accent}1A` : "transparent",
+                        color: active ? p.accent : "var(--muted-foreground)",
+                      }}
+                    >
+                      <Icon name={p.icon as any} className="w-3.5 h-3.5" />
+                      {p.name}
+                    </button>
+                  );
+                })}
+              </div>
             </div>
           </div>
           {industryDetection && industryDetection.confidence >= 15 && (
@@ -471,6 +447,8 @@ Return JSON:
                     <Icon name="Play" className="w-3.5 h-3.5" /> Practice
                   </Button>
                   <Button size="sm" variant="outline" onClick={() => { exportInterviewDOCX(pkg); incUsage("downloads"); toast.success("DOCX exported."); }} className="gap-1.5"><Icon name="FileType" className="w-3.5 h-3.5" /> DOCX</Button>
+                  <Button size="sm" variant="outline" onClick={() => { exportInterviewMarkdown(pkg); incUsage("downloads"); toast.success("Markdown exported."); }} className="gap-1.5"><Icon name="FileText" className="w-3.5 h-3.5" /> MD</Button>
+                  <Button size="sm" variant="outline" onClick={() => { exportInterviewJSON(pkg); incUsage("downloads"); toast.success("JSON exported."); }} className="gap-1.5"><Icon name="Braces" className="w-3.5 h-3.5" /> JSON</Button>
                   <Button size="sm" onClick={() => { exportInterviewPDF(pkg); incUsage("downloads"); log({ actor: "you", action: "Interview prep exported (PDF)", category: "export", details: `${pkg.role}.pdf`, severity: "info" }); toast.success("PDF exported."); }} className="bg-brand hover:bg-brand-dark text-white gap-1.5"><Icon name="Download" className="w-3.5 h-3.5" /> PDF</Button>
                   <Button size="sm" variant="ghost" className="text-destructive" onClick={() => { removeInterview(pkg.id); toast.success("Deleted."); }}><Icon name="Trash2" className="w-3.5 h-3.5" /></Button>
                 </div>
@@ -561,6 +539,36 @@ Return JSON:
           </Card>
         );
       })}
+
+      {/* === Previous Video Interviews (Sonru-style history) === */}
+      {!generating && interviewSessions.length > 0 && (
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="text-sm flex items-center gap-2"><Icon name="History" className="w-4 h-4 text-brand" /> Previous Video Interviews</CardTitle>
+            <CardDescription>Recordings are stored locally on this device.</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-2">
+            {interviewSessions.map((sess) => (
+              <div key={sess.id} className="flex items-center justify-between gap-2 rounded-lg border border-border px-3 py-2">
+                <div className="min-w-0">
+                  <div className="text-sm font-medium truncate">{sess.role ?? "Video Interview"}{sess.company ? ` at ${sess.company}` : ""}</div>
+                  <div className="text-[10px] text-muted-foreground">
+                    {new Date(sess.startedAt).toLocaleDateString()} · {sess.recordings.length} recording{sess.recordings.length === 1 ? "" : "s"} · {sess.status}
+                  </div>
+                </div>
+                <div className="flex items-center gap-1.5 shrink-0">
+                  <Button size="sm" variant="outline" className="gap-1.5" onClick={() => { setVideoSession({ id: sess.id, resumeId: sess.resumeId, jdId: sess.jdId, company: sess.company, role: sess.role, questions: [], createdAt: sess.startedAt }); }}>
+                    <Icon name="Play" className="w-3.5 h-3.5" /> Replay
+                  </Button>
+                  <Button size="sm" variant="ghost" className="text-destructive" onClick={() => { /* blob cleanup handled by storage.deleteSession when needed */ removeInterviewSession(sess.id); toast.success("Session removed."); }}>
+                    <Icon name="Trash2" className="w-3.5 h-3.5" />
+                  </Button>
+                </div>
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+      )}
         </>
       )}
     </div>

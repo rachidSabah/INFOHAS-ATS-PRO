@@ -1,5 +1,8 @@
 "use client";
 
+import { recordAI, setFlightScope } from "@/lib/ai/flight-recorder";
+setFlightScope({ scope: "resume-optimizer", feature: "Resume Review Platform", module: "src.components.app.modules.ResumeReviewPlatform" });
+
 /**
  * ResumeReviewPlatform — Advanced AI Resume Review Platform
  *
@@ -298,7 +301,7 @@ Rules:
 - Bullet improvements must rewrite ACTUAL bullets from the resume, not invent new ones.
 - Be honest — a weak resume should get low scores, not generic 7/10s.`;
 
-      const result = await callAI({
+      const result = await recordAI({
         systemPrompt,
         userPrompt,
         maxTokens: 4500,
@@ -522,7 +525,7 @@ Rules:
         all: `Fully optimize this resume by applying ALL recommendations from the review: better summary, better headlines, better skills, better bullets, missing keywords. NEVER fabricate experience. Return the FULL optimized resume as JSON matching the resume schema with keys: name, headline, summary, contact, experience, education, skills, projects, certifications, languages, achievements.\n\nRESUME:\n${resumeSnapshot(resume)}\n\nFULL REVIEW:\n${JSON.stringify({ improvements: report.improvements, ats: report.ats, actionPlan: report.actionPlan })}`,
       };
 
-      const result = await callAI({
+      const result = await recordAI({
         systemPrompt: "You are an expert resume optimizer. Apply the requested fixes precisely. Return ONLY valid JSON. NEVER fabricate experience or metrics not present in the original resume.",
         userPrompt: fixPrompts[fixType],
         maxTokens: fixType === "all" || fixType === "ats" ? 3500 : 1500,

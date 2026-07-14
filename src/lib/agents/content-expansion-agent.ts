@@ -1,3 +1,5 @@
+import { recordAI, setFlightScope } from "@/lib/ai/flight-recorder";
+setFlightScope({ scope: "resume-optimizer", feature: "Content Expansion Agent", module: "src.lib.agents.content-expansion-agent" });
 import type { ResumeData, JobDescription } from "../types";
 import type { JobIntelligence } from "../job-intelligence";
 import { callAI } from "../ai";
@@ -102,7 +104,7 @@ async function expandSummary(
   const topSkills = resume.skills.slice(0, 8).map((s) => s.name).join(", ");
 
   try {
-    const result = await callAI({
+    const result = await recordAI({
       systemPrompt: "You are a professional resume writer. Expand the given summary to 2-3 sentences that are impactful and ATS-friendly. Return ONLY the expanded summary text — no quotes, no labels, no markdown.",
       userPrompt: `Original summary: "${resume.summary}"
 
@@ -133,7 +135,7 @@ async function expandBullets(
   if (exp.bullets.length >= maxBullets) return exp;
 
   try {
-    const result = await callAI({
+    const result = await recordAI({
       systemPrompt: "You are a professional resume writer. Add more bullet points to the given experience entry. Keep them factual, quantified, and ATS-friendly. Return ONLY the bullet points as a JSON array of strings — no other text.",
       userPrompt: `Role: ${exp.title} at ${exp.company}
 Existing bullets: ${JSON.stringify(exp.bullets)}
@@ -171,7 +173,7 @@ export async function trimExperienceBullets(
   targetCount = 3
 ): Promise<string[]> {
   try {
-    const result = await callAI({
+    const result = await recordAI({
       systemPrompt: "You are an expert resume writer and editor. Your job is to trim, consolidate, and shorten the bullet points for a job experience entry to make them more concise, high-impact, and quantified, fitting strictly into a smaller layout space while retaining all factual metrics and achievements.",
       userPrompt: `Role: ${exp.title} at ${exp.company}
 Current bullets:

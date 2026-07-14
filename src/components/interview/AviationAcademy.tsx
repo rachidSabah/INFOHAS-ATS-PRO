@@ -1,5 +1,8 @@
 "use client";
 
+import { recordAI, setFlightScope } from "@/lib/ai/flight-recorder";
+setFlightScope({ scope: "interview", feature: "Aviation Academy", module: "src.components.interview.AviationAcademy" });
+
 import { useState, useEffect } from "react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -191,7 +194,7 @@ export function AviationAcademy() {
     setEvaluating(true);
     try {
       const qText = SONRU_QUESTIONS.find((q) => q.id === selectedSonruQ)?.text || "";
-      const result = await callAI({
+      const result = await recordAI({
         systemPrompt: `You are an Expert Airline Interview Coach. Evaluate the candidate's script response to a Sonru asynchronous video interview question. Score out of 100 based on CRM awareness, Passenger Safety (SEP), Service Recovery, and professional vocabulary. If stress mode is active, include a critical, demanding stress follow-up question. Return ONLY JSON: {"score": 85, "review": "...", "detectedKeywords": ["...", "..."], "recommendations": ["...", "..."] ${stressModeActive ? ', "stressFollowUp": "..."' : ""}}`,
         userPrompt: `QUESTION: ${qText}
 RESPONSE SCRIPT: ${responseScript}
@@ -266,7 +269,7 @@ Return only JSON.`,
     }
     setAnsweringStress(true);
     try {
-      const result = await callAI({
+      const result = await recordAI({
         systemPrompt: `You are a demanding airline recruitment panel interviewer. Evaluate the candidate's defensive response to your tough follow-up. Grade out of 100 based on safety compliance, operational maturity, and composure. Return ONLY JSON: {"verdict": "..."}`,
         userPrompt: `TIGHT FOLLOW-UP: ${stressFollowUp}
 CANDIDATE'S DEFENSIVE RESPONSE: ${stressResponse}
@@ -298,7 +301,7 @@ Return only JSON.`,
     }
     setAnalyzingStar(true);
     try {
-      const result = await callAI({
+      const result = await recordAI({
         systemPrompt: `You are an Expert Interview Coach. Analyze the step-by-step STAR method entries. Assemble them into one cohesive, high-quality interview answer. Score out of 100. Return ONLY JSON: {"score": 88, "feedback": "...", "finalOutput": "..."}`,
         userPrompt: `SITUATION: ${starSituation}
 TASK: ${starTask}
@@ -348,7 +351,7 @@ Return only JSON.`,
     setSubmittingCrm(true);
     try {
       const chatHistory = groupLogs.map((l) => `${l.sender} (${l.role}): ${l.message}`).join("\n");
-      const result = await callAI({
+      const result = await recordAI({
         systemPrompt: `You are an Airline Recruiter sitting in an Assessment Centre. Grade the candidate's contribution to the group discussion scenario. Score out of 100 based on diplomacy, active listening references, safety compliance, and team consensus facilitation. Return ONLY JSON: {"score": 82, "feedback": "...", "replyFromPurser": "..."}`,
         userPrompt: `SCENARIO: ${activeScenario.scenario}
 GROUP CHAT LOGS:

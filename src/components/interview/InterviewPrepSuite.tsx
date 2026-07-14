@@ -1,5 +1,8 @@
 "use client";
 
+import { recordAI, setFlightScope } from "@/lib/ai/flight-recorder";
+setFlightScope({ scope: "interview", feature: "Interview Prep Suite", module: "src.components.interview.InterviewPrepSuite" });
+
 import { useState, useCallback, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -103,7 +106,7 @@ export function InterviewPrepSuite({ optimizedResume, jd, onClose }: InterviewPr
         keywords: jd.keywords,
       });
 
-      const result = await callAI({
+      const result = await recordAI({
         systemPrompt: `You are an expert interview coach. Generate a comprehensive interview preparation package for a ${jobTitle} role${company ? ` at ${company}` : ""}. Use the candidate's resume and the job description to generate TAILORED questions that align with their actual experience and skills. NEVER ask about technologies or experiences not present in the resume. Return ONLY valid JSON.`,
         userPrompt: `CANDIDATE'S OPTIMIZED RESUME:
 ${resumeContext}
@@ -506,7 +509,7 @@ function PreloadedMockInterview({ questions, company, jobTitle, onClose }: {
     setSubmitting(true);
     setError(null);
     try {
-      const result = await callAI({
+      const result = await recordAI({
         systemPrompt: "You are an expert interview coach. Evaluate the candidate's answer and provide feedback. Return ONLY valid JSON.",
         userPrompt: `Question: ${current.question}\nCandidate's answer: ${answers[current.id].answer}\nRecommended answer: ${current.recommendedAnswer}\n\nReturn JSON: { "strengths": ["..."], "improvements": ["..."], "score": 85 }`,
         maxTokens: 1000,

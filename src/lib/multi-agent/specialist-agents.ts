@@ -1,3 +1,5 @@
+import { recordAI, setFlightScope } from "@/lib/ai/flight-recorder";
+setFlightScope({ scope: "future-agents", feature: "Specialist Agents", module: "src.lib.multi-agent.specialist-agents" });
 // ============================================================================
 // Specialist Agents — 11 independent, provider-agnostic, patch-producing agents
 // ============================================================================
@@ -211,7 +213,7 @@ async function callAgentAI(
     const policyPreamble = optimizationPolicy
       ? `${optimizationPolicy}\n\n`
       : "";
-    const response = await callAI({
+    const response = await recordAI({
       userPrompt: prompt,
       temperature: 0.3,
       maxTokens: 4000,

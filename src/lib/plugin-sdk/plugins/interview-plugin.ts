@@ -1,8 +1,11 @@
-// ============================================================================
+"use client";
+
+import { recordAI, setFlightScope } from "@/lib/ai/flight-recorder";
+setFlightScope({ scope: "interview", feature: "Interview Plugin", module: "src.lib.plugin-sdk.plugins.interview-plugin" });
+
 // Plugin SDK — Interview Prep Plugin
 // ============================================================================
 
-"use client";
 
 import type { AgentPlugin } from "../interfaces/plugin";
 import type { ServiceContainer } from "../service-container";
@@ -48,7 +51,7 @@ export class InterviewPlugin implements AgentPlugin {
     const skillsSummary = resume.skills.slice(0, 10).map((s) => s.name).join(", ");
     const jobSummary = jd.slice(0, 800);
 
-    const result = await callAI({
+    const result = await recordAI({
       systemPrompt: `You are an expert interview coach. Generate a tailored interview package based on the candidate's background and the target job description. Output MUST be valid JSON (no markdown formatting, no prefix/suffix text) representing a list of questions.`,
       userPrompt: `Generate exactly 9 interview questions (3 behavioral, 3 technical, 2 situational, 1 company-fit). For each question, provide:
 - question: the question text

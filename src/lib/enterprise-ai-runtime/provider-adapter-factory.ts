@@ -1,3 +1,5 @@
+import { recordAI, setFlightScope } from "@/lib/ai/flight-recorder";
+setFlightScope({ scope: "resume-optimizer", feature: "Provider Adapter Factory", module: "src.lib.enterprise-ai-runtime.provider-adapter-factory" });
 // ============================================================================
 // ProviderAdapterFactory — converts store provider objects → AIProvider instances
 // ============================================================================
@@ -119,7 +121,7 @@ export class StoreProviderAdapter implements AIProvider {
     const userMessage = request.messages.find((m) => m.role === "user");
     const systemMessage = request.messages.find((m) => m.role === "system");
 
-    const result = await callAI({
+    const result = await recordAI({
       userPrompt: userMessage?.content ?? "",
       systemPrompt: systemMessage?.content,
       temperature: request.temperature,

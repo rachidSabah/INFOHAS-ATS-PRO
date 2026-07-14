@@ -99,14 +99,19 @@ export function SmartTextarea({ value, onChange, section, placeholder, className
 
   const callAI = async (prompt: string) => {
     try {
-      const { ProviderRouter } = await import("@/lib/ai/services/router");
-      const r = await ProviderRouter.chat({
-        messages: [
-          { role: "system", content: "You are a professional resume writer. Return ONLY the requested text." },
-          { role: "user", content: prompt },
-        ], maxTokens: 200, temperature: 0.7,
-      }, { agentTask: "summary" });
-      return (r.text||"").replace(/^["']|["']$/g,"").trim();
+      // Route through the universal recorded pipeline (no direct ProviderRouter
+      // bypass) so Smart Textarea executions are observed like every other feature.
+      const { recordAI } = await import("@/lib/ai/flight-recorder");
+      const r = await recordAI(
+        {
+          systemPrompt: "You are a professional resume writer. Return ONLY the requested text.",
+          userPrompt: prompt,
+          maxTokens: 200,
+          temperature: 0.7,
+        },
+        { scope: "resume-copilot", feature: "Smart Textarea", module: "src.components.shared.SmartTextarea" }
+      );
+      return (r.text || "").replace(/^["']|["']$/g, "").trim();
     } catch { return ""; }
   };
 

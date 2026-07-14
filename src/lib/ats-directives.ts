@@ -1,3 +1,5 @@
+import { recordAI, setFlightScope } from "@/lib/ai/flight-recorder";
+setFlightScope({ scope: "ats-analysis", feature: "ATS Directives", module: "src.lib.ats-directives" });
 // ResumeAI Pro — Aviation-focused ATS directives & helpers
 //
 // This module contains:
@@ -11,7 +13,7 @@
 //   7. aviationOptimize()   — AI call using the unified directive (returns structured JSON)
 //   8. getDocxHtml()        — strict A4 one-page HTML wrapper for .doc/.docx export
 //
-// analyzeWithGemini() routes through our existing callAI() gateway (Puter → server → local),
+// analyzeWithGemini() routes through our existing recordAI() gateway (Puter → server → local),
 // so it inherits the full failover chain. The "Gemini" name is preserved for compatibility
 // with the original spec — in practice any provider can serve it.
 
@@ -207,7 +209,7 @@ export interface AviationAtsResult {
  * ATS profile, aviation keyword bank, tone/format/strictness settings, and strict
  * 2,800-character / one-A4-page enforcement.
  *
- * Routes through callAI() (Puter → server → local) for full failover.
+ * Routes through recordAI() (Puter → server → local) for full failover.
  */
 export async function analyzeWithGemini(
   resumeText: string,
@@ -314,7 +316,7 @@ export async function analyzeWithGemini(
       }
     `;
 
-    const result = await callAI({
+    const result = await recordAI({
       systemPrompt: `You are an Expert Recruiter, Senior ATS Consultant, and Master Resume Strategist. You deeply analyze resumes and job descriptions before rewriting. You use recruiter-grade language, industry terminology, and high-impact phrases. You NEVER fabricate information. Industry: ${INDUSTRY_PROFILES[airlineProfile]?.label || "Generic"}. Always return ONLY valid JSON — no markdown fences, no prose.`,
       userPrompt: prompt,
       maxTokens: 6000,
@@ -632,7 +634,7 @@ Return ONLY the JSON object described in the directive. No prose, no markdown fe
 
 `;
 
-  const result = await callAI({
+  const result = await recordAI({
     systemPrompt: antiHallucinationPreamble + split.system,
     userPrompt: (split.user ? split.user + "\n\n---\n\n" : "") + userPrompt,
     maxTokens: 8000,

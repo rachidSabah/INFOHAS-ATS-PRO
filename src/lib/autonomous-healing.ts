@@ -1,8 +1,11 @@
-// ResumeAI Pro — Autonomous Healing Engine
+"use client";
+
+import { recordAI, setFlightScope } from "@/lib/ai/flight-recorder";
+setFlightScope({ scope: "future-agents", feature: "Autonomous Healing", module: "src.lib.autonomous-healing" });
+
 // Detects errors, performs root cause analysis, classifies issues, generates patches,
 // validates patches (simulating typecheck, lint, build, test), and commits/rolls back.
 
-"use client";
 
 import { callAI, extractJSON } from "./ai";
 import { useApp } from "./store";
@@ -254,7 +257,7 @@ export async function healIssue(
       const fileData = await readFile(issue.file);
       const surroundingCode = fileData.lines.slice(Math.max(0, (issue.line || 1) - 5), Math.min(fileData.lines.length, (issue.line || 1) + 10)).join("\n");
       
-      const analysisResult = await callAI({
+      const analysisResult = await recordAI({
         systemPrompt: "You are a senior software architect. Analyze the code snippet and determine the root cause, risk, confidence, and reasoning. Return ONLY JSON.",
         userPrompt: `File: ${issue.file}\nLine: ${issue.line}\nCode Snippet:\n${surroundingCode}\n\nReturn JSON: {"rootCause": "string", "risk": "LOW"|"MEDIUM"|"HIGH", "confidence": number, "reasoning": "string"}`,
         maxTokens: 1000,
@@ -280,7 +283,7 @@ export async function healIssue(
       const fileData = await readFile(issue.file);
       const surroundingCode = fileData.lines.slice(Math.max(0, (issue.line || 1) - 10), Math.min(fileData.lines.length, (issue.line || 1) + 20)).join("\n");
       
-      const patchResult = await callAI({
+      const patchResult = await recordAI({
         systemPrompt: "You are a senior software engineer. Generate a unified git diff patch to fix the described issue. Ensure the patch conforms to standard unified diff structure. Return ONLY JSON.",
         userPrompt: `Issue: ${issue.title} - ${issue.description}\nFile: ${issue.file}\nCode surrounding issue:\n${surroundingCode}\n\nReturn JSON: {"patch": "diff --git a/... b/..."}`,
         maxTokens: 2000,

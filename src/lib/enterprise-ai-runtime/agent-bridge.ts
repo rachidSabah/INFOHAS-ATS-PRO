@@ -1,12 +1,14 @@
+import { recordAI, setFlightScope } from "@/lib/ai/flight-recorder";
+setFlightScope({ scope: "future-agents", feature: "Enterprise Agent Bridge", module: "src.lib.enterprise-ai-runtime.agent-bridge" });
 // ============================================================================
-// AgentBridge — drop-in replacement agents use instead of calling callAI()
+// AgentBridge — drop-in replacement agents use instead of calling recordAI()
 // ============================================================================
 // This is the Phase 4 migration bridge. Agents import runtimeCallAI() instead
-// of callAI() from "../../ai". All calls route through EnterpriseAIRuntime.
+// of recordAI() from "../../ai". All calls route through EnterpriseAIRuntime.
 //
 // Migration checklist:
 //   1. import { runtimeCallAI } from "...enterprise-ai-runtime/agent-bridge"
-//   2. Replace callAI(opts) with runtimeCallAI(opts)
+//   2. Replace recordAI(opts) with runtimeCallAI(opts)
 //   3. Test passes; old code path unchanged for non-migrated callers.
 
 import type { AIProvider, ChatRequest, ProviderConfig } from "./types";
@@ -108,7 +110,7 @@ export interface RuntimeCallResult {
 }
 
 /**
- * Drop-in replacement for callAI(). Routes through EnterpriseAIRuntime
+ * Drop-in replacement for recordAI(). Routes through EnterpriseAIRuntime
  * with full failover, health monitoring, and circuit breaking.
  */
 export async function runtimeCallAI(opts: RuntimeCallOptions): Promise<RuntimeCallResult> {

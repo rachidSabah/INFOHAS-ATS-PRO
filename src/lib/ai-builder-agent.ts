@@ -1,4 +1,8 @@
-// ResumeAI Pro — AI Builder Agent engine
+"use client";
+
+import { recordAI, setFlightScope } from "@/lib/ai/flight-recorder";
+setFlightScope({ scope: "resume-builder", feature: "AI Builder Agent", module: "src.lib.ai-builder-agent" });
+
 // Extends the AI Dev Agent with full code-editing capabilities:
 //   - Repository Explorer (browse files)
 //   - File operations (read/create/update/rename/move/delete)
@@ -14,7 +18,6 @@
 //   Generate Patch → Staging Branch → Build → Test → Report → Approval → Merge
 // The AI NEVER directly modifies production.
 
-"use client";
 
 import { callAI, extractJSON } from "./ai";
 import { useApp } from "./store";
@@ -161,7 +164,7 @@ Return ONLY valid JSON array:
 [{"file": "src/lib/ai.ts", "line": 172, "symbol": "callAI", "type": "function"}]`;
 
   try {
-    const result = await callAI({
+    const result = await recordAI({
       systemPrompt: "You are a code search engine. Return ONLY valid JSON arrays.",
       userPrompt: prompt,
       maxTokens: 1000,
@@ -358,7 +361,7 @@ Analyze the request and create an execution plan. Return ONLY valid JSON:
 }`;
 
   try {
-    const result = await callAI({
+    const result = await recordAI({
       systemPrompt: "You are an AI Builder Agent. Always return ONLY valid JSON.",
       userPrompt: prompt,
       maxTokens: 2000,
@@ -413,7 +416,7 @@ Return ONLY valid JSON:
 }`;
 
   try {
-    const result = await callAI({
+    const result = await recordAI({
       systemPrompt: "You are a code generator. Generate complete, production-ready file contents. Always return ONLY valid JSON.",
       userPrompt: prompt,
       maxTokens: 10000,
@@ -463,7 +466,7 @@ Return ONLY valid JSON:
 }`;
 
   try {
-    const result = await callAI({
+    const result = await recordAI({
       systemPrompt: "You are an AI code generator. Generate unified git diffs. Always return ONLY valid JSON.",
       userPrompt: prompt,
       maxTokens: 6000,
@@ -486,7 +489,7 @@ Generate comprehensive tests that verify the task implementation.
 Return ONLY the test file content (TypeScript), no markdown fences.`;
 
   try {
-    const result = await callAI({
+    const result = await recordAI({
       systemPrompt: "You are a test generator. Generate Vitest tests.",
       userPrompt: prompt,
       maxTokens: 4000,
@@ -856,7 +859,7 @@ export async function runAutonomousDebug(): Promise<{
           ? `File: ${issue.file}:${issue.line}\nCode: ${issue.code || "n/a"}\nDescription: ${issue.description}`
           : `Description: ${issue.description}`;
 
-        const patchResult = await callAI({
+        const patchResult = await recordAI({
           systemPrompt: "You are a code fixer. Generate a unified git diff to fix the described issue. Use ONLY real file paths from the evidence. Return ONLY valid JSON: {\"title\": \"Fix: ...\", \"diff\": \"diff --git a/...\"}",
           userPrompt: `Fix this issue using the REAL evidence provided. Do NOT invent file paths.\n\n${evidenceText}`,
           maxTokens: 2000,

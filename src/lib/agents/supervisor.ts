@@ -1,3 +1,5 @@
+import { recordAI, setFlightScope } from "@/lib/ai/flight-recorder";
+setFlightScope({ scope: "future-agents", feature: "Supervisor Agent", module: "src.lib.agents.supervisor" });
 // ============================================================================
 // SupervisorAgent — the central orchestrator for the Unified AI Career
 // Operating System (V3).
@@ -1359,7 +1361,7 @@ async function runCoverLetterAgent(resume: ResumeData, jd: JobDescription, compa
       updateAgent(agentId, { log: `⚠ First attempt too short (${result.text?.trim().length ?? 0} chars). Retrying with simplified prompt…` });
 
       // Retry with a more structured prompt to coax more output
-      const retryResult = await withRetry(() => callAI({
+      const retryResult = await withRetry(() => recordAI({
         systemPrompt: "Write a professional job application cover letter. Minimum 400 words. Plain text, no markdown.",
         userPrompt: `Write a complete cover letter for ${resume.name} applying to ${jobTitle} at ${company || "the company"}.
 
@@ -1750,7 +1752,7 @@ async function runCareerCoachAgent(resume: ResumeData, jd: JobDescription, indus
   updateAgent(agentId, { status: "running", startedAt: new Date().toISOString(), log: "Generating career recommendations…" });
   try {
     const profile = state.profile;
-    const result = await withRetry(() => callAI({
+    const result = await withRetry(() => recordAI({
       systemPrompt: "You are an expert career coach. Generate personalized career recommendations based on the candidate's resume, target job, industry, and history. Return ONLY valid JSON.",
       userPrompt: `CANDIDATE: ${resume.name}, ${resume.headline ?? ""}
 SKILLS: ${resume.skills.map((s) => s.name).join(", ")}

@@ -1,5 +1,8 @@
 "use client";
 
+import { recordAI, setFlightScope } from "@/lib/ai/flight-recorder";
+setFlightScope({ scope: "resume-copilot", feature: "AI Models", module: "src.components.app.modules.AIModels" });
+
 import { useState, useEffect } from "react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -246,7 +249,7 @@ export function AIModels() {
       const { callAI } = await import("@/lib/ai");
 
       // Use a local override object — never mutate the `selected` state variable
-      const res = await callAI({
+      const res = await recordAI({
         systemPrompt: "Respond in exactly one word: 'READY'. Do not write anything else.",
         userPrompt: "status check",
         maxTokens: 5,

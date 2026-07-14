@@ -1,8 +1,11 @@
-// ============================================================================
+"use client";
+
+import { recordAI, setFlightScope } from "@/lib/ai/flight-recorder";
+setFlightScope({ scope: "cover-letter", feature: "Cover Letter Plugin", module: "src.lib.plugin-sdk.plugins.cover-letter-plugin" });
+
 // Plugin SDK — Cover Letter Plugin
 // ============================================================================
 
-"use client";
 
 import type { AgentPlugin } from "../interfaces/plugin";
 import type { ServiceContainer } from "../service-container";
@@ -48,7 +51,7 @@ export class CoverLetterPlugin implements AgentPlugin {
     const skillsSummary = resume.skills.slice(0, 10).map((s) => s.name).join(", ");
     const jobSummary = jd.slice(0, 800);
 
-    const result = await callAI({
+    const result = await recordAI({
       systemPrompt: `You are a professional cover letter writer. Write a compelling, personalized cover letter of at least 400 words (minimum 2,500 characters). Structure: opening paragraph (hook + role interest), body (2-3 paragraphs matching experience to job requirements), closing (call to action). Plain text only — no headers, no markdown.`,
       userPrompt: `Write a full cover letter for the following:
 

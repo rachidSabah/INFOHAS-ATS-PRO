@@ -195,3 +195,42 @@ Stage Summary:
 - 52 new regression tests for the new modules
 - Production readiness: 92%
 - Final deliverables report saved to download/Final_Deliverables_Report.md
+
+---
+
+Task ID: verify-and-finish-feature (Phase 8.1.3 — Universal AI Flight Recorder + Video Interview)
+Agent: main (Claude Code session resume)
+Task: Resume the ATS PREMIUM session, verify the in-flight Flight Recorder + video-interview work, fix all breakage, and bring the working tree to a clean committable state.
+
+Work Log:
+- Recovered the session: real working tree is D:\ATS PREMIUM (not the empty Downloads\ATSPRO). Prior stages documented in worklog.md up to the P1.5-P1.7 roadmap (304 tests, 92% production readiness).
+- Working tree had uncommitted Flight Recorder work (src/lib/ai/flight-recorder.ts — 553 lines, relocated from src/lib/interview/ to src/lib/ai/) + new video-interview suite (src/lib/interview/*, src/hooks/interview/*, src/components/interview/VideoInterviewSession.tsx, DeviceCheck.tsx, src/app/interview/device-check/page.tsx) + interview exporter additions (exportInterviewJSON, exportInterviewMarkdown in src/lib/exporter.ts) + callAI → recordAI delegation in src/lib/ai.ts.
+
+- Ran `npx tsc --noEmit`: 0 errors (already clean).
+- Ran `npx vitest run`: 35 failing tests across 17 suites — all from ONE root cause:
+
+  Bug 1 — Module-init TDZ cyclic import (flight-recorder.ts):
+    - flight-recorder.ts statically imported `callAIRaw` from `@/lib/ai`; but ai.ts → optimizer-directive-engine.ts calls `setFlightScope()` at TOP LEVEL, which writes to `let _moduleContext` in flight-recorder.ts.
+    - Under the cycle, flight-recorder.ts had not reached its own `let _moduleContext = {}` line, so the top-level `setFlightScope()` hit it in the TDZ → `ReferenceError: Cannot access '_moduleContext' before initialization`.
+    - Fix: made `callAIRaw` import LAZY inside `recordAI()` (await import("@/lib/ai")) — matches the file's own mandated design (recordAI is the ONLY caller of callAIRaw). Cycle broken.
+
+- Bug 2 — `"use client"` not first statement (build-break):
+    - 23 files had the Flight Recorder `import { recordAI, setFlightScope }` + `setFlightScope(...)` lines BEFORE `"use client"`, which Next.js forbids.
+    - Fix: reordered so `"use client";` is line 1, then the recorder import + setFlightScope call, for 14 component files + 9 lib files.
+
+- Bug 3 — Stale test mocks:
+    - src/lib/interview/adaptive.test.ts: the flight-recorder mock lacked `setFlightScope`/`resetFlightScope` exports (top-level callers panic). Added them as no-ops.
+    - src/lib/job-parser.test.ts: mocked the old `callAI` and asserted it was called; production now routes through `recordAI`. Re-pointed the mock to `@/lib/ai/flight-recorder`'s `recordAI` and asserted on the new boundary.
+
+Validation:
+- npx tsc --noEmit: 0 errors
+- npx vitest run: 1304 passed (was 1269 + 35 failing → fixed to 1304 passing)
+- npx next build: clean (exit 0), all routes compiled (incl. /interview/device-check)
+- npx eslint on changed files: clean
+
+Stage Summary:
+- Root cause of the test crash AND a latent runtime crash on any feature that calls setFlightScope() at import time (optimizer, parser, agents, etc.) was a single static import cycle. The lazy-import fix is the permanent resolution and aligns with the module's own documented design.
+- Root cause of the build failure was the Flight Recorder instrumentation pattern placing a top-level import before "use client". Reordering all 23 affected files resolves it for the whole app, not just the two originally reported.
+- All breakage from the in-flight Phase 8.1.3 feature is fixed. Suite is green, build is clean, lint is clean. Working tree is committable.
+- Note: CRLF line endings in this repo — git warns "LF will be replaced by CRLF" on every touched file.
+

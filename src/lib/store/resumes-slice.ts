@@ -10,6 +10,7 @@ import type {
   ResumeData, JobDescription, CoverLetter, InterviewPackage, ATSReport,
   ResumeReviewReport, CareerMaterial
 } from "../types";
+import type { InterviewSessionRecord } from "@/hooks/interview/types";
 import {
   SEED_RESUMES, SEED_JDS, SEED_COVER_LETTERS, SEED_INTERVIEW, SEED_ATS_REPORTS
 } from "../mock-data";
@@ -61,6 +62,12 @@ export interface ResumesSlice {
   removeInterview: (id: string) => void;
   setActiveInterview: (id: string | null) => void;
 
+  // ---- Interview video sessions (Sonru-style) — history + metadata only ----
+  interviewSessions: InterviewSessionRecord[];
+  addInterviewSession: (s: InterviewSessionRecord) => void;
+  updateInterviewSession: (id: string, patch: Partial<InterviewSessionRecord>) => void;
+  removeInterviewSession: (id: string) => void;
+
   addATSReport: (r: ATSReport) => void;
 
   addReviewReport: (r: ResumeReviewReport) => void;
@@ -76,6 +83,7 @@ export const createResumesSlice: StateCreator<AppState, [], [], ResumesSlice> = 
   atsReports: SEED_ATS_REPORTS,
   careerMaterials: [],
   reviewReports: [],
+  interviewSessions: [],
 
   activeResumeId: SEED_RESUMES[0]?.id ?? null,
   activeJdId: SEED_JDS[0]?.id ?? null,
@@ -289,6 +297,41 @@ export const createResumesSlice: StateCreator<AppState, [], [], ResumesSlice> = 
   },
 
   setActiveInterview: (id) => set({ activeInterviewId: id }),
+
+  addInterviewSession: (s) => {
+    set((st) => ({ interviewSessions: [s, ...st.interviewSessions] }));
+    if (typeof localStorage !== "undefined") {
+      try {
+        const existing = JSON.parse(localStorage.getItem("resumeai-interview-sessions-backup") || "[]");
+        localStorage.setItem("resumeai-interview-sessions-backup", JSON.stringify([s, ...existing.filter((x: any) => x.id !== s.id)].slice(0, 50)));
+      } catch (syncErr) { console.warn("[store] Operation failed:", syncErr); }
+    }
+  },
+
+  updateInterviewSession: (id, patch) => {
+    set((st) => ({
+      interviewSessions: st.interviewSessions.map((s) =>
+        s.id === id ? { ...s, ...patch } : s
+      ),
+    }));
+    if (typeof localStorage !== "undefined") {
+      try {
+        const existing = JSON.parse(localStorage.getItem("resumeai-interview-sessions-backup") || "[]");
+        const updated = existing.map((x: any) => (x.id === id ? { ...x, ...patch } : x));
+        localStorage.setItem("resumeai-interview-sessions-backup", JSON.stringify(updated));
+      } catch (syncErr) { console.warn("[store] Operation failed:", syncErr); }
+    }
+  },
+
+  removeInterviewSession: (id) => {
+    set((st) => ({ interviewSessions: st.interviewSessions.filter((s) => s.id !== id) }));
+    if (typeof localStorage !== "undefined") {
+      try {
+        const existing = JSON.parse(localStorage.getItem("resumeai-interview-sessions-backup") || "[]");
+        localStorage.setItem("resumeai-interview-sessions-backup", JSON.stringify(existing.filter((x: any) => x.id !== id)));
+      } catch (syncErr) { console.warn("[store] Operation failed:", syncErr); }
+    }
+  },
 
   addATSReport: (r) => {
     set((s) => ({ atsReports: [r, ...s.atsReports] }));

@@ -1,8 +1,11 @@
-// ResumeAI Pro — Career Tools Modules
+"use client";
+
+import { recordAI, setFlightScope } from "@/lib/ai/flight-recorder";
+setFlightScope({ scope: "resume-copilot", feature: "Career Tools", module: "src.components.app.modules.CareerTools" });
+
 // All modules use live AI calls (callAI) and live store data.
 // No demo data, no placeholders, no simulated results.
 
-"use client";
 
 import { useState, useRef, useEffect } from "react";
 import ReactMarkdown from "react-markdown";
@@ -92,7 +95,7 @@ export function LinkedinImport() {
     if (!url.match(/linkedin\.com\/in\//)) { toast.error("Enter a valid LinkedIn profile URL (linkedin.com/in/...)"); return; }
     setLoading(true); setOutput("");
     try {
-      const result = await callAI({
+      const result = await recordAI({
         systemPrompt: "You are a LinkedIn profile parser. Given a LinkedIn URL, generate a structured resume. Return ONLY valid JSON matching the resume format with: name, headline, contact, summary, experience, education, skills, languages.",
         userPrompt: `Parse this LinkedIn profile URL and create a resume: ${url}\n\nIf you cannot access the URL, generate a template resume based on the URL structure. Return JSON with: name, headline, contact {email, phone, location, linkedin}, summary, experience [{title, company, location, startDate, endDate, bullets[]}], education [{institution, degree, startDate, endDate}], skills [{name}], languages [{name, proficiency}].`,
         maxTokens: 3000,
@@ -195,7 +198,7 @@ export function MultiLanguage() {
     if (!resume) { toast.error("Create a resume first."); return; }
     setLoading(true); setOutput("");
     try {
-      const result = await callAI({
+      const result = await recordAI({
         systemPrompt: `You are a professional resume translator. Translate the resume to ${lang}. Keep proper nouns, company names, and certifications in original language. Maintain the same structure and formatting.`,
         userPrompt: `Translate this resume to ${lang}:\n\n${JSON.stringify({ name: resume.name, headline: resume.headline, summary: resume.summary, experience: resume.experience, education: resume.education, skills: resume.skills, languages: resume.languages })}\n\nReturn the translated resume as JSON with the same structure.`,
         maxTokens: 3000, taskCategory: "document",
@@ -448,7 +451,7 @@ export function BulkGenerator() {
     try {
       // Step 1: Parse JD
       updateJob(job.id, { status: "analyzing", statusLabel: "Analyzing JD…" });
-      const jdParseResult = await callAI({
+      const jdParseResult = await recordAI({
         systemPrompt: "You are a job description parser. Return ONLY valid JSON.",
         userPrompt: `Extract from this job description:\n${job.value.slice(0, 3000)}\n\nReturn JSON: { "title": "...", "company": "...", "location": "...", "requiredSkills": [...], "keywords": [...] }`,
         maxTokens: 1000, taskCategory: "document",
@@ -464,7 +467,7 @@ export function BulkGenerator() {
       updateJob(job.id, { status: "optimizing", statusLabel: `Optimizing (${industryProfile.label})…`, industry: industryProfile.label, company, title });
 
       // Step 3: Optimize resume
-      const optResult = await callAI({
+      const optResult = await recordAI({
         systemPrompt: `You are a Senior ATS Optimization Expert. Optimize the resume for the job description using ${industryProfile.label} industry keywords. Return ONLY JSON with: name, headline, summary, skills [{name, category}], experience [{title, company, location, startDate, endDate, bullets[]}], missingKeywordsAdded, bulletsRewritten.\n\nINDUSTRY KEYWORDS: ${industryProfile.keywordBank}`,
         userPrompt: `SOURCE RESUME:\n${JSON.stringify({ name: resume.name, headline: resume.headline, summary: resume.summary, experience: resume.experience.map((e) => ({ title: e.title, company: e.company, bullets: e.bullets })), skills: resume.skills.map((s) => s.name) })}\n\nJOB DESCRIPTION:\n${job.value.slice(0, 2000)}\n\nOptimize for maximum ATS match. NEVER fabricate experience. Return JSON only.`,
         maxTokens: 3000, temperature: 0.4, taskCategory: "document",
@@ -509,7 +512,7 @@ export function BulkGenerator() {
       updateJob(job.id, { status: "cover-letter", statusLabel: "Generating cover letter…", optimizedResumeId: optimized.id, atsScore, matchScore: atsReport.jdMatchPercent ?? Math.round(atsScore * 0.9) });
 
       // Step 4: Generate cover letter
-      const clResult = await callAI({
+      const clResult = await recordAI({
         systemPrompt: `You are an expert cover letter writer. Write a ${industryProfile.label} industry cover letter (~400 words). Plain text only. Sound human, professional, recruiter-grade.`,
         userPrompt: `Candidate: ${optimized.name}, ${optimized.headline}\nExperience: ${optimized.experience.map((e) => `${e.title} at ${e.company}`).join(", ")}\nSkills: ${optimized.skills.map((s) => s.name).join(", ")}\n\nJob: ${title} at ${company}\nJD: ${job.value.slice(0, 1000)}\n\nWrite the cover letter now.`,
         maxTokens: 1000, taskCategory: "document",
@@ -519,7 +522,7 @@ export function BulkGenerator() {
 
       // Step 4.5: Generate outreach message
       updateJob(job.id, { status: "cover-letter", statusLabel: "Generating outreach message…", coverLetterId: cl.id });
-      const outreachResult = await callAI({
+      const outreachResult = await recordAI({
         systemPrompt: "You are a professional networking expert. Write a highly personalized cold outreach message for LinkedIn or Email (max 120 words). Plain text only. Sound professional, concise, and response-driven.",
         userPrompt: `Candidate: ${optimized.name}, ${optimized.headline}\nJob: ${title} at ${company}\n\nWrite the networking message now.`,
         maxTokens: 400, taskCategory: "document",
@@ -529,7 +532,7 @@ export function BulkGenerator() {
       updateJob(job.id, { status: "interview", statusLabel: "Generating interview prep…", outreachMessage });
 
       // Step 5: Generate interview prep (condensed — 9 questions)
-      const ivResult = await callAI({
+      const ivResult = await recordAI({
         systemPrompt: `You are an expert interview coach for ${industryProfile.label}. Return ONLY JSON.`,
         userPrompt: `Candidate resume: ${JSON.stringify({ name: optimized.name, experience: optimized.experience.map((e) => ({ title: e.title, company: e.company, bullets: e.bullets })), skills: optimized.skills.map((s) => s.name) })}\n\nJob: ${title} at ${company}\nJD: ${job.value.slice(0, 1500)}\n\nGenerate 9 interview questions (3 technical, 3 behavioral, 2 situational, 1 company). Return JSON: { "questions": [{ "category": "...", "question": "...", "difficulty": "easy|medium|hard", "recommendedAnswer": "...", "talkingPoints": [...], "followUps": [...] }] }`,
         maxTokens: 3000, taskCategory: "document",
@@ -971,7 +974,7 @@ export function SalaryInsights() {
     if (!role) { toast.error("Enter a role"); return; }
     setLoading(true); setOutput("");
     try {
-      const result = await callAI({
+      const result = await recordAI({
         systemPrompt: "You are a salary analyst. Provide realistic salary ranges based on role, location, and experience. Include entry, mid, senior levels.",
         userPrompt: `Provide salary insights for: Role: ${role}, Location: ${location || "Global"}. Include: salary range (entry/mid/senior), benefits typically offered, negotiation tips, and market demand outlook.`,
         maxTokens: 1500, taskCategory: "document",
@@ -1045,7 +1048,7 @@ export function SkillGap() {
     if (!selectedJd) { toast.error("Select a job description."); return; }
     setLoading(true); setReport(null);
     try {
-      const result = await callAI({
+      const result = await recordAI({
         systemPrompt: `You are an Expert Career Advisor and Skills Analyst. You deeply analyze the gap between a candidate's resume and a job description, then generate actionable learning roadmaps. NEVER fabricate — only reference real skills from the resume. Return ONLY valid JSON.`,
         userPrompt: `CANDIDATE RESUME:
 ${JSON.stringify({ name: resume.name, headline: resume.headline, summary: resume.summary, skills: resume.skills.map((s) => s.name), experience: resume.experience.map((e) => ({ title: e.title, company: e.company, bullets: e.bullets.slice(0, 2) })), education: resume.education.map((ed) => ({ degree: ed.degree, institution: ed.institution })), certifications: resume.certifications.map((c) => c.name) })}
@@ -1274,7 +1277,7 @@ export function CareerPath() {
     if (!current || !target) { toast.error("Enter both roles"); return; }
     setLoading(true); setOutput("");
     try {
-      const result = await callAI({
+      const result = await recordAI({
         systemPrompt: "You are a career advisor. Map the progression path from current role to target role.",
         userPrompt: `Current role: ${current}\nTarget role: ${target}\n\nProvide: 1) Step-by-step career path (3-5 intermediate roles), 2) Skills to acquire at each step, 3) Estimated time per step, 4) Key milestones to hit.`,
         maxTokens: 1500, taskCategory: "document",
@@ -1366,7 +1369,7 @@ export function CompanyResearch() {
 
       const jdContext = jd?.rawText ?? jd?.keywords?.join(", ") ?? "(no JD)";
 
-      const result = await callAI({
+      const result = await recordAI({
         systemPrompt: `You are an Expert Company Intelligence Analyst and Senior Recruiter. Generate a comprehensive company intelligence report for job seekers. NEVER fabricate information — if you don't know something, say "Information not available". Return ONLY valid JSON.`,
         userPrompt: `COMPANY: ${targetCompany}
 ${jd ? `JOB TITLE: ${jd.title || "N/A"}\nJOB DESCRIPTION: ${jdContext.slice(0, 1500)}` : ""}
@@ -1680,7 +1683,7 @@ export function AiCoach() {
     const userMsg = { role: "user", content: input };
     setMessages((m) => [...m, userMsg]); setInput(""); setLoading(true);
     try {
-      const result = await callAI({
+      const result = await recordAI({
         systemPrompt: "You are an expert career coach. Provide actionable, specific advice. Ask clarifying questions when needed. Be encouraging but honest.",
         userPrompt: input, maxTokens: 1000, taskCategory: "interactive",
       });
@@ -1945,7 +1948,7 @@ export function AiMockInterview() {
       // Random seed to bust any AI caching — ensures different questions each time
       const seed = Math.floor(Math.random() * 1000000);
 
-      const result = await callAI({
+      const result = await recordAI({
         systemPrompt: `You are an expert interviewer conducting a mock interview for a ${effectivePosition} position. ${topicContext}Ask ONE realistic interview question at a time — the kind a real interviewer would ask for this specific role and topic. Wait for the candidate's answer. After they answer, provide brief feedback (1-2 sentences) and ask the next question. Always respond in plain text — NEVER return JSON.${examplesText}`,
         userPrompt: `Start a mock interview for: ${positionContext}${topicContext}\nAsk the first question. The question MUST be specific to ${selectedTopic?.label ?? "the topic"} and relevant to the ${effectivePosition} role. Do NOT ask generic questions about software architecture or scaling — ask about the actual duties of this role.\n\n[Session ID: ${seed} — generate a unique question]`,
         maxTokens: 500,
@@ -1978,7 +1981,7 @@ export function AiMockInterview() {
         : "";
       const seed = Math.floor(Math.random() * 1000000);
 
-      const result = await callAI({
+      const result = await recordAI({
         systemPrompt: `You are an expert interviewer conducting a mock interview for a ${effectivePosition} position. The candidate just answered your question. Provide brief feedback (1-2 sentences) specific to their answer, then ask the next question on a different aspect of the role. Always respond in plain text — NEVER return JSON. Keep questions realistic and specific to ${selectedTopic?.label ?? "the topic"}.${examplesText}`,
         userPrompt: `Candidate's answer: ${userAnswer}\n\nProvide brief feedback and ask the next question. The next question MUST be specific to ${selectedTopic?.label ?? "the topic"} and relevant to the ${effectivePosition} role. Do NOT ask generic software engineering questions unless the topic is Technical.\n\n[Session ID: ${seed} — generate a unique question]`,
         maxTokens: 500,
@@ -2180,7 +2183,7 @@ export function AiSalaryCoach() {
     if (!role || !offer) { toast.error("Enter role and offer details"); return; }
     setLoading(true); setOutput("");
     try {
-      const result = await callAI({
+      const result = await recordAI({
         systemPrompt: "You are a salary negotiation coach. Help the candidate negotiate a better offer with specific scripts and strategies.",
         userPrompt: `Role: ${role}\nCurrent offer: ${offer}\nExperience: ${experience || "N/A"}\n\nProvide: 1) Assessment of the offer, 2) Negotiation strategy, 3) Exact scripts to use (phone + email), 4) Counter-offer range, 5) What to avoid saying.`,
         maxTokens: 2000, taskCategory: "document",
@@ -2215,7 +2218,7 @@ export function AiEmailWriter() {
   const generate = async () => {
     setLoading(true); setOutput("");
     try {
-      const result = await callAI({
+      const result = await recordAI({
         systemPrompt: "You are a professional email writer. Write concise, effective emails for job seekers.",
         userPrompt: `Email type: ${type}\nContext: ${context}\n\nWrite a professional email. Include subject line. Keep it concise and actionable.`,
         maxTokens: 800, taskCategory: "document",
@@ -2254,7 +2257,7 @@ export function AiResumeReview() {
     if (!resume) { toast.error("Select a resume"); return; }
     setLoading(true); setOutput("");
     try {
-      const result = await callAI({
+      const result = await recordAI({
         systemPrompt: "You are a senior recruiter. Review the resume critically. Be honest and specific. Rate each section out of 10.",
         userPrompt: `Review this resume as a senior recruiter:\n\n${JSON.stringify({ name: resume.name, headline: resume.headline, summary: resume.summary, experience: resume.experience, education: resume.education, skills: resume.skills })}\n\nProvide: 1) Overall score /10, 2) Section-by-section feedback (Summary, Experience, Skills, Education), 3) Top 3 strengths, 4) Top 3 weaknesses, 5) Specific improvement suggestions.`,
         maxTokens: 2000, taskCategory: "document",
@@ -2290,7 +2293,7 @@ export function AiJobMatch() {
     if (!resume || !jdUrl) { toast.error("Select resume and enter JD URL"); return; }
     setLoading(true); setOutput("");
     try {
-      const result = await callAI({
+      const result = await recordAI({
         systemPrompt: "You are an ATS system. Score the resume against the job description. Be precise and data-driven. Use markdown formatting (##, **, |, ✅) for readability. NEVER score any individual category above its maximum (e.g. if a category is out of 25, the max score is 25 — never 26/25). Clamp all scores to their maximums.",
         userPrompt: `Resume: ${JSON.stringify({ name: resume.name, headline: resume.headline, summary: resume.summary, experience: resume.experience, skills: resume.skills })}\n\nJob URL: ${jdUrl}\n\nProvide: 1) Match score /100 (clamped to 100 max), 2) Keyword match analysis (as a markdown table), 3) Missing keywords, 4) Experience alignment, 5) Recommendations to improve match.\n\nIMPORTANT: No individual sub-score may exceed its maximum. If a category is /25, the score must be ≤ 25. If /30, ≤ 30. The overall score must be ≤ 100.`,
         maxTokens: 1500, taskCategory: "document",
@@ -2324,7 +2327,7 @@ export function AiAchievement() {
     if (!input.trim()) { toast.error("Paste an achievement"); return; }
     setLoading(true); setOutput("");
     try {
-      const result = await callAI({
+      const result = await recordAI({
         systemPrompt: "You are a resume writer. Rewrite weak achievement bullets into 3 strong versions with action verbs and measurable outcomes. If no metrics exist, suggest where to add them.",
         userPrompt: `Rewrite this achievement in 3 different ways:\n\n${input}\n\nProvide 3 versions: 1) Conservative, 2) Impact-focused, 3) Metrics-driven. Each as a single bullet point starting with an action verb.`,
         maxTokens: 800, taskCategory: "document",

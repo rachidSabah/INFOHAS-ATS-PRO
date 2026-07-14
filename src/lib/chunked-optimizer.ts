@@ -1,4 +1,8 @@
-// ============================================================================
+"use client";
+
+import { recordAI, setFlightScope } from "@/lib/ai/flight-recorder";
+setFlightScope({ scope: "resume-optimizer", feature: "Chunked Optimizer", module: "src.lib.chunked-optimizer" });
+
 // Chunked Optimizer — Feature 2: Surgical Chunking (MapReduce Optimization)
 //
 // Instead of sending the ENTIRE resume + job description in one massive prompt
@@ -21,7 +25,6 @@
 // (graceful partial optimization).
 // ============================================================================
 
-"use client";
 
 import type { ResumeData, JobDescription } from "./types";
 import { callAI } from "./ai";
@@ -89,7 +92,7 @@ ${experienceJson}
 Return ONLY the JSON array. No explanation, no markdown fences.`;
 
   try {
-    const result = await callAI({
+    const result = await recordAI({
       systemPrompt,
       userPrompt,
       maxTokens: 2500,
@@ -157,7 +160,7 @@ Job Description Required Skills & Keywords: ${jdSkills || "(none provided)"}
 Return the enriched skills JSON array. No explanation, no markdown.`;
 
   try {
-    const result = await callAI({
+    const result = await recordAI({
       systemPrompt,
       userPrompt,
       maxTokens: 1200,
@@ -233,7 +236,7 @@ ${intelligenceContext ? `\nAdditional Context:\n${intelligenceContext.slice(0, 8
 Write the optimized professional summary now:`;
 
   try {
-    const result = await callAI({
+    const result = await recordAI({
       systemPrompt,
       userPrompt,
       maxTokens: 600,

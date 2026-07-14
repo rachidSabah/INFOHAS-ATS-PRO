@@ -1,5 +1,8 @@
 "use client";
 
+import { recordAI, setFlightScope } from "@/lib/ai/flight-recorder";
+setFlightScope({ scope: "adaptive-interview", feature: "Interview Session", module: "src.components.interview.InterviewSession" });
+
 import { useState, useCallback, useRef, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -217,7 +220,7 @@ export function InterviewSession({ pkg, onClose }: InterviewSessionProps) {
     setError(null);
 
     try {
-      const result = await callAI({
+      const result = await recordAI({
         systemPrompt: "You are an expert interview coach. Evaluate the candidate's answer and provide constructive feedback. Focus heavily on checking for behavioral components if applicable: STAR structure (Situation, Task, Action, Result) with specific quantified outcomes. Return ONLY valid JSON.",
         userPrompt: `Question: ${current.question}
 Category: ${current.category}

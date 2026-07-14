@@ -1,8 +1,11 @@
-// ResumeAI Pro — Batch Resume Optimizer
+"use client";
+
+import { recordAI, setFlightScope } from "@/lib/ai/flight-recorder";
+setFlightScope({ scope: "resume-optimizer", feature: "Batch Optimizer", module: "src.components.app.modules.BatchOptimizer" });
+
 // Upload up to 10 resume files, pick a target JD, and process them all sequentially.
 // Each file is parsed → optimized → saved to library. Finished batch exports as a ZIP.
 
-"use client";
 
 import { useState, useRef, useCallback } from "react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -317,7 +320,7 @@ export function BatchOptimizer() {
       // Step 2 – Optimize via AI
       patchItem(item.id, { status: "optimizing", statusLabel: "Optimizing with AI…" });
 
-      const optResult = await callAI({
+      const optResult = await recordAI({
         systemPrompt:
           "You are a Senior ATS Optimization Expert. Optimize the resume for the job description below. " +
           "Return ONLY valid JSON with fields: name, headline, summary, skills (array of {name, category}), " +

@@ -1,5 +1,8 @@
 "use client";
 
+import { recordAI, setFlightScope } from "@/lib/ai/flight-recorder";
+setFlightScope({ scope: "resume-copilot", feature: "AI Tools", module: "src.components.app.modules.AITools" });
+
 import { useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -77,7 +80,7 @@ export function AITools() {
         sys = "You are an expert recruiter outreach strategist. Write a highly personalized, brief, and professional cold email pitch or LinkedIn message to a hiring manager or recruiter.";
         user = `Write a personalized cold email pitch based on this resume and target role details:\n${input || JSON.stringify(resume ?? {})}`;
       }
-      const result = await callAI({ systemPrompt: sys, userPrompt: user, maxTokens: 1500, taskCategory: "document" });
+      const result = await recordAI({ systemPrompt: sys, userPrompt: user, maxTokens: 1500, taskCategory: "document" });
       setOutput(result.text);
       incUsage("resumesGenerated");
       log({ actor: "you", action: `AI tool: ${active}`, category: "ai", details: `via ${result.provider}`, severity: "info" });

@@ -1,3 +1,5 @@
+import { recordAI, setFlightScope } from "@/lib/ai/flight-recorder";
+setFlightScope({ scope: "company-intelligence", feature: "Company Intelligence", module: "src.lib.agents.company-skill-agents" });
 // ============================================================================
 // CompanyIntelligenceAgent + SkillGapAgent
 //
@@ -74,7 +76,7 @@ export async function analyzeCompanyIntelligence(
   const jdContext = jd.rawText?.slice(0, 2000) ??
     JSON.stringify({ title: jd.title, company: jd.company, responsibilities: jd.responsibilities, requiredSkills: jd.requiredSkills, keywords: jd.keywords });
 
-  const result = await callAI({
+  const result = await recordAI({
     systemPrompt: `You are an Expert Company Intelligence Analyst. You generate concise, actionable company profiles that a resume optimizer can use to tailor a candidate's resume for THIS specific company. NEVER fabricate — if you don't know something, say "Information not available". Return ONLY valid JSON.`,
     userPrompt: `COMPANY: ${companyName}
 JOB TITLE: ${jd.title || "N/A"}
@@ -194,7 +196,7 @@ export async function analyzeSkillGap(
     return cached;
   }
 
-  const result = await callAI({
+  const result = await recordAI({
     systemPrompt: `You are an Expert Career Advisor and Skills Analyst. You analyze the gap between a candidate's resume and a job's requirements, then identify transferable and adjacent skills the candidate can use to bridge gaps — WITHOUT fabricating experience. Return ONLY valid JSON.`,
     userPrompt: `CANDIDATE RESUME:
 ${JSON.stringify({

@@ -1,3 +1,5 @@
+import { recordAI, setFlightScope } from "@/lib/ai/flight-recorder";
+setFlightScope({ scope: "resume-optimizer", feature: "Resume Optimizer", module: "src.components.app.modules.Optimizer" });
 "use client";
 
 import { useState, useRef, useEffect, useCallback, Suspense, lazy } from "react";
@@ -252,7 +254,7 @@ export function Optimizer() {
     setInjectingKeyword(keyword);
     toast.info(`Injecting keyword "${keyword}"...`);
     try {
-      const result = await callAI({
+      const result = await recordAI({
         systemPrompt: `You are an expert resume writer. Your job is to inject a specific target keyword naturally into the resume's summary or one of the experience bullet points.
 Return ONLY valid JSON matching the exact schema of the provided resume.
 Do NOT invent fake companies, jobs, or credentials.
@@ -589,7 +591,7 @@ Guidelines:
       setAiLog((l) => [...l, "✓ Scraped text successfully.", "Now extracting job details via AI..."]);
       
       setAiThinking(true);
-      const parseResult = await callAI({
+      const parseResult = await recordAI({
         systemPrompt: "You are a job description parser. Extract structured data. Return ONLY valid JSON.",
         userPrompt: `Extract from this job description:\n\n${data.text}\n\nReturn JSON with keys: title, company, location, employmentType, salary, responsibilities (array), requiredSkills (array), preferredSkills (array), technologies (array), experienceYears, education, keywords (array of 8-15).`,
         maxTokens: 2000,
@@ -735,7 +737,7 @@ Guidelines:
     // Try AI extraction
     let parsed: JobDescription;
     try {
-      const result = await callAI({
+      const result = await recordAI({
         systemPrompt: "You are a job description parser. Extract structured data from the job description text. Return ONLY valid JSON.",
         userPrompt: `Extract from this job description:\n\n${jdText}\n\nReturn JSON with keys: title, company, location, employmentType, salary, responsibilities (array), requiredSkills (array), preferredSkills (array), technologies (array), experienceYears, education, keywords (array of 8-15).`,
         maxTokens: 2000,

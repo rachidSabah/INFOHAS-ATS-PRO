@@ -1,4 +1,8 @@
-// ============================================================================
+"use client";
+
+import { recordAI, setFlightScope } from "@/lib/ai/flight-recorder";
+setFlightScope({ scope: "resume-copilot", feature: "AI Copilot Panel", module: "src.components.shared.AICopilotPanel" });
+
 // AI Copilot Panel — Feature 6: Interactive floating editor assistant
 //
 // Designed to sit on the bottom right of the screen (or pinned next to the editor).
@@ -13,7 +17,6 @@
 //   - Clean design with premium glassmorphism
 // ============================================================================
 
-"use client";
 
 import React, { useState, useEffect, useRef } from "react";
 import { Icon } from "@/components/shared";
@@ -258,7 +261,7 @@ Guidelines:
 
     try {
       const prompt = getPromptForAction(action, targetText);
-      const res = await callAI({
+      const res = await recordAI({
         systemPrompt: "You are a professional resume writer. Return ONLY the requested text. Never use asterisks or markdown formatting of any kind.",
         userPrompt: prompt,
         maxTokens: 2500,
@@ -444,7 +447,7 @@ Guidelines:
 3. Keep it professional, concise, and ATS-friendly.
 4. Return ONLY the generated bullet point text. No preamble, no quotes, no markdown wrappers.`;
 
-      const res = await callAI({
+      const res = await recordAI({
         systemPrompt: "You are a professional resume writer. Return ONLY the requested text.",
         userPrompt: prompt,
         maxTokens: 2000,
@@ -499,7 +502,7 @@ Respond ONLY with a JSON object of the updated sections following this format, w
   ]
 }`;
 
-      const res = await callAI({
+      const res = await recordAI({
         systemPrompt: "You are a professional resume writer. Return ONLY a valid JSON object.",
         userPrompt: prompt,
         maxTokens: 2500,

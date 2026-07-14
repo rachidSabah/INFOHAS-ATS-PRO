@@ -1,4 +1,8 @@
-// ResumeAI Pro — Job Intelligence Engine
+"use client";
+
+import { recordAI, setFlightScope } from "@/lib/ai/flight-recorder";
+setFlightScope({ scope: "job-intelligence", feature: "Job Intelligence", module: "src.lib.job-intelligence" });
+
 // Analyzes a job description and extracts structured intelligence:
 //   - Required skills (technical + soft)
 //   - Required experience (years, roles)
@@ -11,7 +15,6 @@
 // This engine runs BEFORE optimization so the optimizer can prioritize
 // job requirements over original-resume keywords.
 
-"use client";
 
 import { callAI, extractJSON } from "./ai";
 import { PIPELINE_STEP_CALL_TIMEOUT_MS } from "./pipeline-watchdog";
@@ -135,7 +138,7 @@ Return ONLY valid JSON:
 }`;
 
   try {
-    const result = await callAI({
+    const result = await recordAI({
       systemPrompt: "You are a Job Intelligence Analyst. You extract structured intelligence from job descriptions. Always return ONLY valid JSON — no prose, no markdown fences.",
       userPrompt: prompt,
       maxTokens: 3000,

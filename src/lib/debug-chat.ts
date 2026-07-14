@@ -1,4 +1,8 @@
-// ============================================================================
+"use client";
+
+import { recordAI, setFlightScope } from "@/lib/ai/flight-recorder";
+setFlightScope({ scope: "resume-copilot", feature: "Debug Chat", module: "src.lib.debug-chat" });
+
 // Conversational Debug Chat Interface
 //
 // Interactive chat window connected to the AI Provider Registry.
@@ -10,7 +14,6 @@
 // This file provides the service layer.
 // ============================================================================
 
-"use client";
 
 import { callAI } from "./ai";
 import { getMetricsSnapshot } from "./metrics-service";
@@ -90,7 +93,7 @@ export async function sendDebugMessage(
   });
 
   try {
-    const result = await callAI({
+    const result = await recordAI({
       systemPrompt: systemContext,
       userPrompt: `DEBUG REQUEST: ${userPrompt}
 

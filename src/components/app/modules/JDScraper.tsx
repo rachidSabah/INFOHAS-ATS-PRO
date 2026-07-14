@@ -1,5 +1,8 @@
 "use client";
 
+import { recordAI, setFlightScope } from "@/lib/ai/flight-recorder";
+setFlightScope({ scope: "job-intelligence", feature: "JD Scraper", module: "src.components.app.modules.JDScraper" });
+
 import { useState } from "react";
 import { motion } from "framer-motion";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -89,7 +92,7 @@ export function JDScraper() {
     setExtracting(true);
     setLogLines((l) => [...l, "Calling AI to extract structure…"]);
     try {
-      const result = await callAI({
+      const result = await recordAI({
         systemPrompt: "You are a job description parser. Extract structured data. Return ONLY valid JSON.",
         userPrompt: `Extract from this job description:\n\n${rawText}\n\nReturn JSON with keys: title, company, location, employmentType, salary, responsibilities (array of strings), requiredSkills (array), preferredSkills (array), technologies (array), experienceYears, education, keywords (array of 8-15 most important).`,
         maxTokens: 2000,

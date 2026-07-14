@@ -1775,3 +1775,86 @@ export async function exportInterviewDOCX(pkg: InterviewPackage) {
   const blob = await Packer.toBlob(doc);
   saveAs(blob, (`interview_prep_${(pkg.company || "package").replace(/\s+/g, "_")}`).toLowerCase() + ".docx");
 }
+
+// ----------------------------------------------------------------------------
+// Interview export — JSON + Markdown
+// ----------------------------------------------------------------------------
+
+export function exportInterviewJSON(pkg: InterviewPackage, meta?: Record<string, unknown>): void {
+  const payload = {
+    exportedAt: new Date().toISOString(),
+    role: pkg.role ?? null,
+    company: pkg.company ?? null,
+    resumeId: pkg.resumeId ?? null,
+    jdId: pkg.jdId ?? null,
+    createdAt: pkg.createdAt,
+    ...(meta ?? {}),
+    questions: (pkg.questions ?? []).map((q) => ({
+      category: q.category,
+      difficulty: q.difficulty,
+      question: q.question,
+      recommendedAnswer: q.recommendedAnswer,
+      talkingPoints: q.talkingPoints,
+      starExample: q.starExample ?? null,
+      followUps: q.followUps,
+    })),
+  };
+  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+  saveAs(blob, `interview_prep_${(pkg.company || "package").replace(/\s+/g, "_").toLowerCase()}.json`);
+}
+
+export function exportInterviewMarkdown(pkg: InterviewPackage): void {
+  const lines: string[] = [];
+  lines.push(`# Interview Preparation — ${pkg.role ?? "Role"}${pkg.company ? ` at ${pkg.company}` : ""}`);
+  lines.push("");
+  lines.push(`_Generated ${new Date(pkg.createdAt).toLocaleString()}_`);
+  lines.push("");
+
+  const grouped: Record<string, typeof pkg.questions> = {};
+  for (const q of (pkg.questions ?? [])) (grouped[q.category] ||= []).push(q);
+
+  const categoryLabels: Record<string, string> = {
+    technical: "Technical",
+    behavioral: "Behavioral",
+    situational: "Situational",
+    hr: "HR",
+    company: "Company-specific",
+  };
+
+  for (const cat of Object.keys(categoryLabels)) {
+    const qs = grouped[cat];
+    if (!qs || !qs.length) continue;
+    lines.push(`## ${categoryLabels[cat]} Questions`);
+    lines.push("");
+    qs.forEach((q, i) => {
+      lines.push(`### ${i + 1}. ${q.question} _(${q.difficulty})_`);
+      lines.push("");
+      if (q.recommendedAnswer) {
+        lines.push(`**Recommended answer:** ${q.recommendedAnswer}`);
+        lines.push("");
+      }
+      if (q.talkingPoints?.length) {
+        lines.push("**Talking points:**");
+        for (const t of q.talkingPoints) lines.push(`- ${t}`);
+        lines.push("");
+      }
+      if (q.starExample) {
+        lines.push("**STAR example:**");
+        lines.push(`- Situation: ${q.starExample.situation}`);
+        lines.push(`- Task: ${q.starExample.task}`);
+        lines.push(`- Action: ${q.starExample.action}`);
+        lines.push(`- Result: ${q.starExample.result}`);
+        lines.push("");
+      }
+      if (q.followUps?.length) {
+        lines.push("**Follow-ups:**");
+        for (const f of q.followUps) lines.push(`- ${f}`);
+        lines.push("");
+      }
+    });
+  }
+
+  const blob = new Blob([lines.join("\n")], { type: "text/markdown" });
+  saveAs(blob, `interview_prep_${(pkg.company || "package").replace(/\s+/g, "_").toLowerCase()}.md`);
+}
+

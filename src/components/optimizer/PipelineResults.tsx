@@ -1,5 +1,8 @@
 "use client";
 
+import { recordAI, setFlightScope } from "@/lib/ai/flight-recorder";
+setFlightScope({ scope: "resume-optimizer", feature: "Pipeline Results", module: "src.components.optimizer.PipelineResults" });
+
 import { useState } from "react";
 import { motion } from "framer-motion";
 import { Button } from "@/components/ui/button";
@@ -51,7 +54,7 @@ export function PipelineResults({ result }: PipelineResultsProps) {
 
       const { callAI, extractJSON } = await import("@/lib/ai");
       
-      const response = await callAI({
+      const response = await recordAI({
         systemPrompt: `You are a panel of 3 elite recruiters reviewing a candidate's resume against a job description:
 1. "Sonia" (Tech Startup Recruiter): Highly critical of action verbs, impact metrics, and tool stack. 3-second scan profile.
 2. "David" (Enterprise Engineering Director): Focuses on architecture, scale, system longevity, and technical depth.
@@ -97,7 +100,7 @@ Format:
     setGeneratingRoadmap(true);
     try {
       const { callAI, extractJSON } = await import("@/lib/ai");
-      const response = await callAI({
+      const response = await recordAI({
         systemPrompt: `You are a career development coach and technical instructor.
 Create a structured learning roadmap for the requested skill.
 Return a JSON object matching this structure:

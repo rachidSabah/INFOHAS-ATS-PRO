@@ -222,6 +222,9 @@ export interface InterviewQuestion {
   talkingPoints: string[];
   starExample?: { situation: string; task: string; action: string; result: string };
   followUps: string[];
+  /** Interviewer persona that posed the question (8.1.1 multi-persona). */
+  personaId?: string;
+  personaName?: string;
 }
 
 export interface InterviewPackage {

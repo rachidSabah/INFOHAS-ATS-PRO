@@ -1,17 +1,18 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { analyzeJobIntelligence } from "./job-intelligence";
-import { callAI } from "./ai";
 
-// Mock the AI caller
-import { vi } from "vitest";
-
-vi.mock("./ai", async () => {
-  const actual = await vi.importActual<any>("./ai");
-  return {
-    ...actual,
-    callAI: vi.fn(),
-  };
-});
+// The production code now routes every AI call through the Flight Recorder's
+// `recordAI()` (which itself delegates to `callAIRaw`). Mock that boundary so
+// the test stays hermetic and we can assert the AI path is exercised.
+const mockRecordAI = vi.fn();
+vi.mock("@/lib/ai/flight-recorder", () => ({
+  recordAI: (...args: any[]) => mockRecordAI(...args),
+  setFlightScope: () => {},
+  resetFlightScope: () => {},
+  setFlightRecordSink: () => {},
+  hashString: (s: string) => String(s.length),
+  INTERVIEW_PROMPT_VERSION: "8.1.3",
+}));
 
 const QATAR_DUTY_FREE_TEXT = `Till Assistant | Qatar Duty Free
 General Information
@@ -62,7 +63,7 @@ describe("Job Description Parsing — Qatar Duty Free", () => {
       avoidKeywords: ["airport security", "aviation engineer"],
     });
 
-    vi.mocked(callAI).mockResolvedValue({
+    mockRecordAI.mockResolvedValue({
       text: mockAIResponse,
       provider: "Mock OpenAI",
       latencyMs: 100,
@@ -93,7 +94,7 @@ describe("Job Description Parsing — Qatar Duty Free", () => {
 
     const intelligence = await analyzeJobIntelligence(jd);
 
-    expect(callAI).toHaveBeenCalled();
+    expect(mockRecordAI).toHaveBeenCalled();
     expect(intelligence.roleTitle).toBe("Till Assistant");
     expect(intelligence.company).toBe("Qatar Duty Free");
     expect(intelligence.requiredSkills).toContain("Basic Literacy");

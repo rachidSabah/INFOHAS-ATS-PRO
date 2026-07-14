@@ -1,5 +1,8 @@
 "use client";
 
+import { recordAI, setFlightScope } from "@/lib/ai/flight-recorder";
+setFlightScope({ scope: "resume-optimizer", feature: "Fallback Chain", module: "src.components.app.modules.FallbackChain" });
+
 import { useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -106,7 +109,7 @@ export function FallbackChain() {
       }
 
       try {
-        const result = await callAI({
+        const result = await recordAI({
           systemPrompt: "You are a test assistant. Reply with exactly: OK",
           userPrompt: "Test connection. Reply with: OK",
           maxTokens: 10,

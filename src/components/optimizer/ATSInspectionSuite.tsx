@@ -1,5 +1,8 @@
 "use client";
 
+import { recordAI, setFlightScope } from "@/lib/ai/flight-recorder";
+setFlightScope({ scope: "ats-analysis", feature: "ATS Inspection Suite", module: "src.components.optimizer.ATSInspectionSuite" });
+
 import { useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -89,7 +92,7 @@ export function ATSInspectionSuite({
     setAnalyzingKeyword(keyword);
     setSuggestedRewrite(null);
     try {
-      const result = await callAI({
+      const result = await recordAI({
         systemPrompt: `You are an Expert Resume Optimizer. Suggest exactly where and how to weave a missing keyword into the candidate's resume experience bullets. Identify one specific bullet point from the resume that matches best. Return ONLY JSON: {"experienceId": "...", "bulletIndex": 0, "oldBulletText": "...", "newBulletText": "..."}`,
         userPrompt: `MISSING KEYWORD: ${keyword}
 RESUME EXPERIENCE ENTRIES:

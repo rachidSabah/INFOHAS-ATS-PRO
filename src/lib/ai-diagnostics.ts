@@ -1,4 +1,8 @@
-// ============================================================================
+"use client";
+
+import { recordAI, setFlightScope } from "@/lib/ai/flight-recorder";
+setFlightScope({ scope: "resume-optimizer", feature: "AI Diagnostics", module: "src.lib.ai-diagnostics" });
+
 // AI Response Diagnostics — structured logging for every AI call.
 //
 // PROBLEM (P1.5 — AI Reliability):
@@ -30,14 +34,13 @@
 // USAGE:
 //   const diag = startAICall({ provider: "Puter.js", model: "gpt-5-nano", ... });
 //   try {
-//     const response = await callAI(...);
+//     const response = await recordAI(...);
 //     diag.succeed(response, { finishReason: "stop" });
 //   } catch (e) {
 //     diag.fail(e);
 //   }
 // ============================================================================
 
-"use client";
 
 export interface AICallDiagnostic {
   /** Unique ID for this call (correlates across logs). */
@@ -103,7 +106,7 @@ function generateRequestId(): string {
  * Usage:
  *   const diag = startAICall({ provider: "Puter.js", model: "gpt-5-nano", ... });
  *   try {
- *     const response = await callAI(...);
+ *     const response = await recordAI(...);
  *     diag.succeed(response, { finishReason: "stop" });
  *   } catch (e) {
  *     diag.fail(e);

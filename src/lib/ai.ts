@@ -209,9 +209,14 @@ export function extractJSON<T = any>(raw: string): T {
 }
 
 /**
- * Main AI entrypoint — delegates directly to ProviderRouter (ADR-001).
+ * RAW AI entrypoint — delegates directly to ProviderRouter (ADR-001).
+ *
+ * Phase 8.1.3.1: this is the SINGLE place that talks to the Provider Router.
+ * Only the Flight Recorder's `recordAI()` is allowed to call this directly.
+ * Feature code must NOT import `callAIRaw` — use `callAI` (auto-recorded) or
+ * `recordAI` (with metadata).
  */
-export async function callAI(opts: AICallOptions): Promise<AICallResult> {
+export async function callAIRaw(opts: AICallOptions): Promise<AICallResult> {
   const chatRequest: ChatRequest = {
     messages: opts.messages
       ? opts.messages
@@ -245,6 +250,23 @@ export async function callAI(opts: AICallOptions): Promise<AICallResult> {
       : estTokens(opts.userPrompt),
     isLocalEngine: res.provider.includes("Local Engine") || !!(res as any).isLocalEngine,
   };
+}
+
+/**
+ * Main AI entrypoint (backward-compatible).
+ *
+ * Phase 8.1.3.1 — UNIVERSAL PIPELINE: `callAI` now delegates to the Flight
+ * Recorder's `recordAI()`, so EVERY existing caller is automatically recorded
+ * with ZERO behavioral change. `recordAI` internally calls `callAIRaw` (the
+ * only raw provider path). This guarantees a single, unified, observed
+ * execution pipeline without touching call-sites.
+ *
+ * `recordAI` is imported lazily to avoid a static import cycle between this
+ * module and the flight recorder.
+ */
+export async function callAI(opts: AICallOptions): Promise<AICallResult> {
+  const { recordAI } = await import("./ai/flight-recorder");
+  return recordAI(opts, { scope: "other", feature: "callAI (auto)", module: "src/lib/ai.ts" });
 }
 
 /**

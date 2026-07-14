@@ -1,3 +1,5 @@
+import { recordAI, setFlightScope } from "@/lib/ai/flight-recorder";
+setFlightScope({ scope: "resume-optimizer", feature: "Optimizer Directive Engine", module: "src.lib.optimizer-directive-engine" });
 // ============================================================================
 // Optimizer Directive Engine — Single Source of Truth for ALL Prompts
 //
@@ -624,7 +626,7 @@ OUTPUT: Return full resume JSON (same shape as standard directive) with ATS-opti
  * @example
  *   import { getDirective } from "./optimizer-directive-engine";
  *   const directive = getDirective("standard", config);
- *   const result = await callAI({ systemPrompt: directive, ... });
+ *   const result = await recordAI({ systemPrompt: directive, ... });
  */
 export function getDirective(
   type: DirectiveType,
