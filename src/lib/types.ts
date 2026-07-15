@@ -453,6 +453,8 @@ export interface AIProvider {
   timeout: number;
   maxTokens: number;
   temperature: number;
+  /** Optional provider-default nucleus sampling (0-1). Phase 8.1.3.2A. */
+  topP?: number;
   retryAttempts?: number;
   rateLimitPerMinute?: number;
   applicationId?: string;

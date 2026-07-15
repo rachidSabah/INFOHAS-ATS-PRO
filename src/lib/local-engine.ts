@@ -16,11 +16,14 @@ import type { AICallOptions } from "./ai";
  * and returns a templated but tailored response.
  */
 export function localGenerate(opts: AICallOptions): string {
-  const prompt = (opts.userPrompt || "").toLowerCase();
+  const userPromptText = opts.messages
+    ? opts.messages.map((m) => m.content).join("\n")
+    : opts.userPrompt || "";
+  const prompt = userPromptText.toLowerCase();
   const sp = (opts.systemPrompt || "").toLowerCase();
 
   if (sp.includes("copilot")) {
-    return localCopilot(opts.userPrompt || "", opts.systemPrompt || "");
+    return localCopilot(userPromptText, opts.systemPrompt || "");
   }
 
   // Check for the OPTIMIZER_DIRECTIVE — it needs JSON output.
@@ -39,29 +42,29 @@ export function localGenerate(opts: AICallOptions): string {
     (sp.includes("json") && prompt.includes("source resume") && prompt.includes("target job description"));
 
   if (isOptimizerTask) {
-    return localOptimize(opts.userPrompt);
+    return localOptimize(userPromptText);
   }
   // Check for the aviation directive
   if (sp.includes("senior ats optimization expert") && sp.includes("return json format only")) {
-    return localOptimize(opts.userPrompt);
+    return localOptimize(userPromptText);
   }
   if (prompt.includes("cover letter") || sp.includes("cover letter")) {
-    return localCoverLetter(opts.userPrompt);
+    return localCoverLetter(userPromptText);
   }
   if (prompt.includes("interview") || sp.includes("interview")) {
-    return localInterview(opts.userPrompt);
+    return localInterview(userPromptText);
   }
   if (prompt.includes("summary") || sp.includes("professional summary")) {
-    return localSummary(opts.userPrompt);
+    return localSummary(userPromptText);
   }
   if (prompt.includes("bullet") || sp.includes("bullet point")) {
-    return localBullets(opts.userPrompt);
+    return localBullets(userPromptText);
   }
   if (prompt.includes("job description") || prompt.includes("extract") || sp.includes("scraper") || sp.includes("job description parser")) {
-    return localJD(opts.userPrompt);
+    return localJD(userPromptText);
   }
   if (prompt.includes("ats") || sp.includes("ats")) {
-    return localATS(opts.userPrompt);
+    return localATS(userPromptText);
   }
   // Default: return a JSON fallback so callers that expect JSON don't crash.
   // CRITICAL: NEVER include error messages, "offline mode", "unavailable", or

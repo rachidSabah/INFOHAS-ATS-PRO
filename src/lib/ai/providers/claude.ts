@@ -25,6 +25,7 @@ export class ClaudeProvider extends OpenAICompatibleProvider {
       model,
       max_tokens: req.maxTokens ?? config.maxTokens,
       temperature: req.temperature ?? config.temperature,
+      top_p: req.topP ?? config.topP,
       messages: userMsgs.map((m) => ({ role: m.role, content: m.content })),
       ...(sysMsg ? { system: sysMsg.content } : {}),
       ...this.parseJson(config.parametersJson),

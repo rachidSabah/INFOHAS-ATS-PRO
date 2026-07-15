@@ -20,6 +20,7 @@ export class OllamaProvider implements AIProviderAdapter {
         stream: false,
         options: {
           temperature: req.temperature ?? config.temperature,
+          top_p: req.topP ?? config.topP,
           num_predict: req.maxTokens ?? config.maxTokens,
         },
       }),

@@ -9,11 +9,12 @@ export const runtime = "edge";
 export async function POST(req: NextRequest) {
   try {
     const body = ((await req.json().catch(() => ({}))) as any) as any;
-    const { systemPrompt, userPrompt, maxTokens = 4096, temperature = 0.7 } = body as {
+    const { systemPrompt, userPrompt, maxTokens = 4096, temperature = 0.7, topP } = body as {
       systemPrompt?: string;
       userPrompt?: string;
       maxTokens?: number;
       temperature?: number;
+      topP?: number;
     };
 
     if (!userPrompt || typeof userPrompt !== "string") {
@@ -30,6 +31,7 @@ export async function POST(req: NextRequest) {
     }
     const clampedMaxTokens = Math.min(Math.max(Number(maxTokens) || 4096, 100), 16384);
     const clampedTemperature = Math.min(Math.max(Number(temperature) || 0.7, 0), 2);
+    const clampedTopP = typeof topP === "number" ? Math.min(Math.max(topP, 0), 1) : undefined;
 
     // Call Z.ai API directly via fetch (Edge-compatible)
     // We use the REST API for Edge compatibility.
@@ -60,6 +62,7 @@ export async function POST(req: NextRequest) {
         model: "glm-4.6",
         messages,
         temperature: clampedTemperature,
+        top_p: clampedTopP,
         max_tokens: clampedMaxTokens,
       }),
       signal: AbortSignal.timeout(25000),

@@ -157,40 +157,8 @@ export class ProviderRouter {
       }
     }
 
-    // === 5. Build Fallback Chain ===
-    let chain = FallbackManager.buildChain(providers, settings);
-
-    // Apply preferredProviderId / agent routes / selection
-    const prefId = opts.preferredProviderId;
-    if (prefId) {
-      const pref = providers.find((p) => p.id === prefId);
-      if (pref) {
-        chain = chain.filter((p) => p.id !== prefId);
-        chain.unshift(pref);
-      }
-    } else {
-      // Agent-aware provider selection (Feature 2)
-      let agentType = opts.agentType;
-      if (!agentType) {
-        if (opts.isOptimizerCall) {
-          agentType = "optimizer";
-        } else if (systemPrompt.toLowerCase().includes("quality assurance") || systemPrompt.toLowerCase().includes("qa") || systemPrompt.toLowerCase().includes("reflection")) {
-          agentType = "supervisor";
-        } else if (systemPrompt.toLowerCase().includes("guardian") || systemPrompt.toLowerCase().includes("anti-fabrication")) {
-          agentType = "guardian";
-        } else if (systemPrompt.toLowerCase().includes("format") || systemPrompt.toLowerCase().includes("assemble")) {
-          agentType = "assembler";
-        }
-      }
-
-      if (agentType) {
-        const agentProvider = await selectProviderForAgent(agentType, opts.excludeProviderIds);
-        if (agentProvider) {
-          chain = chain.filter((p) => p.id !== agentProvider.id);
-          chain.unshift(agentProvider);
-        }
-      }
-    }
+    // === 5. Build Fallback Chain (shared with stream()) ===
+    let chain = await ProviderRouter.resolveChain(providers, settings, req, opts);
 
     if (chain.length === 0) {
       throw new Error(
@@ -198,19 +166,6 @@ export class ProviderRouter {
           ? "No active AI providers. Configure one in Super Admin → AI Providers."
           : "No AI providers available for your account. Use Puter.js (free) by signing in with Google via the Puter button."
       );
-    }
-
-    // Capability-Weighted Model Selection (Model Registry)
-    if (opts.agentTask && modelRegistry.size() > 0) {
-      const bestModel = modelRegistry.getBestForTask(opts.agentTask);
-      if (bestModel) {
-        const bestProvider = providers.find((p) => p.id === bestModel.providerId);
-        if (bestProvider && !rateLimitTracker.isRateLimited(bestProvider.id)) {
-          chain = chain.filter((p) => p.id !== bestProvider.id);
-          chain.unshift(bestProvider);
-          console.info(`[Router] Task "${opts.agentTask}" → best model: ${bestModel.modelName} (${bestModel.providerName})`);
-        }
-      }
     }
 
     // === 6. Execution Loop with Fallovers ===
@@ -294,6 +249,199 @@ export class ProviderRouter {
     throw new OptimizationProviderExhaustedError(
       `All AI providers failed for this request:\n${errors.map((e, i) => `  ${i + 1}. ${e}`).join("\n")}`
     );
+  }
+
+  /**
+   * STREAMING entrypoint — Phase 8.1.3.2B.
+   * Reuses the EXACT same fallback chain, cooldowns, provider selection,
+   * capability-weighted model routing, and timeouts as `chat()` (no duplicate
+   * router). The only difference is response delivery: when an adapter
+   * implements `stream()`, text chunks are piped through `onChunk` as they
+   * arrive; otherwise the adapter's full response is emitted as chunks so every
+   * consumer still receives progressive text through a single code path.
+   */
+  static async stream(
+    req: ChatRequest,
+    opts: RouterOptions = {},
+    onChunk: (text: string) => void = () => {}
+  ): Promise<ChatResponse> {
+    const t0 = performance.now();
+    const state = useApp.getState();
+    const allProviders = state.providers;
+    const isSuperAdmin = state.user?.role === "super_admin";
+    const providers = isSuperAdmin
+      ? allProviders
+      : allProviders.filter((p) => p.allowedForRegularUsers === true);
+
+    // === 1. Token-limit truncation (same as chat) ===
+    const systemPrompt = req.messages.find((m) => m.role === "system")?.content ?? "";
+    let userPrompt = req.messages.find((m) => m.role === "user")?.content ?? "";
+    const totalTokens = Math.ceil((systemPrompt.length + userPrompt.length) / 4);
+    if (totalTokens > MAX_INPUT_TOKENS) {
+      const systemTokens = Math.ceil(systemPrompt.length / 4);
+      const userBudget = Math.max(0, MAX_INPUT_TOKENS - systemTokens);
+      userPrompt = truncatePromptToTokenLimit(userPrompt, userBudget);
+      req.messages = req.messages.map((m) => (m.role === "user" ? { ...m, content: userPrompt } : m));
+    }
+
+    // === 2. Resolve the fallback chain (shared logic with chat) ===
+    const chain = await ProviderRouter.resolveChain(providers, state.providerSettings, req, opts);
+    if (chain.length === 0) {
+      throw new Error(
+        isSuperAdmin
+          ? "No active AI providers. Configure one in Super Admin → AI Providers."
+          : "No AI providers available for your account. Use Puter.js (free) by signing in with Google via the Puter button."
+      );
+    }
+
+    // === 3. Execution loop with fallovers (streaming delivery) ===
+    const errors: string[] = [];
+    const callTimeoutMs = opts.timeoutMs ?? AI_CALL_TIMEOUT_MS;
+
+    for (const provider of chain) {
+      const cooldownId = provider.id || provider.name || provider.type;
+
+      if (rateLimitTracker.isRateLimited(provider.id) || isProviderInCooldown(cooldownId)) {
+        const remainingSec = rateLimitTracker.isRateLimited(provider.id)
+          ? Math.ceil(rateLimitTracker.getCooldownRemainingMs(provider.id) / 1000)
+          : 60;
+        errors.push(`${provider.name}: in cooldown (${remainingSec}s remaining)`);
+        continue;
+      }
+
+      const elapsedMs = Math.round(performance.now() - t0);
+      if (elapsedMs >= callTimeoutMs) {
+        console.warn(`[AI Stream] Budget exhausted (${elapsedMs}ms ≥ ${callTimeoutMs}ms). Skipping remaining chain.`);
+        break;
+      }
+
+      try {
+        const attemptTimeout = chain.length > 1 ? Math.min(25000, callTimeoutMs - elapsedMs) : callTimeoutMs - elapsedMs;
+        const adapter = ProviderFactory.get(provider.type);
+        const config = toProviderConfig(provider);
+
+        let res: ChatResponse;
+        if (typeof (adapter as any).stream === "function" && provider.type !== "local") {
+          res = await withTimeout(
+            (adapter as any).stream({ ...req, model: opts.modelOverride || req.model }, config, onChunk),
+            attemptTimeout,
+            `${provider.name}.stream`
+          );
+        } else {
+          res = await withTimeout(
+            adapter.chat({ ...req, model: opts.modelOverride || req.model }, config),
+            attemptTimeout,
+            `${provider.name}.generate`
+          );
+          // Non-streaming adapter: emit the full text as tokens so the consumer
+          // still receives progressive output through the single onChunk path.
+          for (const token of res.text.split(/(\s+)/)) onChunk(token);
+        }
+
+        this.log({
+          providerId: provider.id,
+          providerName: provider.name,
+          requestType: opts.requestType || "chat",
+          modelName: res.model,
+          status: "success",
+          latencyMs: res.latencyMs,
+          inputTokens: res.inputTokens,
+          outputTokens: res.outputTokens,
+          requestPreview: req.messages[req.messages.length - 1]?.content?.slice(0, 200),
+          responsePreview: res.text.slice(0, 200),
+        });
+
+        return res;
+      } catch (e: any) {
+        const eMsg = e?.message ?? String(e);
+        errors.push(`${provider.name}: ${eMsg}`);
+        console.warn(`[AI Stream] Provider ${provider.name} failed: ${eMsg}`);
+        if (e?.statusCode === 429 || /429/.test(eMsg) || /rate.?limit/i.test(eMsg) || /FreeUsageLimitError/i.test(eMsg)) {
+          rateLimitTracker.record429(provider.id, provider.modelName ?? "default");
+          markProvider429Cooldown(cooldownId);
+        } else if (e?.statusCode === 401 || /401/.test(eMsg) || /billing/i.test(eMsg) || /payment/i.test(eMsg) || /CreditsError/i.test(eMsg)) {
+          markProvider401Cooldown(cooldownId);
+        } else if (isTimeoutError(e)) {
+          markProviderTimeoutCooldown(cooldownId);
+        }
+      }
+    }
+
+    // === 4. Last-resort local fallback (emit as chunks) ===
+    console.warn("[AI Stream] All providers failed. Falling back to local engine.");
+    const localText = localGenerate({ systemPrompt, userPrompt, preferLocal: true });
+    if (localText) {
+      for (const token of localText.split(/(\s+)/)) onChunk(token);
+      return {
+        text: localText,
+        provider: "Local Engine (fallback)",
+        model: "local",
+        latencyMs: Math.round(performance.now() - t0),
+      };
+    }
+
+    throw new OptimizationProviderExhaustedError(
+      `All AI providers failed for this streaming request:\n${errors.map((e, i) => `  ${i + 1}. ${e}`).join("\n")}`
+    );
+  }
+
+  /**
+   * Shared fallback-chain resolution used by BOTH `chat()` and `stream()`.
+   * Builds the ordered provider chain (preferred → agent route → capability-
+   * weighted model → default), applying cooldown-safe mutation on a copy so the
+   * caller's array is untouched.
+   */
+  private static async resolveChain(
+    providers: any[],
+    settings: any,
+    req: ChatRequest,
+    opts: RouterOptions
+  ): Promise<any[]> {
+    let chain = FallbackManager.buildChain(providers, settings);
+
+    const prefId = opts.preferredProviderId;
+    if (prefId) {
+      const pref = providers.find((p) => p.id === prefId);
+      if (pref) {
+        chain = chain.filter((p) => p.id !== prefId);
+        chain.unshift(pref);
+      }
+      return chain;
+    }
+
+    let agentType = opts.agentType;
+    if (!agentType) {
+      if (opts.isOptimizerCall) {
+        agentType = "optimizer";
+      } else if (req.messages.some((m) => /quality assurance|qa|reflection/i.test(m.content))) {
+        agentType = "supervisor";
+      } else if (req.messages.some((m) => /guardian|anti-fabrication/i.test(m.content))) {
+        agentType = "guardian";
+      } else if (req.messages.some((m) => /format|assemble/i.test(m.content))) {
+        agentType = "assembler";
+      }
+    }
+
+    if (agentType) {
+      const agentProvider = await selectProviderForAgent(agentType as any, opts.excludeProviderIds);
+      if (agentProvider) {
+        chain = chain.filter((p) => p.id !== agentProvider.id);
+        chain.unshift(agentProvider);
+      }
+    }
+
+    if (opts.agentTask && modelRegistry.size() > 0) {
+      const bestModel = modelRegistry.getBestForTask(opts.agentTask);
+      if (bestModel) {
+        const bestProvider = providers.find((p) => p.id === bestModel.providerId);
+        if (bestProvider && !rateLimitTracker.isRateLimited(bestProvider.id)) {
+          chain = chain.filter((p) => p.id !== bestProvider.id);
+          chain.unshift(bestProvider);
+        }
+      }
+    }
+
+    return chain;
   }
 
   /**

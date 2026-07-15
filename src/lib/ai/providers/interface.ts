@@ -12,6 +12,8 @@ export interface ChatRequest {
   messages: ChatMessage[];
   model?: string;
   temperature?: number;
+  /** Nucleus sampling (0-1). Phase 8.1.3.2A: propagated to provider bodies. */
+  topP?: number;
   maxTokens?: number;
   stream?: boolean;
   tools?: ToolDefinition[];
@@ -54,6 +56,8 @@ export interface ProviderConfig {
   timeout: number;
   maxTokens: number;
   temperature: number;
+  /** Provider-default nucleus sampling (0-1). Phase 8.1.3.2A. */
+  topP?: number;
   retryAttempts?: number;
   rateLimitPerMinute?: number;
   authType?: "bearer" | "header" | "query" | "none";
@@ -75,4 +79,12 @@ export interface AIProviderAdapter {
   chat(req: ChatRequest, config: ProviderConfig): Promise<ChatResponse>;
   testConnection(config: ProviderConfig): Promise<{ ok: boolean; latencyMs: number; message: string; response?: string }>;
   listModels?(config: ProviderConfig): Promise<string[]>;
+  /**
+   * OPTIONAL streaming. Implemented only by adapters whose backend natively
+   * streams (e.g. Puter.js via window.puter.ai.chat). When absent, callers fall
+   * back to `chat` + chunked emission — so the pipeline NEVER needs a second
+   * code path. Text chunks are piped through `onChunk`; the promise resolves
+   * with the assembled ChatResponse.
+   */
+  stream?(req: ChatRequest, config: ProviderConfig, onChunk: (text: string) => void): Promise<ChatResponse>;
 }

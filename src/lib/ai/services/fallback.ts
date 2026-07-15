@@ -108,6 +108,7 @@ export function toProviderConfig(p: AIProvider): ProviderConfig {
     timeout: p.timeout,
     maxTokens: p.maxTokens,
     temperature: p.temperature,
+    topP: p.topP,
     retryAttempts: p.retryAttempts,
     rateLimitPerMinute: p.rateLimitPerMinute,
     authType: p.authType,

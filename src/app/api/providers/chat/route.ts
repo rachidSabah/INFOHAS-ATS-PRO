@@ -46,7 +46,7 @@ export async function POST(req: NextRequest) {
   try {
     const raw = await req.text().catch(() => "");
     const body = raw ? JSON.parse(raw) : {};
-    let { baseUrl, apiKey, authType, headersJson, model, messages, maxTokens, temperature, responsePath, timeoutMs } = body;
+    let { baseUrl, apiKey, authType, headersJson, model, messages, maxTokens, temperature, topP, responsePath, timeoutMs } = body;
 
     if (!baseUrl) {
       return NextResponse.json({ ok: false, error: "baseUrl is required" }, { status: 400 });
@@ -108,6 +108,7 @@ export async function POST(req: NextRequest) {
       messages: messages || [{ role: "user", content: "Hello" }],
       max_tokens: maxTokens ?? 4096,
       temperature: temperature ?? 0.7,
+      top_p: topP ?? undefined,
       stream: false,
     };
 

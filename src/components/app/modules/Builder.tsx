@@ -139,7 +139,13 @@ import { A4Preview } from "@/components/resume/A4Preview";
 import { ATSMatchMeter } from "@/components/optimizer/ATSMatchMeter";
 import { toast } from "sonner";
 import { extractJSON } from "@/lib/ai";
+import { recordAI, setFlightScope } from "@/lib/ai/flight-recorder";
 import type { ResumeData, ResumeExperience, ResumeEducation, ResumeSkill, ResumeTemplate, JobDescription } from "@/lib/types";
+
+// Phase 8.1.3.1 — register this module's scope so every AI call below is
+// recorded under the universal Flight Recorder. Reuses the shared metadata
+// builder instead of manually creating records.
+setFlightScope({ scope: "resume-builder", feature: "Resume Builder", module: "src.components.app.modules.Builder" });
 
 const ACCENT_PRESETS = ["#1154A3", "#0B1F3A", "#10B981", "#F59E0B", "#8B5CF6", "#EC4899", "#0EA5E9", "#DC2626"];
 
@@ -401,9 +407,8 @@ export function Builder() {
     setTranslating(true);
     const toastId = toast.loading("Translating resume with AI...");
     try {
-      const { ProviderRouter } = await import("@/lib/ai/services/router");
       const targetLangName = ({ en: "English", fr: "French", es: "Spanish", de: "German", ar: "Arabic" } as any)[translateLang] || "English";
-      
+
       const payload = {
         headline: resume.headline,
         summary: resume.summary,
@@ -420,9 +425,10 @@ Guidelines:
 2. Keep all 'id' fields identical (do not change or translate the IDs).
 3. Preserve the exact structure. Return ONLY valid JSON matching the payload format.`;
 
-      const res = await ProviderRouter.chat({
-        messages: [{ role: "user", content: prompt }], maxTokens: 1500, temperature: 0.3
-      }, { agentTask: "summary" });
+      // Phase 8.1.3.1 — route through the universal pipeline (auto-recorded).
+      const res = await recordAI({
+        userPrompt: prompt, maxTokens: 1500, temperature: 0.3, agentTask: "summary",
+      });
 
       const parsed = JSON.parse(res.text.trim());
       if (parsed) {
@@ -541,14 +547,13 @@ Guidelines:
     setFixingIssueId(issue.id);
     const toastId = toast.loading(`AI is fixing: "${issue.title}"...`);
     try {
-      const { ProviderRouter } = await import("@/lib/ai/services/router");
       if (issue.type === "summary") {
         const prompt = `Rewrite this resume summary to be highly professional, impactful, and about 90 words: "${resume.summary ?? ""}". ` +
           (activeJD ? `Ensure you align it with the target job: "${activeJD.title} at ${activeJD.company || 'Target Employer'}". ` : "") +
           `Return ONLY the summary text. Do NOT use any asterisks or markdown bold formatting.`;
-        const res = await ProviderRouter.chat({
-          messages: [{ role: "user", content: prompt }], maxTokens: 250, temperature: 0.6
-        }, { agentTask: "summary" });
+        const res = await recordAI({
+          userPrompt: prompt, maxTokens: 250, temperature: 0.6, agentTask: "summary",
+        });
         if (res.text) {
           const cleanSummary = cleanStringField(res.text) || "";
           patch({ summary: cleanSummary });
@@ -560,9 +565,9 @@ Guidelines:
           const prompt = `Rewrite the bullet points for the role "${exp.title} at ${exp.company}" to include realistic metrics and measurable achievements (e.g. increase efficiency by X%, save hours, grow revenue):
 ${JSON.stringify(exp.bullets)}
 Return ONLY a valid JSON array of string bullets, NO formatting, NO markdown, NO asterisks.`;
-          const res = await ProviderRouter.chat({
-            messages: [{ role: "user", content: prompt }], maxTokens: 400, temperature: 0.7
-          }, { agentTask: "experience" });
+          const res = await recordAI({
+            userPrompt: prompt, maxTokens: 400, temperature: 0.7, agentTask: "experience",
+          });
           try {
             const parsedBullets = extractJSON<any>(res.text);
             if (Array.isArray(parsedBullets)) {
@@ -592,14 +597,13 @@ Return ONLY a valid JSON array of string bullets, NO formatting, NO markdown, NO
     if (!resume) return;
     const toastId = toast.loading(`AI is weaving "${keyword}" into your ${target}...`);
     try {
-      const { ProviderRouter } = await import("@/lib/ai/services/router");
       const cleanKeyword = cleanStringField(keyword) || "";
 
       if (target === "summary") {
         const prompt = `Rewrite this resume summary to naturally incorporate the keyword "${cleanKeyword}". Ensure it is highly professional, impactful, and about 90 words: "${resume.summary ?? ""}". Return ONLY the summary text. Do NOT use any asterisks or markdown bold formatting.`;
-        const res = await ProviderRouter.chat({
-          messages: [{ role: "user", content: prompt }], maxTokens: 250, temperature: 0.6
-        }, { agentTask: "summary" });
+        const res = await recordAI({
+          userPrompt: prompt, maxTokens: 250, temperature: 0.6, agentTask: "summary",
+        });
         if (res.text) {
           const cleanSummary = cleanStringField(res.text) || "";
           patch({ summary: cleanSummary });
@@ -614,9 +618,9 @@ Return ONLY a valid JSON array of string bullets, NO formatting, NO markdown, NO
         const prompt = `Rewrite the bullet points for the role "${exp.title} at ${exp.company}" to naturally incorporate the keyword/phrase "${cleanKeyword}". Keep the achievements measurable and professional:
 ${JSON.stringify(exp.bullets)}
 Return ONLY a valid JSON array of string bullets, NO formatting, NO markdown, NO asterisks.`;
-        const res = await ProviderRouter.chat({
-          messages: [{ role: "user", content: prompt }], maxTokens: 400, temperature: 0.7
-        }, { agentTask: "experience" });
+        const res = await recordAI({
+          userPrompt: prompt, maxTokens: 400, temperature: 0.7, agentTask: "experience",
+        });
         try {
           const parsedBullets = extractJSON<any>(res.text);
           if (Array.isArray(parsedBullets)) {
@@ -741,24 +745,16 @@ Initiating target-seeking optimization loops...`
         }
       ]);
 
-      const { ProviderRouter } = await import("@/lib/ai/services/router");
-      const opt1 = await ProviderRouter.chat({
-        messages: [
-          {
-            role: "system",
-            content: `You are a professional ATS Resume Optimization Agent.
+      const opt1 = await recordAI({
+        systemPrompt: `You are a professional ATS Resume Optimization Agent.
 Analyze the target job description and current resume.
 Rewrite the professional summary and headline to incorporate missing keywords: ${JSON.stringify(activeJD.keywords || [])}.
-You MUST output a valid [PATCH] block with updates to "summary" and "headline" fields.`
-          },
-          {
-            role: "user",
-            content: `Resume:\n${JSON.stringify(resume)}\n\nJob description:\n${JSON.stringify(activeJD)}`
-          }
-        ],
+You MUST output a valid [PATCH] block with updates to "summary" and "headline" fields.`,
+        userPrompt: `Resume:\n${JSON.stringify(resume)}\n\nJob description:\n${JSON.stringify(activeJD)}`,
         maxTokens: 1000,
-        temperature: 0.6
-      }, { agentTask: "summary" });
+        temperature: 0.6,
+        agentTask: "summary",
+      });
 
       const reply1 = opt1.text || "";
       let patch1: any = null;
@@ -808,23 +804,16 @@ New ATS Score: **${scoreAfterStep1}%** (Improvement: +${scoreAfterStep1 - initia
         }
       ]);
 
-      const opt2 = await ProviderRouter.chat({
-        messages: [
-          {
-            role: "system",
-            content: `You are a professional ATS Resume Optimization Agent.
+      const opt2 = await recordAI({
+        systemPrompt: `You are a professional ATS Resume Optimization Agent.
 Compare the current resume skills against the target job description.
 Extract and add missing keywords to the skills list.
-You MUST output a valid [PATCH] block containing the updated "skills" array.`
-          },
-          {
-            role: "user",
-            content: `Resume:\n${JSON.stringify(currentTempResume)}\n\nJob description:\n${JSON.stringify(activeJD)}`
-          }
-        ],
+You MUST output a valid [PATCH] block containing the updated "skills" array.`,
+        userPrompt: `Resume:\n${JSON.stringify(currentTempResume)}\n\nJob description:\n${JSON.stringify(activeJD)}`,
         maxTokens: 1000,
-        temperature: 0.6
-      }, { agentTask: "summary" });
+        temperature: 0.6,
+        agentTask: "summary",
+      });
 
       const reply2 = opt2.text || "";
       let patch2: any = null;
@@ -862,22 +851,15 @@ New ATS Score: **${scoreAfterStep2}%** (Improvement: +${scoreAfterStep2 - scoreA
         }
       ]);
 
-      const opt3 = await ProviderRouter.chat({
-        messages: [
-          {
-            role: "system",
-            content: `You are a professional ATS Resume Optimization Agent.
+      const opt3 = await recordAI({
+        systemPrompt: `You are a professional ATS Resume Optimization Agent.
 Enhance work experiences to focus on leadership and inject quantified metrics (numbers, percentages, time limits).
-You MUST output a valid [PATCH] block containing the updated "experience" array.`
-          },
-          {
-            role: "user",
-            content: `Resume:\n${JSON.stringify(currentTempResume)}\n\nJob description:\n${JSON.stringify(activeJD)}`
-          }
-        ],
+You MUST output a valid [PATCH] block containing the updated "experience" array.`,
+        userPrompt: `Resume:\n${JSON.stringify(currentTempResume)}\n\nJob description:\n${JSON.stringify(activeJD)}`,
         maxTokens: 1000,
-        temperature: 0.6
-      }, { agentTask: "summary" });
+        temperature: 0.6,
+        agentTask: "summary",
+      });
 
       const reply3 = opt3.text || "";
       let patch3: any = null;
@@ -1192,8 +1174,6 @@ I have prepared a comprehensive proposed patch to apply all 3 steps of optimizat
     setSendingMessage(true);
 
     try {
-      const { ProviderRouter } = await import("@/lib/ai/services/router");
-      
       const systemPrompt = `You are a professional AI Resume Copilot.
 Your job is to help the candidate write, rewrite, and refine their resume.
 You have the candidate's current resume and the job description they are targeting.
@@ -1311,15 +1291,16 @@ CURRENT RESUME DATA:
 ${resumeContext}
 ---`;
 
-      const response = await ProviderRouter.chat({
+      const response = await recordAI({
         messages: [
           { role: "system", content: fullSystemPrompt },
           ...messages.map((m) => ({ role: m.role, content: m.content })),
           { role: "user", content: userText }
         ],
         maxTokens: 1000,
-        temperature: 0.65
-      }, { agentTask: "summary" });
+        temperature: 0.65,
+        agentTask: "summary",
+      });
 
       const reply = response.text || "";
       let cleanReply = reply;

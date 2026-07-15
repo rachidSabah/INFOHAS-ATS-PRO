@@ -64,6 +64,7 @@ export class PuterProvider implements AIProviderAdapter {
       userPrompt: req.messages.find((m) => m.role === "user")?.content || "",
       maxTokens: req.maxTokens,
       temperature: req.temperature,
+      topP: req.topP,
       model: req.model || config.modelName,
     });
 
@@ -89,6 +90,67 @@ export class PuterProvider implements AIProviderAdapter {
 
   async listModels(config: ProviderConfig): Promise<string[]> {
     return config.enabledModels ?? ["gpt-5.4-nano", "gpt-5-nano", "gpt-4o-mini", "gpt-4o", "claude-sonnet-4-5", "claude-3-5-sonnet", "gemini-2.5-flash", "deepseek-chat", "llama-3.3-70b", "mistral-large"];
+  }
+
+  /**
+   * Streaming — Puter.js is the only backend that natively streams in this app.
+   * Iterates the AsyncIterable that window.puter.ai.chat returns when
+   * `stream: true`, piping every text chunk through `onChunk`. Errors (including
+   * "error" parts from the stream) reject so the pipeline can cool down / fall
+   * back exactly as the non-streaming path would.
+   */
+  async stream(req: ChatRequest, config: ProviderConfig, onChunk: (text: string) => void): Promise<ChatResponse> {
+    const t0 = performance.now();
+    await loadPuterScript();
+    if (typeof window === "undefined" || !window.puter?.ai?.chat) {
+      throw new Error("Puter.js is not available for streaming.");
+    }
+
+    const { getPuterProvider } = await import("../../providers/puter-provider");
+    const puter = getPuterProvider();
+    if (!puter.isAuthenticated() && !window.puter?.ai?.chat) {
+      throw new Error("Puter authentication required for streaming.");
+    }
+
+    const messages = req.messages;
+    const chatOpts: any = {
+      max_tokens: req.maxTokens ?? config.maxTokens,
+      temperature: req.temperature ?? config.temperature ?? 0.7,
+      stream: true,
+    };
+    const model = req.model || config.modelName;
+    if (model) chatOpts.model = model;
+
+    const response: any = window.puter.ai.chat(messages as any, chatOpts);
+    if (!response || typeof (response as any)[Symbol.asyncIterator] !== "function") {
+      throw new Error("Puter.js streaming response was not iterable.");
+    }
+
+    let fullText = "";
+    let sawError = "";
+    for await (const part of response as AsyncIterable<any>) {
+      if (part?.type === "text" && part.text) {
+        fullText += part.text;
+        onChunk(part.text);
+      } else if (part?.type === "error") {
+        sawError = part.message || "Puter stream error";
+        break;
+      } else if (typeof part === "string") {
+        fullText += part;
+        onChunk(part);
+      }
+    }
+
+    if (sawError) {
+      throw new Error(sawError);
+    }
+
+    return {
+      text: fullText,
+      provider: "Puter.js (streamed)",
+      model: model || "puter-default",
+      latencyMs: Math.round(performance.now() - t0),
+    };
   }
 }
 

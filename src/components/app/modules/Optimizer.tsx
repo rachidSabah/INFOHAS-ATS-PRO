@@ -1,6 +1,7 @@
+"use client";
+
 import { recordAI, setFlightScope } from "@/lib/ai/flight-recorder";
 setFlightScope({ scope: "resume-optimizer", feature: "Resume Optimizer", module: "src.components.app.modules.Optimizer" });
-"use client";
 
 import { useState, useRef, useEffect, useCallback, Suspense, lazy } from "react";
 import { motion, AnimatePresence } from "framer-motion";

@@ -476,6 +476,8 @@ export class PuterProvider implements OAuthAIProvider {
     userPrompt: string;
     maxTokens?: number;
     temperature?: number;
+    /** Nucleus sampling (0-1). Phase 8.1.3.2A: accepted but Puter.js has no top_p knob. */
+    topP?: number;
     model?: string;
   }): Promise<{ text: string; provider: string; latencyMs: number }> {
     // AUTH CHECK — try authenticated first, then anonymous fallback

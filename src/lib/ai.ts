@@ -8,12 +8,10 @@
 import { ProviderRouter, type RouterOptions } from "./ai/services/router";
 import type { ChatRequest } from "./ai/providers/interface";
 import { localGenerate } from "./local-engine";
-import { isPuterInCooldown, markPuterCooldown, isPuterQuotaError } from "./provider-cooldown";
 import { buildStandardDirective } from "./optimizer-directive-engine";
 import { getPromptCache, setPromptCache, buildPromptHash } from "./prompt-cache";
-import { withTimeout, OptimizationProviderExhaustedError, OPTIMIZER_CALL_TIMEOUT_MS } from "./pipeline-watchdog";
+import { OptimizationProviderExhaustedError, OPTIMIZER_CALL_TIMEOUT_MS } from "./pipeline-watchdog";
 import { useApp } from "./store";
-import { truncatePromptToTokenLimit, MAX_INPUT_TOKENS } from "./ai-diagnostics";
 import {
   checkPuterUsageStatus as _checkPuterUsageStatus,
   getPuterMonthlyUsage as _getPuterMonthlyUsage,
@@ -97,9 +95,11 @@ export function getOptimizerDirective(): string {
 
 export interface AICallOptions {
   systemPrompt?: string;
-  userPrompt: string;
+  userPrompt?: string;
   maxTokens?: number;
   temperature?: number;
+  /** Nucleus sampling (0-1). Phase 8.1.3.2A: now propagated end-to-end. */
+  topP?: number;
   preferLocal?: boolean;
   preferServer?: boolean;
   taskCategory?: "document" | "interactive" | "development";
@@ -109,10 +109,16 @@ export interface AICallOptions {
   enableRetries?: boolean;
   enableProviderSwitch?: boolean;
   agentType?: "optimizer" | "supervisor" | "guardian" | "assembler" | "emergency" | "simple" | "reasoning";
+  /** Task hint forwarded to ProviderRouter for capability-weighted model selection (Phase 8.1.3.1). */
+  agentTask?: string;
   providerId?: string;
   messages?: { role: "system" | "user" | "assistant"; content: string }[];
   modelOverride?: string;
   signal?: AbortSignal;
+  /** Phase 8.1.3.2B — when true, deliver the response as streamed chunks via an
+   *  onChunk callback (provided to callAIStreamed/recordAI). Non-streaming
+   *  callers ignore this. */
+  stream?: boolean;
 }
 
 export interface AICallResult {
@@ -217,17 +223,19 @@ export function extractJSON<T = any>(raw: string): T {
  * `recordAI` (with metadata).
  */
 export async function callAIRaw(opts: AICallOptions): Promise<AICallResult> {
+  const userPrompt = opts.userPrompt ?? "";
   const chatRequest: ChatRequest = {
     messages: opts.messages
       ? opts.messages
       : opts.systemPrompt
         ? [
             { role: "system", content: opts.systemPrompt },
-            { role: "user", content: opts.userPrompt },
+            { role: "user", content: userPrompt },
           ]
-        : [{ role: "user", content: opts.userPrompt }],
+        : [{ role: "user", content: userPrompt }],
     model: opts.modelOverride,
     temperature: opts.temperature,
+    topP: opts.topP,
     maxTokens: opts.maxTokens,
     signal: opts.signal,
   };
@@ -247,7 +255,7 @@ export async function callAIRaw(opts: AICallOptions): Promise<AICallResult> {
     latencyMs: res.latencyMs,
     tokensEstimate: res.inputTokens
       ? (res.inputTokens + (res.outputTokens ?? 0))
-      : estTokens(opts.userPrompt),
+      : estTokens(userPrompt),
     isLocalEngine: res.provider.includes("Local Engine") || !!(res as any).isLocalEngine,
   };
 }
@@ -270,108 +278,78 @@ export async function callAI(opts: AICallOptions): Promise<AICallResult> {
 }
 
 /**
- * Streaming entrypoint — uses Puter.js direct streaming if available,
- * else falls back to callAI + simulated word-by-word streaming.
+ * RAW streaming entrypoint — delegates to ProviderRouter.stream() (the single
+ * router, extended with streaming). Phase 8.1.3.2B: this is the ONLY raw
+ * streaming path, mirroring `callAIRaw` for non-streaming. Only `recordAI` may
+ * call this directly.
  */
-export async function callAIStreamed(opts: AICallOptions, onChunk: (chunk: string) => void): Promise<AICallResult> {
-  const t0 = performance.now();
+export async function callAIRawStreamed(
+  opts: AICallOptions,
+  onChunk: (chunk: string) => void
+): Promise<AICallResult> {
+  const userPrompt = opts.userPrompt ?? "";
+  const chatRequest: ChatRequest = {
+    messages: opts.messages
+      ? opts.messages
+      : opts.systemPrompt
+        ? [
+            { role: "system", content: opts.systemPrompt },
+            { role: "user", content: userPrompt },
+          ]
+        : [{ role: "user", content: userPrompt }],
+    model: opts.modelOverride,
+    temperature: opts.temperature,
+    topP: opts.topP,
+    maxTokens: opts.maxTokens,
+    signal: opts.signal,
+  };
 
-  if (!opts.preferServer && !opts.preferLocal && typeof window !== "undefined" && window.puter?.ai?.chat) {
-    if (!isPuterInCooldown()) {
-      try {
-        // Messages are now built with truncated prompt above (see truncatedMessages below).
+  const routerOptions: RouterOptions = {
+    preferredProviderId: opts.providerId,
+    singleProvider: !!opts.providerId,
+    requestType: "chat",
+    ...opts,
+  };
 
+  const res = await ProviderRouter.stream(chatRequest, routerOptions, onChunk);
 
-        // ADR-002: Temperature must be pinned per use-case — never left to a default 0.7 for
-        // structured tasks. The caller may pass opts.temperature explicitly (authoritative).
-        // Otherwise we infer from context: optimizer calls → 0.3 (low variance), chat → 0.7.
-        const resolvedTemperature = opts.temperature !== undefined
-          ? opts.temperature
-          : opts.isOptimizerCall
-            ? 0.3   // Structured resume suggestions — low variance
-            : 0.7;  // General chat
+  return {
+    text: res.text,
+    provider: res.provider,
+    latencyMs: res.latencyMs,
+    tokensEstimate: res.inputTokens
+      ? (res.inputTokens + (res.outputTokens ?? 0))
+      : estTokens(userPrompt),
+    isLocalEngine: res.provider.includes("Local Engine") || !!(res as any).isLocalEngine,
+  };
+}
 
-
-        // Enforce token budget on this path (the Puter streaming path bypasses ProviderRouter
-        // which is the normal truncation point — apply it here explicitly).
-        const truncatedUserPrompt = truncatePromptToTokenLimit(
-          opts.userPrompt,
-          MAX_INPUT_TOKENS
-        );
-
-        const truncatedMessages = opts.messages
-          ? opts.messages
-          : opts.systemPrompt
-            ? [
-                { role: "system", content: opts.systemPrompt },
-                { role: "user", content: truncatedUserPrompt },
-              ]
-            : [{ role: "user", content: truncatedUserPrompt }];
-
-        const chatOpts: any = {
-          max_tokens: opts.maxTokens ?? 4096,
-          temperature: resolvedTemperature,
-          stream: true,
-        };
-
-
-        try {
-          const state: any = useApp.getState();
-          const puterProvider = (state?.providers || []).find(
-            (p: any) => p.type === "puter" && p.isActive && p.modelName,
-          );
-          if (puterProvider?.modelName) {
-            chatOpts.model = puterProvider.modelName;
-          }
-        } catch (e) {
-          console.warn("[AI] Puter model lookup failed:", e);
-        }
-
-        const response: any = await withTimeout(
-          window.puter.ai.chat(truncatedMessages, chatOpts),
-          60000,
-          "Puter AI chat (streamed)"
-        );
-
-
-        let fullText = "";
-        for await (const part of response as AsyncIterable<any>) {
-          if (part?.type === "text" && part.text) {
-            fullText += part.text;
-            onChunk(part.text);
-          } else if (part?.type === "error") {
-            throw new Error(part.message || "Puter stream error");
-          }
-        }
-
-        if (fullText.trim().length > 0) {
-          return {
-            text: fullText,
-            provider: "Puter.js (streamed)",
-            latencyMs: Math.round(performance.now() - t0),
-            tokensEstimate: estTokens(opts.userPrompt + (opts.systemPrompt ?? "")),
-          };
-        }
-      } catch (e: any) {
-        const msg = e?.message || String(e || "");
-        if (isPuterQuotaError(e)) {
-          markPuterCooldown();
-          console.warn("[AI Streamed] Puter usage cap hit — entering 5-minute cooldown.");
-        } else if (!/auth|sign.?in|unauthor|401|403/i.test(msg)) {
-          console.warn("[AI Streamed] Puter streaming failed, falling through to callAI:", msg);
-        }
-      }
-    }
-  }
-
-  // Fallback: non-streamed callAI + simulated streaming
-  const result = await callAI(opts);
-  const words = result.text.split(/(\s+)/);
-  for (let i = 0; i < words.length; i++) {
-    onChunk(words[i]);
-    if (i % 12 === 0) await new Promise((r) => setTimeout(r, 8));
-  }
-  return result;
+/**
+ * Streaming entrypoint — Phase 8.1.3.2B UNIVERSAL STREAMING.
+ *
+ * Streaming is now a FIRST-CLASS path through the SAME architecture as
+ * `callAI`: it delegates to `recordAI` (with `stream: true`), so every streamed
+ * execution is automatically recorded by the Flight Recorder, passes through
+ * the middleware hooks, and consumes the shared configuration — with NO bypass
+ * of ProviderRouter / Puter cooldown / failover. The only behavioural difference
+ * from the old implementation is that delivery is now progressive through the
+ * single ProviderRouter.stream path instead of a hand-rolled direct
+ * `window.puter.ai.chat` call.
+ *
+ * The public signature `(opts, onChunk)` is preserved for callers.
+ */
+export async function callAIStreamed(
+  opts: AICallOptions,
+  onChunk: (chunk: string) => void
+): Promise<AICallResult> {
+  const { recordAI } = await import("./ai/flight-recorder");
+  return recordAI(opts, {
+    scope: "other",
+    feature: "callAIStreamed (auto)",
+    module: "src/lib/ai.ts",
+    stream: true,
+    onChunk,
+  });
 }
 
 // React store helpers

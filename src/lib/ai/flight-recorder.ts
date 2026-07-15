@@ -30,6 +30,14 @@
 // instead (see Phase 8.1.3.1 mandate: recordAI is the ONLY caller of callAIRaw).
 import { type AICallOptions, type AICallResult } from "@/lib/ai";
 import { uid, useApp } from "@/lib/store";
+// Phase 8.1.3.2A — middleware hooks + diagnostics. Imported lazily inside the
+// try block to avoid a static cycle (see header note on callAIRaw).
+import { runHooks } from "./hooks";
+// Phase 8.1.3.3 — reflection prompt version constant (no runtime cycle: the
+// engine's heavy `recordAI` import is lazy inside recordAI; this is a const).
+import { REFLECTION_PROMPT_VERSION } from "./reflection-engine";
+// Phase 8.1.3.4 — QA prompt version constant (same lazy-const pattern).
+import { QA_PROMPT_VERSION } from "./qa-engine";
 
 // ----------------------------------------------------------------------------
 // Types
@@ -63,6 +71,149 @@ export interface FlightCost {
   estimatedCost: number; // USD, best-effort
   provider: string;
   model: string;
+}
+
+/**
+ * Internal-only diagnostics captured by recordAI (Phase 8.1.3.2A).
+ * Exposes prompt/context versioning + assembly metrics + a configuration
+ * snapshot. Never includes secrets or full payloads beyond what is already
+ * in `prompt`/`cost`. Safe to emit into the audit log.
+ */
+export interface FlightDiagnostics {
+  promptVersion: string;
+  promptHash: string;
+  contextHash: string;
+  promptSize: number;
+  contextSize: number;
+  promptSource?: string;
+  contextSource?: string;
+  promptAssemblyMs?: number;
+  contextAssemblyMs?: number;
+  scope?: string;
+  /** Snapshot of the execution-layer configuration actually used. */
+  config: {
+    temperature?: number;
+    topP?: number;
+    maxTokens?: number;
+    model?: string;
+    provider?: string;
+    taskCategory?: string;
+    streaming: boolean;
+    agentTask?: string;
+  };
+  // Phase 8.1.3.2B — streaming diagnostics (observability only, no UI).
+  executionType?: "streaming" | "non-streaming";
+  streamingStatus?: "idle" | "streaming" | "completed" | "aborted" | "error";
+  chunkCount?: number;
+  streamingDurationMs?: number;
+  abortReason?: string;
+  // Phase 8.1.3.3 — reflection diagnostics (observability only, no UI).
+  reflectionEnabled?: boolean;
+  reflectionScore?: number;
+  reflectionConfidence?: number;
+  reflectionOutcome?: "ok" | "retry" | "error";
+  reflectionRecommendedRetry?: boolean;
+  // Phase 8.1.3.4 — QA diagnostics (observability only, no UI).
+  qaEnabled?: boolean;
+  qaScore?: number;
+  qaConfidence?: number;
+  qaOutcome?: "passed" | "failed" | "error";
+  qaRecommendedFail?: boolean;
+  qaFindings?: number;
+}
+
+/**
+ * Phase 8.1.3.2B — streaming execution metadata captured by the recorder.
+ * Recorded EXECUTION METADATA ONLY — never individual tokens. Observability
+ * responsibility only; the recorder never performs or alters execution.
+ */
+export interface FlightStreamMeta {
+  /** Number of text chunks delivered to the consumer. */
+  chunkCount: number;
+  /** Epoch ms when the first chunk was delivered (undefined if none). */
+  streamingStartMs?: number;
+  /** Epoch ms when streaming finished/aborted. */
+  streamingEndMs?: number;
+  /** Final streaming status. */
+  streamingStatus: "streaming" | "completed" | "aborted" | "error";
+  /** Reason when the stream was aborted/cancelled (e.g. AbortSignal). */
+  abortReason?: string;
+}
+
+/**
+ * Phase 8.1.3.3 — reflection captured by the recorder (observability ONLY).
+ * The Reflection Engine produces this; the recorder never runs or alters it.
+ * Contains the agreed ReflectionResult shape plus the execution metadata the
+ * Flight Recorder must surface (provider/model/version/duration/cost/tokens).
+ */
+export interface FlightReflection {
+  reflectionId: string;
+  enabled: boolean;
+  /** 0-100. */
+  score: number;
+  /** 0-100. */
+  confidence: number;
+  /** ok | retry | error. */
+  outcome: "ok" | "retry" | "error";
+  summary: string;
+  strengths: string[];
+  weaknesses: string[];
+  missingInformation: string[];
+  instructionViolations: string[];
+  formatViolations: string[];
+  reasoningIssues: string[];
+  /** 0-1. */
+  hallucinationRisk: number;
+  /** 0-1. */
+  determinismRisk: number;
+  suggestedActions: string[];
+  retryRecommended: boolean;
+  retryReason: string;
+  // Enterprise metrics required by the spec:
+  promptVersion: string;
+  durationMs?: number;
+  latencyMs?: number;
+  provider?: string;
+  model?: string;
+  cost?: number;
+  tokens?: number;
+  errors: string[];
+}
+
+/**
+ * Phase8.1.3.4 — QA verdict captured by the recorder (observability ONLY).
+ * The QA Engine produces this; the recorder never runs or alters it.
+ * Mirrors FlightReflection's shape (score/confidence/outcome/findings/risks
+ * + the execution metadata the Flight Recorder must surface).
+ */
+export interface FlightQA {
+  qaId: string;
+  enabled: boolean;
+  /** 0-100. */
+  score: number;
+  /** 0-100. */
+  confidence: number;
+  /** passed | failed | error. */
+  outcome: "passed" | "failed" | "error";
+  summary: string;
+  findings: { category: string; description: string; severity: "critical" | "major" | "minor" }[];
+  /** 0-1. */
+  hallucinationRisk: number;
+  /** 0-1. */
+  policyRisk: number;
+  /** 0-1. */
+  incompletenessRisk: number;
+  passed: boolean;
+  failRecommended: boolean;
+  failReason: string;
+  promptVersion: string;
+  durationMs?: number;
+  latencyMs?: number;
+  provider?: string;
+  model?: string;
+  cost?: number;
+  tokens?: number;
+  errors: string[];
 }
 
 export interface InterviewContextMeta {
@@ -142,7 +293,23 @@ export interface FlightRecord {
 
   // Replay payload — enough to reconstruct the exact call WITHOUT re-executing.
   prompt: { systemPrompt?: string; userPrompt: string; messages?: AICallOptions["messages"] };
-  parameters: { temperature?: number; maxTokens?: number; modelOverride?: string; taskCategory?: string };
+  parameters: { temperature?: number; topP?: number; maxTokens?: number; modelOverride?: string; taskCategory?: string };
+
+  // Phase 8.1.3.2A — internal diagnostics (no UI, no secrets). Captures prompt/
+  // context versioning + assembly metrics + a configuration snapshot so future
+  // phases (Reflection/QA/Validation) can reason about an execution offline.
+  diagnostics?: FlightDiagnostics;
+
+  // Phase 8.1.3.2B — streaming execution metadata (observability only).
+  streamMeta?: FlightStreamMeta;
+
+  // Phase 8.1.3.3 — reflection captured automatically when enabled
+  // (observability only; the Reflection Engine owns the logic).
+  reflection?: FlightReflection;
+
+  // Phase 8.1.3.4 — QA verdict captured automatically when enabled
+  // (observability only; the QA Engine owns the logic).
+  qa?: FlightQA;
 
   // Timeline + perf + cost
   timeline: FlightSpan[];
@@ -338,6 +505,17 @@ export interface RecordOptions extends FlightMetadata {
   reflectionEnabled?: boolean;
   qaEnabled?: boolean;
   promptVersion?: string;
+  /** Phase 8.1.3.2B — streaming mode. When true, `onChunk` receives progressive
+   *  text and the execution is recorded as streaming. */
+  stream?: boolean;
+  /** Progressive text delivery callback (streaming mode only). */
+  onChunk?: (chunk: string) => void;
+  /** Phase 8.1.3.3 — reflection configuration. When set (and merged
+   *  reflectionEnabled is true), the Reflection Engine runs as middleware. */
+  reflectionConfig?: import("./reflection-engine").ReflectionConfig;
+  /** Phase 8.1.3.4 — QA configuration. When set (and merged qaEnabled is true),
+   *  the QA Engine runs as middleware. */
+  qaConfig?: import("./qa-engine").QAConfig;
 }
 
 /**
@@ -352,39 +530,277 @@ export async function recordAI(
   // Merge module-level context (set once per feature) when the caller did not
   // supply explicit metadata. Single metadata path — no duplication.
   const merged: RecordOptions = { ..._moduleContext, ...rec };
+  // Phase 8.1.3.3 — a supplied reflectionConfig implies reflection is desired;
+  // normalize so the rest of the pipeline keys off a single boolean.
+  if (merged.reflectionConfig?.reflectionEnabled) {
+    merged.reflectionEnabled = true;
+  }
+  if (merged.qaConfig?.qaEnabled) {
+    merged.qaEnabled = true;
+  }
   const executionId = uid("fx");
   const t0 = Date.now();
   const timeline: FlightSpan[] = [{ name: "context", at: t0 }];
 
+  // Phase 8.1.3.2A — prompt/context diagnostics. Reuses the same hashing the
+  // recorder already did; these here additionally capture size + source.
   const promptText = opts.messages
     ? JSON.stringify(opts.messages)
     : `${opts.systemPrompt ?? ""}\n@@@\n${opts.userPrompt ?? ""}`;
   const contextText = JSON.stringify({ resumeId: merged.resumeId, jdId: merged.jdId, interviewSessionId: merged.interviewSessionId });
   const promptHash = hashString(promptText);
   const contextHash = hashString(contextText);
+  const promptSize = promptText.length;
+  const contextSize = contextText.length;
 
   const warnings: string[] = [];
   const errors: string[] = [];
+  const hookNotes: string[] = [];
   let retryCount = 0;
   let status: ExecutionStatus = "running";
   let result: AICallResult | null = null;
+  // Phase 8.1.3.3 — reflection result captured for the record (null when disabled).
+  let flightReflection: FlightReflection | null = null;
+  // Phase 8.1.3.4 — QA result captured for the record (null when disabled).
+  let flightQA: FlightQA | null = null;
+
+  // Phase 8.1.3.2B — streaming state (metadata only; never holds tokens).
+  const isStreaming = Boolean(merged.stream);
+  let chunkCount = 0;
+  let streamingStartMs: number | undefined;
+  let streamingStatus: "streaming" | "completed" | "aborted" | "error" = "streaming";
+  let abortReason: string | undefined;
+
+  // Phase 8.1.3.2A — extension points. Hooks are no-ops unless registered; they
+  // cannot change execution (they are observability seams for future phases).
+  await runHooks("BeforePrompt", { executionId, scope: merged.scope, feature: merged.feature, module: merged.module, opts });
+  await runHooks("AfterPrompt", { executionId, scope: merged.scope, feature: merged.feature, module: merged.module, opts });
+  await runHooks("BeforeContext", { executionId, scope: merged.scope, feature: merged.feature, module: merged.module, opts });
+  await runHooks("AfterContext", { executionId, scope: merged.scope, feature: merged.feature, module: merged.module, opts, notes: hookNotes });
 
   timeline.push({ name: "prompt", at: Date.now() });
 
+  // Wrapper that counts + timestamps chunks and forwards to the consumer.
+  const deliverChunk = (chunk: string) => {
+    if (chunk.length === 0) return;
+    if (chunkCount === 0) streamingStartMs = Date.now();
+    chunkCount++;
+    merged.onChunk?.(chunk);
+  };
+
   try {
     // Delegate to the SINGLE existing pipeline — no duplicate execution.
-    // `callAIRaw` is imported lazily to avoid a static module-init cycle
-    // (see header note). This is the only place that invokes the raw provider.
-    const { callAIRaw } = await import("@/lib/ai");
-    result = await callAIRaw(opts);
+    // `callAIRaw` / `callAIRawStreamed` are imported lazily to avoid a static
+    // module-init cycle (see header note). This is the only place that invokes
+    // the raw provider, streaming or not. The ONLY difference between the two
+    // paths is response delivery — everything else is identical.
+    await runHooks("BeforeProvider", { executionId, scope: merged.scope, feature: merged.feature, module: merged.module, opts });
+    const { callAIRaw, callAIRawStreamed } = await import("@/lib/ai");
+    if (isStreaming) {
+      result = await callAIRawStreamed(opts, deliverChunk);
+      streamingStatus = "completed";
+    } else {
+      result = await callAIRaw(opts);
+    }
+    await runHooks("AfterProvider", { executionId, scope: merged.scope, feature: merged.feature, module: merged.module, opts, result });
     timeline.push({ name: "provider", at: Date.now(), detail: result.provider });
     timeline.push({ name: "model", at: Date.now() });
+    if (isStreaming) timeline.push({ name: "streaming", at: Date.now(), detail: `${chunkCount} chunks` });
+    await runHooks("BeforeResponse", { executionId, scope: merged.scope, feature: merged.feature, module: merged.module, opts, result });
     timeline.push({ name: "response", at: Date.now() });
+    await runHooks("AfterResponse", { executionId, scope: merged.scope, feature: merged.feature, module: merged.module, opts, result });
     status = "completed";
+
+    // Phase 8.1.3.3 — Reflection (MIDDLEWARE, observability only).
+    // Runs ONLY after the response is fully assembled (streaming-safe: the
+    // final chunk has already been delivered above), and ONLY when reflection is
+    // enabled. Reflection NEVER mutates `result` — it produces structured
+    // feedback that future phases (Decision/Retry Engine) may act on.
+    if (merged.reflectionEnabled && result) {
+      const tRef = Date.now();
+      timeline.push({ name: "reflection", at: tRef });
+      const originalPromptText = opts.messages
+        ? JSON.stringify(opts.messages)
+        : `${opts.systemPrompt ?? ""}\n@@@\n${opts.userPrompt ?? ""}`;
+      const executionContextText = JSON.stringify({
+        scope: merged.scope,
+        feature: merged.feature,
+        resumeId: merged.resumeId,
+        jdId: merged.jdId,
+      });
+      const { reflect } = await import("./reflection-engine");
+      try {
+        const reflectionResult = await reflect({
+          executionId,
+          originalPrompt: originalPromptText,
+          executionContext: executionContextText,
+          aiResponseText: result.text,
+          scope: merged.scope,
+          opts,
+          config: merged.reflectionConfig,
+          signal: opts.signal,
+        });
+        flightReflection = {
+          reflectionId: reflectionResult.reflectionId,
+          enabled: true,
+          score: reflectionResult.overallScore,
+          confidence: reflectionResult.confidence,
+          outcome: reflectionResult.status,
+          summary: reflectionResult.summary,
+          strengths: reflectionResult.strengths,
+          weaknesses: reflectionResult.weaknesses,
+          missingInformation: reflectionResult.missingInformation,
+          instructionViolations: reflectionResult.instructionViolations,
+          formatViolations: reflectionResult.formatViolations,
+          reasoningIssues: reflectionResult.reasoningIssues,
+          hallucinationRisk: reflectionResult.hallucinationRisk,
+          determinismRisk: reflectionResult.determinismRisk,
+          suggestedActions: reflectionResult.suggestedActions,
+          retryRecommended: reflectionResult.retryRecommended,
+          retryReason: reflectionResult.retryReason,
+          promptVersion: reflectionResult.metadata.promptVersion,
+          durationMs: reflectionResult.metadata.durationMs,
+          latencyMs: reflectionResult.metadata.latencyMs,
+          provider: reflectionResult.metadata.provider,
+          model: reflectionResult.metadata.model,
+          cost: reflectionResult.metadata.cost,
+          tokens: reflectionResult.metadata.tokens,
+          errors: reflectionResult.metadata.error ? [reflectionResult.metadata.error] : [],
+        };
+      } catch (re: any) {
+        flightReflection = {
+          reflectionId: uid("rfx"),
+          enabled: true,
+          score: 0,
+          confidence: 0,
+          outcome: "error",
+          summary: "Reflection failed.",
+          strengths: [],
+          weaknesses: [],
+          missingInformation: [],
+          instructionViolations: [],
+          formatViolations: [],
+          reasoningIssues: [],
+          hallucinationRisk: 1,
+          determinismRisk: 1,
+          suggestedActions: [],
+          retryRecommended: false,
+          retryReason: "reflection error",
+          promptVersion: REFLECTION_PROMPT_VERSION,
+          errors: [re?.message ?? String(re)],
+        };
+      }
+      timeline.push({ name: "reflection", at: Date.now(), detail: flightReflection.outcome });
+      await runHooks("OnReflection", {
+        executionId,
+        scope: merged.scope,
+        feature: merged.feature,
+        module: merged.module,
+        opts,
+        result,
+        notes: hookNotes,
+      });
+    }
+
+    // Phase 8.1.3.4 — QA (MIDDLEWARE, observability only).
+    // Runs ONLY after the response is fully assembled (streaming-safe: the
+    // final chunk has already been delivered above) and ONLY when QA is enabled.
+    // QA NEVER mutates `result` — it produces structured findings that future
+    // phases (Decision/Retry Engine, Validation) may act on.
+    if (merged.qaEnabled && result) {
+      const tQA = Date.now();
+      timeline.push({ name: "qa", at: tQA });
+      const originalPromptText = opts.messages
+        ? JSON.stringify(opts.messages)
+        : `${opts.systemPrompt ?? ""}\n@@@\n${opts.userPrompt ?? ""}`;
+      const executionContextText = JSON.stringify({
+        scope: merged.scope,
+        feature: merged.feature,
+        resumeId: merged.resumeId,
+        jdId: merged.jdId,
+      });
+      const { qa } = await import("./qa-engine");
+      try {
+        const qaResult = await qa({
+          executionId,
+          originalPrompt: originalPromptText,
+          executionContext: executionContextText,
+          aiResponseText: result.text,
+          scope: merged.scope,
+          opts,
+          config: merged.qaConfig,
+          signal: opts.signal,
+        });
+        flightQA = {
+          qaId: qaResult.qaId,
+          enabled: true,
+          score: qaResult.overallScore,
+          confidence: qaResult.confidence,
+          outcome: qaResult.status,
+          summary: qaResult.summary,
+          findings: qaResult.findings,
+          hallucinationRisk: qaResult.hallucinationRisk,
+          policyRisk: qaResult.policyRisk,
+          incompletenessRisk: qaResult.incompletenessRisk,
+          passed: qaResult.passed,
+          failRecommended: qaResult.failRecommended,
+          failReason: qaResult.failReason,
+          promptVersion: qaResult.metadata.promptVersion,
+          durationMs: qaResult.metadata.durationMs,
+          latencyMs: qaResult.metadata.latencyMs,
+          provider: qaResult.metadata.provider,
+          model: qaResult.metadata.model,
+          cost: qaResult.metadata.cost,
+          tokens: qaResult.metadata.tokens,
+          errors: qaResult.metadata.error ? [qaResult.metadata.error] : [],
+        };
+      } catch (qe: any) {
+        flightQA = {
+          qaId: uid("qfx"),
+          enabled: true,
+          score: 0,
+          confidence: 0,
+          outcome: "error",
+          summary: "QA failed.",
+          findings: [],
+          hallucinationRisk: 0,
+          policyRisk: 0,
+          incompletenessRisk: 0,
+          passed: false,
+          failRecommended: false,
+          failReason: "qa error",
+          promptVersion: QA_PROMPT_VERSION,
+          errors: [qe?.message ?? String(qe)],
+        };
+      }
+      timeline.push({ name: "qa", at: Date.now(), detail: flightQA.outcome });
+      await runHooks("OnQA", {
+        executionId,
+        scope: merged.scope,
+        feature: merged.feature,
+        module: merged.module,
+        opts,
+        result,
+        notes: hookNotes,
+      });
+    }
+
+    await runHooks("OnSuccess", { executionId, scope: merged.scope, feature: merged.feature, module: merged.module, opts, result });
   } catch (e: any) {
     errors.push(e?.message ?? String(e));
     status = "error";
+    const isAbort = e?.name === "AbortError" || opts.signal?.aborted;
+    if (isStreaming) {
+      streamingStatus = isAbort ? "aborted" : "error";
+      if (isAbort) abortReason = e?.message || "AbortSignal";
+    }
     timeline.push({ name: "response", at: Date.now(), detail: "error" });
+    const isTimeout = e?.name === "AbortError" || /timeout|timed? ?out/i.test(e?.message ?? "");
+    if (isTimeout) {
+      await runHooks("OnTimeout", { executionId, scope: merged.scope, feature: merged.feature, module: merged.module, opts, error: e, notes: hookNotes });
+    } else {
+      await runHooks("OnFailure", { executionId, scope: merged.scope, feature: merged.feature, module: merged.module, opts, error: e, notes: hookNotes });
+    }
     throw e;
   } finally {
     const t1 = Date.now();
@@ -416,7 +832,7 @@ export async function recordAI(
       temperature: opts.temperature,
       topP: (opts as any).topP,
       maxTokens: opts.maxTokens,
-      streaming: Boolean((opts as any).streaming),
+      streaming: isStreaming,
       promptVersion: merged.promptVersion ?? INTERVIEW_PROMPT_VERSION,
       promptHash,
       contextHash,
@@ -439,6 +855,7 @@ export async function recordAI(
       },
       parameters: {
         temperature: opts.temperature,
+        topP: opts.topP,
         maxTokens: opts.maxTokens,
         modelOverride: opts.modelOverride,
         taskCategory: opts.taskCategory,
@@ -447,6 +864,8 @@ export async function recordAI(
       performance: {
         totalMs,
         providerMs: result?.latencyMs,
+        reflectionMs: flightReflection?.durationMs,
+        qaMs: flightQA?.durationMs,
         ...merged.perf,
       },
       cost: {
@@ -458,9 +877,64 @@ export async function recordAI(
         model,
       },
       scope: merged.scope ?? "interview",
+      // Phase 8.1.3.2A — internal diagnostics (prompt/context versioning,
+      // assembly metrics, config snapshot). No UI; safe to emit to the audit log.
+      diagnostics: {
+        promptVersion: merged.promptVersion ?? INTERVIEW_PROMPT_VERSION,
+        promptHash,
+        contextHash,
+        promptSize,
+        contextSize,
+        scope: merged.scope,
+        config: {
+          temperature: opts.temperature,
+          topP: opts.topP,
+          maxTokens: opts.maxTokens,
+          model: opts.modelOverride,
+          provider,
+          taskCategory: opts.taskCategory,
+          streaming: isStreaming,
+          agentTask: (opts as any).agentTask,
+        },
+        // Phase 8.1.3.2B — streaming diagnostics (observability only).
+        executionType: isStreaming ? "streaming" : "non-streaming",
+        streamingStatus: isStreaming ? streamingStatus : undefined,
+        chunkCount: isStreaming ? chunkCount : undefined,
+        streamingDurationMs: isStreaming && streamingStartMs ? t1 - streamingStartMs : undefined,
+        abortReason: isStreaming ? abortReason : undefined,
+        // Phase 8.1.3.3 — reflection diagnostics (observability only).
+        reflectionEnabled: merged.reflectionEnabled ?? false,
+        reflectionScore: flightReflection?.score,
+        reflectionConfidence: flightReflection?.confidence,
+        reflectionOutcome: flightReflection?.outcome,
+        reflectionRecommendedRetry: flightReflection?.retryRecommended,
+        // Phase 8.1.3.4 — QA diagnostics (observability only).
+        qaEnabled: merged.qaEnabled ?? false,
+        qaScore: flightQA?.score,
+        qaConfidence: flightQA?.confidence,
+        qaOutcome: flightQA?.outcome,
+        qaRecommendedFail: flightQA?.failRecommended,
+        qaFindings: flightQA?.findings.length ?? 0,
+      },
+      // Phase 8.1.3.2B — streaming execution metadata (observability only).
+      streamMeta: isStreaming
+        ? {
+            chunkCount,
+            streamingStartMs,
+            streamingEndMs: t1,
+            streamingStatus,
+            abortReason,
+          }
+        : undefined,
+      // Phase 8.1.3.3 — reflection (observability only; engine owns logic).
+      reflection: flightReflection ?? undefined,
+      // Phase 8.1.3.4 — QA verdict (observability only; engine owns logic).
+      qa: flightQA ?? undefined,
     };
 
+    await runHooks("BeforePersist", { executionId, scope: merged.scope, feature: merged.feature, module: merged.module, opts, result, notes: hookNotes });
     emit(record);
+    await runHooks("AfterPersist", { executionId, scope: merged.scope, feature: merged.feature, module: merged.module, opts, result, notes: hookNotes });
   }
 
   return result!;

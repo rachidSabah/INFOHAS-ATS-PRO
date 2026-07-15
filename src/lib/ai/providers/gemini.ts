@@ -77,6 +77,7 @@ export class GeminiProvider extends OpenAICompatibleProvider {
       contents,
       generationConfig: {
         temperature: req.temperature ?? config.temperature,
+        topP: req.topP ?? config.topP,
         maxOutputTokens: req.maxTokens ?? config.maxTokens,
       },
       ...(sysMsg ? { systemInstruction: { parts: [{ text: sysMsg.content }] } } : {}),

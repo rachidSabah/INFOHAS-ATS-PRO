@@ -32,6 +32,7 @@ export class CustomProvider implements AIProviderAdapter {
         model,
         messages: req.messages,
         temperature: req.temperature ?? config.temperature,
+        top_p: req.topP ?? config.topP,
         max_tokens: req.maxTokens ?? config.maxTokens,
         api_key: config.apiKey ?? "",
       });
@@ -40,6 +41,7 @@ export class CustomProvider implements AIProviderAdapter {
         model,
         messages: req.messages.map((m) => ({ role: m.role, content: m.content })),
         temperature: req.temperature ?? config.temperature,
+        top_p: req.topP ?? config.topP,
         max_tokens: req.maxTokens ?? config.maxTokens,
         ...this.parseJson(config.parametersJson),
       };
@@ -64,6 +66,7 @@ export class CustomProvider implements AIProviderAdapter {
           messages: req.messages,
           maxTokens: req.maxTokens ?? config.maxTokens,
           temperature: req.temperature ?? config.temperature,
+          topP: req.topP ?? config.topP,
           responsePath: config.responsePath,
           timeoutMs: config.timeout,
         }),

@@ -1,6 +1,7 @@
 "use client";
 
 import { recordAI, setFlightScope } from "@/lib/ai/flight-recorder";
+import { PromptBuilder } from "@/lib/ai/prompt-builder";
 setFlightScope({ scope: "resume-copilot", feature: "Debug Chat", module: "src.lib.debug-chat" });
 
 // Conversational Debug Chat Interface
@@ -93,9 +94,12 @@ export async function sendDebugMessage(
   });
 
   try {
-    const result = await recordAI({
-      systemPrompt: systemContext,
-      userPrompt: `DEBUG REQUEST: ${userPrompt}
+    // Phase 8.1.3.2A — assemble the prompt through the shared Prompt Builder.
+    // The wording is byte-identical to before; the builder only composes the
+    // system + user fragments into the shape recordAI already consumes.
+    const built = new PromptBuilder({ scope: "resume-copilot", feature: "Debug Chat", version: "hermes-debug" })
+      .system(systemContext)
+      .user(`DEBUG REQUEST: ${userPrompt}
 
 Analyze the issue, identify the root cause, and suggest a fix.
 If you recommend code changes, format them as a patch.
@@ -106,7 +110,12 @@ Format your response with clear sections:
 1. DIAGNOSIS
 2. ROOT CAUSE
 3. RECOMMENDED FIX
-4. ACTION ITEMS (if any)`,
+4. ACTION ITEMS (if any)`)
+      .build();
+
+    const result = await recordAI({
+      systemPrompt: built.systemPrompt,
+      userPrompt: built.userPrompt,
       maxTokens: 2000,
       temperature: 0.3,
       taskCategory: "development",

@@ -13,6 +13,7 @@ const sink = vi.fn();
 
 vi.mock("@/lib/ai", () => ({
   callAIRaw: (...args: any[]) => mockCallAI(...args),
+  callAIRawStreamed: (...args: any[]) => mockCallAI(...args),
   extractJSON: (raw: string) => JSON.parse(raw.replace(/```json|```/g, "").trim()),
 }));
 
