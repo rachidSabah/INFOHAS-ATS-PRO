@@ -275,7 +275,7 @@ export function Interview() {
       </div>
 
       {activeSubTab === "aviation-academy" ? (
-        <AviationAcademy />
+        <AviationAcademy jobDescription={selectedJd} />
       ) : (
         <>
 

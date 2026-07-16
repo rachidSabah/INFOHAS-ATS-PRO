@@ -3,12 +3,13 @@
 import { recordAI, setFlightScope } from "@/lib/ai/flight-recorder";
 setFlightScope({ scope: "interview", feature: "Aviation Academy", module: "src.components.interview.AviationAcademy" });
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef, useMemo } from "react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge, Icon } from "@/components/shared";
 import { toast } from "sonner";
 import { callAI } from "@/lib/ai";
+import type { JobDescription } from "@/lib/types";
 
 // ============================================================================
 // Data Constants
@@ -88,13 +89,108 @@ const GROOMING_STANDARDS: Record<string, { lips: string; hair: string; nails: st
 };
 
 // ============================================================================
+// JD → Aviation Context Detection
+// Maps a parsed job description (airline, route hints, fleet keywords) onto
+// the Sector & Fleet Customizer + grooming airline. Keeps dropdowns editable.
+// ============================================================================
+
+const AIRLINE_GROOMING_MAP: Record<string, string> = {
+  emirates: "emirates",
+  qatar: "qatar",
+  "qatar airways": "qatar",
+  etihad: "etihad",
+  "etihad airways": "etihad"
+};
+
+const ROUTE_KEYWORDS: { sectorId: string; patterns: RegExp }[] = [
+  { sectorId: "me-short", patterns: /(gcc|middle east|doh|doha|ruh|riyadh|kwi|kuwait|uae|dubai|abu dhabi|bahrain|mct|muscat|jeddah|dxb|auh|gulf|emirates|qatar|etihad|gulf air|oman air)/i },
+  { sectorId: "transatlantic", patterns: /(transatlantic|jfk|new york|ord|chicago|lax|los angeles|usa|united states|americas|atlanta|iah|houston|boston|sfo|san francisco)/i },
+  { sectorId: "eu-hubs", patterns: /(europe|european|lhr|london|cdg|paris|fra|frankfurt|ams|amsterdam|mad|madrid|munich|zurich|geneva|brussels|vienna|ist|istanbul)/i },
+  { sectorId: "asia-long", patterns: /(asia|asian|ultra.?long|nrt|tokyo|sin|singapore|hkg|hong kong|icn|seoul|pek|beijing|shanghai|bkk|bangkok|del|delhi|syd|sydney|melbourne|pacific|australia)/i }
+];
+
+const FLEET_KEYWORDS: { fleetId: string; patterns: RegExp }[] = [
+  { fleetId: "a380", patterns: /(a380|airbus a380|superjumbo)/i },
+  { fleetId: "b777", patterns: /(777|boeing 777|777-300|777-200|triple seven)/i },
+  { fleetId: "b787", patterns: /(787|boeing 787|dreamliner)/i },
+  { fleetId: "a350", patterns: /(a350|airbus a350|350-1000|350-900)/i }
+];
+
+export interface DetectedAviationContext {
+  sectorId: string | null;
+  fleetId: string | null;
+  airlineGrooming: string | null;
+  hints: string[];
+}
+
+function detectAviationContext(jd: JobDescription | null | undefined): DetectedAviationContext {
+  const empty: DetectedAviationContext = { sectorId: null, fleetId: null, airlineGrooming: null, hints: [] };
+  if (!jd) return empty;
+
+  const title = jd.title ?? "";
+  const company = jd.company ?? "";
+  const raw = jd.rawText ?? "";
+  const keywords = Array.isArray(jd.keywords) ? jd.keywords.join(" ") : "";
+  const responsibilities = Array.isArray(jd.responsibilities) ? jd.responsibilities.join(" ") : "";
+  const blob = `${title} ${company} ${keywords} ${responsibilities} ${raw}`;
+  const hints: string[] = [];
+
+  // Airline → grooming standard (company is the strongest signal)
+  let airlineGrooming: string | null = null;
+  const companyLower = company.toLowerCase();
+  for (const [key, val] of Object.entries(AIRLINE_GROOMING_MAP)) {
+    if (companyLower.includes(key)) { airlineGrooming = val; hints.push(`Airline: ${key}`); break; }
+  }
+  if (!airlineGrooming) {
+    for (const [key, val] of Object.entries(AIRLINE_GROOMING_MAP)) {
+      if (blob.toLowerCase().includes(key)) { airlineGrooming = val; hints.push(`Airline (from JD): ${key}`); break; }
+    }
+  }
+
+  // Route → sector
+  let sectorId: string | null = null;
+  for (const { sectorId: sid, patterns } of ROUTE_KEYWORDS) {
+    if (patterns.test(blob)) { sectorId = sid; hints.push(`Sector: ${SECTORS.find((s) => s.id === sid)?.label ?? sid}`); break; }
+  }
+
+  // Fleet → aircraft focus
+  let fleetId: string | null = null;
+  for (const { fleetId: fid, patterns } of FLEET_KEYWORDS) {
+    if (patterns.test(blob)) { fleetId = fid; hints.push(`Fleet: ${FLEETS.find((f) => f.id === fid)?.label ?? fid}`); break; }
+  }
+
+  return { sectorId, fleetId, airlineGrooming, hints };
+}
+
+// ============================================================================
 // Component Definition
 // ============================================================================
 
-export function AviationAcademy() {
-  // Sector Customizer States
+export function AviationAcademy({ jobDescription }: { jobDescription?: JobDescription | null }) {
+  // Sector Customizer — auto-detect from parsed JD, editable by the user.
+  // IMPORTANT: detection must run AFTER mount (useEffect), never during the
+  // initial useState. The JD is read from a client store that is empty during
+  // SSR; deriving initial state from it would make the server HTML differ
+  // from the first client render → React hydration error #418.
+  const detected = useMemo(() => detectAviationContext(jobDescription), [jobDescription]);
+
+  // Sector Customizer States — initialized to safe defaults (match SSR).
   const [selectedSector, setSelectedSector] = useState(SECTORS[2].id);
   const [selectedFleet, setSelectedFleet] = useState(FLEETS[1].id);
+  const [selectedAirlineGrooming, setSelectedAirlineGrooming] = useState("emirates");
+  // Tracks whether the current selection still matches the JD-derived suggestion
+  const [sectorFromJd, setSectorFromJd] = useState(false);
+  const [fleetFromJd, setFleetFromJd] = useState(false);
+  const [groomingFromJd, setGroomingFromJd] = useState(false);
+
+  // Apply JD-derived defaults on the client only, after mount.
+  useEffect(() => {
+    if (!detected.sectorId && !detected.fleetId && !detected.airlineGrooming) return;
+    if (detected.sectorId) { setSelectedSector(detected.sectorId); setSectorFromJd(true); }
+    if (detected.fleetId) { setSelectedFleet(detected.fleetId); setFleetFromJd(true); }
+    if (detected.airlineGrooming) { setSelectedAirlineGrooming(detected.airlineGrooming); setGroomingFromJd(true); }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [detected]);
 
   // Sonru Simulator States
   const [selectedSonruQ, setSelectedSonruQ] = useState(SONRU_QUESTIONS[0].id);
@@ -136,8 +232,64 @@ export function AviationAcademy() {
   const [submittingCrm, setSubmittingCrm] = useState(false);
 
   // Grooming States
-  const [selectedAirlineGrooming, setSelectedAirlineGrooming] = useState("emirates");
   const [checkedGrooming, setCheckedGrooming] = useState<Record<string, boolean>>({});
+
+  // Real webcam preview (Sonru simulator)
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const streamRef = useRef<MediaStream | null>(null);
+  const [cameraState, setCameraState] = useState<"idle" | "requesting" | "live" | "denied" | "unavailable">("idle");
+  const [cameraError, setCameraError] = useState<string | null>(null);
+
+  const stopCamera = () => {
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach((t) => t.stop());
+      streamRef.current = null;
+    }
+    if (videoRef.current) videoRef.current.srcObject = null;
+    setCameraState("idle");
+  };
+
+  const startCamera = async () => {
+    setCameraError(null);
+    if (typeof navigator === "undefined" || !navigator.mediaDevices?.getUserMedia) {
+      setCameraState("unavailable");
+      setCameraError("Camera API not available in this browser.");
+      return;
+    }
+    setCameraState("requesting");
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+      streamRef.current = stream;
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
+        await videoRef.current.play().catch(() => {});
+      }
+      setCameraState("live");
+    } catch (err: any) {
+      const name = err?.name ?? "";
+      if (name === "NotAllowedError" || name === "SecurityError") {
+        setCameraState("denied");
+        setCameraError("Camera permission denied. You can still rehearse using the simulated flow.");
+      } else if (name === "NotFoundError" || name === "OverconstrainedError") {
+        setCameraState("unavailable");
+        setCameraError("No camera found on this device.");
+      } else {
+        setCameraState("unavailable");
+        setCameraError("Camera unavailable.");
+      }
+    }
+  };
+
+  // Manage the webcam lifecycle alongside the Sonru flow timer.
+  useEffect(() => {
+    if (timerMode === "idle") {
+      stopCamera();
+    } else if (timerMode === "prep" || timerMode === "record") {
+      startCamera();
+    }
+    return () => stopCamera();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [timerMode]);
 
   // Reset Sonru Timer
   useEffect(() => {
@@ -412,10 +564,17 @@ Return only JSON.`,
         <CardContent className="p-4 sm:p-5 grid sm:grid-cols-2 gap-4">
           <div className="space-y-3">
             <div>
-              <label className="text-xs font-semibold text-muted-foreground uppercase">Target Sector Network</label>
+              <div className="flex items-center justify-between gap-2">
+                <label className="text-xs font-semibold text-muted-foreground uppercase">Target Sector Network</label>
+                {sectorFromJd && (
+                  <Badge variant="outline" className="gap-1 text-[10px] font-semibold">
+                    <Icon name="Wand2" className="w-3 h-3" /> From JD
+                  </Badge>
+                )}
+              </div>
               <select
                 value={selectedSector}
-                onChange={(e) => setSelectedSector(e.target.value)}
+                onChange={(e) => { setSelectedSector(e.target.value); setSectorFromJd(false); }}
                 className="w-full h-9 mt-1 px-2 rounded-md border border-input bg-background text-sm"
               >
                 {SECTORS.map((s) => <option key={s.id} value={s.id}>{s.label}</option>)}
@@ -428,10 +587,17 @@ Return only JSON.`,
 
           <div className="space-y-3">
             <div>
-              <label className="text-xs font-semibold text-muted-foreground uppercase">Aircraft Fleet Focus</label>
+              <div className="flex items-center justify-between gap-2">
+                <label className="text-xs font-semibold text-muted-foreground uppercase">Aircraft Fleet Focus</label>
+                {fleetFromJd && (
+                  <Badge variant="outline" className="gap-1 text-[10px] font-semibold">
+                    <Icon name="Wand2" className="w-3 h-3" /> From JD
+                  </Badge>
+                )}
+              </div>
               <select
                 value={selectedFleet}
-                onChange={(e) => setSelectedFleet(e.target.value)}
+                onChange={(e) => { setSelectedFleet(e.target.value); setFleetFromJd(false); }}
                 className="w-full h-9 mt-1 px-2 rounded-md border border-input bg-background text-sm"
               >
                 {FLEETS.map((f) => <option key={f.id} value={f.id}>{f.label}</option>)}
@@ -441,6 +607,21 @@ Return only JSON.`,
               <strong>Galley focus:</strong> {FLEETS.find((f) => f.id === selectedFleet)?.keyFeature}
             </p>
           </div>
+
+          {jobDescription && detected.hints.length > 0 && (
+            <div className="sm:col-span-2 rounded-lg border border-brand/20 bg-brand/5 p-3 text-xs">
+              <div className="flex items-center gap-1.5 text-brand font-semibold mb-1.5">
+                <Icon name="Sparkles" className="w-3.5 h-3.5" />
+                Auto-detected from “{jobDescription.title || jobDescription.company || "your job description"}”
+              </div>
+              <div className="flex flex-wrap gap-1.5">
+                {detected.hints.map((h, i) => <Badge key={i} variant="outline" className="text-[10px]">{h}</Badge>)}
+              </div>
+              <p className="text-[10px] text-muted-foreground mt-1.5">
+                Selections are pre-filled but fully editable — change any dropdown to override.
+              </p>
+            </div>
+          )}
         </CardContent>
       </Card>
 
@@ -483,10 +664,33 @@ Return only JSON.`,
 
             {/* Video Feed Box */}
             <div className="relative rounded-lg aspect-video bg-neutral-900 overflow-hidden border border-neutral-800 flex flex-col items-center justify-center text-white">
+              {/* Live webcam preview (always mounted; shown only when live) */}
+              <video
+                ref={videoRef}
+                playsInline
+                muted
+                className={`absolute inset-0 w-full h-full object-cover ${cameraState === "live" ? "opacity-100" : "opacity-0"}`}
+              />
+
+              {/* Camera status pill */}
+              {timerMode !== "idle" && cameraState !== "live" && (
+                <div className="absolute top-3 left-3 flex items-center gap-1.5 rounded-full bg-black/60 px-2 py-1 text-[10px] uppercase font-bold tracking-wider font-mono">
+                  {cameraState === "requesting" && <><span className="w-2 h-2 rounded-full bg-amber-400 animate-pulse" /> Connecting…</>}
+                  {cameraState === "denied" && <><Icon name="CameraOff" className="w-3 h-3 text-red-400" /> Cam denied</>}
+                  {cameraState === "unavailable" && <><Icon name="CameraOff" className="w-3 h-3 text-neutral-400" /> No cam</>}
+                </div>
+              )}
+
               {timerMode === "idle" && (
                 <div className="text-center p-4">
                   <Icon name="CameraOff" className="w-10 h-10 text-neutral-600 mx-auto mb-2" />
                   <p className="text-xs text-neutral-400">Camera is off. Click below to begin the assessment flow.</p>
+                  {cameraState === "denied" && (
+                    <p className="text-[11px] text-amber-400 mt-1">Permission denied — you can still rehearse with the simulated flow.</p>
+                  )}
+                  {cameraState === "unavailable" && cameraError && (
+                    <p className="text-[11px] text-neutral-400 mt-1">{cameraError}</p>
+                  )}
                 </div>
               )}
 
@@ -508,6 +712,16 @@ Return only JSON.`,
                   <p className="text-sm">Speak clearly into your microphone...</p>
                   <p className="text-3xl font-mono mt-1 text-red-500">{recordTime}s</p>
                 </div>
+              )}
+
+              {/* Retry camera if blocked */}
+              {timerMode !== "idle" && (cameraState === "denied" || cameraState === "unavailable") && (
+                <button
+                  onClick={startCamera}
+                  className="absolute bottom-3 right-3 flex items-center gap-1 rounded-full bg-white/10 hover:bg-white/20 px-2.5 py-1 text-[10px] font-semibold"
+                >
+                  <Icon name="RefreshCw" className="w-3 h-3" /> Retry camera
+                </button>
               )}
             </div>
 
@@ -699,10 +913,17 @@ Return only JSON.`,
         <CardContent className="p-4 sm:p-5 space-y-4">
           <div className="flex items-center gap-4 flex-wrap">
             <div className="flex-1 min-w-[200px]">
-              <label className="text-xs font-semibold text-muted-foreground">SELECT TARGET AIRLINE FOR COMPLIANCE</label>
+              <label className="text-xs font-semibold text-muted-foreground flex items-center gap-2">
+                SELECT TARGET AIRLINE FOR COMPLIANCE
+                {groomingFromJd && (
+                  <Badge variant="outline" className="gap-1 text-[10px] font-semibold">
+                    <Icon name="Wand2" className="w-3 h-3" /> From JD
+                  </Badge>
+                )}
+              </label>
               <select
                 value={selectedAirlineGrooming}
-                onChange={(e) => setSelectedAirlineGrooming(e.target.value)}
+                onChange={(e) => { setSelectedAirlineGrooming(e.target.value); setGroomingFromJd(false); }}
                 className="w-full h-9 mt-1 px-2 rounded-md border border-input bg-background text-sm"
               >
                 <option value="emirates">Emirates</option>

@@ -432,15 +432,26 @@ export async function runLockedPipeline(
       }
 
       // === Fix 8: Skills/Languages structural immutability ===
+      // Normalize a skill/language name by stripping a leading "Category: "
+      // prefix that some AI providers leak into the `name` field (e.g.
+      // "General: Active Listening" should match source "Active Listening").
+      // Without this, the immutability check spuriously reports the skill as
+      // "removed" and forces 3 doomed retries → degraded-optimization return.
+      const normalizeName = (n: string): string =>
+        n.replace(/^\s*[^:]{1,30}:\s*/, "").trim().toLowerCase();
+
       const srcSkills = sourceResume.skills || [];
       const assembledSkills = assembleResult.resume.skills || [];
       for (const srcSkill of srcSkills) {
         const skillName = typeof srcSkill === "string" ? srcSkill : (srcSkill as any).name;
         if (!skillName) continue;
-        const found = assembledSkills.some(
-          (as: any) =>
-            (typeof as === "string" ? as : as.name)?.toLowerCase() === skillName.toLowerCase()
-        );
+        const srcNorm = normalizeName(skillName);
+        const found = assembledSkills.some((as: any) => {
+          const asName = typeof as === "string" ? as : as.name;
+          if (!asName) return false;
+          const asNorm = normalizeName(asName);
+          return asName.toLowerCase() === skillName.toLowerCase() || asNorm === srcNorm;
+        });
         if (!found) {
           contentViolations.push(`Skill "${skillName}" was removed from assembled resume`);
         }
@@ -451,10 +462,13 @@ export async function runLockedPipeline(
       for (const srcLang of srcLangs) {
         const langName = typeof srcLang === "string" ? srcLang : (srcLang as any).name;
         if (!langName) continue;
-        const found = assembledLangs.some(
-          (al: any) =>
-            (typeof al === "string" ? al : al.name)?.toLowerCase() === langName.toLowerCase()
-        );
+        const srcNorm = normalizeName(langName);
+        const found = assembledLangs.some((al: any) => {
+          const alName = typeof al === "string" ? al : al.name;
+          if (!alName) return false;
+          const alNorm = normalizeName(alName);
+          return alName.toLowerCase() === langName.toLowerCase() || alNorm === srcNorm;
+        });
         if (!found) {
           contentViolations.push(`Language "${langName}" was removed from assembled resume`);
         }

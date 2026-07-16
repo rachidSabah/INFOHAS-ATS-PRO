@@ -568,15 +568,43 @@ function checkDirectiveCompliance(
   };
 }
 
-// ── Check 13: Bullet Count Preservation (critical) ──────────────────────────
+// ── Check 13: Bullet Content Preservation (critical) ──────────────────────────
 
 /**
- * Verifies that EVERY experience entry has the EXACT SAME number of bullets
- * as the corresponding entry in the source resume. This prevents the LLM
- * from dropping, merging, or truncating bullet points during optimization.
+ * Verifies that optimization does NOT silently LOSE accomplishments.
+ *
+ * Historically this enforced an EXACT bullet-count match, which wrongly
+ * vetoed legitimate consolidation (e.g. 7 weak bullets → 3 strong,
+ * same achievements, fewer words). The guard now measures CONTENT
+ * coverage instead: the optimized bullets must still contain the
+ * substance of the source bullets. We only fail when bullets are dropped
+ * AND their content is not preserved (i.e. real data loss), not when
+ * the LLM rewrote/merged them into fewer-but-richer points.
  */
 function checkBulletsPreserved(optimized: ResumeData, source: ResumeData): GuardianCheck {
   const failures: string[] = [];
+
+  // Tokenize a bullet into a normalized word set for coverage comparison.
+  const tokens = (s: string): Set<string> => {
+    const t = s.toLowerCase().replace(/[^a-z0-9\s]/g, " ").split(/\s+/).filter((w) => w.length > 3);
+    return new Set(t);
+  };
+  // Fraction of source bullet tokens still present in the optimized set.
+  const coverage = (src: string[], opt: string[]): number => {
+    if (src.length === 0) return 1;
+    const optTokens = new Set<string>();
+    for (const b of opt) for (const t of tokens(b)) optTokens.add(t);
+    if (optTokens.size === 0) return 0;
+    let kept = 0;
+    for (const b of src) {
+      const bt = tokens(b);
+      if (bt.size === 0) { kept++; continue; }
+      let overlap = 0;
+      for (const t of bt) if (optTokens.has(t)) overlap++;
+      if (overlap / bt.size >= 0.5) kept++;
+    }
+    return kept / src.length;
+  };
 
   for (const optExp of optimized.experience) {
     const srcExp = source.experience.find(
@@ -592,9 +620,13 @@ function checkBulletsPreserved(optimized: ResumeData, source: ResumeData): Guard
     const optCount = optBullets.length;
 
     if (optCount < srcCount) {
-      failures.push(
-        `"${optExp.title} @ ${optExp.company}": ${srcCount} bullets → ${optCount} (${srcCount - optCount} missing)`
-      );
+      // Fewer bullets is OK iff the content was consolidated (coverage kept).
+      const cov = coverage(srcBullets, optBullets);
+      if (cov < 0.7) {
+        failures.push(
+          `"${optExp.title} @ ${optExp.company}": ${srcCount} bullets → ${optCount} (${(srcCount - optCount)} missing, only ${(cov * 100).toFixed(0)}% of content preserved)`
+        );
+      }
     } else if (optCount > srcCount) {
       // More bullets than source is suspicious (hallucination)
       failures.push(
