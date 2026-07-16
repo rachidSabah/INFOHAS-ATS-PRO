@@ -41,7 +41,9 @@ export type HookPoint =
   | "OnTimeout"
   | "OnRetry"
   | "OnReflection"
-  | "OnQA";
+  | "OnQA"
+  | "OnValidation"
+  | "OnDecision";
 
 /**
  * The context object passed to every hook. It is READ-MOSTLY: hooks may read
@@ -88,6 +90,8 @@ const registry: Record<HookPoint, HookFn[]> = {
   AfterPersist: [],
   OnReflection: [],
   OnQA: [],
+  OnValidation: [],
+  OnDecision: [],
   OnSuccess: [],
   OnFailure: [],
   OnTimeout: [],

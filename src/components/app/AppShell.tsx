@@ -35,6 +35,14 @@ import { AgentConfigCenter } from "./modules/AgentConfigCenter";
 import { AIDevAgent } from "./modules/AIDevAgent";
 import { AIWorkspace } from "./modules/AIWorkspace";
 import { Workers } from "./modules/Workers";
+import { RecruiterIntelligence } from "./modules/RecruiterIntelligence";
+import { CandidateExperience } from "./modules/CandidateExperience";
+import { FlightRecorderConsole } from "./modules/FlightRecorderConsole";
+import { InterviewAnalytics } from "./modules/InterviewAnalytics";
+import { InterviewReports } from "./modules/InterviewReports";
+import { Explainability } from "./modules/Explainability";
+import { ScenarioManagement } from "./modules/ScenarioManagement";
+import { PersonaManagement } from "./modules/PersonaManagement";
 import {
   LinkedinImport, ResumeVersioning, MultiLanguage, ResumeSharing, AbTesting,
   BulkGenerator, ResumeAnalytics, AppTracker, SalaryInsights, SkillGap,
@@ -108,6 +116,14 @@ const VIEW_COMPONENTS: Record<ViewKey, React.FC> = {
   "ai-achievement": AiAchievement,
   "integrations": Integrations,
   "batch-optimizer": BatchOptimizer,
+  "recruiter": RecruiterIntelligence,
+  "candidate-experience": CandidateExperience,
+  "flight-recorder": FlightRecorderConsole,
+  "interview-analytics": InterviewAnalytics,
+  "interview-reports": InterviewReports,
+  "explainability": Explainability,
+  "scenario-mgmt": ScenarioManagement,
+  "persona-mgmt": PersonaManagement,
   logs: Logs,
 };
 
@@ -137,6 +153,8 @@ const SUPER_ADMIN_VIEWS: ViewKey[] = [
   "agent-config",
   "ai-dev-agent",
   "ai-workspace",
+  "scenario-mgmt",
+  "persona-mgmt",
   "logs",
 ];
 
@@ -144,6 +162,11 @@ const ADMIN_VIEWS: ViewKey[] = [
   "admin",
   "users",
   "analytics",
+  "recruiter",
+  "flight-recorder",
+  "interview-analytics",
+  "interview-reports",
+  "explainability",
 ];
 
 /**

@@ -95,4 +95,13 @@ export interface InterviewSessionRecord {
   completedAt?: string;
   /** Overall report blob (filled on completion). */
   reportRef?: string;
+  /**
+   * Completed interview memory (answered questions + competencies). Optional —
+   * present once a live session finishes. Consumed by the Recruiter Intelligence
+   * read-model (buildCandidateIntelligence) for full analytics. Mirrors the
+   * lightweight-metadata pattern used for recordings.
+   */
+  memory?: unknown;
+  /** FlightRecords captured during this session (reflection/qa/validation/decision). */
+  records?: unknown[];
 }

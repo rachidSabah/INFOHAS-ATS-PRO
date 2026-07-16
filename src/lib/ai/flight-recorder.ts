@@ -38,6 +38,11 @@ import { runHooks } from "./hooks";
 import { REFLECTION_PROMPT_VERSION } from "./reflection-engine";
 // Phase 8.1.3.4 — QA prompt version constant (same lazy-const pattern).
 import { QA_PROMPT_VERSION } from "./qa-engine";
+// Phase 8.1.3.5 — validation version constant (validation is deterministic and
+// imports only types from this module, so a const import is safe; the engine's
+// heavy `validate` fn is imported lazily inside recordAI like the others).
+import { VALIDATION_VERSION } from "./validation-engine";
+import { DECISION_VERSION } from "./decision-engine";
 
 // ----------------------------------------------------------------------------
 // Types
@@ -47,7 +52,7 @@ export type ExecutionStatus = "created" | "running" | "completed" | "error" | "r
 
 /** Lifecycle span — the timeline. Stored inline for fast replay/render. */
 export interface FlightSpan {
-  name: "context" | "prompt" | "provider" | "model" | "streaming" | "retry" | "reflection" | "qa" | "validation" | "response" | "persist";
+  name: "context" | "prompt" | "provider" | "model" | "streaming" | "retry" | "reflection" | "qa" | "validation" | "response" | "persist" | "decision";
   at: number; // epoch ms
   ms?: number; // duration of this phase
   detail?: string;
@@ -120,6 +125,21 @@ export interface FlightDiagnostics {
   qaOutcome?: "passed" | "failed" | "error";
   qaRecommendedFail?: boolean;
   qaFindings?: number;
+  // Phase 8.1.3.5 — validation diagnostics (observability only, no UI).
+  validationEnabled?: boolean;
+  validationScore?: number;
+  validationOutcome?: "passed" | "warning" | "failed" | "error";
+  validationProfile?: string;
+  validationRecommendedFail?: boolean;
+  validationCriticalFailures?: number;
+  validationRuleCount?: number;
+  // Phase 8.1.3.6 — decision diagnostics (observability only, no UI).
+  decisionEnabled?: boolean;
+  decisionStatus?: "accept" | "retry" | "reject" | "escalate" | "human_review" | "continue" | "stop";
+  decisionReason?: string;
+  decisionConfidence?: number;
+  decisionEvidence?: string;
+  decisionRuleCount?: number;
 }
 
 /**
@@ -216,6 +236,78 @@ export interface FlightQA {
   errors: string[];
 }
 
+/**
+ * Phase 8.1.3.5 — Validation verdict captured by the recorder (observability
+ * ONLY). The Validation Engine produces this deterministically (no AI); the
+ * recorder never runs or alters it. Mirrors FlightReflection/FlightQA shape
+ * (score/status/evidence + the metadata the Flight Recorder must surface).
+ */
+export interface FlightValidation {
+  validationId: string;
+  enabled: boolean;
+  /** 0-100 weighted rule score. */
+  score: number;
+  /** passed | warning | failed | error. */
+  outcome: "passed" | "warning" | "failed" | "error";
+  profile: string;
+  rules: {
+    ruleId: string;
+    profile: string;
+    kind: "required" | "optional" | "critical" | "warning";
+    outcome: "pass" | "warning" | "fail";
+    reason: string;
+    evidence: string;
+    severity: "critical" | "major" | "minor";
+  }[];
+  warnings: string[];
+  failures: string[];
+  reasons: string[];
+  criticalFailures: number;
+  passed: boolean;
+  failRecommended: boolean;
+  deterministic: true;
+  version: string;
+  durationMs: number;
+  errors: string[];
+}
+
+/**
+ * Phase 8.1.3.6 — Decision verdict captured by the recorder (observability
+ * ONLY). The Decision Engine produces this deterministically (no AI); the
+ * recorder never runs or alters it. Mirrors FlightReflection/FlightQA/
+ * FlightValidation shape (status/reason/evidence + the rule trace the Flight
+ * Recorder must surface).
+ */
+export interface FlightDecision {
+  decisionId: string;
+  enabled: boolean;
+  /** accept | retry | reject | escalate | human_review | continue | stop. */
+  status: "accept" | "retry" | "reject" | "escalate" | "human_review" | "continue" | "stop";
+  reason: string;
+  /** 0-1 confidence in the decision. */
+  confidence: number;
+  evidence: string;
+  /** Ordered rule trace (ruleId + triggered + status). */
+  trace: { ruleId: string; triggered: boolean; status: string }[];
+  /** Rules that fired. */
+  rules: {
+    ruleId: string;
+    profile: string;
+    status: string;
+    confidence: number;
+    reason: string;
+    evidence: string;
+    triggered: boolean;
+  }[];
+  supportingReflection?: string;
+  supportingQA?: string;
+  supportingValidation?: string;
+  deterministic: true;
+  version: string;
+  durationMs: number;
+  errors: string[];
+}
+
 export interface InterviewContextMeta {
   questionId?: string;
   questionType?: string;
@@ -282,7 +374,12 @@ export interface FlightRecord {
   retryCount: number;
   reflectionEnabled: boolean;
   qaEnabled: boolean;
+  /** Whether Validation middleware ran for this execution. */
+  validationEnabled?: boolean;
   validationResult?: string;
+  /** Whether Decision middleware ran for this execution. */
+  decisionEnabled?: boolean;
+  decisionResult?: string;
   status: ExecutionStatus;
   warnings: string[];
   errors: string[];
@@ -310,6 +407,14 @@ export interface FlightRecord {
   // Phase 8.1.3.4 — QA verdict captured automatically when enabled
   // (observability only; the QA Engine owns the logic).
   qa?: FlightQA;
+
+  // Phase 8.1.3.5 — Validation verdict captured automatically when enabled
+  // (observability only; the Validation Engine — deterministic — owns logic).
+  validation?: FlightValidation;
+
+  // Phase 8.1.3.6 — Decision verdict captured automatically when enabled
+  // (observability only; the Decision Engine — deterministic — owns logic).
+  decision?: FlightDecision;
 
   // Timeline + perf + cost
   timeline: FlightSpan[];
@@ -504,6 +609,8 @@ export interface RecordOptions extends FlightMetadata {
   perf?: Partial<FlightPerformance>;
   reflectionEnabled?: boolean;
   qaEnabled?: boolean;
+  /** Phase 8.1.3.5 — validation (deterministic) switch. */
+  validationEnabled?: boolean;
   promptVersion?: string;
   /** Phase 8.1.3.2B — streaming mode. When true, `onChunk` receives progressive
    *  text and the execution is recorded as streaming. */
@@ -516,6 +623,15 @@ export interface RecordOptions extends FlightMetadata {
   /** Phase 8.1.3.4 — QA configuration. When set (and merged qaEnabled is true),
    *  the QA Engine runs as middleware. */
   qaConfig?: import("./qa-engine").QAConfig;
+  /** Phase 8.1.3.5 — validation configuration. When set (and merged
+   *  validationEnabled is true), the Validation Engine runs as middleware. */
+  validationConfig?: import("./validation-engine").ValidationConfig;
+  /** Phase 8.1.3.6 — decision (deterministic) switch. */
+  decisionEnabled?: boolean;
+  /** Phase 8.1.3.6 — decision configuration. When set (and merged
+   *  decisionEnabled is true), the Decision Engine runs as middleware (after
+   *  Validation). */
+  decisionConfig?: import("./decision-engine").DecisionConfig;
 }
 
 /**
@@ -537,6 +653,12 @@ export async function recordAI(
   }
   if (merged.qaConfig?.qaEnabled) {
     merged.qaEnabled = true;
+  }
+  if (merged.validationConfig?.validationEnabled) {
+    merged.validationEnabled = true;
+  }
+  if (merged.decisionConfig?.decisionEnabled) {
+    merged.decisionEnabled = true;
   }
   const executionId = uid("fx");
   const t0 = Date.now();
@@ -563,6 +685,10 @@ export async function recordAI(
   let flightReflection: FlightReflection | null = null;
   // Phase 8.1.3.4 — QA result captured for the record (null when disabled).
   let flightQA: FlightQA | null = null;
+  // Phase 8.1.3.5 — Validation result captured for the record (null when disabled).
+  let flightValidation: FlightValidation | null = null;
+  // Phase 8.1.3.6 — Decision result captured for the record (null when disabled).
+  let flightDecision: FlightDecision | null = null;
 
   // Phase 8.1.3.2B — streaming state (metadata only; never holds tokens).
   const isStreaming = Boolean(merged.stream);
@@ -785,6 +911,152 @@ export async function recordAI(
       });
     }
 
+    // Phase 8.1.3.5 — Validation (MIDDLEWARE, deterministic, observability only).
+    // Runs ONLY after the response is fully assembled AND after Reflection/QA (so
+    // it can CONSUME their results) — streaming-safe for the same reason (the
+    // final chunk was already delivered). Validation is PURE + DETERMINISTIC: it
+    // never executes AI, never mutates `result`, and never retries. It applies the
+    // scope's Validation Profile (rule set) and records the verdict.
+    if (merged.validationEnabled && result) {
+      const tVal = Date.now();
+      timeline.push({ name: "validation", at: tVal });
+      const originalPromptText = opts.messages
+        ? JSON.stringify(opts.messages)
+        : `${opts.systemPrompt ?? ""}\n@@@\n${opts.userPrompt ?? ""}`;
+      const executionContextText = JSON.stringify({
+        scope: merged.scope,
+        feature: merged.feature,
+        resumeId: merged.resumeId,
+        jdId: merged.jdId,
+      });
+      const { validate } = await import("./validation-engine");
+      try {
+        const validationResult = validate({
+          executionId,
+          prompt: originalPromptText,
+          context: executionContextText,
+          response: result.text,
+          scope: merged.scope,
+          reflection: flightReflection,
+          qa: flightQA,
+          config: merged.validationConfig,
+        });
+        flightValidation = {
+          validationId: validationResult.validationId,
+          enabled: true,
+          score: validationResult.score,
+          outcome: validationResult.status,
+          profile: validationResult.profile,
+          rules: validationResult.rules,
+          warnings: validationResult.warnings,
+          failures: validationResult.failures,
+          reasons: validationResult.reasons,
+          criticalFailures: validationResult.criticalFailures,
+          passed: validationResult.passed,
+          failRecommended: validationResult.failRecommended,
+          deterministic: true,
+          version: validationResult.version,
+          durationMs: validationResult.durationMs,
+          errors: validationResult.errors,
+        };
+      } catch (ve: any) {
+        flightValidation = {
+          validationId: uid("vfx"),
+          enabled: true,
+          score: 0,
+          outcome: "error",
+          profile: merged.scope ?? "default",
+          rules: [],
+          warnings: [],
+          failures: [],
+          reasons: [],
+          criticalFailures: 0,
+          passed: false,
+          failRecommended: false,
+          deterministic: true,
+          version: VALIDATION_VERSION,
+          durationMs: Date.now() - tVal,
+          errors: [ve?.message ?? String(ve)],
+        };
+      }
+      timeline.push({ name: "validation", at: Date.now(), detail: flightValidation.outcome });
+      await runHooks("OnValidation", {
+        executionId,
+        scope: merged.scope,
+        feature: merged.feature,
+        module: merged.module,
+        opts,
+        result,
+        notes: hookNotes,
+      });
+    }
+
+    // Phase8.1.3.6 — Decision (MIDDLEWARE, deterministic, observability only).
+    // Runs ONLY after the response is fully assembled AND after Reflection/QA/
+    // Validation (so it can CONSUME their verdicts) — streaming-safe for the
+    // same reason (the final chunk was already delivered). Decision is PURE +
+    // DETERMINISTIC: it never executes AI, never mutates `result`, and never
+    // retries. It applies the scope's Decision Profile (rule set) and records
+    // the verdict. A "retry" verdict is EMIT-ONLY this phase (re-execution is
+    // the mandate of 8.1.3.7).
+    if (merged.decisionEnabled && result) {
+      const tDec = Date.now();
+      timeline.push({ name: "decision", at: tDec });
+      const { decide } = await import("./decision-engine");
+      try {
+        const decisionResult = decide({
+          executionId,
+          scope: merged.scope,
+          reflection: flightReflection,
+          qa: flightQA,
+          validation: flightValidation,
+          config: merged.decisionConfig,
+        });
+        flightDecision = {
+          decisionId: decisionResult.decisionId,
+          enabled: true,
+          status: decisionResult.status,
+          reason: decisionResult.reason,
+          confidence: decisionResult.confidence,
+          evidence: decisionResult.evidence,
+          trace: decisionResult.trace,
+          rules: decisionResult.rules,
+          supportingReflection: decisionResult.supportingReflection,
+          supportingQA: decisionResult.supportingQA,
+          supportingValidation: decisionResult.supportingValidation,
+          deterministic: true,
+          version: decisionResult.version,
+          durationMs: decisionResult.durationMs,
+          errors: decisionResult.errors,
+        };
+      } catch (de: any) {
+        flightDecision = {
+          decisionId: uid("dcx"),
+          enabled: true,
+          status: "continue",
+          reason: "decision error",
+          confidence: 0,
+          evidence: "",
+          trace: [],
+          rules: [],
+          deterministic: true,
+          version: DECISION_VERSION,
+          durationMs: Date.now() - tDec,
+          errors: [de?.message ?? String(de)],
+        };
+      }
+      timeline.push({ name: "decision", at: Date.now(), detail: flightDecision.status });
+      await runHooks("OnDecision", {
+        executionId,
+        scope: merged.scope,
+        feature: merged.feature,
+        module: merged.module,
+        opts,
+        result,
+        notes: hookNotes,
+      });
+    }
+
     await runHooks("OnSuccess", { executionId, scope: merged.scope, feature: merged.feature, module: merged.module, opts, result });
   } catch (e: any) {
     errors.push(e?.message ?? String(e));
@@ -842,7 +1114,10 @@ export async function recordAI(
       retryCount,
       reflectionEnabled: merged.reflectionEnabled ?? false,
       qaEnabled: merged.qaEnabled ?? false,
+      validationEnabled: merged.validationEnabled ?? false,
       validationResult: merged.interview?.branchReason ?? merged.resumeOpt?.validation,
+      decisionEnabled: merged.decisionEnabled ?? false,
+      decisionResult: flightDecision?.status,
       status,
       warnings,
       errors,
@@ -866,6 +1141,7 @@ export async function recordAI(
         providerMs: result?.latencyMs,
         reflectionMs: flightReflection?.durationMs,
         qaMs: flightQA?.durationMs,
+        validationMs: flightValidation?.durationMs,
         ...merged.perf,
       },
       cost: {
@@ -915,6 +1191,21 @@ export async function recordAI(
         qaOutcome: flightQA?.outcome,
         qaRecommendedFail: flightQA?.failRecommended,
         qaFindings: flightQA?.findings.length ?? 0,
+        // Phase 8.1.3.5 — validation diagnostics (observability only).
+        validationEnabled: merged.validationEnabled ?? false,
+        validationScore: flightValidation?.score,
+        validationOutcome: flightValidation?.outcome,
+        validationProfile: flightValidation?.profile,
+        validationRecommendedFail: flightValidation?.failRecommended,
+        validationCriticalFailures: flightValidation?.criticalFailures ?? 0,
+        validationRuleCount: flightValidation?.rules.length ?? 0,
+        // Phase 8.1.3.6 — decision diagnostics (observability only).
+        decisionEnabled: merged.decisionEnabled ?? false,
+        decisionStatus: flightDecision?.status,
+        decisionReason: flightDecision?.reason,
+        decisionConfidence: flightDecision?.confidence,
+        decisionEvidence: flightDecision?.evidence,
+        decisionRuleCount: flightDecision?.rules.length ?? 0,
       },
       // Phase 8.1.3.2B — streaming execution metadata (observability only).
       streamMeta: isStreaming
@@ -930,6 +1221,10 @@ export async function recordAI(
       reflection: flightReflection ?? undefined,
       // Phase 8.1.3.4 — QA verdict (observability only; engine owns logic).
       qa: flightQA ?? undefined,
+      // Phase 8.1.3.5 — Validation verdict (observability only; engine owns logic).
+      validation: flightValidation ?? undefined,
+      // Phase 8.1.3.6 — Decision verdict (observability only; engine owns logic).
+      decision: flightDecision ?? undefined,
     };
 
     await runHooks("BeforePersist", { executionId, scope: merged.scope, feature: merged.feature, module: merged.module, opts, result, notes: hookNotes });

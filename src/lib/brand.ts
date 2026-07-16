@@ -77,6 +77,7 @@ export const NAV_USER: { key: string; label: string; icon: string; group: string
   { key: "optimizer", label: "Resume Optimizer", icon: "Wand2", group: "Tools" },
   { key: "cover-letter", label: "Cover Letters", icon: "Mail", group: "Tools" },
   { key: "interview", label: "Interview Prep", icon: "MessagesSquare", group: "Tools" },
+  { key: "candidate-experience", label: "Live Interview", icon: "Radio", group: "Tools" },
   { key: "jd-scraper", label: "Job Scraper", icon: "Search", group: "Tools" },
   { key: "ai-tools", label: "AI Tools", icon: "Sparkles", group: "Tools" },
   { key: "linkedin-import", label: "LinkedIn Import", icon: "Linkedin", group: "Resume Tools" },
@@ -111,6 +112,11 @@ export const NAV_ADMIN: { key: string; label: string; icon: string; group: strin
   { key: "admin", label: "Admin Overview", icon: "ShieldCheck", group: "Admin" },
   { key: "users", label: "Users", icon: "Users", group: "Admin" },
   { key: "analytics", label: "Analytics", icon: "BarChart3", group: "Admin" },
+  { key: "recruiter", label: "Recruiter Intelligence", icon: "ClipboardCheck", group: "Interview Intelligence" },
+  { key: "interview-analytics", label: "Competency Analytics", icon: "Radar", group: "Interview Intelligence" },
+  { key: "explainability", label: "Explainability", icon: "ScanSearch", group: "Interview Intelligence" },
+  { key: "interview-reports", label: "Executive Reports", icon: "FileText", group: "Interview Intelligence" },
+  { key: "flight-recorder", label: "Flight Recorder", icon: "Plane", group: "Interview Intelligence" },
 ];
 
 export const NAV_SUPER: { key: string; label: string; icon: string; group: string }[] = [
@@ -127,5 +133,7 @@ export const NAV_SUPER: { key: string; label: string; icon: string; group: strin
   { key: "optimizer-directive", label: "Optimizer Directive", icon: "SlidersHorizontal", group: "Super Admin" },
   { key: "ai-dev-agent", label: "AI Development Agent", icon: "Bot", group: "Super Admin" },
   { key: "ai-workspace", label: "AI Workspace", icon: "Code2", group: "Super Admin" },
+  { key: "scenario-mgmt", label: "Scenario Management", icon: "Map", group: "Super Admin" },
+  { key: "persona-mgmt", label: "Persona Management", icon: "UsersRound", group: "Super Admin" },
   { key: "logs", label: "Audit Logs", icon: "ScrollText", group: "Super Admin" },
 ];
