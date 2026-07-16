@@ -179,18 +179,13 @@ jobs:
           command: deploy
 
   # ----------------------------------------------------------
-  # 5. Run D1 migrations (idempotent)
+  # 5. Run D1 migrations (state-tracked, idempotent)
   # ----------------------------------------------------------
-  # Each migration is applied via `wrangler d1 execute --file=...`.
-  # SQLite doesn't support IF NOT EXISTS on ADD COLUMN, so re-running a
-  # migration that's already been applied will produce a "duplicate column
-  # name" error. We treat that as success (continue-on-error: true) so the
-  # pipeline doesn't fail on re-runs.
-  #
-  # The proper fix is `wrangler d1 migrations apply` which tracks state in
-  # the d1_migrations system table. Once that command is GA and stable,
-  # replace the per-file steps below with a single:
-  #   wrangler d1 migrations apply resumeai-pro-db --remote --env production
+  # Uses `wrangler d1 migrations apply`, which tracks applied migrations in the
+  # d1_migrations system table. This applies ALL migrations (0001..0015) in
+  # order and skips already-applied ones — safe to re-run. Replaces the old
+  # per-file `d1 execute` steps, which only covered a subset and mis-referenced
+  # filenames (migrations 0007–0015 were never applied).
   migrate:
     name: Run D1 migrations
     needs: deploy-workers
@@ -198,62 +193,12 @@ jobs:
     if: github.ref == 'refs/heads/main'
     steps:
       - uses: actions/checkout@v4
-      - name: Apply initial schema (0001_init.sql)
+      - name: Apply D1 migrations (state-tracked)
         uses: cloudflare/wrangler-action@v3
-        continue-on-error: true
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          command: d1 execute resumeai-pro-db --file=migrations/0001_init.sql --remote --env production
-      - name: Apply enhanced AI providers (0002_ai_providers_enhanced.sql)
-        uses: cloudflare/wrangler-action@v3
-        continue-on-error: true
-        with:
-          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          command: d1 execute resumeai-pro-db --file=migrations/0002_ai_providers_enhanced.sql --remote --env production
-      - name: Apply user management (0003_user_access_control.sql)
-        uses: cloudflare/wrangler-action@v3
-        continue-on-error: true
-        with:
-          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          command: d1 execute resumeai-pro-db --file=migrations/0003_user_access_control.sql --remote --env production
-      - name: Apply user management v2 (0004_user_management.sql)
-        uses: cloudflare/wrangler-action@v3
-        continue-on-error: true
-        with:
-          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          command: d1 execute resumeai-pro-db --file=migrations/0004_user_management.sql --remote --env production
-      - name: Apply cloud migration (0005_cloud_migration.sql)
-        uses: cloudflare/wrangler-action@v3
-        continue-on-error: true
-        with:
-          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          command: d1 execute resumeai-pro-db --file=migrations/0005_cloud_migration.sql --remote --env production
-      - name: Apply provider settings (0006_provider_settings.sql)
-        uses: cloudflare/wrangler-action@v3
-        continue-on-error: true
-        with:
-          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          command: d1 execute resumeai-pro-db --file=migrations/0006_provider_settings.sql --remote --env production
-      - name: Apply provider classification (0004_provider_classification.sql)
-        uses: cloudflare/wrangler-action@v3
-        continue-on-error: true
-        with:
-          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          command: d1 execute resumeai-pro-db --file=migrations/0004_provider_classification.sql --remote --env production
-      - name: Apply AI dev agent (0003_ai_dev_agent.sql)
-        uses: cloudflare/wrangler-action@v3
-        continue-on-error: true
-        with:
-          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          command: d1 execute resumeai-pro-db --file=migrations/0003_ai_dev_agent.sql --remote --env production
+          command: d1 migrations apply resumeai-pro-db --remote
 
   # ----------------------------------------------------------
   # 6. Smoke test — verify the deploy is healthy

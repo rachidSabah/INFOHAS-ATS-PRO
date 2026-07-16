@@ -4,13 +4,16 @@ const nextConfig: NextConfig = {
   // For Cloudflare Pages deployment, do NOT use "standalone" — next-on-pages handles output.
   // For Docker/Vercel deployment, change to output: "standalone".
   typescript: {
-    ignoreBuildErrors: true,
+    // Phase 9.0 (production hardening): type errors must FAIL the build.
+    // The codebase is type-clean (tsc --noEmit passes), so this is safe and
+    // prevents masked type regressions from shipping.
+    ignoreBuildErrors: false,
   },
   reactStrictMode: false,
   // Cloudflare Pages requires these experimental flags
   experimental: {
     // next-on-pages needs this for proper page resolution
-    optimizePackageImports: ["lucide-react", "framer-motion"],
+    optimizePackageImports: ["lucide-react", "framer-motion", "recharts", "date-fns", "react-syntax-highlighter"],
   },
   // Images: disable optimization (Cloudflare Pages doesn't support the default loader)
   images: {

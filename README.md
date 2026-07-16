@@ -6,7 +6,14 @@
 
 ![ResumeAI Pro](public/brand/og-image.png)
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![CI/CD](https://github.com/rachidSabah/INFOHAS-ATS-PRO/actions/workflows/ci-cd.yml/badge.svg)](.github/workflows/ci-cd.yml)
+[![Deploy: Cloudflare](https://img.shields.io/badge/deploy-Cloudflare%20Pages%20%2B%20Workers-FF0000.svg)](DEPLOYMENT.md)
+[![TypeScript](https://img.shields.io/badge/lang-TypeScript-3178C6.svg)](tsconfig.json)
+
 ---
+
+
 
 ## Highlights
 
@@ -45,19 +52,35 @@
 ## Quick start (local dev)
 
 ```bash
-# 1. Install dependencies
-bun install
+# 1. Install dependencies (npm is the canonical package manager)
+npm install
 
 # 2. Copy env template and fill in your values
 cp .env.example .env
 # (For local dev, you can leave most keys blank — Puter.js handles AI for free)
 
 # 3. Run the dev server
-bun run dev
+npm run dev
 # → http://localhost:3000
 ```
 
 The app works fully in local dev without any external API keys — Puter.js (loaded from CDN) provides free AI when users click "Sign in with Google".
+
+---
+
+## Production deployment
+
+ResumeAI Pro is **Cloudflare-native**: the Next.js frontend deploys to
+**Cloudflare Pages** (Edge runtime) and the API to a **Cloudflare Worker**
+(Hono) over **D1** + **KV**. One-command deploy:
+
+```bash
+./scripts/deploy.sh          # pages + worker + D1 migrations
+```
+
+See [DEPLOYMENT.md](DEPLOYMENT.md) for prerequisites, secrets, and the
+verification checklist ([docs/PRODUCTION_VERIFICATION.md](docs/PRODUCTION_VERIFICATION.md)).
+CI/CD is defined in [`.github/workflows/ci-cd.yml`](.github/workflows/ci-cd.yml).
 
 ---
 

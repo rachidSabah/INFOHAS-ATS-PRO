@@ -62,5 +62,13 @@ tool-results/
 # Build-time generated repo index (committed for Cloudflare Pages, regenerated on each build)
 # public/repo-index.json
 
+# Build / dev artifacts that must never ship
+build-*.log
+*.tsbuildinfo
+test-results/
+scratch/
+download/
+dev.out.log
+
 # Plugin SDK — generated registry
 src/lib/plugin-sdk/plugin-registry.generated.ts
