@@ -68,7 +68,6 @@ export function useATSMatchScore(
     // Use the debounced version to force re-compute
     if (version < 0) return null; // fallthrough
     return computeATSReadiness(resume, jd);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [version, jd]);
 
   const score = breakdown?.readinessScore ?? null;

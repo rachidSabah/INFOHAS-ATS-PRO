@@ -120,10 +120,12 @@ export function VideoInterviewSession({ pkg, resume, jd, generated, onClose, onC
   // their mic is picking up sound BEFORE the recording starts. The recorder
   // has its own internal meter that takes over once recording begins.
   const previewMeter = useAudioMeter(0.08);
+  const { start: startMeter, stop: stopMeter } = previewMeter;
 
   // Live transcript for the active recording. Reset whenever we move to a new
   // question or start a new recording.
   const speech = useSpeechRecognition({ continuous: true, interimResults: false });
+  const { start: startSpeech, stop: stopSpeech, reset: resetSpeech } = speech;
 
   const sessionId = useMemo(() => uid("sess"), []);
   const current = questions[currentIndex];
@@ -188,14 +190,14 @@ export function VideoInterviewSession({ pkg, resume, jd, generated, onClose, onC
         );
       } else {
         // Start the preview audio meter so the user can see mic input live.
-        previewMeter.start(stream);
+        startMeter(stream);
       }
     } catch (e: any) {
       setCameraError(e?.message || "Could not activate camera.");
     } finally {
       setCameraActivating(false);
     }
-  }, [requestCameraAndMic, previewMeter, deviceSnapshot.error]);
+  }, [requestCameraAndMic, startMeter, deviceSnapshot.error]);
 
   // Activate the camera on mount AND whenever we transition back to the prep
   // phase (e.g. when moving to the next question). The effect is gated on
@@ -206,7 +208,7 @@ export function VideoInterviewSession({ pkg, resume, jd, generated, onClose, onC
     // re-attach the preview meter; don't re-request permission.
     const existing = getStream();
     if (existing && existing.getVideoTracks().length > 0) {
-      previewMeter.start(existing);
+      startMeter(existing);
       return;
     }
     // First mount or stream was stopped — request fresh.
@@ -216,15 +218,33 @@ export function VideoInterviewSession({ pkg, resume, jd, generated, onClose, onC
     // every render. The activation is idempotent.
   }, [phase, currentIndex]);
 
+  // Re-bind the already-acquired stream to whichever <video> element is
+  // currently mounted. Because the <video> is conditionally rendered per
+  // phase (prep / countdown / recording), React unmounts the old element and
+  // mounts a fresh one with srcObject === null on every phase change. The
+  // stream is only attached inside requestCameraAndMic on first request, so
+  // without this the new element stays black. We never stop or re-request the
+  // stream here — the recorder reuses getStream() and must keep the same
+  // tracks.
+  useEffect(() => {
+    const el = videoRef.current;
+    const stream = getStream();
+    if (el && stream && el.srcObject !== stream) {
+      el.srcObject = stream;
+      el.muted = true;
+      el.play().catch(() => {});
+    }
+  }, [phase, currentIndex, getStream]);
+
   // ---- when a recording is finalized --------------------------------------
   const onRecorderComplete = useCallback(
     async (blob: Blob, mimeType: string, durationMs: number) => {
       const q = questions[currentIndex];
       if (!q) return;
       // Stop speech recognition and freeze the transcript.
-      speech.stop();
+      stopSpeech();
       // Stop the preview meter (recorder has its own).
-      previewMeter.stop();
+      stopMeter();
       const transcript = speech.transcript.trim();
       const id = uid("rec");
       const meta: InterviewRecordingMeta = {
@@ -248,7 +268,7 @@ export function VideoInterviewSession({ pkg, resume, jd, generated, onClose, onC
         setError(e?.message || "Failed to save recording.");
       }
     },
-    [currentIndex, questions, jd?.id, resume?.id, sessionId, speech, previewMeter]
+    [currentIndex, questions, jd?.id, resume?.id, sessionId, stopSpeech, stopMeter, speech]
   );
 
   const recorder = useMediaRecorder({ maxDurationMs: MAX_REC_MS, onComplete: onRecorderComplete });
@@ -263,15 +283,15 @@ export function VideoInterviewSession({ pkg, resume, jd, generated, onClose, onC
       // Stop the preview meter before the recorder starts its own internal
       // meter on the same stream (two AnalyserNodes on one source is fine in
       // Web Audio, but stopping the preview avoids double-RAF work).
-      previewMeter.stop();
+      stopMeter();
       setPhase("recording");
-      speech.reset();
-      speech.start();
+      resetSpeech();
+      startSpeech();
       recorder.start(stream);
     } catch (e: any) {
       setError(e?.message || "Could not start recording.");
     }
-  }, [ensureStream, recorder, speech, previewMeter]);
+  }, [ensureStream, recorder, startSpeech, resetSpeech, stopMeter]);
 
   // ---- preparation countdown ----------------------------------------------
   useEffect(() => {

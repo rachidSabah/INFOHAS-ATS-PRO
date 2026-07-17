@@ -4,6 +4,13 @@ import { useState, useCallback, useMemo } from "react";
 import { motion } from "framer-motion";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Badge, Icon, ScoreRing } from "@/components/shared";
 import { useApp, uid } from "@/lib/store";
 import { detectIndustry, INDUSTRY_PROFILES } from "@/lib/industry-ats";
@@ -25,6 +32,7 @@ import type { InterviewPackage, InterviewQuestion } from "@/lib/types";
 import type { InterviewSessionRecord } from "@/hooks/interview/types";
 import type { InterviewFinalReport } from "@/lib/interview/ai";
 import { AviationAcademy } from "@/components/interview/AviationAcademy";
+import { DeviceCheck } from "@/components/interview/DeviceCheck";
 
 const CATEGORIES = [
   { id: "technical", label: "Technical", icon: "Code2", color: "#1154A3" },
@@ -77,6 +85,7 @@ export function Interview() {
   const [selectedJdId, setSelectedJdId] = useState<string>(jds[0]?.id ?? "");
   const [selectedPersonaIds, setSelectedPersonaIds] = useState<string[]>(["hr", "hiring-manager", "cabin-crew-manager", "chief-purser", "safety-trainer", "panel"]);
   const [activeSubTab, setActiveSubTab] = useState<"standard" | "aviation-academy">("standard");
+  const [deviceCheckOpen, setDeviceCheckOpen] = useState(false);
   const [completedQuestions, setCompletedQuestions] = useState<Set<string>>(new Set());
   const [readinessData, setReadinessData] = useState<{ score: number; strengths: string[]; weaknesses: string[]; topicsToReview: string[]; skillsToReview: string[]; focusAreas: string[] } | null>(null);
 
@@ -348,11 +357,24 @@ export function Interview() {
                 <Icon name={simMode === "video" ? "Video" : "Mic"} className="w-4 h-4" />
                 Start {simMode === "video" ? "Video" : "Voice"} Interview
               </Button>
-              <a href="/interview/device-check" className="inline-flex">
-                <Button variant="ghost" size="sm" className="gap-1.5" title="Check your camera & microphone">
+              <Dialog open={deviceCheckOpen} onOpenChange={setDeviceCheckOpen}>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="gap-1.5"
+                  title="Check your camera & microphone"
+                  onClick={() => setDeviceCheckOpen(true)}
+                >
                   <Icon name="Camera" className="w-4 h-4" /> Device Check
                 </Button>
-              </a>
+                <DialogContent className="max-w-2xl">
+                  <DialogHeader>
+                    <DialogTitle>Device Check</DialogTitle>
+                    <DialogDescription>Verify your camera and microphone before starting an interview.</DialogDescription>
+                  </DialogHeader>
+                  <DeviceCheck />
+                </DialogContent>
+              </Dialog>
             </div>
           )}
         </div>

@@ -74,7 +74,6 @@ export function ConnectAntigravityDialog() {
   useEffect(() => {
     if (isAuthorizedInStore) setState("authorized");
     else if (state === "authorized") setState("idle");
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isAuthorizedInStore]);
 
   // Restore session on mount

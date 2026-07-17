@@ -12,6 +12,7 @@ import { buildStandardDirective } from "./optimizer-directive-engine";
 import { getPromptCache, setPromptCache, buildPromptHash } from "./prompt-cache";
 import { OptimizationProviderExhaustedError, OPTIMIZER_CALL_TIMEOUT_MS } from "./pipeline-watchdog";
 import { useApp } from "./store";
+import { useShallow } from "zustand/react/shallow";
 import {
   checkPuterUsageStatus as _checkPuterUsageStatus,
   getPuterMonthlyUsage as _getPuterMonthlyUsage,
@@ -354,7 +355,7 @@ export async function callAIStreamed(
 
 // React store helpers
 export function useAIProviders() {
-  return useApp((s) => s.providers.filter((p) => p.isActive).sort((a, b) => a.priority - b.priority));
+  return useApp(useShallow((s) => s.providers.filter((p) => p.isActive).sort((a, b) => a.priority - b.priority)));
 }
 
 export function usePreferredProvider() {

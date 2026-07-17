@@ -189,7 +189,6 @@ export function AviationAcademy({ jobDescription }: { jobDescription?: JobDescri
     if (detected.sectorId) { setSelectedSector(detected.sectorId); setSectorFromJd(true); }
     if (detected.fleetId) { setSelectedFleet(detected.fleetId); setFleetFromJd(true); }
     if (detected.airlineGrooming) { setSelectedAirlineGrooming(detected.airlineGrooming); setGroomingFromJd(true); }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [detected]);
 
   // Sonru Simulator States
@@ -288,7 +287,6 @@ export function AviationAcademy({ jobDescription }: { jobDescription?: JobDescri
       startCamera();
     }
     return () => stopCamera();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [timerMode]);
 
   // Reset Sonru Timer

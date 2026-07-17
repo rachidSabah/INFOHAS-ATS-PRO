@@ -921,8 +921,15 @@ export function AppTracker() {
   const [apps, setApps] = useState<Array<{ id: string; company: string; role: string; status: string; date: string }>>([]);
   const [company, setCompany] = useState("");
   const [role, setRole] = useState("");
+  const [selectedId, setSelectedId] = useState<string | null>(null);
 
   const columns = ["Applied", "Phone Screen", "Interview", "Offer", "Rejected"];
+
+  // Flattened, ordered list of every card across columns (column order first,
+  // then insertion order). Drives prev/next navigation.
+  const ordered = columns.flatMap((col) => apps.filter((a) => a.status === col));
+  const selectedIndex = selectedId ? ordered.findIndex((a) => a.id === selectedId) : -1;
+
   const add = () => {
     if (!company || !role) return;
     const app = { id: uid("app"), company, role, status: "Applied", date: new Date().toISOString() };
@@ -932,6 +939,53 @@ export function AppTracker() {
   };
   const move = (id: string, status: string) => setApps((a) => a.map((x) => x.id === id ? { ...x, status } : x));
 
+  // Prev/Next walk the flattened ordered list. If nothing is selected yet,
+  // "Next" targets the first card.
+  const goPrev = () => {
+    if (selectedIndex <= 0) return;
+    setSelectedId(ordered[selectedIndex - 1].id);
+  };
+  const goNext = () => {
+    if (ordered.length === 0) return;
+    if (selectedIndex === -1) {
+      setSelectedId(ordered[0].id);
+      return;
+    }
+    if (selectedIndex >= ordered.length - 1) return;
+    setSelectedId(ordered[selectedIndex + 1].id);
+  };
+
+  // Push a browser-history entry whenever the selected application changes so
+  // the Back button returns to the previous application (not the dashboard).
+  // Scoped to this component so the rest of the SPA's navigation is untouched.
+  const skipNextPush = useRef(true);
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    // Restore selection from a back/forward navigation first.
+    const onPop = () => {
+      const id = (window.history.state as any)?.atsAppId ?? null;
+      setSelectedId(typeof id === "string" ? id : null);
+    };
+    window.addEventListener("popstate", onPop);
+
+    // Restore on mount from the current history entry.
+    const initial = (window.history.state as any)?.atsAppId;
+    if (typeof initial === "string") setSelectedId(initial);
+
+    return () => window.removeEventListener("popstate", onPop);
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    if (skipNextPush.current) {
+      skipNextPush.current = false;
+      return;
+    }
+    if (selectedId) {
+      window.history.pushState({ atsAppId: selectedId }, "");
+    }
+  }, [selectedId]);
+
   return (
     <div className="space-y-6">
       <div><h1 className="font-display text-2xl font-bold flex items-center gap-2"><Icon name="KanbanSquare" className="w-6 h-6 text-brand" /> Application Tracker</h1><p className="text-sm text-muted-foreground mt-1">Track job applications through your pipeline.</p></div>
@@ -940,15 +994,38 @@ export function AppTracker() {
         <Input value={role} onChange={(e) => setRole(e.target.value)} placeholder="Role" className="flex-1 min-w-[150px]" />
         <Button onClick={add} className="bg-brand hover:bg-brand-dark text-white gap-2"><Icon name="Plus" className="w-4 h-4" /> Add</Button>
       </CardContent></Card>
+
+      {/* Prev / Next navigation bar */}
+      <div className="flex items-center justify-between gap-3 rounded-lg border border-border bg-background p-2">
+        <Button variant="outline" size="sm" onClick={goPrev} disabled={selectedIndex <= 0} className="gap-1.5">
+          <Icon name="ArrowLeft" className="w-4 h-4" /> Prev
+        </Button>
+        <span className="text-xs text-muted-foreground tabular-nums">
+          {ordered.length === 0 ? "No applications" : selectedId ? `${selectedIndex + 1} of ${ordered.length}` : `${ordered.length} total`}
+        </span>
+        <Button variant="outline" size="sm" onClick={goNext} disabled={ordered.length === 0 || selectedIndex >= ordered.length - 1} className="gap-1.5">
+          Next <Icon name="ArrowRight" className="w-4 h-4" />
+        </Button>
+      </div>
+
       <div className="grid sm:grid-cols-2 lg:grid-cols-5 gap-3">
         {columns.map((col) => (
           <div key={col} className="space-y-2">
             <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground px-2">{col} ({apps.filter((a) => a.status === col).length})</div>
             {apps.filter((a) => a.status === col).map((app) => (
-              <div key={app.id} className="rounded-lg border border-border p-2">
+              <div
+                key={app.id}
+                onClick={() => setSelectedId(app.id)}
+                className={`rounded-lg border p-2 cursor-pointer transition-colors ${selectedId === app.id ? "border-brand ring-2 ring-brand/40 bg-brand/5" : "border-border hover:border-brand/50"}`}
+              >
                 <div className="text-sm font-medium truncate">{app.role}</div>
                 <div className="text-xs text-muted-foreground truncate">{app.company}</div>
-                <select value={app.status} onChange={(e) => move(app.id, e.target.value)} className="w-full h-7 px-2 rounded-md border border-input bg-background text-xs mt-1">
+                <select
+                  value={app.status}
+                  onClick={(e) => e.stopPropagation()}
+                  onChange={(e) => move(app.id, e.target.value)}
+                  className="w-full h-7 px-2 rounded-md border border-input bg-background text-xs mt-1"
+                >
                   {columns.map((c) => <option key={c} value={c}>{c}</option>)}
                 </select>
               </div>
