@@ -23,6 +23,7 @@ import { Badge, Icon, ScoreRing } from "@/components/shared";
 import {
   useDeviceCheck,
   useMediaRecorder,
+  useAudioMeter,
   useSpeechRecognition,
   analyzeFillerWords,
   normalizeWpmToScore,
@@ -88,6 +89,17 @@ export function VoiceInterviewSession({ pkg, resume, jd, generated, onClose, onC
   const [error, setError] = useState<string | null>(null);
   const [finalReport, setFinalReport] = useState<InterviewFinalReport | null>(null);
   const [generatingReport, setGeneratingReport] = useState(false);
+  // Mic activation state — drives the inline audio waveform + retry button
+  // shown during prep & countdown. The mic is requested as soon as the session
+  // mounts so the user can verify their microphone works (and see the live
+  // audio level) BEFORE the recording actually starts. Mirrors the video
+  // session's camera-activation pattern.
+  const [micActivating, setMicActivating] = useState(false);
+  const [micError, setMicError] = useState<string | null>(null);
+
+  // Preview audio meter — runs during prep & countdown so the user can verify
+  // their mic is picking up sound BEFORE the recording starts.
+  const previewMeter = useAudioMeter(0.08);
 
   const speech = useSpeechRecognition({ continuous: true, interimResults: false });
 
@@ -121,12 +133,54 @@ export function VoiceInterviewSession({ pkg, resume, jd, generated, onClose, onC
     return stream;
   }, [getStream, requestCameraAndMic]);
 
+  // ---- activate mic early so the user sees a live audio waveform during prep --
+  // Mirrors the video session's camera-activation pattern: the mic is requested
+  // as soon as the session mounts so the user can verify their audio input
+  // (waveform + level meter + "Audio: live" status pill) BEFORE the recording
+  // starts. The same stream is reused by recorder.start() so there is no
+  // audible glitch between phases.
+  const activateMic = useCallback(async () => {
+    setMicActivating(true);
+    setMicError(null);
+    try {
+      const stream = await requestCameraAndMic({ video: false, audio: true });
+      if (!stream) {
+        setMicError(
+          deviceSnapshot.error ??
+            "Microphone access failed. Check permissions and retry."
+        );
+      } else {
+        previewMeter.start(stream);
+      }
+    } catch (e: any) {
+      setMicError(e?.message || "Could not activate microphone.");
+    } finally {
+      setMicActivating(false);
+    }
+  }, [requestCameraAndMic, previewMeter, deviceSnapshot.error]);
+
+  // Activate the mic on mount AND whenever we transition back to the prep
+  // phase (e.g. when moving to the next question).
+  useEffect(() => {
+    if (phase !== "prep") return;
+    const existing = getStream();
+    if (existing && existing.getAudioTracks().length > 0) {
+      previewMeter.start(existing);
+      return;
+    }
+    void activateMic();
+    // We intentionally only depend on `phase` + `currentIndex` so the mic is
+    // re-activated when moving to a new question's prep phase, not on every
+    // render. The activation is idempotent.
+  }, [phase, currentIndex]);
+
   // ---- when a recording is finalized --------------------------------------
   const onRecorderComplete = useCallback(
     async (blob: Blob, mimeType: string, durationMs: number) => {
       const q = questions[currentIndex];
       if (!q) return;
       speech.stop();
+      previewMeter.stop();
       const transcript = speech.transcript.trim();
       const id = uid("rec");
       const meta: InterviewRecordingMeta = {
@@ -150,7 +204,7 @@ export function VoiceInterviewSession({ pkg, resume, jd, generated, onClose, onC
         setError(e?.message || "Failed to save recording.");
       }
     },
-    [currentIndex, questions, jd?.id, resume?.id, sessionId, speech]
+    [currentIndex, questions, jd?.id, resume?.id, sessionId, speech, previewMeter]
   );
 
   const recorder = useMediaRecorder({ maxDurationMs: MAX_REC_MS, onComplete: onRecorderComplete });
@@ -162,6 +216,8 @@ export function VoiceInterviewSession({ pkg, resume, jd, generated, onClose, onC
         setError("Microphone unavailable. Run the device check first.");
         return;
       }
+      // Stop the preview meter before the recorder starts its own.
+      previewMeter.stop();
       setPhase("recording");
       speech.reset();
       speech.start();
@@ -169,7 +225,7 @@ export function VoiceInterviewSession({ pkg, resume, jd, generated, onClose, onC
     } catch (e: any) {
       setError(e?.message || "Could not start recording.");
     }
-  }, [ensureStream, recorder, speech]);
+  }, [ensureStream, recorder, speech, previewMeter]);
 
   // ---- preparation countdown ----------------------------------------------
   useEffect(() => {
@@ -372,8 +428,9 @@ export function VoiceInterviewSession({ pkg, resume, jd, generated, onClose, onC
     () => () => {
       stopPreview();
       speech.stop();
+      previewMeter.stop();
     },
-    [stopPreview, speech]
+    [stopPreview, speech, previewMeter]
   );
 
   if (!current) {
@@ -470,21 +527,106 @@ export function VoiceInterviewSession({ pkg, resume, jd, generated, onClose, onC
             </div>
           )}
 
+          {/* === Live audio waveform frame ===
+              Rendered continuously during prep, countdown, AND recording so the
+              user always sees the live mic level and can verify their microphone
+              is working. Mirrors the video session's camera-preview fix. */}
+
+          {/* PREP phase — waveform + prep timer overlay + device status */}
           {phase === "prep" && (
-            <div className="text-center py-4 space-y-3">
-              <div className="text-4xl font-bold text-brand tabular-nums">{formatRemaining(prepRemaining)}</div>
-              <p className="text-sm text-muted-foreground">Prepare your answer. Recording will start automatically.</p>
-              <Button size="sm" variant="outline" onClick={() => setPhase("countdown")} className="gap-1.5"><Icon name="SkipForward" className="w-4 h-4" /> Skip prep</Button>
+            <div className="space-y-3">
+              <div className="relative rounded-xl overflow-hidden bg-gradient-to-br from-brand/10 to-brand-dark/20 aspect-video flex items-center justify-center">
+                <VoiceWaveform level={previewMeter.level} active={previewMeter.active} />
+                <div className="absolute top-2 left-2 flex items-center gap-1.5 text-[10px] font-medium text-white bg-black/50 px-2 py-1 rounded-full">
+                  <Icon name="Mic" className="w-3 h-3" /> Preview
+                </div>
+                <div className="absolute top-2 right-2 flex items-center gap-1.5 text-[10px] font-medium text-white bg-brand/80 px-2 py-1 rounded-full">
+                  <Icon name="Clock" className="w-3 h-3" /> {formatRemaining(prepRemaining)}
+                </div>
+                <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                  <div className="text-center bg-black/50 backdrop-blur-sm rounded-xl px-6 py-4">
+                    <div className="text-4xl font-bold text-white tabular-nums">{formatRemaining(prepRemaining)}</div>
+                    <p className="text-xs text-white/90 mt-1">Prepare your answer</p>
+                  </div>
+                </div>
+                {micActivating && (
+                  <div className="absolute inset-0 flex items-center justify-center bg-black/60">
+                    <div className="text-center">
+                      <Icon name="Loader2" className="w-6 h-6 animate-spin text-white mx-auto" />
+                      <p className="text-xs text-white/80 mt-2">Starting microphone…</p>
+                    </div>
+                  </div>
+                )}
+                {micError && !micActivating && (
+                  <div className="absolute inset-0 flex items-center justify-center bg-black/70">
+                    <div className="text-center max-w-xs px-4">
+                      <Icon name="Mic" className="w-8 h-8 text-red-400 mx-auto" />
+                      <p className="text-xs text-white/90 mt-2 font-medium">Microphone unavailable</p>
+                      <p className="text-[10px] text-white/70 mt-1">{micError}</p>
+                      <Button size="sm" variant="outline" onClick={activateMic} className="mt-3 gap-1.5 bg-white/10 border-white/30 text-white hover:bg-white/20">
+                        <Icon name="RefreshCw" className="w-3.5 h-3.5" /> Retry
+                      </Button>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Inline device status — mic + audio level */}
+              <div className="flex items-center gap-2 flex-wrap text-[10px]">
+                <VoiceDeviceStatusPill
+                  ok={deviceSnapshot.micPermission === "granted"}
+                  label="Mic"
+                  icon="Mic"
+                />
+                <VoiceDeviceStatusPill
+                  ok={previewMeter.active}
+                  label="Audio"
+                  icon="Activity"
+                  detail={previewMeter.active ? "live" : "silent"}
+                />
+              </div>
+
+              {/* Preview audio meter */}
+              <AudioMeterBar level={previewMeter.level} />
+
+              <div className="flex items-center justify-between gap-2 flex-wrap">
+                <p className="text-xs text-muted-foreground">Recording starts automatically when the timer ends.</p>
+                <div className="flex gap-2">
+                  {!micError && !micActivating && (
+                    <Button size="sm" variant="ghost" onClick={activateMic} className="gap-1.5 text-muted-foreground" title="Re-initialise microphone">
+                      <Icon name="RefreshCw" className="w-3.5 h-3.5" /> Retry mic
+                    </Button>
+                  )}
+                  <Button size="sm" variant="outline" onClick={() => setPhase("countdown")} className="gap-1.5">
+                    <Icon name="SkipForward" className="w-4 h-4" /> Skip prep
+                  </Button>
+                </div>
+              </div>
             </div>
           )}
 
+          {/* COUNTDOWN phase — waveform with big countdown number overlay */}
           {phase === "countdown" && (
-            <div className="text-center py-6">
-              <div className="text-5xl font-bold text-brand tabular-nums">{Math.ceil(recCountdown / 1000)}</div>
-              <p className="text-sm text-muted-foreground mt-2">Get ready — recording starts automatically</p>
+            <div className="space-y-3">
+              <div className="relative rounded-xl overflow-hidden bg-gradient-to-br from-brand/10 to-brand-dark/20 aspect-video flex items-center justify-center">
+                <VoiceWaveform level={previewMeter.level} active={previewMeter.active} />
+                <div className="absolute top-2 left-2 flex items-center gap-1.5 text-[10px] font-medium text-white bg-black/50 px-2 py-1 rounded-full">
+                  <Icon name="Mic" className="w-3 h-3" /> Get ready
+                </div>
+                <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                  <div className="text-7xl sm:text-8xl font-bold text-white tabular-nums drop-shadow-2xl">
+                    {Math.ceil(recCountdown / 1000)}
+                  </div>
+                </div>
+                <div className="absolute bottom-2 left-2 right-2 text-center">
+                  <p className="text-xs text-white/90 bg-black/40 inline-block px-2 py-1 rounded-full">Recording starts automatically</p>
+                </div>
+              </div>
+              <p className="text-xs text-muted-foreground text-center">Take a breath and get ready to speak.</p>
             </div>
           )}
 
+          {/* RECORDING phase — same waveform frame, with REC badge + controls */}
           {phase === "recording" && (
             <div className="space-y-3">
               {/* Audio-only "preview" — animated waveform driven by mic level. */}
@@ -624,6 +766,39 @@ function VoiceWaveform({ level, active }: { level: number; active: boolean }) {
           />
         );
       })}
+    </div>
+  );
+}
+
+/**
+ * Inline device-status pill for the voice session — shows a green check / red
+ * cross for mic permission and audio level. Lets the user verify their mic
+ * works WITHOUT leaving for the separate Device Check tab.
+ */
+function VoiceDeviceStatusPill({
+  ok,
+  label,
+  icon,
+  detail,
+}: {
+  ok: boolean;
+  label: string;
+  icon: string;
+  detail?: string;
+}) {
+  return (
+    <div
+      className={`flex items-center gap-1 px-2 py-1 rounded-full border ${
+        ok
+          ? "bg-emerald-50 dark:bg-emerald-950/30 border-emerald-200 dark:border-emerald-900 text-emerald-700 dark:text-emerald-400"
+          : "bg-red-50 dark:bg-red-950/30 border-red-200 dark:border-red-900 text-red-700 dark:text-red-400"
+      }`}
+      title={ok ? `${label}: active` : `${label}: not ready`}
+    >
+      <Icon name={icon} className="w-3 h-3" />
+      <span className="font-medium">{label}</span>
+      <Icon name={ok ? "CheckCircle2" : "XCircle"} className="w-3 h-3" />
+      {detail && <span className="text-[9px] opacity-70">· {detail}</span>}
     </div>
   );
 }

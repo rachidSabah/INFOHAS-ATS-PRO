@@ -34,6 +34,7 @@ import { Badge, Icon, ScoreRing } from "@/components/shared";
 import {
   useDeviceCheck,
   useMediaRecorder,
+  useAudioMeter,
   useSpeechRecognition,
   analyzeFillerWords,
   normalizeWpmToScore,
@@ -103,11 +104,22 @@ export function VideoInterviewSession({ pkg, resume, jd, generated, onClose, onC
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [finalReport, setFinalReport] = useState<InterviewFinalReport | null>(null);
   const [generatingReport, setGeneratingReport] = useState(false);
+  // Camera activation state — drives the inline preview + retry button shown
+  // during prep & countdown. The camera is requested as soon as the session
+  // mounts (not deferred to recording start) so the user sees themselves and
+  // can verify the device works without leaving for the Device Check tab.
+  const [cameraActivating, setCameraActivating] = useState(false);
+  const [cameraError, setCameraError] = useState<string | null>(null);
 
   const { snapshot: deviceSnapshot, getStream, requestCameraAndMic, stopPreview } = useDeviceCheck({
     videoRef,
-    enablePreview: false, // we manage the stream manually for recording
+    enablePreview: false, // we manage the stream manually so it persists across phases
   });
+
+  // Preview audio meter — runs during prep & countdown so the user can verify
+  // their mic is picking up sound BEFORE the recording starts. The recorder
+  // has its own internal meter that takes over once recording begins.
+  const previewMeter = useAudioMeter(0.08);
 
   // Live transcript for the active recording. Reset whenever we move to a new
   // question or start a new recording.
@@ -157,6 +169,53 @@ export function VideoInterviewSession({ pkg, resume, jd, generated, onClose, onC
     return stream;
   }, [getStream, requestCameraAndMic]);
 
+  // ---- activate camera early so the user sees a live preview during prep --
+  // This is the fix for the "no video frame during prep/countdown" issue: the
+  // camera is requested as soon as the session mounts AND whenever we move to
+  // a new question (which resets to the prep phase). The stream is attached to
+  // videoRef by useDeviceCheck, and the <video> element is rendered in all
+  // three phases (prep / countdown / recording) below. The same stream is
+  // reused by recorder.start() so there is no flicker between phases.
+  const activateCamera = useCallback(async () => {
+    setCameraActivating(true);
+    setCameraError(null);
+    try {
+      const stream = await requestCameraAndMic();
+      if (!stream) {
+        setCameraError(
+          deviceSnapshot.error ??
+            "Camera/microphone access failed. Check permissions and retry."
+        );
+      } else {
+        // Start the preview audio meter so the user can see mic input live.
+        previewMeter.start(stream);
+      }
+    } catch (e: any) {
+      setCameraError(e?.message || "Could not activate camera.");
+    } finally {
+      setCameraActivating(false);
+    }
+  }, [requestCameraAndMic, previewMeter, deviceSnapshot.error]);
+
+  // Activate the camera on mount AND whenever we transition back to the prep
+  // phase (e.g. when moving to the next question). The effect is gated on
+  // `phase === "prep"` so it doesn't re-request mid-recording.
+  useEffect(() => {
+    if (phase !== "prep") return;
+    // If we already have a live stream (e.g. user navigated back), just
+    // re-attach the preview meter; don't re-request permission.
+    const existing = getStream();
+    if (existing && existing.getVideoTracks().length > 0) {
+      previewMeter.start(existing);
+      return;
+    }
+    // First mount or stream was stopped — request fresh.
+    void activateCamera();
+    // We intentionally only depend on `phase` + `currentIndex` so the camera
+    // is re-activated when moving to a new question's prep phase, not on
+    // every render. The activation is idempotent.
+  }, [phase, currentIndex]);
+
   // ---- when a recording is finalized --------------------------------------
   const onRecorderComplete = useCallback(
     async (blob: Blob, mimeType: string, durationMs: number) => {
@@ -164,6 +223,8 @@ export function VideoInterviewSession({ pkg, resume, jd, generated, onClose, onC
       if (!q) return;
       // Stop speech recognition and freeze the transcript.
       speech.stop();
+      // Stop the preview meter (recorder has its own).
+      previewMeter.stop();
       const transcript = speech.transcript.trim();
       const id = uid("rec");
       const meta: InterviewRecordingMeta = {
@@ -187,7 +248,7 @@ export function VideoInterviewSession({ pkg, resume, jd, generated, onClose, onC
         setError(e?.message || "Failed to save recording.");
       }
     },
-    [currentIndex, questions, jd?.id, resume?.id, sessionId, speech]
+    [currentIndex, questions, jd?.id, resume?.id, sessionId, speech, previewMeter]
   );
 
   const recorder = useMediaRecorder({ maxDurationMs: MAX_REC_MS, onComplete: onRecorderComplete });
@@ -199,6 +260,10 @@ export function VideoInterviewSession({ pkg, resume, jd, generated, onClose, onC
         setError("Camera/microphone unavailable. Run the device check first.");
         return;
       }
+      // Stop the preview meter before the recorder starts its own internal
+      // meter on the same stream (two AnalyserNodes on one source is fine in
+      // Web Audio, but stopping the preview avoids double-RAF work).
+      previewMeter.stop();
       setPhase("recording");
       speech.reset();
       speech.start();
@@ -206,7 +271,7 @@ export function VideoInterviewSession({ pkg, resume, jd, generated, onClose, onC
     } catch (e: any) {
       setError(e?.message || "Could not start recording.");
     }
-  }, [ensureStream, recorder, speech]);
+  }, [ensureStream, recorder, speech, previewMeter]);
 
   // ---- preparation countdown ----------------------------------------------
   useEffect(() => {
@@ -442,8 +507,9 @@ export function VideoInterviewSession({ pkg, resume, jd, generated, onClose, onC
     () => () => {
       stopPreview();
       speech.stop();
+      previewMeter.stop();
     },
-    [stopPreview, speech]
+    [stopPreview, speech, previewMeter]
   );
 
   if (!current) {
@@ -563,20 +629,122 @@ export function VideoInterviewSession({ pkg, resume, jd, generated, onClose, onC
             </div>
           )}
 
-          {/* Phase: PREP */}
-          {phase === "prep" && (
-            <PrepBlock remainingMs={prepRemaining} onSkip={() => setPhase("countdown")} />
-          )}
+          {/* === Live camera preview frame ===
+              Rendered continuously during prep, countdown, AND recording so the
+              user always sees themselves and can verify the camera is working.
+              This fixes the regression where the video frame was only visible
+              during the recording phase — the user had no way to confirm their
+              camera/mic were active before the countdown ended. */}
 
-          {/* Phase: COUNTDOWN */}
-          {phase === "countdown" && (
-            <div className="text-center py-6">
-              <div className="text-5xl font-bold text-brand tabular-nums">{Math.ceil(recCountdown / 1000)}</div>
-              <p className="text-sm text-muted-foreground mt-2">Get ready — recording starts automatically</p>
+          {/* PREP phase — camera preview + prep timer overlay + device status */}
+          {phase === "prep" && (
+            <div className="space-y-3">
+              <div className="relative rounded-xl overflow-hidden bg-black aspect-video">
+                {/* The <video> element is always rendered in this phase so the
+                    useDeviceCheck hook can attach the stream to videoRef. */}
+                <video ref={videoRef} className="w-full h-full object-cover" playsInline muted autoPlay />
+                {/* Overlay: prep timer + "Preview" badge */}
+                <div className="absolute top-2 left-2 flex items-center gap-1.5 text-[10px] font-medium text-white bg-black/50 px-2 py-1 rounded-full">
+                  <Icon name="Camera" className="w-3 h-3" /> Preview
+                </div>
+                <div className="absolute top-2 right-2 flex items-center gap-1.5 text-[10px] font-medium text-white bg-brand/80 px-2 py-1 rounded-full">
+                  <Icon name="Clock" className="w-3 h-3" /> {formatRemaining(prepRemaining)}
+                </div>
+                <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                  <div className="text-center bg-black/50 backdrop-blur-sm rounded-xl px-6 py-4">
+                    <div className="text-4xl font-bold text-white tabular-nums">{formatRemaining(prepRemaining)}</div>
+                    <p className="text-xs text-white/90 mt-1">Prepare your answer</p>
+                  </div>
+                </div>
+                {/* Camera activating spinner / error overlay */}
+                {cameraActivating && (
+                  <div className="absolute inset-0 flex items-center justify-center bg-black/60">
+                    <div className="text-center">
+                      <Icon name="Loader2" className="w-6 h-6 animate-spin text-white mx-auto" />
+                      <p className="text-xs text-white/80 mt-2">Starting camera…</p>
+                    </div>
+                  </div>
+                )}
+                {cameraError && !cameraActivating && (
+                  <div className="absolute inset-0 flex items-center justify-center bg-black/70">
+                    <div className="text-center max-w-xs px-4">
+                      <Icon name="Camera" className="w-8 h-8 text-red-400 mx-auto" />
+                      <p className="text-xs text-white/90 mt-2 font-medium">Camera unavailable</p>
+                      <p className="text-[10px] text-white/70 mt-1">{cameraError}</p>
+                      <Button size="sm" variant="outline" onClick={activateCamera} className="mt-3 gap-1.5 bg-white/10 border-white/30 text-white hover:bg-white/20">
+                        <Icon name="RefreshCw" className="w-3.5 h-3.5" /> Retry
+                      </Button>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Inline device status — lets the user verify camera + mic
+                  without leaving for the separate Device Check tab. */}
+              <div className="flex items-center gap-2 flex-wrap text-[10px]">
+                <DeviceStatusPill
+                  ok={deviceSnapshot.cameraPermission === "granted" && !!deviceSnapshot.previewActive}
+                  label="Camera"
+                  icon="Camera"
+                  detail={deviceSnapshot.previewCapabilities ? `${deviceSnapshot.previewCapabilities.width}×${deviceSnapshot.previewCapabilities.height}` : undefined}
+                />
+                <DeviceStatusPill
+                  ok={deviceSnapshot.micPermission === "granted"}
+                  label="Mic"
+                  icon="Mic"
+                />
+                <DeviceStatusPill
+                  ok={previewMeter.active}
+                  label="Audio"
+                  icon="Activity"
+                  detail={previewMeter.active ? "live" : "silent"}
+                />
+              </div>
+
+              {/* Preview audio meter — shows mic input level during prep so the
+                  user can verify their microphone is picking up sound. */}
+              <AudioMeterBar level={previewMeter.level} />
+
+              {/* Prep controls */}
+              <div className="flex items-center justify-between gap-2 flex-wrap">
+                <p className="text-xs text-muted-foreground">Recording starts automatically when the timer ends.</p>
+                <div className="flex gap-2">
+                  {!cameraError && !cameraActivating && (
+                    <Button size="sm" variant="ghost" onClick={activateCamera} className="gap-1.5 text-muted-foreground" title="Re-initialise camera & microphone">
+                      <Icon name="RefreshCw" className="w-3.5 h-3.5" /> Retry camera
+                    </Button>
+                  )}
+                  <Button size="sm" variant="outline" onClick={() => setPhase("countdown")} className="gap-1.5">
+                    <Icon name="SkipForward" className="w-4 h-4" /> Skip prep
+                  </Button>
+                </div>
+              </div>
             </div>
           )}
 
-          {/* Phase: RECORDING */}
+          {/* COUNTDOWN phase — camera preview with big countdown number overlay */}
+          {phase === "countdown" && (
+            <div className="space-y-3">
+              <div className="relative rounded-xl overflow-hidden bg-black aspect-video">
+                <video ref={videoRef} className="w-full h-full object-cover" playsInline muted autoPlay />
+                <div className="absolute top-2 left-2 flex items-center gap-1.5 text-[10px] font-medium text-white bg-black/50 px-2 py-1 rounded-full">
+                  <Icon name="Video" className="w-3 h-3" /> Get ready
+                </div>
+                {/* Big countdown number centered on the video feed */}
+                <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                  <div className="text-7xl sm:text-8xl font-bold text-white tabular-nums drop-shadow-2xl">
+                    {Math.ceil(recCountdown / 1000)}
+                  </div>
+                </div>
+                <div className="absolute bottom-2 left-2 right-2 text-center">
+                  <p className="text-xs text-white/90 bg-black/40 inline-block px-2 py-1 rounded-full">Recording starts automatically</p>
+                </div>
+              </div>
+              <p className="text-xs text-muted-foreground text-center">Look at the camera and get ready to speak.</p>
+            </div>
+          )}
+
+          {/* RECORDING phase — same video frame, with REC badge + controls */}
           {phase === "recording" && (
             <div className="space-y-3">
               <div className="relative rounded-xl overflow-hidden bg-black aspect-video">
@@ -859,12 +1027,35 @@ function ReportList({ title, icon, color, items }: { title: string; icon: string
 // helpers / sub-components
 // ----------------------------------------------------------------------------
 
-function PrepBlock({ remainingMs, onSkip }: { remainingMs: number; onSkip: () => void }) {
+/**
+ * Inline device-status pill — shows a green check / red cross for camera, mic,
+ * and audio level. Lets the user verify their devices work WITHOUT leaving the
+ * video session for the separate Device Check tab.
+ */
+function DeviceStatusPill({
+  ok,
+  label,
+  icon,
+  detail,
+}: {
+  ok: boolean;
+  label: string;
+  icon: string;
+  detail?: string;
+}) {
   return (
-    <div className="text-center py-4 space-y-3">
-      <div className="text-4xl font-bold text-brand tabular-nums">{formatRemaining(remainingMs)}</div>
-      <p className="text-sm text-muted-foreground">Prepare your answer. Recording will start automatically.</p>
-      <Button size="sm" variant="outline" onClick={onSkip} className="gap-1.5"><Icon name="SkipForward" className="w-4 h-4" /> Skip prep</Button>
+    <div
+      className={`flex items-center gap-1 px-2 py-1 rounded-full border ${
+        ok
+          ? "bg-emerald-50 dark:bg-emerald-950/30 border-emerald-200 dark:border-emerald-900 text-emerald-700 dark:text-emerald-400"
+          : "bg-red-50 dark:bg-red-950/30 border-red-200 dark:border-red-900 text-red-700 dark:text-red-400"
+      }`}
+      title={ok ? `${label}: active` : `${label}: not ready`}
+    >
+      <Icon name={icon} className="w-3 h-3" />
+      <span className="font-medium">{label}</span>
+      <Icon name={ok ? "CheckCircle2" : "XCircle"} className="w-3 h-3" />
+      {detail && <span className="text-[9px] opacity-70">· {detail}</span>}
     </div>
   );
 }
