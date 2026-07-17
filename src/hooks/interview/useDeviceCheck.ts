@@ -148,8 +148,14 @@ export function useDeviceCheck(options: UseDeviceCheckOptions = {}) {
         streamRef.current = null;
       }
       try {
+        // When the caller passes `video: false`, request audio-only. This is
+        // used by the Sonru voice-only mode (VoiceInterviewSession). Defaults
+        // remain 720p video + audio.
+        const wantsVideo = constraints?.video !== false;
         const stream = await navigator.mediaDevices.getUserMedia({
-          video: constraints?.video ?? ({ width: { ideal: 1280 }, height: { ideal: 720 } } as MediaTrackConstraints),
+          video: wantsVideo
+            ? (constraints?.video ?? ({ width: { ideal: 1280 }, height: { ideal: 720 } } as MediaTrackConstraints))
+            : false,
           audio: constraints?.audio ?? true,
         });
         streamRef.current = stream;
@@ -161,7 +167,7 @@ export function useDeviceCheck(options: UseDeviceCheckOptions = {}) {
         const micId = micTrack?.getSettings().deviceId ?? null;
         const caps = readCapabilities(camTrack);
 
-        if (videoRef?.current) {
+        if (videoRef?.current && camTrack) {
           videoRef.current.srcObject = stream;
           try {
             await videoRef.current.play().catch(() => {});
@@ -173,12 +179,12 @@ export function useDeviceCheck(options: UseDeviceCheckOptions = {}) {
         setSnapshot((s) => ({
           ...s,
           supported: true,
-          cameraPermission: "granted",
-          micPermission: "granted",
+          cameraPermission: camTrack ? "granted" : s.cameraPermission,
+          micPermission: micTrack ? "granted" : s.micPermission,
           selectedCameraId: camId ?? s.selectedCameraId,
           selectedMicId: micId ?? s.selectedMicId,
           previewCapabilities: caps,
-          previewActive: true,
+          previewActive: !!camTrack,
           error: null,
           recoveryHint: null,
         }));

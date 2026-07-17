@@ -13,14 +13,25 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { RecorderSnapshot, RecorderState } from "./types";
 import { useAudioMeter } from "./useAudioMeter";
 
-function pickMimeType(): string {
+function pickMimeType(stream?: MediaStream | null): string {
   if (typeof window === "undefined" || !("MediaRecorder" in window)) return "";
-  const candidates = [
-    "video/webm;codecs=vp9,opus",
-    "video/webm;codecs=vp8,opus",
-    "video/webm",
-    "video/mp4",
-  ];
+  // Detect audio-only streams so we pick an audio-only MIME type (avoids a
+  // Safari quirk where a video MIME with no video track fails to start).
+  const hasVideo = !!stream?.getVideoTracks().length;
+  const candidates = hasVideo
+    ? [
+        "video/webm;codecs=vp9,opus",
+        "video/webm;codecs=vp8,opus",
+        "video/webm",
+        "video/mp4",
+      ]
+    : [
+        "audio/webm;codecs=opus",
+        "audio/webm",
+        "audio/ogg;codecs=opus",
+        "audio/mp4",
+        "video/webm", // last-resort fallback
+      ];
   for (const c of candidates) {
     try {
       if (MediaRecorder.isTypeSupported(c)) return c;
@@ -133,7 +144,7 @@ export function useMediaRecorder(options: UseMediaRecorderOptions = {}): UseMedi
       chunksRef.current = [];
       accumulatedRef.current = 0;
 
-      const mimeType = pickMimeType();
+      const mimeType = pickMimeType(stream);
       let recorder: MediaRecorder;
       try {
         recorder = mimeType
