@@ -10,12 +10,20 @@ import { detectIndustry, INDUSTRY_PROFILES } from "@/lib/industry-ats";
 import { exportInterviewPDF, exportInterviewDOCX, exportInterviewJSON, exportInterviewMarkdown } from "@/lib/exporter";
 import { InterviewSession, InterviewSkeleton } from "@/components/interview/InterviewSession";
 import { VideoInterviewSession } from "@/components/interview/VideoInterviewSession";
-import { generateInterviewQuestions, toInterviewPackage, type GeneratedPackage } from "@/lib/interview/ai";
+import { VoiceInterviewSession } from "@/components/interview/VoiceInterviewSession";
+import {
+  generateInterviewQuestions,
+  toInterviewPackage,
+  buildInterviewMatchScore,
+  type GeneratedPackage,
+  type InterviewMatchScore,
+} from "@/lib/interview/ai";
 import { INTERVIEW_PERSONAS } from "@/lib/interview/personas";
 import { setFlightRecordSink } from "@/lib/ai/flight-recorder";
 import { toast } from "sonner";
 import type { InterviewPackage, InterviewQuestion } from "@/lib/types";
 import type { InterviewSessionRecord } from "@/hooks/interview/types";
+import type { InterviewFinalReport } from "@/lib/interview/ai";
 import { AviationAcademy } from "@/components/interview/AviationAcademy";
 
 const CATEGORIES = [
@@ -26,7 +34,20 @@ const CATEGORIES = [
   { id: "company", label: "Company-specific", icon: "Building2", color: "#EC4899" },
 ] as const;
 
-const DIFFICULTY_COLORS: Record<string, string> = { easy: "#10B981", medium: "#F59E0B", hard: "#DC2626" };
+const SUB_TYPE_LABELS: Record<string, string> = {
+  "hr": "HR",
+  "behavioral": "Behavioral",
+  "star": "STAR",
+  "technical": "Technical",
+  "situational": "Situational",
+  "company-fit": "Company Fit",
+  "leadership": "Leadership",
+  "problem-solving": "Problem Solving",
+  "resume-specific": "Resume-Specific",
+  "jd-specific": "JD-Specific",
+};
+
+const DIFFICULTY_COLORS: Record<string, string> = { easy: "#10B981", medium: "#F59E0B", hard: "#DC2626", adaptive: "#3B82F6" };
 
 export function Interview() {
   const interviews = useApp((s) => s.interviews);
@@ -46,7 +67,11 @@ export function Interview() {
   const [generating, setGenerating] = useState(false);
   const [expanded, setExpanded] = useState<string | null>(null);
   const [practiceSession, setPracticeSession] = useState<InterviewPackage | null>(null);
-  const [videoSession, setVideoSession] = useState<InterviewPackage | null>(null);
+  // `simSession` is the package currently being interviewed in the Sonru simulator.
+  // `simMode` distinguishes between video (camera+mic) and voice (mic-only) — both
+  // reuse the same package but render a different session component.
+  const [simSession, setSimSession] = useState<InterviewPackage | null>(null);
+  const [simMode, setSimMode] = useState<"video" | "voice">("video");
   const [videoGenerated, setVideoGenerated] = useState<GeneratedPackage | null>(null);
   const [selectedResumeId, setSelectedResumeId] = useState<string>(resumes[0]?.id ?? "");
   const [selectedJdId, setSelectedJdId] = useState<string>(jds[0]?.id ?? "");
@@ -155,30 +180,63 @@ export function Interview() {
     ? Math.round((completedQuestions.size / latestQuestions.length) * 100)
     : 0;
 
-  // === Video interview (Sonru-style) mode ===
-  if (videoSession) {
+  // === Match score (Resume ↔ JD) — surfaced on the Interview Prep page ===
+  // Reuses the existing ATS report + review report when available. Pure function,
+  // no AI call. Memoized on the resume/JD ids to avoid recompute on every render.
+  const matchScore: InterviewMatchScore | null = useMemo(() => {
+    if (!selectedResume) return null;
+    const ats = atsReports.find((a) => a.resumeId === selectedResume.id);
+    const rev = reviewReports.find((r) => r.resumeId === selectedResume.id && (!r.jdId || r.jdId === selectedJd?.id)) ?? reviewReports.find((r) => r.resumeId === selectedResume.id);
+    return buildInterviewMatchScore(selectedResume, selectedJd ?? null, ats ?? null, rev ?? null);
+  }, [selectedResume, selectedJd, atsReports, reviewReports]);
+
+  // === Sonru simulator (video OR voice) ===
+  if (simSession) {
+    const handleSimComplete = (
+      sessionId: string,
+      records: InterviewSessionRecord["recordings"],
+      finalReport?: InterviewFinalReport
+    ) => {
+      const rec: InterviewSessionRecord = {
+        id: sessionId,
+        resumeId: simSession.resumeId,
+        jdId: simSession.jdId,
+        company: simSession.company,
+        role: simSession.role,
+        status: "completed",
+        recordings: records,
+        startedAt: new Date().toISOString(),
+        completedAt: new Date().toISOString(),
+        // Persist the final report blob alongside the session metadata so the
+        // "Previous Video Interviews" history can surface hiring recommendations.
+        reportRef: finalReport ? JSON.stringify(finalReport).slice(0, 4000) : undefined,
+      };
+      addInterviewSession(rec);
+      const verdictLabel = finalReport?.verdictLabel ?? "";
+      toast.success(
+        `${simMode === "video" ? "Video" : "Voice"} interview saved — ${records.length} recordings${verdictLabel ? ` · ${verdictLabel}` : ""}.`
+      );
+    };
+    if (simMode === "voice") {
+      return (
+        <VoiceInterviewSession
+          pkg={simSession}
+          resume={selectedResume ?? undefined}
+          jd={selectedJd ?? undefined}
+          generated={videoGenerated ?? undefined}
+          onClose={() => { setSimSession(null); setVideoGenerated(null); }}
+          onComplete={handleSimComplete}
+        />
+      );
+    }
     return (
       <VideoInterviewSession
-        pkg={videoSession}
+        pkg={simSession}
         resume={selectedResume ?? undefined}
         jd={selectedJd ?? undefined}
         generated={videoGenerated ?? undefined}
-        onClose={() => { setVideoSession(null); setVideoGenerated(null); }}
-        onComplete={(sessionId, records) => {
-          const rec: InterviewSessionRecord = {
-            id: sessionId,
-            resumeId: videoSession.resumeId,
-            jdId: videoSession.jdId,
-            company: videoSession.company,
-            role: videoSession.role,
-            status: "completed",
-            recordings: records,
-            startedAt: new Date().toISOString(),
-            completedAt: new Date().toISOString(),
-          };
-          addInterviewSession(rec);
-          toast.success(`Interview saved — ${records.length} recordings.`);
-        }}
+        onClose={() => { setSimSession(null); setVideoGenerated(null); }}
+        onComplete={handleSimComplete}
       />
     );
   }
@@ -248,21 +306,47 @@ export function Interview() {
                 {generating ? <Icon name="Loader2" className="w-4 h-4 animate-spin" /> : <Icon name="Sparkles" className="w-4 h-4" />}
                 {generating ? "Generating…" : "Generate package"}
               </Button>
+
+              {/* Mode selector: Video (Sonru-style camera+mic) vs Voice (mic-only). */}
+              <div className="flex bg-secondary/60 rounded-lg p-0.5 border border-border" role="group" aria-label="Simulator mode">
+                <button
+                  type="button"
+                  onClick={() => setSimMode("video")}
+                  className={`px-2.5 py-1 text-xs font-medium rounded-md transition-all flex items-center gap-1 ${
+                    simMode === "video" ? "bg-background text-brand shadow-sm font-semibold" : "text-muted-foreground hover:text-foreground"
+                  }`}
+                  title="Sonru-style video interview (camera + microphone)"
+                >
+                  <Icon name="Video" className="w-3.5 h-3.5" /> Video
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSimMode("voice")}
+                  className={`px-2.5 py-1 text-xs font-medium rounded-md transition-all flex items-center gap-1 ${
+                    simMode === "voice" ? "bg-background text-brand shadow-sm font-semibold" : "text-muted-foreground hover:text-foreground"
+                  }`}
+                  title="Sonru-style voice-only interview (microphone)"
+                >
+                  <Icon name="Mic" className="w-3.5 h-3.5" /> Voice
+                </button>
+              </div>
+
               <Button
                 variant="outline"
                 onClick={() => {
                   if (!latestPkg) {
-                    toast.error("Generate a package first, then start the video interview.");
+                    toast.error("Generate a package first, then start the simulator.");
                     return;
                   }
                   setVideoGenerated(null);
-                  setVideoSession(latestPkg);
+                  setSimSession(latestPkg);
                 }}
                 disabled={!latestPkg}
                 className="gap-2 border-brand text-brand hover:bg-brand-light"
-                title="Start a Sonru-style video interview"
+                title={`Start a Sonru-style ${simMode} interview`}
               >
-                <Icon name="Video" className="w-4 h-4" /> Start Video Interview
+                <Icon name={simMode === "video" ? "Video" : "Mic"} className="w-4 h-4" />
+                Start {simMode === "video" ? "Video" : "Voice"} Interview
               </Button>
               <a href="/interview/device-check" className="inline-flex">
                 <Button variant="ghost" size="sm" className="gap-1.5" title="Check your camera & microphone">
@@ -395,6 +479,90 @@ export function Interview() {
         </Card>
       )}
 
+      {/* === Resume / Job / Match-score summary cards === */}
+      {/* Spec requirement: "Resume summary", "Job summary", "Match score" must
+          be visible on the Interview Prep page. These are pure functions of
+          the selected resume + JD; no AI call. */}
+      {selectedResume && (
+        <div className="grid lg:grid-cols-3 gap-4">
+          {/* Resume summary */}
+          <Card>
+            <CardContent className="p-4 space-y-2">
+              <div className="flex items-center gap-2 mb-1">
+                <Icon name="FileText" className="w-4 h-4 text-brand" />
+                <h3 className="text-sm font-semibold">Resume Summary</h3>
+              </div>
+              <div className="text-sm font-medium truncate">{selectedResume.name}</div>
+              {selectedResume.headline && <div className="text-xs text-muted-foreground truncate">{selectedResume.headline}</div>}
+              <div className="space-y-1 text-[11px] text-muted-foreground">
+                <div><span className="font-semibold text-foreground/80">Experience:</span> {(selectedResume.experience ?? []).length} role(s)</div>
+                <div><span className="font-semibold text-foreground/80">Skills:</span> {(selectedResume.skills ?? []).slice(0, 8).map((s) => typeof s === "string" ? s : s.name).join(", ")}{(selectedResume.skills ?? []).length > 8 ? "…" : ""}</div>
+                <div><span className="font-semibold text-foreground/80">Education:</span> {(selectedResume.education ?? []).length ? (selectedResume.education ?? []).map((e) => e.degree).filter(Boolean).join(", ") : "Not specified"}</div>
+                {(selectedResume.certifications ?? []).length > 0 && (
+                  <div><span className="font-semibold text-foreground/80">Certs:</span> {(selectedResume.certifications ?? []).slice(0, 3).map((c) => c.name).join(", ")}{(selectedResume.certifications ?? []).length > 3 ? "…" : ""}</div>
+                )}
+                {(selectedResume.languages ?? []).length > 0 && (
+                  <div><span className="font-semibold text-foreground/80">Languages:</span> {(selectedResume.languages ?? []).map((l) => l.name).join(", ")}</div>
+                )}
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Job summary */}
+          <Card>
+            <CardContent className="p-4 space-y-2">
+              <div className="flex items-center gap-2 mb-1">
+                <Icon name="Briefcase" className="w-4 h-4 text-brand" />
+                <h3 className="text-sm font-semibold">Job Summary</h3>
+              </div>
+              <div className="text-sm font-medium truncate">{selectedJd?.title ?? "No job selected"}</div>
+              {selectedJd?.company && <div className="text-xs text-muted-foreground truncate">{selectedJd.company}</div>}
+              <div className="space-y-1 text-[11px] text-muted-foreground">
+                <div><span className="font-semibold text-foreground/80">Industry:</span> {industryProfile?.label ?? "Generic"}</div>
+                <div><span className="font-semibold text-foreground/80">Experience:</span> {selectedJd?.experienceYears ?? "Not specified"}</div>
+                <div><span className="font-semibold text-foreground/80">Education:</span> {selectedJd?.education ?? "Not specified"}</div>
+                <div><span className="font-semibold text-foreground/80">Employment:</span> {selectedJd?.employmentType ?? "Not specified"}</div>
+                {(selectedJd?.requiredSkills ?? []).length > 0 && (
+                  <div><span className="font-semibold text-foreground/80">Required Skills:</span> {(selectedJd?.requiredSkills ?? []).slice(0, 6).join(", ")}{(selectedJd?.requiredSkills ?? []).length > 6 ? "…" : ""}</div>
+                )}
+                {(selectedJd?.keywords ?? []).length > 0 && (
+                  <div className="flex items-start gap-1"><span className="font-semibold text-foreground/80 shrink-0">ATS Keywords:</span> <span className="flex flex-wrap gap-1">{(selectedJd?.keywords ?? []).slice(0, 6).map((k, i) => <Badge key={i} variant="outline" className="text-[9px]">{k}</Badge>)}</span></div>
+                )}
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Match score */}
+          {matchScore && (
+            <Card>
+              <CardContent className="p-4 space-y-2">
+                <div className="flex items-center justify-between mb-1">
+                  <div className="flex items-center gap-2">
+                    <Icon name="Target" className="w-4 h-4 text-brand" />
+                    <h3 className="text-sm font-semibold">Match Score</h3>
+                  </div>
+                  <ScoreRing value={matchScore.overall} size={48} label="Match" />
+                </div>
+                <div className="space-y-1 text-[11px]">
+                  <MatchRow label="Skills" value={matchScore.skillMatch} />
+                  <MatchRow label="ATS Keywords" value={matchScore.keywordMatch} />
+                  <MatchRow label="Experience" value={matchScore.experienceMatch} />
+                  <MatchRow label="Education" value={matchScore.educationMatch} />
+                  <MatchRow label="Industry" value={matchScore.industryMatch} />
+                </div>
+                <div className="flex items-center justify-between text-[10px] text-muted-foreground pt-1 border-t border-border">
+                  <span className="capitalize">Seniority: <span className="font-semibold text-foreground/80">{matchScore.seniority}</span></span>
+                  <span>Industry: <span className="font-semibold text-foreground/80">{matchScore.industry}</span></span>
+                </div>
+                {matchScore.missingSkills.length > 0 && (
+                  <div className="text-[10px]"><span className="font-semibold text-amber-600">Missing skills: </span><span className="text-muted-foreground">{matchScore.missingSkills.join(", ")}</span></div>
+                )}
+              </CardContent>
+            </Card>
+          )}
+        </div>
+      )}
+
       {/* === Progress tracker === */}
       {latestPkg && prepPercent > 0 && (
         <Card>
@@ -490,7 +658,11 @@ export function Interview() {
                           <div className="flex-1 min-w-0">
                             <div className="flex items-center gap-2 mb-1 flex-wrap">
                               <span className="text-[10px] uppercase tracking-wide font-semibold" style={{ color: cat.color }}>{cat.label}</span>
-                              <span className="text-[10px] px-1.5 py-0.5 rounded-full font-semibold" style={{ background: `${DIFFICULTY_COLORS[q.difficulty]}20`, color: DIFFICULTY_COLORS[q.difficulty] }}>{q.difficulty}</span>
+                              {q.subType && SUB_TYPE_LABELS[q.subType] && (
+                                <span className="text-[10px] px-1.5 py-0.5 rounded-full font-semibold bg-brand/10 text-brand" title="Sonru question family">{SUB_TYPE_LABELS[q.subType]}</span>
+                              )}
+                              <span className="text-[10px] px-1.5 py-0.5 rounded-full font-semibold" style={{ background: `${DIFFICULTY_COLORS[q.difficulty] ?? "#888"}20`, color: DIFFICULTY_COLORS[q.difficulty] ?? "#888" }}>{q.difficulty}</span>
+                              {q.personaName && <span className="text-[10px] text-muted-foreground flex items-center gap-0.5"><Icon name="User" className="w-2.5 h-2.5" /> {q.personaName}</span>}
                               {isCompleted && <span className="text-[10px] text-emerald-600 font-medium">✓ completed</span>}
                             </div>
                             <div className={`font-semibold text-sm text-pretty ${isCompleted ? "line-through opacity-60" : ""}`}>{i + 1}. {q.question}</div>
@@ -540,37 +712,81 @@ export function Interview() {
         );
       })}
 
-      {/* === Previous Video Interviews (Sonru-style history) === */}
+      {/* === Previous Simulator Sessions (Sonru-style history) === */}
       {!generating && interviewSessions.length > 0 && (
         <Card>
           <CardHeader className="pb-3">
-            <CardTitle className="text-sm flex items-center gap-2"><Icon name="History" className="w-4 h-4 text-brand" /> Previous Video Interviews</CardTitle>
-            <CardDescription>Recordings are stored locally on this device.</CardDescription>
+            <CardTitle className="text-sm flex items-center gap-2"><Icon name="History" className="w-4 h-4 text-brand" /> Previous Simulator Sessions</CardTitle>
+            <CardDescription>Recordings are stored locally on this device. Final reports are summarised below.</CardDescription>
           </CardHeader>
           <CardContent className="space-y-2">
-            {interviewSessions.map((sess) => (
-              <div key={sess.id} className="flex items-center justify-between gap-2 rounded-lg border border-border px-3 py-2">
-                <div className="min-w-0">
-                  <div className="text-sm font-medium truncate">{sess.role ?? "Video Interview"}{sess.company ? ` at ${sess.company}` : ""}</div>
-                  <div className="text-[10px] text-muted-foreground">
-                    {new Date(sess.startedAt).toLocaleDateString()} · {sess.recordings.length} recording{sess.recordings.length === 1 ? "" : "s"} · {sess.status}
+            {interviewSessions.map((sess) => {
+              // The persisted `reportRef` field carries a serialized
+              // InterviewFinalReport (capped at 4KB). Try to parse it for
+              // display; if missing or invalid, fall back to recording count.
+              let parsedReport: { overallScore?: number; verdictLabel?: string; atsReadiness?: number } | null = null;
+              if (sess.reportRef) {
+                try {
+                  parsedReport = JSON.parse(sess.reportRef);
+                } catch {
+                  parsedReport = null;
+                }
+              }
+              return (
+                <div key={sess.id} className="flex items-center justify-between gap-2 rounded-lg border border-border px-3 py-2">
+                  <div className="min-w-0">
+                    <div className="text-sm font-medium truncate">{sess.role ?? "Simulator Session"}{sess.company ? ` at ${sess.company}` : ""}</div>
+                    <div className="text-[10px] text-muted-foreground flex items-center gap-1.5 flex-wrap">
+                      <span>{new Date(sess.startedAt).toLocaleDateString()}</span>
+                      <span>·</span>
+                      <span>{sess.recordings.length} recording{sess.recordings.length === 1 ? "" : "s"}</span>
+                      <span>·</span>
+                      <span className="capitalize">{sess.status}</span>
+                      {parsedReport?.verdictLabel && (
+                        <>
+                          <span>·</span>
+                          <span className="font-semibold text-brand">{parsedReport.verdictLabel.split("—")[0].trim()}</span>
+                        </>
+                      )}
+                      {typeof parsedReport?.overallScore === "number" && (
+                        <>
+                          <span>·</span>
+                          <span>Score {parsedReport.overallScore}</span>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    <Button size="sm" variant="ghost" className="text-destructive" onClick={() => { removeInterviewSession(sess.id); toast.success("Session removed."); }}>
+                      <Icon name="Trash2" className="w-3.5 h-3.5" />
+                    </Button>
                   </div>
                 </div>
-                <div className="flex items-center gap-1.5 shrink-0">
-                  <Button size="sm" variant="outline" className="gap-1.5" onClick={() => { setVideoSession({ id: sess.id, resumeId: sess.resumeId, jdId: sess.jdId, company: sess.company, role: sess.role, questions: [], createdAt: sess.startedAt }); }}>
-                    <Icon name="Play" className="w-3.5 h-3.5" /> Replay
-                  </Button>
-                  <Button size="sm" variant="ghost" className="text-destructive" onClick={() => { /* blob cleanup handled by storage.deleteSession when needed */ removeInterviewSession(sess.id); toast.success("Session removed."); }}>
-                    <Icon name="Trash2" className="w-3.5 h-3.5" />
-                  </Button>
-                </div>
-              </div>
-            ))}
+              );
+            })}
           </CardContent>
         </Card>
       )}
         </>
       )}
+    </div>
+  );
+}
+
+// ----------------------------------------------------------------------------
+// Match-row helper — a labeled 0-100 bar shown inside the Match Score card.
+// Pure presentational component; no state.
+// ----------------------------------------------------------------------------
+
+function MatchRow({ label, value }: { label: string; value: number }) {
+  const color = value >= 70 ? "#10B981" : value >= 50 ? "#F59E0B" : "#DC2626";
+  return (
+    <div className="flex items-center gap-2">
+      <span className="w-24 shrink-0 text-muted-foreground">{label}</span>
+      <div className="flex-1 h-1.5 bg-secondary rounded-full overflow-hidden">
+        <div className="h-full rounded-full" style={{ width: `${value}%`, background: color }} />
+      </div>
+      <span className="w-7 text-right font-semibold">{value}</span>
     </div>
   );
 }
