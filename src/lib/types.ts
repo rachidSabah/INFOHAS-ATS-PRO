@@ -213,11 +213,43 @@ export interface CoverLetter {
   updatedAt: string;
 }
 
+/**
+ * Difficulty levels supported by the interview engine.
+ *
+ * - `easy` / `medium` / `hard`: static difficulty assignments.
+ * - `adaptive`: difficulty chosen by the adaptive engine based on candidate
+ *   performance (Phase 8.1.2). Pre-existing UI surfaces already render this
+ *   value (`DIFF_COLOR.adaptive`), so widening the union keeps the runtime
+ *   behaviour aligned with the type system. Non-breaking — older packages
+ *   without `adaptive` continue to use the other three values.
+ */
+export type InterviewDifficulty = "easy" | "medium" | "hard" | "adaptive";
+
+/**
+ * Sub-type taxonomy for interview questions, covering all 10 question families
+ * required by the Sonru Video & Voice Screen Simulator spec.
+ *
+ * The five top-level `category` values are kept for backwards compatibility
+ * (older persisted packages only have those). The `subType` field is OPTIONAL
+ * and used to drive UI labels, filters, and final-report aggregation.
+ */
+export type InterviewQuestionSubType =
+  | "hr"
+  | "behavioral"
+  | "star"
+  | "technical"
+  | "situational"
+  | "company-fit"
+  | "leadership"
+  | "problem-solving"
+  | "resume-specific"
+  | "jd-specific";
+
 export interface InterviewQuestion {
   id: string;
   category: "technical" | "behavioral" | "situational" | "hr" | "company";
   question: string;
-  difficulty: "easy" | "medium" | "hard";
+  difficulty: InterviewDifficulty;
   recommendedAnswer: string;
   talkingPoints: string[];
   starExample?: { situation: string; task: string; action: string; result: string };
@@ -225,6 +257,11 @@ export interface InterviewQuestion {
   /** Interviewer persona that posed the question (8.1.1 multi-persona). */
   personaId?: string;
   personaName?: string;
+  /**
+   * Optional sub-type tag from the 10-question-family taxonomy. Older packages
+   * may not have this; consumers should fall back to `category` when absent.
+   */
+  subType?: InterviewQuestionSubType;
 }
 
 export interface InterviewPackage {
