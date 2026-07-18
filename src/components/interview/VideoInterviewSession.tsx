@@ -147,6 +147,19 @@ export function VideoInterviewSession({ pkg, resume, jd, generated, onClose, onC
   const speech = useSpeechRecognition({ continuous: true, interimResults: false });
   const { start: startSpeech, stop: stopSpeech, reset: resetSpeech } = speech;
 
+  // Stable refs for cleanup — avoids adding `speech` and `previewMeter` to the
+  // unmount effect's dep array. Both hooks return a NEW plain object on every
+  // render (they contain state like `level`/`listening`), so including them as
+  // deps would cause the cleanup to fire on every re-render, calling
+  // stopPreview() 60×/sec (useAudioMeter ticks via requestAnimationFrame) and
+  // killing the camera stream the moment it is acquired.
+  const stopPreviewRef = useRef(stopPreview);
+  useEffect(() => { stopPreviewRef.current = stopPreview; }, [stopPreview]);
+  const stopSpeechRef = useRef(stopSpeech);
+  useEffect(() => { stopSpeechRef.current = stopSpeech; }, [stopSpeech]);
+  const stopMeterRef = useRef(stopMeter);
+  useEffect(() => { stopMeterRef.current = stopMeter; }, [stopMeter]);
+
   const sessionId = useMemo(() => uid("sess"), []);
   const current = questions[currentIndex];
   const isLast = currentIndex === total - 1;
@@ -529,13 +542,17 @@ export function VideoInterviewSession({ pkg, resume, jd, generated, onClose, onC
   }, []);
 
   // ---- cleanup stream on unmount -------------------------------------------
+  // IMPORTANT: deps must be [] (unmount only). `speech` and `previewMeter` are
+  // plain object literals recreated every render (they hold state). Including
+  // them as deps caused the cleanup — and stopPreview() — to fire on every
+  // re-render, stopping the camera stream 60×/sec via the audio meter's RAF.
   useEffect(
     () => () => {
-      stopPreview();
-      speech.stop();
-      previewMeter.stop();
+      stopPreviewRef.current();
+      stopSpeechRef.current();
+      stopMeterRef.current();
     },
-    [stopPreview, speech, previewMeter]
+    [] // unmount only
   );
 
   if (!current) {
