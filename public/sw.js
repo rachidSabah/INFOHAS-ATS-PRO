@@ -19,7 +19,7 @@
 //   - Network-only for API routes and POST requests
 //   - Auto-update: new SW takes over immediately via skipWaiting + claim
 
-const CACHE_VERSION = "resumeai-pro-v2-" + "20260620"; // changes each deploy
+const CACHE_VERSION = "resumeai-pro-v2-" + "20260718-2"; // changes each deploy
 const CACHE_PREFIX = "resumeai-pro-";
 const APP_SHELL = [
   "/",
