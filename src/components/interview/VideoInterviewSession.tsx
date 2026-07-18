@@ -110,14 +110,31 @@ export function VideoInterviewSession({ pkg, resume, jd, generated, onClose, onC
   // can verify the device works without leaving for the Device Check tab.
   const [cameraActivating, setCameraActivating] = useState(false);
   const [cameraError, setCameraError] = useState<string | null>(null);
-  // Incremented every time a new stream is successfully acquired so that the
-  // re-bind useEffect below has a *reactive* dependency to trigger on.
-  const [streamKey, setStreamKey] = useState(0);
+  // Local ref to the live MediaStream — updated every time we acquire a new
+  // stream. Using a ref (not state) means we can read it synchronously inside
+  // callbacks and effects without stale-closure issues.
+  const liveStreamRef = useRef<MediaStream | null>(null);
 
   const { snapshot: deviceSnapshot, getStream, requestCameraAndMic, stopPreview } = useDeviceCheck({
     videoRef,
     enablePreview: false, // we manage the stream manually so it persists across phases
   });
+
+  // ---- attach a stream to whichever <video> element is currently mounted ---
+  // Called imperatively every time either the stream changes or the phase
+  // changes (which remounts the <video> element). Much more reliable than a
+  // useEffect dependency array that can miss cases.
+  const bindStream = useCallback((stream: MediaStream) => {
+    const el = videoRef.current;
+    if (!el) return;
+    if (el.srcObject !== stream) {
+      el.srcObject = stream;
+      el.muted = true;
+    }
+    // Retry play() after a tick — some browsers reject play() before the
+    // element has been painted for the first time.
+    el.play().catch(() => setTimeout(() => el.play().catch(() => {}), 150));
+  }, []);
 
   // Preview audio meter — runs during prep & countdown so the user can verify
   // their mic is picking up sound BEFORE the recording starts. The recorder
@@ -187,12 +204,10 @@ export function VideoInterviewSession({ pkg, resume, jd, generated, onClose, onC
     try {
       const stream = await requestCameraAndMic();
       if (!stream) {
-        // deviceSnapshot.error may not be updated yet — show a generic message.
         setCameraError("Camera/microphone access failed. Check browser permissions and retry.");
       } else {
-        // Bump streamKey so the re-bind effect fires even if phase hasn't changed.
-        setStreamKey((k) => k + 1);
-        // Start the preview audio meter so the user can see mic input live.
+        liveStreamRef.current = stream;
+        bindStream(stream);
         startMeter(stream);
       }
     } catch (e: any) {
@@ -200,55 +215,32 @@ export function VideoInterviewSession({ pkg, resume, jd, generated, onClose, onC
     } finally {
       setCameraActivating(false);
     }
-  }, [requestCameraAndMic, startMeter]);
+  }, [requestCameraAndMic, bindStream, startMeter]);
 
-  // Activate the camera on mount AND whenever we transition back to the prep
-  // phase (e.g. when moving to the next question). The effect is gated on
-  // `phase === "prep"` so it doesn't re-request mid-recording.
+  // On mount and whenever we return to the prep phase, request/reuse the stream.
   useEffect(() => {
     if (phase !== "prep") return;
-    // If we already have a live stream (e.g. user navigated back), just
-    // re-attach the preview meter; don't re-request permission.
-    const existing = getStream();
-    if (existing && existing.getVideoTracks().length > 0) {
+    const existing = liveStreamRef.current;
+    if (existing && existing.getVideoTracks().some((t) => t.readyState === "live")) {
+      // Reuse existing live stream — just re-bind and restart meter.
+      bindStream(existing);
       startMeter(existing);
-      // Still bump streamKey so the re-bind effect below fires for the newly
-      // mounted <video> element that appeared when we returned to prep.
-      setStreamKey((k) => k + 1);
       return;
     }
-    // First mount or stream was stopped — request fresh.
     void activateCamera();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [phase, currentIndex]); // intentionally excludes activateCamera/getStream/startMeter
+  }, [phase, currentIndex]); // intentionally stable — activateCamera/bindStream/startMeter are memoized
 
-  // Re-bind the already-acquired stream to whichever <video> element is
-  // currently mounted. Because the <video> is conditionally rendered per
-  // phase (prep / countdown / recording), React unmounts the old element and
-  // mounts a fresh one with srcObject === null on every phase change. The
-  // stream is only attached inside requestCameraAndMic on first request, so
-  // without this the new element stays black.
-  //
-  // IMPORTANT: `streamKey` is the reactive signal. It increments whenever a
-  // new stream is acquired (inside activateCamera). `phase` ensures we also
-  // re-run when the <video> is remounted due to a phase transition. `getStream`
-  // is a stable function ref and is NOT a useful dependency here.
+  // Re-bind the stream whenever the phase changes (= <video> element remounted).
+  // This covers the prep→countdown→recording transitions where a new DOM node
+  // is mounted but the stream was already acquired during the prep phase.
   useEffect(() => {
-    const el = videoRef.current;
-    const stream = getStream();
-    if (!el || !stream) return;
-    if (el.srcObject !== stream) {
-      el.srcObject = stream;
-      el.muted = true;
-    }
-    // play() can fail silently under strict autoplay policies; retry once after
-    // a short tick to allow the browser to paint the element first.
-    const tryPlay = () =>
-      el.play().catch(() => {
-        setTimeout(() => el.play().catch(() => {}), 200);
-      });
-    tryPlay();
-  }, [phase, currentIndex, streamKey, getStream]);
+    const stream = liveStreamRef.current;
+    if (!stream) return;
+    // Small delay to let React finish mounting the new <video> element before
+    // we try to attach srcObject and call play().
+    const id = setTimeout(() => bindStream(stream), 50);
+    return () => clearTimeout(id);
+  }, [phase, bindStream]);
 
   // ---- when a recording is finalized --------------------------------------
   const onRecorderComplete = useCallback(
