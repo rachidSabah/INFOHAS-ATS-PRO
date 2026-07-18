@@ -110,6 +110,9 @@ export function VideoInterviewSession({ pkg, resume, jd, generated, onClose, onC
   // can verify the device works without leaving for the Device Check tab.
   const [cameraActivating, setCameraActivating] = useState(false);
   const [cameraError, setCameraError] = useState<string | null>(null);
+  // Incremented every time a new stream is successfully acquired so that the
+  // re-bind useEffect below has a *reactive* dependency to trigger on.
+  const [streamKey, setStreamKey] = useState(0);
 
   const { snapshot: deviceSnapshot, getStream, requestCameraAndMic, stopPreview } = useDeviceCheck({
     videoRef,
@@ -184,11 +187,11 @@ export function VideoInterviewSession({ pkg, resume, jd, generated, onClose, onC
     try {
       const stream = await requestCameraAndMic();
       if (!stream) {
-        setCameraError(
-          deviceSnapshot.error ??
-            "Camera/microphone access failed. Check permissions and retry."
-        );
+        // deviceSnapshot.error may not be updated yet — show a generic message.
+        setCameraError("Camera/microphone access failed. Check browser permissions and retry.");
       } else {
+        // Bump streamKey so the re-bind effect fires even if phase hasn't changed.
+        setStreamKey((k) => k + 1);
         // Start the preview audio meter so the user can see mic input live.
         startMeter(stream);
       }
@@ -197,7 +200,7 @@ export function VideoInterviewSession({ pkg, resume, jd, generated, onClose, onC
     } finally {
       setCameraActivating(false);
     }
-  }, [requestCameraAndMic, startMeter, deviceSnapshot.error]);
+  }, [requestCameraAndMic, startMeter]);
 
   // Activate the camera on mount AND whenever we transition back to the prep
   // phase (e.g. when moving to the next question). The effect is gated on
@@ -209,32 +212,43 @@ export function VideoInterviewSession({ pkg, resume, jd, generated, onClose, onC
     const existing = getStream();
     if (existing && existing.getVideoTracks().length > 0) {
       startMeter(existing);
+      // Still bump streamKey so the re-bind effect below fires for the newly
+      // mounted <video> element that appeared when we returned to prep.
+      setStreamKey((k) => k + 1);
       return;
     }
     // First mount or stream was stopped — request fresh.
     void activateCamera();
-    // We intentionally only depend on `phase` + `currentIndex` so the camera
-    // is re-activated when moving to a new question's prep phase, not on
-    // every render. The activation is idempotent.
-  }, [phase, currentIndex]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [phase, currentIndex]); // intentionally excludes activateCamera/getStream/startMeter
 
   // Re-bind the already-acquired stream to whichever <video> element is
   // currently mounted. Because the <video> is conditionally rendered per
   // phase (prep / countdown / recording), React unmounts the old element and
   // mounts a fresh one with srcObject === null on every phase change. The
   // stream is only attached inside requestCameraAndMic on first request, so
-  // without this the new element stays black. We never stop or re-request the
-  // stream here — the recorder reuses getStream() and must keep the same
-  // tracks.
+  // without this the new element stays black.
+  //
+  // IMPORTANT: `streamKey` is the reactive signal. It increments whenever a
+  // new stream is acquired (inside activateCamera). `phase` ensures we also
+  // re-run when the <video> is remounted due to a phase transition. `getStream`
+  // is a stable function ref and is NOT a useful dependency here.
   useEffect(() => {
     const el = videoRef.current;
     const stream = getStream();
-    if (el && stream && el.srcObject !== stream) {
+    if (!el || !stream) return;
+    if (el.srcObject !== stream) {
       el.srcObject = stream;
       el.muted = true;
-      el.play().catch(() => {});
     }
-  }, [phase, currentIndex, getStream]);
+    // play() can fail silently under strict autoplay policies; retry once after
+    // a short tick to allow the browser to paint the element first.
+    const tryPlay = () =>
+      el.play().catch(() => {
+        setTimeout(() => el.play().catch(() => {}), 200);
+      });
+    tryPlay();
+  }, [phase, currentIndex, streamKey, getStream]);
 
   // ---- when a recording is finalized --------------------------------------
   const onRecorderComplete = useCallback(
@@ -660,9 +674,10 @@ export function VideoInterviewSession({ pkg, resume, jd, generated, onClose, onC
           {phase === "prep" && (
             <div className="space-y-3">
               <div className="relative rounded-xl overflow-hidden bg-black aspect-video">
-                {/* The <video> element is always rendered in this phase so the
-                    useDeviceCheck hook can attach the stream to videoRef. */}
-                <video ref={videoRef} className="w-full h-full object-cover" playsInline muted autoPlay />
+                {/* key="prep" forces React to mount a fresh <video> node when
+                    entering the prep phase, so the re-bind effect always runs
+                    on a clean element (srcObject starts null). */}
+                <video key="video-prep" ref={videoRef} className="w-full h-full object-cover" playsInline muted autoPlay />
                 {/* Overlay: prep timer + "Preview" badge */}
                 <div className="absolute top-2 left-2 flex items-center gap-1.5 text-[10px] font-medium text-white bg-black/50 px-2 py-1 rounded-full">
                   <Icon name="Camera" className="w-3 h-3" /> Preview
@@ -746,7 +761,7 @@ export function VideoInterviewSession({ pkg, resume, jd, generated, onClose, onC
           {phase === "countdown" && (
             <div className="space-y-3">
               <div className="relative rounded-xl overflow-hidden bg-black aspect-video">
-                <video ref={videoRef} className="w-full h-full object-cover" playsInline muted autoPlay />
+                <video key="video-countdown" ref={videoRef} className="w-full h-full object-cover" playsInline muted autoPlay />
                 <div className="absolute top-2 left-2 flex items-center gap-1.5 text-[10px] font-medium text-white bg-black/50 px-2 py-1 rounded-full">
                   <Icon name="Video" className="w-3 h-3" /> Get ready
                 </div>
@@ -768,7 +783,7 @@ export function VideoInterviewSession({ pkg, resume, jd, generated, onClose, onC
           {phase === "recording" && (
             <div className="space-y-3">
               <div className="relative rounded-xl overflow-hidden bg-black aspect-video">
-                <video ref={videoRef} className="w-full h-full object-cover" playsInline muted autoPlay />
+                <video key="video-recording" ref={videoRef} className="w-full h-full object-cover" playsInline muted autoPlay />
                 <div className="absolute top-2 left-2 flex items-center gap-1.5 text-[10px] font-medium text-white bg-black/50 px-2 py-1 rounded-full">
                   <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse" /> REC {formatDuration(recorder.elapsedMs)}
                 </div>
