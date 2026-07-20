@@ -1747,7 +1747,11 @@ ${jobMemory.industry}`);
             emitProgress(4, newQALog);
 
             // Re-evaluate if correction is still needed
-            needsCorrection = newQA.confidence < 95 || (newQA.factualConsistency && !newQA.factualConsistency.passed);
+            needsCorrection = Boolean(
+              newQA.confidence < 95 || 
+              (result.afterATS && result.afterATS.scores.ats < 95) ||
+              (newQA.factualConsistency && !newQA.factualConsistency.passed)
+            );
           } else {
             break;
           }
