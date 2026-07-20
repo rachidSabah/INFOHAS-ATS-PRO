@@ -158,11 +158,11 @@ export class AgentBrain {
 
   private async toolAnalyzeATS(resume: ResumeData, jd?: JobDescription | null): Promise<ToolResult> {
     return this.callTool("ATS Analyzer", async () => {
-      const report = analyzeATS(resume, jd ? JSON.stringify(jd) : undefined);
+      const report = analyzeATS(resume, jd);
       return {
         success: true,
         data: report,
-        observation: `ATS Score: ${report.score}/100. Missing keywords: ${(report.missingKeywords || []).slice(0, 5).join(", ") || "none"}. Top gaps: ${(report.gaps || []).slice(0, 3).join(", ") || "none"}.`,
+        observation: `ATS Score: ${report.scores.ats}/100. Missing keywords: ${(report.missingKeywords || []).slice(0, 5).join(", ") || "none"}. Weak sections: ${(report.weakSections || []).slice(0, 3).join(", ") || "none"}.`,
       };
     });
   }
@@ -435,11 +435,11 @@ Respond with ONLY JSON:
       // ── PHASE 1: PLAN ────────────────────────────────────────────────────
       this.plan(`Task: ${task}${targetSection ? ` → ${targetSection}` : ""}. Building execution plan...`);
 
-      const atsInitial = analyzeATS(currentResume, jobDescription ? JSON.stringify(jobDescription) : undefined);
-      this.think(`Initial ATS score: ${atsInitial.score}/100. Gap: ${Math.max(0, 85 - atsInitial.score)} points to target. Missing: ${(atsInitial.missingKeywords || []).slice(0, 5).join(", ") || "none"}.`);
+      const atsInitial = analyzeATS(currentResume, jobDescription);
+      this.think(`Initial ATS score: ${atsInitial.scores.ats}/100. Gap: ${Math.max(0, 85 - atsInitial.scores.ats)} points to target. Missing: ${(atsInitial.missingKeywords || []).slice(0, 5).join(", ") || "none"}.`);
 
       // Determine which tools to run based on task
-      const toolPlan = this.buildToolPlan(task, targetSection, atsInitial.score);
+      const toolPlan = this.buildToolPlan(task, targetSection, atsInitial.scores.ats);
       this.plan(`Execution plan: ${toolPlan.join(" → ")}`);
 
       // ── PHASE 2: EXECUTE TOOLS ───────────────────────────────────────────
@@ -488,8 +488,8 @@ Respond with ONLY JSON:
       }
 
       // ── PHASE 3: REFLECT ─────────────────────────────────────────────────
-      const atsAfter = analyzeATS(currentResume, jobDescription ? JSON.stringify(jobDescription) : undefined);
-      this.think(`Post-optimization ATS: ${atsAfter.score}/100 (was ${atsInitial.score}/100, +${atsAfter.score - atsInitial.score} pts).`);
+      const atsAfter = analyzeATS(currentResume, jobDescription);
+      this.think(`Post-optimization ATS: ${atsAfter.scores.ats}/100 (was ${atsInitial.scores.ats}/100, +${atsAfter.scores.ats - atsInitial.scores.ats} pts).`);
 
       iteration++;
 
@@ -498,8 +498,8 @@ Respond with ONLY JSON:
         const reflResult = await this.toolReflect(
           { summary: resume.summary },
           { summary: currentResume.summary },
-          atsInitial.score,
-          atsAfter.score,
+          atsInitial.scores.ats,
+          atsAfter.scores.ats,
           directive
         );
 
@@ -523,18 +523,18 @@ Respond with ONLY JSON:
       }
 
       // ── PHASE 4: FINALIZE ─────────────────────────────────────────────────
-      const finalAts = analyzeATS(currentResume, jobDescription ? JSON.stringify(jobDescription) : undefined);
+      const finalAts = analyzeATS(currentResume, jobDescription);
       const totalMs = Date.now() - this.startTime;
 
-      this.emit("complete", `✅ Optimization complete in ${iteration} iteration(s). ATS: ${atsInitial.score} → ${finalAts.score}. ${this.improvements.length} improvements applied.`, {
-        atsScore: finalAts.score,
+      this.emit("complete", `✅ Optimization complete in ${iteration} iteration(s). ATS: ${atsInitial.scores.ats} → ${finalAts.scores.ats}. ${this.improvements.length} improvements applied.`, {
+        atsScore: finalAts.scores.ats,
         improvements: this.improvements,
       });
 
       const finalResult: AgentBrainResult = {
         resume: currentResume,
         thoughts: this.thoughts,
-        atsScore: finalAts.score,
+        atsScore: finalAts.scores.ats,
         iterations: iteration,
         toolsUsed: [...new Set(this.toolsUsed)],
         totalTimeMs: totalMs,
