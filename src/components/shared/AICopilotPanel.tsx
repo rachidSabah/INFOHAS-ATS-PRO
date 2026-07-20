@@ -22,7 +22,7 @@ setFlightScope({ scope: "resume-copilot", feature: "AI Copilot Panel", module: "
 import React, { useState, useEffect, useRef } from "react";
 import { Icon } from "@/components/shared";
 import { toast } from "sonner";
-import { callAI } from "@/lib/ai";
+import { callAI, getOptimizerDirective } from "@/lib/ai";
 import type { ResumeData, JobDescription } from "@/lib/types";
 import { saveAIModification, loadAIModifications, type AIModification } from "@/lib/builder-persistence";
 import { useApp } from "@/lib/store";
@@ -239,9 +239,14 @@ export function AICopilotPanel({
         instruction = `Follow this custom instruction: "${action}"`;
     }
 
-    return `You are a professional AI Resume Copilot.
+    const directive = getOptimizerDirective();
+
+    return `You are an elite Senior Executive Resume Architect & ATS Strategy Director with intelligence on par with top frontier AI models.
 Section Context: ${sectionName}
-Target Job: ${jdContext}
+Target Job Context: ${jdContext}
+
+OPTIMIZATION DIRECTIVE & POLICY:
+${directive}
 
 Original Resume Text:
 "${text}"
@@ -249,11 +254,11 @@ Original Resume Text:
 Instruction:
 ${instruction}
 
-Guidelines:
-1. Do NOT invent dates, names, or fake stats.
-2. Return ONLY the optimized text. No preamble, no quotes, no markdown wrappers.
-3. Keep the output length similar to or slightly shorter than the original, unless asked otherwise.
-4. Do NOT use any asterisks (*), markdown bold (**text**), or any other markdown formatting. Return plain text only.`;
+EXECUTIVE INTELLIGENCE DIRECTIVES:
+1. Preserve ALL factual anchors: employer names, degree titles, institutions, employment years/dates, and certifications must NEVER be fabricated or altered.
+2. Use active voice and high-impact action verbs (e.g., Spearheaded, Orchestrated, Engineered, Delivered, Accelerated).
+3. Embed metrics and quantified outcomes naturally using plausible estimation formulas where appropriate.
+4. Return ONLY the final optimized text. No preamble, no quotes, no markdown wrappers (**bold**, *italics*, etc.). Plain text only.`;
   };
 
   const handleAction = async (action: string) => {

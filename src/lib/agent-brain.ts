@@ -40,7 +40,7 @@
 "use client";
 
 import { recordAI } from "@/lib/ai/flight-recorder";
-import { callAI, extractJSON } from "@/lib/ai";
+import { callAI, extractJSON, getOptimizerDirective } from "@/lib/ai";
 import type { ResumeData, JobDescription, ResumeSkill } from "@/lib/types";
 import { analyzeATS } from "@/lib/agents/ats-analysis";
 
@@ -177,10 +177,14 @@ export class AgentBrain {
         ? `Target role: ${jd.title} at ${jd.company || "company"}. Keywords: ${(jd.keywords || []).slice(0, 12).join(", ")}.`
         : "General professional resume";
 
-      const prompt = `You are an elite ATS resume writer specializing in executive-level resumes.
+      const directive = getOptimizerDirective();
+      const prompt = `You are an elite ATS resume writer specializing in executive-level resumes with frontier-level AI intelligence.
 
 TASK: ${instruction || "Enhance this professional summary for maximum ATS impact and executive presence."}
 CONTEXT: ${jdContext}
+
+GLOBAL OPTIMIZATION DIRECTIVE:
+${directive}
 
 CURRENT SUMMARY:
 "${currentSummary}"
@@ -229,10 +233,14 @@ REQUIREMENTS:
         bullets: e.bullets,
       }));
 
-      const prompt = `You are an elite ATS resume writer.
+      const directive = getOptimizerDirective();
+      const prompt = `You are an elite ATS resume writer with frontier-level AI intelligence.
 
 TASK: Enhance ALL experience bullet points to be highly quantified and ATS-optimized.
 CONTEXT: ${jdContext}
+
+GLOBAL OPTIMIZATION DIRECTIVE:
+${directive}
 
 CURRENT EXPERIENCE:
 ${JSON.stringify(expSlim, null, 2)}
