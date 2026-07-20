@@ -7,6 +7,8 @@ import { Icon } from "@/components/shared";
 import { renderHighlightedText, safeRender } from "@/lib/ats-highlighter";
 import type { ResumeData, ResumeLanguage } from "@/lib/types";
 import { uid, useApp } from "@/lib/store";
+import { getA4FillPercentage, autotuneA4Density } from "@/lib/a4-autotuner";
+import { toast } from "sonner";
 
 // Imported safeRender from shared ats-highlighter helper
 
@@ -156,6 +158,26 @@ export function EditableA4Preview({ resume, onChange, scale = 0.7, className, ac
     setEditing(null);
   };
 
+  const [isAutotuning, setIsAutotuning] = useState(false);
+  const fillPercent = getA4FillPercentage(resume);
+
+  const handleAutotune = async () => {
+    if (isAutotuning) return;
+    setIsAutotuning(true);
+    const toastId = toast.loading("⚡ Autotuning A4 page density to 100%...");
+    try {
+      const res = await autotuneA4Density(resume, activeJD ?? null, (msg) => {
+        toast.loading(msg, { id: toastId });
+      });
+      patch(res.resume);
+      toast.success(`✅ A4 Page Density autotuned: ${res.initialFillPercent}% → ${res.finalFillPercent}%!`, { id: toastId });
+    } catch (err: any) {
+      toast.error(`Autotune error: ${err.message}`, { id: toastId });
+    } finally {
+      setIsAutotuning(false);
+    }
+  };
+
   /**
    * openSection — COPILOT FIX (Phase C)
    *
@@ -214,25 +236,61 @@ export function EditableA4Preview({ resume, onChange, scale = 0.7, className, ac
     <div className={className}>
       <input ref={fileRef} type="file" accept="image/png,image/jpeg,image/webp" className="hidden" onChange={(e) => onPhotoUpload(e.target.files)} />
 
-      {latestReport && (
-        <div className="flex items-center justify-between mb-3 bg-secondary/30 p-2 rounded-lg border border-border">
-          <div className="flex items-center gap-1.5">
-            <Icon name="Activity" className="w-4 h-4 text-brand animate-pulse" />
-            <span className="text-xs font-semibold">Heatmap Analysis Available (ATS: {latestReport.scores.ats}/100)</span>
+      <div className="flex flex-wrap items-center justify-between gap-2 mb-3 bg-slate-900/40 p-2 rounded-xl border border-slate-800 text-xs">
+        <div className="flex items-center gap-2">
+          {/* Visual Density Badge */}
+          <div className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg border font-bold text-[11px] ${
+            fillPercent >= 95 && fillPercent <= 100
+              ? "bg-emerald-950/40 border-emerald-800/40 text-emerald-400"
+              : fillPercent < 95
+              ? "bg-amber-950/40 border-amber-800/40 text-amber-400"
+              : "bg-rose-950/40 border-rose-800/40 text-rose-400"
+          }`}>
+            <Icon name="Maximize2" className="w-3.5 h-3.5" />
+            <span>A4 Density: {fillPercent}%</span>
+            <span className="text-[9px] font-normal opacity-80">
+              ({fillPercent >= 95 && fillPercent <= 100 ? "100% Optimal" : fillPercent < 95 ? "Underfilled" : "Overflowing"})
+            </span>
           </div>
-          <button
-            onClick={() => setHeatmapMode(!heatmapMode)}
-            className={`flex items-center gap-1.5 px-2.5 py-1 rounded text-xs font-medium transition-all ${
-              heatmapMode 
-                ? "bg-brand text-white shadow-sm" 
-                : "bg-secondary hover:bg-secondary-hover text-foreground/80 border border-border"
-            }`}
-          >
-            <Icon name="Flame" className={`w-3.5 h-3.5 ${heatmapMode ? "text-amber-300 animate-pulse" : ""}`} />
-            {heatmapMode ? "Hide ATS Heatmap" : "Show ATS Heatmap"}
-          </button>
+
+          {latestReport && (
+            <div className="hidden sm:flex items-center gap-1.5 text-slate-400">
+              <Icon name="Activity" className="w-3.5 h-3.5 text-indigo-400" />
+              <span className="text-[11px]">ATS: {latestReport.scores.ats}/100</span>
+            </div>
+          )}
         </div>
-      )}
+
+        <div className="flex items-center gap-2">
+          {/* 1-Click Autotune Button */}
+          <button
+            onClick={handleAutotune}
+            disabled={isAutotuning}
+            className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 text-white font-bold text-[11px] transition shadow-sm active:scale-95 disabled:opacity-50 cursor-pointer"
+          >
+            {isAutotuning ? (
+              <Icon name="Loader2" className="w-3.5 h-3.5 animate-spin" />
+            ) : (
+              <Icon name="Zap" className="w-3.5 h-3.5 text-amber-300" />
+            )}
+            <span>{isAutotuning ? "Autotuning..." : "⚡ Fill Page 100%"}</span>
+          </button>
+
+          {latestReport && (
+            <button
+              onClick={() => setHeatmapMode(!heatmapMode)}
+              className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] font-medium transition-all ${
+                heatmapMode 
+                  ? "bg-indigo-600 text-white shadow-sm" 
+                  : "bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700"
+              }`}
+            >
+              <Icon name="Flame" className={`w-3.5 h-3.5 ${heatmapMode ? "text-amber-300 animate-pulse" : ""}`} />
+              {heatmapMode ? "Hide Heatmap" : "ATS Heatmap"}
+            </button>
+          )}
+        </div>
+      </div>
 
       {/* Outer wrapper — occupies the SCALED layout space (210mm × scale × 297mm × scale)
           so the parent container sees a correctly-sized box. Without this, CSS transform: scale()
