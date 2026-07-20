@@ -58,8 +58,8 @@ export async function autotuneA4Density(
 
   onProgress?.(`Initial visual density: ${initialFill}% A4 page height`, initialFill);
 
-  // Ideal target range: 95.0% to 100.0%
-  if (initialFill >= 95.0 && initialFill <= 100.0) {
+  // Ideal target range: 94.0% to 98.0% (leaves 2-4% safety buffer for Word/DOCX line heights)
+  if (initialFill >= 94.0 && initialFill <= 98.0) {
     onProgress?.(`Resume is already perfectly tuned at ${initialFill}% A4 density!`, initialFill);
     return {
       resume: currentResume,
@@ -80,14 +80,14 @@ export async function autotuneA4Density(
     const currentFill = getA4FillPercentage(currentResume);
     iterations++;
 
-    if (currentFill >= 95.0 && currentFill <= 100.0) {
+    if (currentFill >= 94.0 && currentFill <= 98.0) {
       onProgress?.(`Target density reached: ${currentFill}% A4 page height!`, currentFill);
       break;
     }
 
-    if (currentFill < 95.0) {
-      // Underfilled: Expand content to reach 100% density
-      const deficitPercent = Math.round(100 - currentFill);
+    if (currentFill < 94.0) {
+      // Underfilled: Expand content to reach 95-98% density
+      const deficitPercent = Math.round(96 - currentFill);
       onProgress?.(`Underfilled (${currentFill}%). Deficit: +${deficitPercent}%. Expanding content...`, currentFill);
 
       const prompt = `You are an elite ATS resume architect. The candidate's resume is underfilling the single A4 page (currently ${currentFill}% full, needs to be 98-100% full).
@@ -151,8 +151,8 @@ EXPANSION INSTRUCTIONS:
         break;
       }
     } else {
-      // Overflowing (>100%): Micro-condense to fit single A4 page
-      const excessPercent = Math.round(currentFill - 100);
+      // Overflowing (>98%): Micro-condense to fit single A4 page
+      const excessPercent = Math.round(currentFill - 96);
       onProgress?.(`Overflowing (${currentFill}%). Excess: -${excessPercent}%. Micro-condensing to fit 1 page...`, currentFill);
 
       const prompt = `You are an elite ATS resume architect. The candidate's resume slightly overflows 1 A4 page (currently ${currentFill}% full).

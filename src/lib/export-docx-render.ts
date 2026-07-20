@@ -101,8 +101,8 @@ export async function exportResumeDOCXRenderDoc(
   // ===== SECTION HELPER =====
   const addSection = (title: string) => {
     children.push(new Paragraph({
-      spacing: { before: 200, after: 60 },
-      children: [new TextRun({ text: title, bold: true, size: L.sectionTitleSizePt * 2, font: L.fontFamily, color: accentHex })],
+      spacing: { before: 120, after: 30, line: 240 },
+      children: [new TextRun({ text: title, bold: true, size: (L.sectionTitleSizePt || 11.5) * 2, font: L.fontFamily, color: accentHex })],
     }));
   };
 
@@ -176,7 +176,7 @@ function renderContentItem(
     case "text":
       children.push(new Paragraph({
         alignment: AlignmentType.JUSTIFIED,
-        spacing: { after: 60 },
+        spacing: { before: 0, after: 30, line: 240 },
         children: parseMarkdownToTextRuns(item.text, {
           size: (item.fontSizePt ?? L.bodyFontSizePt) * 2,
           font: L.fontFamily,
@@ -192,7 +192,7 @@ function renderContentItem(
         children.push(new Paragraph({
           bullet: { level: item.level ?? 0 },
           alignment: AlignmentType.JUSTIFIED,
-          spacing: { after: 30 },
+          spacing: { before: 0, after: 15, line: 230 },
           children: parseMarkdownToTextRuns(b, {
             size: L.bodyFontSizePt * 2,
             font: L.fontFamily,
@@ -211,7 +211,7 @@ function renderContentItem(
       const rightCell = item.cells.find(c => c.align === "right");
       children.push(new Paragraph({
         tabStops: docxTabStops,
-        spacing: { after: 20 },
+        spacing: { before: 40, after: 15, line: 240 },
         children: [
           ...parseMarkdownToTextRuns(leftText, {
             size: L.bodyFontSizePt * 2,
@@ -243,7 +243,7 @@ function renderNestedBullets(
   for (const group of item.groups) {
     children.push(new Paragraph({
       bullet: { level: 0 },
-      spacing: { after: 30 },
+      spacing: { before: 0, after: 15, line: 230 },
       children: [
         new TextRun({ text: `${group.label}: `, bold: true, size: L.bodyFontSizePt * 2, font: L.fontFamily, color: bodyHex }),
         ...parseMarkdownToTextRuns(group.items.join(", "), {
