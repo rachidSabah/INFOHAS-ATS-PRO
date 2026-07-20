@@ -138,6 +138,9 @@ export function EditableA4Preview({ resume, onChange, scale = 0.7, className, ac
 
   const atsReports = useApp((s) => s.atsReports);
   const latestReport = atsReports.find((r) => r.resumeId === resume.id);
+  const activeJdId = useApp((s) => s.activeJdId);
+  const jds = useApp((s) => s.jobDescriptions);
+  const activeJD = jds.find((j) => j.id === activeJdId) ?? jds[0] ?? null;
   const [heatmapMode, setHeatmapMode] = useState(false);
 
   const renderHText = (textVal: any) => {
