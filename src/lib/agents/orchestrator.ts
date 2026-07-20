@@ -1440,6 +1440,21 @@ ${jobMemory.industry}`);
                 directiveConfig,
               });
             }
+
+            // === STAGE 4 DETERMINISTIC A4 AUTOTUNER (Guarantees 98-100% A4 visual density) ===
+            try {
+              const { autotuneA4Density, getA4FillPercentage } = await import("../a4-autotuner");
+              const fillBefore = getA4FillPercentage(result.optimizedResume!);
+              if (fillBefore < 95 || fillBefore > 100) {
+                log("Resume Optimizer", `Autotuning A4 page visual density (currently ${fillBefore}%)...`);
+                emitProgress(3, `Autotuning A4 visual page fill (${fillBefore}% → target 98-100%)...`);
+                const tuned = await autotuneA4Density(result.optimizedResume!, jd);
+                result.optimizedResume = tuned.resume;
+                log("Resume Optimizer", `✓ A4 Autotuning complete: ${tuned.initialFillPercent}% → ${tuned.finalFillPercent}% A4 visual density.`);
+              }
+            } catch (atErr: any) {
+              console.warn("[Stage 4 A4 Autotuner] Non-fatal error during autotune:", atErr?.message);
+            }
           } catch (pbErr: any) {
             console.warn("[Final Safety Net Page Balancer] Failed (non-fatal):", pbErr?.message);
           }
@@ -1651,9 +1666,10 @@ ${jobMemory.industry}`);
       let healingAttempt = 0;
       const maxHealingAttempts = 3;
       let qaVerdict = result.qa;
-      let needsCorrection = qaVerdict && (
-        qaVerdict.confidence < 95 || 
-        (qaVerdict.factualConsistency && !qaVerdict.factualConsistency.passed)
+      let needsCorrection = Boolean(
+        (qaVerdict && qaVerdict.confidence < 95) || 
+        (result.afterATS && result.afterATS.scores.ats < 95) ||
+        (qaVerdict && qaVerdict.factualConsistency && !qaVerdict.factualConsistency.passed)
       );
 
       while (needsCorrection && healingAttempt < maxHealingAttempts) {
