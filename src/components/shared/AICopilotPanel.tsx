@@ -15,6 +15,7 @@ setFlightScope({ scope: "resume-copilot", feature: "AI Copilot Panel", module: "
 //   - Context-aware action buttons (Enhance, Rewrite, ATS, concise, etc.)
 //   - Translation dropdown
 //   - Clean design with premium glassmorphism
+//   - AgentBrain: full agentic multi-step reasoning with streaming thoughts
 // ============================================================================
 
 
@@ -25,6 +26,8 @@ import { callAI } from "@/lib/ai";
 import type { ResumeData, JobDescription } from "@/lib/types";
 import { saveAIModification, loadAIModifications, type AIModification } from "@/lib/builder-persistence";
 import { useApp } from "@/lib/store";
+import { runAgentBrain, type AgentThought, type AgentBrainResult } from "@/lib/agent-brain";
+import { AgentConsole } from "@/components/shared/AgentConsole";
 
 interface ActiveElementContext {
   section: string; // 'summary' | 'experience' | 'education' | 'skills' | 'certifications' | 'achievements'
@@ -102,12 +105,18 @@ export function AICopilotPanel({
   const [showHistory, setShowHistory] = useState(false);
   const [modHistory, setModHistory] = useState<AIModification[]>([]);
 
-  // Sub-tabs & STAR Builder & Verb scan states
-  const [subTab, setSubTab] = useState<"copilot" | "star" | "verbs" | "mcp">("copilot");
+  const [subTab, setSubTab] = useState<"copilot" | "star" | "verbs" | "mcp" | "agent">("copilot");
   const [starST, setStarST] = useState("");
   const [starAction, setStarAction] = useState("");
   const [starResult, setStarResult] = useState("");
   const [starBullet, setStarBullet] = useState("");
+
+  // AgentBrain states
+  const [agentThoughts, setAgentThoughts] = useState<AgentThought[]>([]);
+  const [isAgentRunning, setIsAgentRunning] = useState(false);
+  const [agentResult, setAgentResult] = useState<AgentBrainResult | null>(null);
+  const [agentSection, setAgentSection] = useState<"all" | "summary" | "experience" | "education" | "skills">("all");
+  const [agentTask, setAgentTask] = useState<"optimize" | "enhance_section" | "fill_page">("optimize");
 
   // MCP States
   const [mcpServers, setMcpServers] = useState<Record<string, any>>({});
@@ -615,7 +624,49 @@ Respond ONLY with a JSON object following this exact format, no markdown:
     }
   };
 
+  // ─── AgentBrain: full agentic multi-step optimization ───────────────────────
+  const handleAgentRun = async () => {
+    if (isAgentRunning) return;
+    setIsAgentRunning(true);
+    setAgentThoughts([]);
+    setAgentResult(null);
+    const toastId = toast.loading(`🤖 Agent Brain: ${agentTask === 'fill_page' ? 'Filling page' : agentTask === 'enhance_section' ? `Enhancing ${agentSection}` : 'Optimizing resume'}...`);
+
+    try {
+      const result = await runAgentBrain({
+        task: agentTask,
+        targetSection: agentTask === 'enhance_section' ? agentSection : undefined,
+        resume,
+        jobDescription: activeJD ?? null,
+        maxIterations: 2,
+        callbacks: {
+          onThought: (thought) => {
+            setAgentThoughts((prev) => [...prev, thought]);
+          },
+          onPatch: (patchData) => {
+            // Apply partial patches live as the agent works
+            patch(patchData);
+          },
+          onComplete: (res) => {
+            setAgentResult(res);
+            toast.success(`✅ Agent complete! ATS: ${res.atsScore}/100. ${res.improvements.length} improvements.`, { id: toastId });
+          },
+          onError: (err) => {
+            toast.error(`Agent failed: ${err}`, { id: toastId });
+          },
+        },
+      });
+
+      setAgentResult(result);
+    } catch (err: any) {
+      toast.error(`Agent Brain error: ${err.message}`, { id: toastId });
+    } finally {
+      setIsAgentRunning(false);
+    }
+  };
+
   const handlePageShrink = async () => {
+
     setLoading(true);
     const toastId = toast.loading("AI is condensing resume to fit 1 page...");
     try {
@@ -751,6 +802,17 @@ Respond ONLY with a JSON object of the updated sections following this format, w
                 }`}
               >
                 MCP Tools
+              </button>
+              <button
+                onClick={() => setSubTab("agent")}
+                className={`flex-1 py-2 text-center text-[10px] uppercase font-bold tracking-wider transition relative ${
+                  subTab === "agent" ? "text-violet-400 border-b border-violet-500 bg-slate-800/10" : "text-slate-500 hover:text-slate-300"
+                }`}
+              >
+                {isAgentRunning && (
+                  <span className="absolute top-1 right-1 w-1.5 h-1.5 rounded-full bg-violet-400 animate-ping" />
+                )}
+                Agent 🤖
               </button>
             </div>
           )}
@@ -1304,6 +1366,127 @@ Respond ONLY with a JSON object of the updated sections following this format, w
                             </div>
                           </div>
                         )}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* ── AGENT BRAIN TAB ────────────────────────────────────── */}
+                {subTab === "agent" && (
+                  <div className="space-y-3">
+                    {/* Header */}
+                    <div className="flex items-center gap-2">
+                      <div className="w-6 h-6 rounded-lg bg-gradient-to-br from-violet-600 to-indigo-600 flex items-center justify-center">
+                        <Icon name="Brain" className="w-3.5 h-3.5 text-white" />
+                      </div>
+                      <div>
+                        <div className="text-[11px] font-bold text-slate-200">Agent Brain</div>
+                        <div className="text-[9px] text-slate-500">Multi-step agentic optimization with live thought streaming</div>
+                      </div>
+                    </div>
+
+                    {/* Task selector */}
+                    <div className="space-y-1">
+                      <label className="text-[9px] uppercase font-bold text-slate-500 tracking-wider">Mode</label>
+                      <div className="grid grid-cols-3 gap-1">
+                        {([
+                          { key: "optimize", label: "Full Optimize", icon: "Sparkles" },
+                          { key: "enhance_section", label: "Section", icon: "Wand2" },
+                          { key: "fill_page", label: "Fill Page", icon: "Maximize2" },
+                        ] as const).map(({ key, label, icon }) => (
+                          <button
+                            key={key}
+                            onClick={() => setAgentTask(key)}
+                            className={`p-1.5 rounded-lg text-[9px] font-bold border transition flex flex-col items-center gap-0.5 cursor-pointer ${
+                              agentTask === key
+                                ? "bg-violet-600/20 border-violet-500/50 text-violet-300"
+                                : "bg-slate-800/40 border-slate-700/50 text-slate-400 hover:text-slate-200"
+                            }`}
+                          >
+                            <Icon name={icon} className="w-3 h-3" />
+                            {label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Section selector (only for enhance_section) */}
+                    {agentTask === "enhance_section" && (
+                      <div className="space-y-1">
+                        <label className="text-[9px] uppercase font-bold text-slate-500 tracking-wider">Target Section</label>
+                        <div className="grid grid-cols-3 gap-1">
+                          {(["all", "summary", "experience", "education", "skills"] as const).map((s) => (
+                            <button
+                              key={s}
+                              onClick={() => setAgentSection(s)}
+                              className={`p-1 rounded text-[9px] font-bold border transition cursor-pointer capitalize ${
+                                agentSection === s
+                                  ? "bg-indigo-600/20 border-indigo-500/50 text-indigo-300"
+                                  : "bg-slate-800/40 border-slate-700/50 text-slate-400 hover:text-slate-200"
+                              }`}
+                            >
+                              {s}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* JD Context indicator */}
+                    <div className={`flex items-center gap-1.5 px-2 py-1.5 rounded-lg text-[9px] ${
+                      activeJD ? "bg-emerald-950/30 border border-emerald-800/30 text-emerald-400" : "bg-slate-800/30 border border-slate-700/30 text-slate-500"
+                    }`}>
+                      <Icon name={activeJD ? "Briefcase" : "Info"} className="w-3 h-3" />
+                      {activeJD ? `JD: ${activeJD.title || "Loaded"} — ATS keywords active` : "No JD loaded — general optimization mode"}
+                    </div>
+
+                    {/* Run button */}
+                    <button
+                      onClick={handleAgentRun}
+                      disabled={isAgentRunning}
+                      className="w-full py-2.5 rounded-xl bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 text-white text-[11px] font-bold transition active:scale-95 disabled:opacity-50 flex items-center justify-center gap-2 cursor-pointer"
+                    >
+                      {isAgentRunning ? (
+                        <>
+                          <Icon name="Loader2" className="w-4 h-4 animate-spin" />
+                          Agent Running...
+                        </>
+                      ) : (
+                        <>
+                          <Icon name="Zap" className="w-4 h-4" />
+                          🤖 Launch Agent Brain
+                        </>
+                      )}
+                    </button>
+
+                    {/* Live streaming thought console */}
+                    {(agentThoughts.length > 0 || isAgentRunning) && (
+                      <AgentConsole
+                        thoughts={agentThoughts}
+                        isRunning={isAgentRunning}
+                        atsScoreBefore={atsScore?.score}
+                        atsScoreAfter={agentResult?.atsScore}
+                        improvements={agentResult?.improvements}
+                        compact={true}
+                      />
+                    )}
+
+                    {/* Capabilities info (when idle and no thoughts) */}
+                    {agentThoughts.length === 0 && !isAgentRunning && (
+                      <div className="space-y-1.5">
+                        <label className="text-[9px] uppercase font-bold text-slate-500 tracking-wider">Agent Capabilities</label>
+                        {[
+                          { icon: "Brain", color: "text-violet-400", text: "Multi-step chain-of-thought reasoning" },
+                          { icon: "Wrench", color: "text-amber-400", text: "Tool calling: ATS analyzer, section patchers" },
+                          { icon: "RefreshCcw", color: "text-cyan-400", text: "Self-reflection & iterative improvement" },
+                          { icon: "Eye", color: "text-emerald-400", text: "Real-time streaming of all agent thoughts" },
+                          { icon: "GitBranch", color: "text-orange-400", text: "Autonomous decision & retry loops" },
+                        ].map((item, i) => (
+                          <div key={i} className="flex items-center gap-2 text-[10px] text-slate-400">
+                            <Icon name={item.icon} className={`w-3 h-3 shrink-0 ${item.color}`} />
+                            {item.text}
+                          </div>
+                        ))}
                       </div>
                     )}
                   </div>
