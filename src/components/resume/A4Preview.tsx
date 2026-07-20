@@ -405,13 +405,26 @@ function InfohasProTemplate({ resume, accent }: { resume: ResumeData; accent: st
                       </span>
                     )}
                   </div>
-                  {ed.highlights && ed.highlights.length > 0 && (
-                    <ul style={{ margin: "0.5mm 0 0 0", paddingLeft: `${L.bulletIndentMm}mm`, listStyleType: "•" }}>
-                      {ed.highlights.map((h, i) => (
-                        <li key={i} style={{ color: BLACK }}>{h}</li>
-                      ))}
-                    </ul>
-                  )}
+                  {ed.highlights && ed.highlights.length > 0 && (() => {
+                    // Parse highlights: split "Modules: X, Y, Z" into individual bullet items
+                    const allBullets: string[] = [];
+                    for (const h of ed.highlights) {
+                      const cleaned = h.replace(/^Modules:\s*/i, "").trim();
+                      if (cleaned.includes(",")) {
+                        cleaned.split(",").map((s: string) => s.trim()).filter(Boolean).forEach((m: string) => allBullets.push(m));
+                      } else if (cleaned) {
+                        allBullets.push(cleaned);
+                      }
+                    }
+                    if (allBullets.length === 0) return null;
+                    return (
+                      <ul style={{ margin: "0.5mm 0 0 0", paddingLeft: `${L.bulletIndentMm}mm`, listStyleType: "•" }}>
+                        {allBullets.map((m: string, i: number) => (
+                          <li key={i} style={{ color: BLACK }}>{m}</li>
+                        ))}
+                      </ul>
+                    );
+                  })()}
                 </div>
               ))}
             </div>

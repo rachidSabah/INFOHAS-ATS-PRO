@@ -481,6 +481,140 @@ Guidelines:
     toast.success(`Swapped verb to "${newVerb}"!`);
   };
 
+  const handlePageExpand = async () => {
+    setLoading(true);
+    const toastId = toast.loading("AI is expanding resume to fill 100% of the page...");
+    try {
+      const jdContext = activeJD
+        ? `Target Job: ${activeJD.title} at ${activeJD.company || "Target Employer"}. Required keywords: ${(activeJD.keywords || []).slice(0, 15).join(", ")}`
+        : "General senior professional resume";
+
+      const prompt = `You are an expert ATS resume writer. The candidate's resume is currently UNDER-FILLING the single A4 page (less than 90% full).
+Your task: expand the resume content to achieve ~100% page utilization by:
+1. Adding 2-4 more high-impact, quantified bullet points to each experience entry.
+2. Expanding the professional summary to 4-6 impactful sentences.
+3. Adding module/course highlights to education entries if not already present.
+4. Keeping ALL existing facts, dates, company names UNCHANGED.
+5. Injecting ATS keywords naturally: ${jdContext}
+
+Current resume data:
+${JSON.stringify({
+  summary: resume.summary,
+  experience: resume.experience.map(e => ({ id: e.id, title: e.title, company: e.company, bullets: e.bullets })),
+  education: resume.education.map(e => ({ id: e.id, degree: e.degree, institution: e.institution, highlights: e.highlights }))
+})}
+
+Respond ONLY with a JSON object following this exact format, no markdown:
+{
+  "summary": "expanded summary...",
+  "experience": [
+    { "id": "exp-id", "bullets": ["bullet1", "bullet2", "bullet3", "bullet4", "bullet5"] }
+  ],
+  "education": [
+    { "id": "edu-id", "highlights": ["Module1, Module2, Module3, Module4, Module5, Module6"] }
+  ]
+}`;
+
+      const res = await recordAI({
+        systemPrompt: "You are a professional resume writer. Return ONLY a valid JSON object with no markdown wrappers.",
+        userPrompt: prompt,
+        maxTokens: 4000,
+        temperature: 0.35,
+        taskCategory: "document"
+      });
+
+      const jsonStr = (res.text || "").replace(/```json|```/g, "").trim();
+      const data = JSON.parse(jsonStr);
+
+      if (data) {
+        const nextExperience = resume.experience.map(e => {
+          const match = data.experience?.find((x: any) => x.id === e.id);
+          return match ? { ...e, bullets: match.bullets } : e;
+        });
+        const nextEducation = resume.education.map(e => {
+          const match = data.education?.find((x: any) => x.id === e.id);
+          return match ? { ...e, highlights: match.highlights } : e;
+        });
+
+        patch({
+          summary: data.summary || resume.summary,
+          experience: nextExperience,
+          education: nextEducation,
+        });
+
+        toast.success("Resume expanded to fill the full page!", { id: toastId });
+      }
+    } catch (err: any) {
+      console.error(err);
+      toast.error("Failed to expand page content: " + err.message, { id: toastId });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleSectionEnhance = async (sectionName: string) => {
+    setLoading(true);
+    const toastId = toast.loading(`Enhancing ${sectionName} section...`);
+    try {
+      const jdContext = activeJD
+        ? `Target Job: ${activeJD.title} at ${activeJD.company || "Target Employer"}. Keywords: ${(activeJD.keywords || []).slice(0, 15).join(", ")}`
+        : "General professional resume";
+
+      let sectionData = "";
+      let prompt = "";
+
+      if (sectionName === "summary") {
+        sectionData = resume.summary || "";
+        prompt = `You are an expert ATS resume writer.\nEnhance this professional summary to be highly impactful, outcome-focused, and ATS-optimized.\nContext: ${jdContext}\n\nOriginal:\n"${sectionData}"\n\nGuidelines:\n- 4-6 impactful sentences\n- Start with a strong professional identity statement\n- Include quantified achievements\n- Naturally inject ATS keywords\n- Return ONLY the improved summary text, no preamble, no markdown.`;
+        const res = await recordAI({ systemPrompt: "Professional resume writer. Plain text only, no markdown.", userPrompt: prompt, maxTokens: 600, temperature: 0.3, taskCategory: "document" });
+        const cleaned = (res.text || "").replace(/^["']|["']$/g, "").replace(/\*\*([^*]+)\*\*/g, "$1").replace(/\*([^*]+)\*/g, "$1").trim();
+        if (cleaned) patch({ summary: cleaned });
+        toast.success("Summary enhanced!", { id: toastId });
+
+      } else if (sectionName === "experience") {
+        const expData = resume.experience.map(e => ({ id: e.id, title: e.title, company: e.company, bullets: e.bullets }));
+        prompt = `You are an expert ATS resume writer.\nEnhance ALL experience bullet points to be highly quantified, outcome-focused, and ATS-optimized.\nContext: ${jdContext}\n\nCurrent experience:\n${JSON.stringify(expData)}\n\nGuidelines:\n- Each bullet must start with a strong action verb\n- Add metrics, percentages, and impact where plausible\n- At least 4-5 bullets per role\n- Return ONLY a JSON array: [{"id": "...", "bullets": ["...","..."]}]`;
+        const res = await recordAI({ systemPrompt: "Professional resume writer. Return ONLY valid JSON array, no markdown.", userPrompt: prompt, maxTokens: 3000, temperature: 0.3, taskCategory: "document" });
+        const jsonStr = (res.text || "").replace(/```json|```/g, "").trim();
+        const data = JSON.parse(jsonStr);
+        if (Array.isArray(data)) {
+          const nextExp = resume.experience.map(e => { const m = data.find((x: any) => x.id === e.id); return m ? { ...e, bullets: m.bullets } : e; });
+          patch({ experience: nextExp });
+        }
+        toast.success("Experience bullets enhanced!", { id: toastId });
+
+      } else if (sectionName === "skills") {
+        const currentSkills = resume.skills.map(s => s.name);
+        prompt = `You are an expert ATS resume writer.\nContext: ${jdContext}\n\nCurrent skills: ${currentSkills.join(", ")}\n\nTask: Return an enhanced, comprehensive skills list that:\n- Keeps all existing skills\n- Adds highly relevant missing ATS keywords for this role\n- Groups logically (same categories as input)\n- Returns ONLY a JSON array: [{"id": "skill-id", "name": "skill name", "category": "category"}]\n\nExisting skill IDs to preserve: ${JSON.stringify(resume.skills.map(s => ({ id: s.id, name: s.name, category: s.category })))}\nAdd new skills with new unique IDs (format: skill-NEW-n).`;
+        const res = await recordAI({ systemPrompt: "Professional resume writer. Return ONLY valid JSON array.", userPrompt: prompt, maxTokens: 2000, temperature: 0.3, taskCategory: "document" });
+        const jsonStr = (res.text || "").replace(/```json|```/g, "").trim();
+        const data = JSON.parse(jsonStr);
+        if (Array.isArray(data)) patch({ skills: data });
+        toast.success("Skills enhanced!", { id: toastId });
+
+      } else if (sectionName === "education") {
+        const eduData = resume.education.map(e => ({ id: e.id, degree: e.degree, institution: e.institution, field: e.field, highlights: e.highlights }));
+        prompt = `You are an expert ATS resume writer.\nContext: ${jdContext}\n\nCurrent education:\n${JSON.stringify(eduData)}\n\nTask: Enhance education entries by adding comprehensive module/course highlights relevant to the target role.\nFor each entry, provide a highlights array with a single comma-separated modules string like: "Module1, Module2, Module3, Module4, Module5, Module6, Module7"\nKeep all degree names, institutions, and dates UNCHANGED.\nReturn ONLY JSON: [{"id": "...", "highlights": ["Module1, Module2, Module3, Module4, ..."]}]`;
+        const res = await recordAI({ systemPrompt: "Professional resume writer. Return ONLY valid JSON array.", userPrompt: prompt, maxTokens: 1500, temperature: 0.3, taskCategory: "document" });
+        const jsonStr = (res.text || "").replace(/```json|```/g, "").trim();
+        const data = JSON.parse(jsonStr);
+        if (Array.isArray(data)) {
+          const nextEdu = resume.education.map(e => { const m = data.find((x: any) => x.id === e.id); return m ? { ...e, highlights: m.highlights } : e; });
+          patch({ education: nextEdu });
+        }
+        toast.success("Education modules enhanced!", { id: toastId });
+
+      } else if (sectionName === "languages") {
+        toast.success("Languages section is already optimised.", { id: toastId });
+      }
+    } catch (err: any) {
+      console.error(err);
+      toast.error(`Failed to enhance ${sectionName}: ` + err.message, { id: toastId });
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const handlePageShrink = async () => {
     setLoading(true);
     const toastId = toast.loading("AI is condensing resume to fit 1 page...");
@@ -689,6 +823,33 @@ Respond ONLY with a JSON object of the updated sections following this format, w
                       </div>
                     </div>
 
+                    {/* === SECTION-SPECIFIC ENHANCE QUICK ACTIONS === */}
+                    <div className="space-y-1.5">
+                      <label className="text-[10px] uppercase font-bold text-slate-500">Enhance by Section</label>
+                      <div className="grid grid-cols-2 gap-1.5">
+                        {[
+                          { key: "summary", label: "Summary", icon: "FileText", color: "text-violet-400" },
+                          { key: "experience", label: "Experience", icon: "Briefcase", color: "text-emerald-400" },
+                          { key: "education", label: "Education", icon: "GraduationCap", color: "text-blue-400" },
+                          { key: "skills", label: "Skills", icon: "Zap", color: "text-amber-400" },
+                        ].map(({ key, label, icon, color }) => (
+                          <button
+                            key={key}
+                            onClick={() => handleSectionEnhance(key)}
+                            disabled={loading}
+                            className="p-2 rounded-xl bg-slate-800/50 hover:bg-slate-800 border border-slate-700/50 text-[10px] font-semibold transition active:scale-95 flex items-center gap-1.5 cursor-pointer disabled:opacity-40 hover:border-indigo-500/40"
+                          >
+                            {loading ? (
+                              <Icon name="Loader2" className={`w-3 h-3 animate-spin ${color}`} />
+                            ) : (
+                              <Icon name={icon} className={`w-3 h-3 ${color}`} />
+                            )}
+                            <span className="text-slate-200">Enhance {label}</span>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
                     {/* Page-Break alert card */}
                     {isPageOverflowing && (
                       <div className="p-3 rounded-xl bg-rose-950/40 border border-rose-900 text-xs space-y-2 animate-pulse">
@@ -710,6 +871,31 @@ Respond ONLY with a JSON object of the updated sections following this format, w
                             <Icon name="Sparkles" className="w-3 h-3 text-white" />
                           )}
                           ✨ Auto-Compress to 1 Page
+                        </button>
+                      </div>
+                    )}
+
+                    {/* Fill Page 100% card — shown when resume is UNDER-filling */}
+                    {!isPageOverflowing && (
+                      <div className="p-3 rounded-xl bg-indigo-950/30 border border-indigo-800/40 text-xs space-y-2">
+                        <div className="flex items-center gap-1.5 text-indigo-400 font-bold">
+                          <Icon name="Maximize2" className="w-4 h-4" />
+                          Page Fill Optimizer
+                        </div>
+                        <p className="text-[10px] text-slate-300">
+                          Resume is under-filling the page. Expand it to 100% with more quantified bullets and modules.
+                        </p>
+                        <button
+                          onClick={handlePageExpand}
+                          disabled={loading}
+                          className="w-full py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded text-[10px] font-bold transition flex items-center justify-center gap-1 cursor-pointer"
+                        >
+                          {loading ? (
+                            <Icon name="Loader2" className="w-3 h-3 animate-spin text-white" />
+                          ) : (
+                            <Icon name="TrendingUp" className="w-3 h-3 text-white" />
+                          )}
+                          📈 Fill Page to 100%
                         </button>
                       </div>
                     )}
