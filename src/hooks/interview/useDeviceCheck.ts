@@ -152,11 +152,31 @@ export function useDeviceCheck(options: UseDeviceCheckOptions = {}) {
         // used by the Sonru voice-only mode (VoiceInterviewSession). Defaults
         // remain 720p video + audio.
         const wantsVideo = constraints?.video !== false;
+        // Audio constraints: when the caller supplies explicit constraints we
+        // honour them verbatim. When we're defaulting (audio: true), we build a
+        // proper MediaTrackConstraints object that disables the three browser
+        // audio-processing pipelines (echo cancellation, noise suppression, and
+        // automatic gain control).
+        //
+        // ROOT-CAUSE FIX: passing bare `audio: true` lets Chrome/Edge apply
+        // aggressive AGC which can effectively zero-out the recorded signal
+        // during quiet gaps, producing a Blob that plays back as silence.
+        // Disabling these at the getUserMedia level preserves raw microphone
+        // input for the MediaRecorder and does NOT affect the visual audio meter
+        // (the analyser still reads the raw PCM).
+        const audioConstraints: MediaTrackConstraints | boolean =
+          constraints?.audio !== undefined
+            ? constraints.audio
+            : ({
+                echoCancellation: false,
+                noiseSuppression: false,
+                autoGainControl: false,
+              } as MediaTrackConstraints);
         const stream = await navigator.mediaDevices.getUserMedia({
           video: wantsVideo
             ? (constraints?.video ?? ({ width: { ideal: 1280 }, height: { ideal: 720 } } as MediaTrackConstraints))
             : false,
-          audio: constraints?.audio ?? true,
+          audio: audioConstraints,
         });
         streamRef.current = stream;
 

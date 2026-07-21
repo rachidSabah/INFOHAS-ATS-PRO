@@ -103,6 +103,27 @@ export function VoiceInterviewSession({ pkg, resume, jd, generated, onClose, onC
 
   const speech = useSpeechRecognition({ continuous: true, interimResults: false });
 
+  // Stable refs for cleanup — avoids adding `speech` and `previewMeter` to the
+  // unmount effect's dep array. Both hooks return a NEW plain object on every
+  // render (they contain state like `level`/`listening`), so including them as
+  // deps would cause the cleanup to fire on every re-render, calling
+  // stopPreview() 60×/sec (useAudioMeter ticks via requestAnimationFrame) and
+  // killing the microphone stream the moment it is acquired.
+  //
+  // REGRESSION FIX: the previous implementation listed `speech` and
+  // `previewMeter` directly in the deps array, causing the cleanup arrow
+  // (which calls stopPreview()) to fire on EVERY render — including the RAF
+  // ticks from the audio meter itself. This continuously stopped and
+  // restarted the mic stream, which prevented the audio track from ever
+  // being in a stable "live" readyState when recorder.start() was called,
+  // causing every recording to be silent.
+  const stopPreviewRef = useRef(stopPreview);
+  useEffect(() => { stopPreviewRef.current = stopPreview; }, [stopPreview]);
+  const stopSpeechRef = useRef(speech.stop);
+  useEffect(() => { stopSpeechRef.current = speech.stop; }, [speech.stop]);
+  const stopMeterRef = useRef(previewMeter.stop);
+  useEffect(() => { stopMeterRef.current = previewMeter.stop; }, [previewMeter.stop]);
+
   const sessionId = useMemo(() => uid("sess"), []);
   const current = questions[currentIndex];
   const isLast = currentIndex === total - 1;
@@ -127,8 +148,9 @@ export function VoiceInterviewSession({ pkg, resume, jd, generated, onClose, onC
   const ensureStream = useCallback(async () => {
     let stream = getStream();
     if (!stream || stream.getAudioTracks().length === 0) {
-      // Explicit audio-only request (no camera).
-      stream = await requestCameraAndMic({ video: false, audio: true });
+      // Audio-only request (no camera). We omit the `audio` key so the
+      // fixed default constraints in useDeviceCheck apply (EC/NS/AGC disabled).
+      stream = await requestCameraAndMic({ video: false });
     }
     return stream;
   }, [getStream, requestCameraAndMic]);
@@ -143,7 +165,11 @@ export function VoiceInterviewSession({ pkg, resume, jd, generated, onClose, onC
     setMicActivating(true);
     setMicError(null);
     try {
-      const stream = await requestCameraAndMic({ video: false, audio: true });
+      // Omit the `audio` key so the fixed default constraints in useDeviceCheck
+      // apply (echoCancellation/noiseSuppression/autoGainControl all disabled).
+      // Passing `audio: true` explicitly would bypass those defaults and
+      // re-enable browser AGC, which is the root cause of silent recordings.
+      const stream = await requestCameraAndMic({ video: false });
       if (!stream) {
         setMicError(
           deviceSnapshot.error ??
@@ -423,14 +449,20 @@ export function VoiceInterviewSession({ pkg, resume, jd, generated, onClose, onC
     setPhase("prep");
   }, [speech]);
 
-  // ---- cleanup -------------------------------------------------------------
+  // ---- cleanup on unmount --------------------------------------------------
+  // IMPORTANT: deps must be [] (unmount only). `speech` and `previewMeter` are
+  // plain object literals recreated every render (they hold state like
+  // `level`/`listening`). Including them as deps causes the cleanup — and
+  // stopPreview() — to fire on every re-render, stopping the mic stream 60×/sec
+  // via the audio meter's RAF loop, which is the root cause of silent recordings
+  // in this session (the mic track never reaches a stable "live" readyState).
   useEffect(
     () => () => {
-      stopPreview();
-      speech.stop();
-      previewMeter.stop();
+      stopPreviewRef.current();
+      stopSpeechRef.current();
+      stopMeterRef.current();
     },
-    [stopPreview, speech, previewMeter]
+    [] // unmount only
   );
 
   if (!current) {

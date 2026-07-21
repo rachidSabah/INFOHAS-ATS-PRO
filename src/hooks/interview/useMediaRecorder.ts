@@ -144,12 +144,45 @@ export function useMediaRecorder(options: UseMediaRecorderOptions = {}): UseMedi
       chunksRef.current = [];
       accumulatedRef.current = 0;
 
+      // PRE-FLIGHT: verify audio tracks are present, live, and enabled.
+      // If audio is missing or stopped the MediaRecorder will still run but
+      // produce a silent Blob. We catch and report it here so the UI can
+      // surface a meaningful error instead of a confusing silent recording.
+      const audioTracks = stream.getAudioTracks();
+      if (audioTracks.length === 0) {
+        setSnapshot((s) => ({
+          ...s,
+          error: "The media stream has no audio track. Check microphone permissions and retry.",
+          state: "error",
+        }));
+        return;
+      }
+      // Re-enable any track that was accidentally disabled and surface
+      // a warning for tracks that have already ended.
+      for (const t of audioTracks) {
+        if (!t.enabled) t.enabled = true;
+        if (t.readyState === "ended") {
+          setSnapshot((s) => ({
+            ...s,
+            error: "The microphone track has ended. Please close and re-open the session to request a fresh stream.",
+            state: "error",
+          }));
+          return;
+        }
+      }
+
       const mimeType = pickMimeType(stream);
       let recorder: MediaRecorder;
       try {
-        recorder = mimeType
-          ? new MediaRecorder(stream, { mimeType, videoBitsPerSecond: 2_500_000, audioBitsPerSecond: 128_000 })
-          : new MediaRecorder(stream);
+        // Always pass explicit bitrate options so the browser encoder uses a
+        // predictable audio quality regardless of MIME-type negotiation.
+        // Note: passing bare `new MediaRecorder(stream)` with no options lets
+        // the browser pick its own (often lower) audio quality, which can
+        // manifest as apparent silence on slow-clocked devices.
+        const recorderOptions: MediaRecorderOptions = mimeType
+          ? { mimeType, videoBitsPerSecond: 2_500_000, audioBitsPerSecond: 128_000 }
+          : { audioBitsPerSecond: 128_000 };
+        recorder = new MediaRecorder(stream, recorderOptions);
       } catch (e: any) {
         setSnapshot((s) => ({ ...s, error: `Could not start recorder: ${e?.message || e}`, state: "error" }));
         return;
@@ -174,7 +207,9 @@ export function useMediaRecorder(options: UseMediaRecorderOptions = {}): UseMedi
       };
 
       startTsRef.current = performance.now();
-      recorder.start(250); // timeslice → periodic dataavailable
+      // 250 ms timeslice: guarantees ondataavailable fires at least 4×/sec,
+      // so the final chunk is never more than 250 ms of audio away from stop().
+      recorder.start(250);
       setSnapshot((s) => ({
         ...s,
         state: "recording",
