@@ -44,6 +44,7 @@
     "scripts",
     "mini-services",
     "tool-results",
-    "tests"
+    "tests",
+    "drizzle.config.ts"
   ]
 }
