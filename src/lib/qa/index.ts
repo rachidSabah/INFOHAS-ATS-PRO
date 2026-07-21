@@ -15,3 +15,4 @@ export { runFullQASuite, runQuickQACheck } from "./test-runner";
 export { GOLDEN_CORPUS, getGoldenResume, getGoldenResumesByIndustry, getGoldenResumesByTag, getAllGoldenIndustries } from "./golden-corpus";
 export { validateSectionParity, validateImmutability, validateContentPreservation, validateAgainstGoldenCorpus, pipelineValidatorToQATests, validateSemanticPreservation } from "./pipeline-validator";
 export { calculateQualityScore, evaluateDeployment, QUALITY_THRESHOLD } from "./quality-score";
+export { runContinuousEvaluation, PRODUCTION_BASELINE_SCORECARD, type CERunResult, type AIScorecard, type PerformanceLabReport, type SecurityAuditReport, type ReleaseGateDecision } from "./ce-platform";
