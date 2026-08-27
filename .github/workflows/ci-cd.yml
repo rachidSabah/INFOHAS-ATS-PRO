@@ -148,13 +148,23 @@ jobs:
           # Run next-on-pages directly. It wraps vercel build to run locally/offline
           # without requiring Vercel authentication or accounts, generating .vercel/output.
           npx @cloudflare/next-on-pages@1.13.16
+      - name: Resolve Pages project name
+        id: proj
+        run: echo "name=${{ github.ref == 'refs/heads/main' && 'resumeai-pro' || 'resumeai-pro-preview' }}" >> "$GITHUB_OUTPUT"
+      - name: Ensure Pages project exists (idempotent)
+        continue-on-error: true
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: pages project create ${{ steps.proj.outputs.name }} --production-branch=main
       - name: Deploy to Cloudflare Pages
         id: deploy
         uses: cloudflare/wrangler-action@v3
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          command: pages deploy .vercel/output/static --project-name=resumeai-pro${{ github.ref == 'refs/heads/main' && '' || '-preview' }}
+          command: pages deploy .vercel/output/static --project-name=${{ steps.proj.outputs.name }}
 
   # ----------------------------------------------------------
   # 4. Deploy Workers (Hono API)
