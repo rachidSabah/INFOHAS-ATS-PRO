@@ -669,7 +669,7 @@ export async function runOptimizationPipeline(input: PipelineInput): Promise<Pip
  * the 120s timeout and watchdog lifecycle management.
  */
 async function _runOptimizationPipelineInner(input: PipelineInput, watchdog: OptimizationWatchdog): Promise<PipelineResult> {
-  const { resume, jd, userDirectives, aviationMode, checkExport = false, enableReflection = true, deepAgenticMode = false, baselineResume } = input;
+  const { resume, jd, userDirectives, aviationMode, checkExport = false, enableReflection = true, deepAgenticMode = false, baselineResume, providerId } = input;
 
   // ============================================================
   // Load Optimizer Directive — Single Source of Truth
@@ -1158,6 +1158,7 @@ ${jobMemory.industry}`);
             result.companyIntelligence,
             result.skillGap,
             deepAgenticMode,
+            input.providerId,
           );
           optimizeResult = optimizeAttemptResult;
         }
@@ -1801,7 +1802,8 @@ ${jobMemory.industry}`);
         resume,
         result.optimizedResume!,
         jd,
-        result.qa
+        result.qa,
+        input.providerId,
       );
 
       reflectionStep.completedAt = new Date().toISOString();
@@ -2133,6 +2135,7 @@ async function optimizeResumeStandard(
   company: CompanyIntelligence | null = null,
   skillGap: SkillGapIntelligence | null = null,
   deepAgenticMode: boolean = false,
+  providerId?: string,
 ): Promise<{ resume: ResumeData; provider: string; charCount: number; keywordsAdded: number }> {
   const cacheKey = getOptimizationCacheKey(resume, jd, directive);
   try {
@@ -2170,7 +2173,7 @@ async function optimizeResumeStandard(
         };
       } else {
         console.warn("[Optimizer] Multi-Agent Supervisor returned unsuccessful result, falling back to standard optimizer.");
-        result = await optimizeResumeStandardInner(resume, jd, directive, ji, company, skillGap);
+        result = await optimizeResumeStandardInner(resume, jd, directive, ji, company, skillGap, providerId);
       }
     } catch (e: any) {
       console.error("[Optimizer] Multi-Agent Supervisor failed, falling back to standard optimizer:", e?.message);
@@ -2199,6 +2202,7 @@ async function optimizeResumeStandardInner(
   ji: JobIntelligence | null,
   company: CompanyIntelligence | null = null,
   skillGap: SkillGapIntelligence | null = null,
+  providerId?: string,
 ): Promise<{ resume: ResumeData; provider: string; charCount: number; keywordsAdded: number }> {
   // Compute missing keywords from the JD
   const jdKeywords = jd.keywords ?? [];
@@ -2434,6 +2438,9 @@ CONTENT REQUIREMENTS:
     temperature: 0.15,
     taskCategory: "document",
     timeoutMs: OPTIMIZER_CALL_TIMEOUT_MS,
+    // Plumb the Arena-selected provider so runOptimizationPipeline truly targets
+    // the chosen model instead of silently using the default failover chain.
+    providerId,
   });
 
   // Process the AI response through the HARDENED leak-prevention pipeline
@@ -2606,6 +2613,8 @@ CONTENT REQUIREMENTS:
         // Same extended timeout as the primary optimizer call — the retry
         // payload is just as large.
         timeoutMs: OPTIMIZER_CALL_TIMEOUT_MS,
+        // Honor the Arena-selected provider in the retry path as well.
+        providerId,
       });
       console.info(`[Optimizer] Retry response: Provider: ${retryResult.provider}, Length: ${retryResult.text?.length ?? 0}`);
       if (retryResult.provider === "Local Engine (offline mode)" || (retryResult.text?.length ?? 0) < 500) {
@@ -3118,7 +3127,8 @@ export async function runReflectionAgent(
   original: ResumeData,
   optimized: ResumeData,
   jd: JobDescription,
-  qa: QAResult
+  qa: QAResult,
+  providerId?: string,
 ): Promise<ReflectionResult> {
   const reason = qa.confidence < 75
     ? `QA confidence is ${qa.confidence}/100 (below 75 threshold)`
@@ -3169,6 +3179,8 @@ Return ONLY valid JSON:
       taskCategory: "document",
       // Free-tier models can take 40-80s on this prompt.
       timeoutMs: PIPELINE_STEP_CALL_TIMEOUT_MS,
+      // Reflection inherits the Arena-selected provider for consistency.
+      providerId,
     });
 
     let data: { issues?: string[]; suggestions?: string[]; confidence?: number };
