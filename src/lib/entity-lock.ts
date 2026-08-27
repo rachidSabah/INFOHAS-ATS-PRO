@@ -769,14 +769,29 @@ export function verifyEntityIntegrity(
     }
 
     // Check dates
+    // SOURCE-AWARE: Only flag a missing startDate as a CRITICAL failure when the
+    // ORIGINAL resume actually had a date there. Many real resumes (e.g. scanned
+    // PDFs parsed from image text) simply omit dates — in that case the original
+    // startDate is also empty, so a missing date is expected, not corruption.
+    // Flagging it as critical caused an unrecoverable Guardian VETO across all 3
+    // retry attempts, which exhausted the 300s budget and returned a degraded /
+    // blank resume. Mirrors the source-aware logic already used for company.
+    const origStartEmpty = !origExp || !origExp.startDate || origExp.startDate.trim().length === 0;
     if (!exp.startDate || exp.startDate.trim().length === 0) {
-      criticalFailures.push({
-        type: "date_missing",
-        message: `Experience #${i + 1} ("${exp.company}") is missing startDate`,
-        field: `experience[${i}].startDate`,
-        expected: origExp?.startDate || "(original date)",
-      });
-      score -= 10;
+      if (origStartEmpty) {
+        // Original had no date either — legitimate, non-blocking.
+        warnings.push(
+          `Experience #${i + 1} ("${exp.company}") has no startDate — same as original (no date provided)`,
+        );
+      } else {
+        criticalFailures.push({
+          type: "date_missing",
+          message: `Experience #${i + 1} ("${exp.company}") is missing startDate`,
+          field: `experience[${i}].startDate`,
+          expected: origExp?.startDate || "(original date)",
+        });
+        score -= 10;
+      }
     }
 
     if (!exp.endDate || exp.endDate.trim().length === 0) {
