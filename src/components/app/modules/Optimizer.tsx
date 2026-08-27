@@ -898,6 +898,11 @@ Guidelines:
   // ============================================================================
   const [pipelineError, setPipelineError] = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
+  // P1 FIX: Pipeline version token — prevents stale results from being
+  // committed to React state. Each runPipeline call increments this counter.
+  // After the async result arrives, we check if the version still matches.
+  // If it doesn't, the result is from an older run and is discarded.
+  const pipelineVersionRef = useRef(0);
 
   const runPipeline = useCallback(async () => {
     if (!resume || !jdParsed || !beforeReport) return;
@@ -906,6 +911,11 @@ Guidelines:
     if (abortRef.current) abortRef.current.abort();
     const controller = new AbortController();
     abortRef.current = controller;
+
+    // P1 FIX: Increment the version token for this run. Any result that
+    // arrives with a different version is stale and must be discarded.
+    pipelineVersionRef.current++;
+    const myVersion = pipelineVersionRef.current;
 
     setAiThinking(true);
     setAiLog([]);
@@ -960,6 +970,14 @@ Guidelines:
       });
 
       if (controller.signal.aborted) return;
+      // P1 FIX: Stale state detector — if a newer run started while we were
+      // waiting, discard this result entirely. This prevents the old run's
+      // ATS scores, optimized resume, and toast from appearing on top of
+      // (or after) the newer run's results.
+      if (myVersion !== pipelineVersionRef.current) {
+        console.warn("[Optimizer] Stale result discarded — pipeline version mismatch.");
+        return;
+      }
       if (!result) {
         // Supervisor returned null — optimization failed
         setPipelineError("Optimization failed. Please try again.");
@@ -1016,6 +1034,25 @@ Guidelines:
           strategies: [],
           successes: [],
           failures: [errMsg],
+        });
+        return;
+      }
+
+      // === P0 FIX: Handle degraded status ===
+      // The optimizer returned the original resume (no AI optimization happened).
+      // Don't show a success toast — show a warning instead.
+      if (result.status === "degraded") {
+        setPipelineError("AI optimization was degraded — all AI providers failed. The original resume was returned unchanged. Please retry when AI providers recover.");
+        setAiLog((l) => [...l, "⚠ Optimization degraded — original resume returned. No AI improvement applied."]);
+        setAiThinking(false);
+        setStep("done");
+        toast.warning("Optimization degraded — AI providers unavailable. Original resume returned. Please retry later.");
+        OptimizationSession.getInstance().completeRound({
+          beforeATS: result.beforeATS?.scores.ats ?? 0,
+          afterATS: 0, // No after-score — optimization was degraded
+          strategies: result.steps.map((s) => s.name),
+          successes: result.steps.filter((s) => s.status === "completed").map((s) => s.name),
+          failures: result.steps.filter((s) => s.status === "degraded" || s.status === "failed").map((s) => s.name),
         });
         return;
       }

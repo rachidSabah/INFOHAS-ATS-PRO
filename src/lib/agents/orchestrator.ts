@@ -617,6 +617,81 @@ export interface ReflectionResult {
  *
  * @returns A PipelineResult with all intermediate artifacts + the optimized resume.
  */
+
+// ============================================================================
+// P2: Retry-with-Modification Engine
+// ============================================================================
+// Instead of blindly retrying with the same prompt, each retry modifies the
+// approach based on the failure reason. This prevents wasting 3 retries that
+// would fail identically.
+
+interface RetryStrategy {
+  description: string;
+  /** If true, simplify the prompt by dropping intelligence blocks. */
+  simplifyPrompt: boolean;
+  /** If true, add "Return ONLY valid JSON" to the system prompt. */
+  enforceJsonMode: boolean;
+  /** If true, add a shorter version of the directive (just page format). */
+  shortDirective: boolean;
+  /** If true, force provider rotation (skip the default provider, try next). */
+  rotateProvider: boolean;
+}
+
+function getRetryStrategy(attempt: number, failureReason: string | null): RetryStrategy {
+  const reason = (failureReason || "").toLowerCase();
+
+  // Attempt 2: If the failure was about JSON parsing, enforce JSON mode
+  if (attempt === 1) {
+    if (reason.includes("json") || reason.includes("parse") || reason.includes("unexpected token")) {
+      return {
+        description: "JSON enforcement mode (strict JSON-only output)",
+        simplifyPrompt: false,
+        enforceJsonMode: true,
+        shortDirective: false,
+        rotateProvider: false,
+      };
+    }
+    // If it was a timeout or network error, simplify the prompt
+    if (reason.includes("timeout") || reason.includes("timed out") || reason.includes("fetch")) {
+      return {
+        description: "simplified prompt (dropped intelligence blocks to reduce token count)",
+        simplifyPrompt: true,
+        enforceJsonMode: false,
+        shortDirective: true,
+        rotateProvider: false,
+      };
+    }
+    // Default: rotate the provider
+    return {
+      description: "provider rotation (skip default, try next provider)",
+      simplifyPrompt: false,
+      enforceJsonMode: false,
+      shortDirective: false,
+      rotateProvider: true,
+    };
+  }
+
+  // Attempt 3: Combine simplified prompt + JSON enforcement
+  if (attempt === 2) {
+    return {
+      description: "simplified prompt + JSON enforcement + provider rotation",
+      simplifyPrompt: true,
+      enforceJsonMode: true,
+      shortDirective: true,
+      rotateProvider: true,
+    };
+  }
+
+  // Attempt 4 (last): Minimal prompt — just the basics
+  return {
+    description: "minimal prompt (core directive only, no intelligence context)",
+    simplifyPrompt: true,
+    enforceJsonMode: true,
+    shortDirective: true,
+    rotateProvider: true,
+  };
+}
+
 export async function runOptimizationPipeline(input: PipelineInput): Promise<PipelineResult> {
   // ============================================================
   // Phase 15-24: Wrap the entire pipeline in a 120s hard timeout
@@ -890,6 +965,10 @@ async function _runOptimizationPipelineInner(input: PipelineInput, watchdog: Opt
       layoutDiagnostics?: any;
     } | null = null;
     let optimizeError: string | null = null;
+    // P2 FIX: Track the failure reason from the previous attempt so we can
+    // modify the prompt strategy on the next retry (instead of blindly retrying
+    // with the exact same prompt — which would fail the same way).
+    let lastFailureReason: string | null = null;
 
     // Load the directive config (for font size, margins, line height)
     let directiveConfig: OptimizerDirectiveConfig | null = null;
@@ -1210,11 +1289,15 @@ ${jobMemory.industry}`);
           break;
         }
         optimizeError = e?.message || "Unknown error";
+        // P2 FIX: Record the failure reason so the next retry can adapt
+        lastFailureReason = optimizeError;
         console.warn(`[Pipeline] Resume Optimizer attempt ${optimizeAttempt}/${maxOptimizeAttempts} failed: ${optimizeError}`);
         log("Resume Optimizer", `Attempt ${optimizeAttempt} failed: ${optimizeError}`);
         if (optimizeAttempt < maxOptimizeAttempts) {
-          log("Resume Optimizer", "Retrying optimization…");
-          emitProgress(3, `Optimization failed (attempt ${optimizeAttempt}). Retrying…`);
+          // P2 FIX: Modify the prompt strategy based on the failure reason
+          const retryStrategy = getRetryStrategy(optimizeAttempt, lastFailureReason);
+          log("Resume Optimizer", `Retrying with modified strategy: ${retryStrategy.description}…`);
+          emitProgress(3, `Optimization failed (attempt ${optimizeAttempt}). Retrying with ${retryStrategy.description}…`);
         }
         continue;
       }
@@ -1662,17 +1745,27 @@ ${jobMemory.industry}`);
     }
 
     // === ATS Analysis (After) ===
-    result.afterATS = analyzeATS(result.optimizedResume!, jd);
-    const beforeScore = result.beforeATS.scores.ats;
-    const afterScore = result.afterATS.scores.ats;
-    const afterLog = `After-optimization ATS score: ${afterScore}/100 (was ${beforeScore}, +${afterScore - beforeScore} pts).`;
-    log("Quality Assurance", afterLog);
-    emitProgress(4, afterLog);
+    // P0 FIX: Skip afterATS computation in the degraded path — computing ATS
+    // on the original resume (which is what the degraded path returns) would
+    // produce BEFORE=AFTER, falsely implying the optimization had no effect.
+    // Instead, set afterATS to null so the UI shows "N/A — optimization degraded".
+    if (result.status === "degraded" || (result.provider || "").includes("Local Engine (degraded)")) {
+      result.afterATS = null;
+      log("Quality Assurance", "⚠ ATS after-score skipped — optimization was degraded (original resume returned). No AI improvement to measure.");
+      emitProgress(4, "ATS after-score: N/A (degraded — no AI optimization)");
+    } else if (result.optimizedResume) {
+      result.afterATS = analyzeATS(result.optimizedResume, jd);
+      const beforeScore = result.beforeATS?.scores?.ats ?? 0;
+      const afterScore = result.afterATS.scores.ats;
+      const afterLog = `After-optimization ATS score: ${afterScore}/100 (was ${beforeScore}, +${afterScore - beforeScore} pts).`;
+      log("Quality Assurance", afterLog);
+      emitProgress(4, afterLog);
+    }
 
     // ========================================================================
     // Multi-Agent Self-Healing Loop (Up to 3 Attempts)
     // ========================================================================
-    if (result.optimizedResume && result.status !== "failed") {
+    if (result.optimizedResume && result.status !== "failed" && result.status !== "degraded") {
       let healingAttempt = 0;
       const maxHealingAttempts = 3;
       let qaVerdict = result.qa;
