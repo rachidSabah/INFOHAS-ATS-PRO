@@ -151,6 +151,7 @@ export async function runMandatoryPipeline(
       throw new Error(`JSON parsing failed: ${processed.errors.join("; ")}`);
     }
     if (processed.errors.length > 0) {
+      currentData = processed.data;
       return {
         passed: true, // Data exists but there were warnings
         warnings: processed.errors,

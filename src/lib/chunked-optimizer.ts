@@ -111,8 +111,7 @@ Return ONLY the JSON array. No explanation, no markdown fences.`;
     // Merge back into original experience (preserving startDate, endDate, location, etc.)
     const merged = experience.map((orig, i) => {
       const optimized = parsed.find(
-        (p: any) =>
-          p.company === orig.company || p.title === orig.title || i === parsed.indexOf(p)
+        (p: any) => p.company === orig.company || p.title === orig.title
       );
       if (!optimized || !Array.isArray(optimized.bullets)) return orig;
       return { ...orig, bullets: optimized.bullets };

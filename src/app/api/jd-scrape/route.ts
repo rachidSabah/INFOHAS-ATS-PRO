@@ -111,6 +111,11 @@ export async function POST(req: NextRequest) {
     // using the scraper as a proxy to reach internal services or cloud
     // metadata endpoints (e.g. http://169.254.169.254/latest/meta-data/).
     const hostname = parsedUrl.hostname.toLowerCase();
+    // Reject numeric/hex/octal hostnames (e.g. 2130706433, 0x7f000001, 017700000001)
+    // that resolve to loopback/private IPs but bypass the dotted-quad SSRF check.
+    if (/^0x[0-9a-f]+$/i.test(hostname) || /^\d+$/.test(hostname) || /^0[0-7]+$/.test(hostname)) {
+      return NextResponse.json({ error: "URLs with numeric hostnames are blocked." }, { status: 400 });
+    }
     const ssrfError = checkSsrf(hostname);
     if (ssrfError) {
       return NextResponse.json({ error: ssrfError }, { status: 400 });

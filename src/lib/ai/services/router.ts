@@ -222,7 +222,7 @@ export class ProviderRouter {
         if (e?.statusCode === 429 || /429/.test(eMsg) || /rate.?limit/i.test(eMsg) || /FreeUsageLimitError/i.test(eMsg)) {
           rateLimitTracker.record429(provider.id, provider.modelName ?? "default");
           markProvider429Cooldown(cooldownId);
-        } else if (e?.statusCode === 401 || /401/.test(eMsg) || /billing/i.test(eMsg) || /payment/i.test(eMsg) || /CreditsError/i.test(eMsg)) {
+        } else if (e?.statusCode === 401 || /401/.test(eMsg) || /CreditsError/i.test(eMsg)) {
           markProvider401Cooldown(cooldownId);
         } else if (isTimeoutError(e)) {
           markProviderTimeoutCooldown(cooldownId);
@@ -359,7 +359,7 @@ export class ProviderRouter {
         if (e?.statusCode === 429 || /429/.test(eMsg) || /rate.?limit/i.test(eMsg) || /FreeUsageLimitError/i.test(eMsg)) {
           rateLimitTracker.record429(provider.id, provider.modelName ?? "default");
           markProvider429Cooldown(cooldownId);
-        } else if (e?.statusCode === 401 || /401/.test(eMsg) || /billing/i.test(eMsg) || /payment/i.test(eMsg) || /CreditsError/i.test(eMsg)) {
+        } else if (e?.statusCode === 401 || /401/.test(eMsg) || /CreditsError/i.test(eMsg)) {
           markProvider401Cooldown(cooldownId);
         } else if (isTimeoutError(e)) {
           markProviderTimeoutCooldown(cooldownId);
@@ -825,7 +825,7 @@ export function getOrderedFallbackProviders(excludeProviderIdOrIds?: string | st
     active.sort((a, b) => {
       const isFreeA = isOpenCodeZenFree(a);
       const isFreeB = isOpenCodeZenFree(b);
-      if (isFreeA !== isFreeB) return isFreeA ? 1 : -1;
+      if (isFreeA !== isFreeB) return isFreeA ? -1 : 1;
       const rankA = reliabilityRank[a.type] ?? 100;
       const rankB = reliabilityRank[b.type] ?? 100;
       return rankA - rankB;
@@ -912,7 +912,7 @@ export function getOrderedFallbackProviders(excludeProviderIdOrIds?: string | st
     active.sort((a, b) => {
       const isFreeA = isOpenCodeZenFree(a);
       const isFreeB = isOpenCodeZenFree(b);
-      if (isFreeA !== isFreeB) return isFreeA ? 1 : -1;
+      if (isFreeA !== isFreeB) return isFreeA ? -1 : 1;
       const rankA = reliabilityRank[a.type] ?? 100;
       const rankB = reliabilityRank[b.type] ?? 100;
       return rankA - rankB;
@@ -1005,7 +1005,7 @@ export async function selectProviderForAgent(
   let eligible = providers.filter((p: any) => isAvailableForSelection(p, excludeIds));
 
   if (agentType === "simple") {
-    const cheapEligible = eligible.filter((p: any) => getProviderTier(p) >= 3);
+    const cheapEligible = eligible.filter((p: any) => getProviderTier(p) <= 2);
     if (cheapEligible.length > 0) {
       eligible = cheapEligible;
     }

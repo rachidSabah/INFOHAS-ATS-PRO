@@ -396,7 +396,7 @@ Return ONLY valid JSON.`;
   });
 
   const parsed = extractJSON<{ summary?: string; headline?: string; rationales?: any[] }>(result.text);
-  const summaryOut = parsed?.summary || "Summary optimization failed.";
+  const summaryOut = parsed?.summary || (resume.summary || "Summary optimization failed.");
   const headlineOut = parsed?.headline || "";
   const rationalesOut = Array.isArray(parsed?.rationales)
     ? parsed.rationales.map(r => ({

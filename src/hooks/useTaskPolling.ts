@@ -67,6 +67,7 @@ export function useTaskPolling(taskId: string | null): UseTaskPollingResult {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const taskRef = useRef<TaskState | null>(null);
 
   const fetchStatus = useCallback(async () => {
     if (!taskId) return;
@@ -86,14 +87,22 @@ export function useTaskPolling(taskId: string | null): UseTaskPollingResult {
       const data = (await res.json()) as any;
       if (data.ok) {
         setTask({
-          id: data.id,
-          status: data.status,
-          progress: data.progress,
-          message: data.message,
-          error: data.error,
-          updated_at: data.updated_at,
-        });
-        setError(null);
+            id: data.id,
+            status: data.status,
+            progress: data.progress,
+            message: data.message,
+            error: data.error,
+            updated_at: data.updated_at,
+          });
+          taskRef.current = {
+            id: data.id,
+            status: data.status,
+            progress: data.progress,
+            message: data.message,
+            error: data.error,
+            updated_at: data.updated_at,
+          };
+          setError(null);
       } else {
         setError(data.error || "Failed to fetch task status");
       }
@@ -117,20 +126,17 @@ export function useTaskPolling(taskId: string | null): UseTaskPollingResult {
 
     // Set up the 2s polling interval
     intervalRef.current = setInterval(() => {
-      // Check if the task is terminal BEFORE fetching
-      setTask((currentTask) => {
-        if (isTerminalStatus(currentTask?.status)) {
-          // Stop polling
-          if (intervalRef.current) {
-            clearInterval(intervalRef.current);
-            intervalRef.current = null;
-          }
-          return currentTask;
+      // Read latest status from a ref to keep the updater pure (no side effects)
+      if (isTerminalStatus(taskRef.current?.status)) {
+        // Stop polling
+        if (intervalRef.current) {
+          clearInterval(intervalRef.current);
+          intervalRef.current = null;
         }
-        // Continue polling
-        fetchStatus();
-        return currentTask;
-      });
+        return;
+      }
+      // Continue polling
+      fetchStatus();
     }, POLL_INTERVAL_MS);
 
     // Cleanup on unmount or taskId change

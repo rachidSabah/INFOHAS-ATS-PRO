@@ -170,6 +170,7 @@ export async function processAIResponseHardened(
     // STEP 9: HARD Entity Integrity Check
     // ========================================================================
     const integrity = verifyEntityIntegrity(restoredResume, lockedEntities);
+    let recheck: EntityIntegrityCheck | null = null;
 
     if (integrity.criticalFailures.length > 0) {
       const failureMsg = `Entity integrity check FAILED (${integrity.integrityScore}/100): ${
@@ -182,7 +183,7 @@ export async function processAIResponseHardened(
         console.warn("[HardenedOptimizer] Final attempt — performing emergency full restoration");
         restoredResume = performEmergencyRestoration(restoredResume, lockedEntities);
         // Re-check after emergency restoration
-        const recheck = verifyEntityIntegrity(restoredResume, lockedEntities);
+        recheck = verifyEntityIntegrity(restoredResume, lockedEntities);
         if (recheck.criticalFailures.length === 0) {
           console.info("[HardenedOptimizer] Emergency restoration succeeded");
         } else {
@@ -196,8 +197,9 @@ export async function processAIResponseHardened(
       }
     }
 
-    // Hard gate: integrity score must be >= 95
-    if (integrity.integrityScore < 95) {
+    // Hard gate: integrity score must be >= 95 (use post-restoration recheck if present)
+    const scoreToCheck = recheck?.integrityScore ?? integrity.integrityScore;
+    if (scoreToCheck < 95) {
       return failResult("integrity_score", [
         `Entity integrity score ${integrity.integrityScore} is below the 95 threshold`,
       ]);

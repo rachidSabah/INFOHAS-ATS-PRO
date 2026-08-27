@@ -1143,14 +1143,14 @@ I have prepared a comprehensive proposed patch to apply all 3 steps of optimizat
         });
         if (scrapeRes.ok) {
           const scrapeData = (await scrapeRes.json()) as any;
-          if (scrapeData.success && scrapeData.job) {
+          if (scrapeData && scrapeData.text) {
             const newJdId = uid("jd");
             const newJd: JobDescription = {
               id: newJdId,
-              title: scrapeData.job.title || "Scraped Position",
-              company: scrapeData.job.company || "Scraped Employer",
-              rawText: scrapeData.job.description || "",
-              keywords: scrapeData.job.keywords || [],
+              title: scrapeData.title || "Scraped Position",
+              company: "Scraped Employer",
+              rawText: scrapeData.text || "",
+              keywords: [],
               url: targetUrl,
               responsibilities: [],
               requiredSkills: [],

@@ -914,9 +914,12 @@ describe("Free Provider Stabilization & Capabilities", () => {
     } as any);
 
     const ordered = getOrderedFallbackProviders();
-    expect(ordered[0].provider.type).toBe("gemini");
-    expect(ordered[1].provider.type).toBe("mistral");
-    expect(ordered[2].provider.type).toBe("opencode");
+    // Free-first design: mistral-small-latest and opencode free models are detected
+    // as free (provider-capabilities.isOpenCodeZenFree) and sort before paid gemini;
+    // within the free group, reliabilityRank orders mistral(2) before opencode(6).
+    expect(ordered[0].provider.type).toBe("mistral");
+    expect(ordered[1].provider.type).toBe("opencode");
+    expect(ordered[2].provider.type).toBe("gemini");
 
     useApp.setState(originalState);
   });
