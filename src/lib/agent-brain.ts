@@ -262,8 +262,7 @@ REQUIREMENTS:
         agentType: "optimizer",
       });
 
-      const jsonStr = (res.text || "").replace(/```json|```/g, "").trim();
-      const data = JSON.parse(jsonStr);
+      const data = extractJSON<any[]>(res.text || "");
 
       if (!Array.isArray(data)) throw new Error("Expected JSON array");
 
@@ -274,10 +273,17 @@ REQUIREMENTS:
         return match ? { ...e, bullets: match.bullets } : e;
       });
 
+      // Honesty guard: if the model returned valid JSON but matched NONE of the
+      // requested entries, that is effectively a no-op — do not report success.
+      const matched = result.filter((e, i) => e.bullets !== experience[i].bullets).length;
+      if (matched === 0) {
+        throw new Error("Experience enhancement produced no matching entries — optimization skipped to avoid silent no-op");
+      }
+
       return {
         success: true,
         data: result,
-        observation: `Experience enhanced: ${data.length} roles updated. Added ~${Math.max(0, totalNew)} new bullet points.`,
+        observation: `Experience enhanced: ${matched} roles updated. Added ~${Math.max(0, totalNew)} new bullet points.`,
       };
     });
   }
@@ -321,8 +327,7 @@ REQUIREMENTS:
         agentType: "optimizer",
       });
 
-      const jsonStr = (res.text || "").replace(/```json|```/g, "").trim();
-      const data = JSON.parse(jsonStr);
+      const data = extractJSON<any[]>(res.text || "");
 
       if (!Array.isArray(data)) throw new Error("Expected JSON array");
 
@@ -331,10 +336,16 @@ REQUIREMENTS:
         return match ? { ...e, highlights: match.highlights } : e;
       });
 
+      // Honesty guard: a valid JSON array that matched no entries is a silent no-op.
+      const matched = result.filter((e, i) => e.highlights !== education[i].highlights).length;
+      if (matched === 0) {
+        throw new Error("Education enhancement produced no matching entries — optimization skipped to avoid silent no-op");
+      }
+
       return {
         success: true,
         data: result,
-        observation: `Education enhanced: ${data.length} entries with module highlights added.`,
+        observation: `Education enhanced: ${matched} entries with module highlights added.`,
       };
     });
   }
@@ -411,13 +422,18 @@ Respond with ONLY JSON:
         agentType: "supervisor",
       });
 
-      const jsonStr = (res.text || "").replace(/```json|```/g, "").trim();
-      const data = JSON.parse(jsonStr);
+      const data = extractJSON<any>(res.text || "");
+
+      // Guard against partial JSON from the model — never emit "undefined" in the
+      // observation, which would silently mask a degraded reflection pass.
+      const summary = data?.summary ? String(data.summary) : "(reflection summary unavailable)";
+      const needsIteration = data?.needsIteration === true;
+      const confidence = typeof data?.confidence === "number" ? data.confidence : 0;
 
       return {
         success: true,
-        data,
-        observation: `Reflection: ${data.summary}. Needs iteration: ${data.needsIteration}. Confidence: ${data.confidence}%.`,
+        data: { ...data, summary, needsIteration, confidence },
+        observation: `Reflection: ${summary}. Needs iteration: ${needsIteration}. Confidence: ${confidence}%.`,
       };
     });
   }

@@ -92,7 +92,16 @@ export class OpenAICompatibleProvider implements AIProviderAdapter {
     }
 
     const data = (await res.json()) as any;
-    const text = data?.choices?.[0]?.message?.content ?? data?.choices?.[0]?.message?.reasoning_content ?? data?.choices?.[0]?.message?.reasoning ?? "";
+    // Order matters: some free reasoning models (e.g. hy3-free) return an empty
+    // `content` but emit their answer in `reasoning_content`/`reasoning`. If we
+    // only checked `content` first, the optimizer would receive an empty resume.
+    const msg = data?.choices?.[0]?.message ?? {};
+    const text =
+      msg?.content ||
+      msg?.reasoning_content ||
+      msg?.reasoning ||
+      data?.choices?.[0]?.text ||
+      "";
     return {
       text,
       provider: this.type,

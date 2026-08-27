@@ -236,10 +236,17 @@ export async function POST(req: NextRequest) {
       }
 
       if (res.status === 401) {
+        // OpenCode/ZenCode return 401 for an *unsupported model*
+        // ({"error":{"type":"ModelError","message":"Model X is not supported"}}),
+        // not only a bad key. Surface the real cause.
+        const isModelError = /model/i.test(errorMessage) &&
+          (/ModelError|not supported|unknown model|model not found/i.test(errorMessage));
         return NextResponse.json({
           ok: false,
           latencyMs,
-          message: `API returned HTTP 401 Unauthorized: Invalid API Key. Please verify that your API key is correct and has the necessary permissions. Detail: ${errorMessage}`,
+          message: isModelError
+            ? `Model not supported by provider. ${errorMessage}`
+            : `API returned HTTP 401 Unauthorized: Invalid API Key. Please verify that your API key is correct and has the necessary permissions. Detail: ${errorMessage}`,
         });
       }
 

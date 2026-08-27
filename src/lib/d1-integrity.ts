@@ -9,6 +9,11 @@
 
 "use client";
 
+// The Cloudflare Worker that serves the data API (D1-backed). This MUST be an
+// absolute URL — the D1 integrity check runs from the Next.js Pages origin and
+// a relative path would resolve to Pages, which has no /api/resumes route.
+const WORKER_API_BASE = "https://resumeai-pro-api.rachidelsabah.workers.dev";
+
 export interface D1IntegrityResult {
   healthy: boolean;
   integrityCheck: string;
@@ -34,10 +39,16 @@ export async function checkD1Integrity(): Promise<D1IntegrityResult> {
   try {
     // Try calling the health endpoint first (lighter check)
     const healthResponse = await fetch("/api/health", { signal: AbortSignal.timeout(5000) });
-    const healthData = (await healthResponse.json()) as any;
+    const healthData = (await healthResponse.json().catch(() => null)) as any;
 
-    if (!healthData.ok || healthData.db !== "connected") {
-      issues.push("D1 database is not connected");
+    // The real health response shape is { status, checks: { database: { status, detail } } }.
+    // There is NO top-level `.ok` or `.db` field, so the previous check
+    // (`!healthData.ok || healthData.db !== "connected"`) was ALWAYS true and
+    // made this feature report "D1 not connected" even when the DB was healthy.
+    const dbStatus = healthData?.checks?.database?.status ?? healthData?.status;
+    const dbOk = healthResponse.ok && (dbStatus === "ok" || dbStatus === "connected");
+    if (!dbOk) {
+      issues.push(`D1 database is not connected (status: ${dbStatus ?? "unknown"})`);
       integrityCheck = "disconnected";
     }
   } catch (e: any) {
@@ -45,10 +56,12 @@ export async function checkD1Integrity(): Promise<D1IntegrityResult> {
     integrityCheck = "error";
   }
 
-  // Check for orphan records by querying the Worker API
+  // Check for orphan records by querying the Worker API.
+  // NOTE: this must target the Cloudflare Worker (which serves /api/resumes),
+  // NOT the Next.js Pages origin — a relative path would 404 on Pages.
   try {
     // Check resumes without users
-    const resumesResponse = await fetch("/api/resumes", {
+    const resumesResponse = await fetch(`${WORKER_API_BASE}/api/resumes`, {
       headers: { "X-User-Id": "system" },
       signal: AbortSignal.timeout(5000),
     });

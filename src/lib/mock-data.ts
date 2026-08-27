@@ -86,20 +86,16 @@ export const SEED_PROVIDERS: AIProvider[] = [
     rateLimitPerMinute: 20,
     modelName: "mimo-v2.5-free",
     enabledModels: [
-      // ── Less congested — try first ──
+      // Verified live free models on https://opencode.ai/zen/v1 (as of 2026-08-27).
+      // Stale names (north-mini-code-free, minimax-m2.5-free, nemotron-3-super-free,
+      // hy3-free-stealth, big-pickle, qwen3-30b-a3b-free, llama-4-*, gemma-3-27b-free)
+      // were removed — the endpoint now returns 401 "Model not supported" for them.
       "mimo-v2.5-free",
-      "minimax-m2.5-free",
-      "nemotron-3-super-free",
+      "hy3-free",
       "nemotron-3-ultra-free",
-      "north-mini-code-free",
-      "hy3-free-stealth",
-      // ── Good fallbacks ──
-      "big-pickle",
-      "qwen3-30b-a3b-free",
-      "llama-4-scout-free",
-      "llama-4-maverick-free",
-      "gemma-3-27b-free",
-      // ── Often congested — last resort ──
+      "nemotron-3.5-lightning-free",
+      "laguna-s-2.1-free",
+      "muse-spark-1.2-contributor-free",
       "deepseek-v4-flash-free"
     ],
     streamingEnabled: true,
