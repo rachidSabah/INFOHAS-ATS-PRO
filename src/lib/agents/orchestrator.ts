@@ -503,7 +503,7 @@ export interface PipelineProgress {
 
 export interface PipelineStep {
   name: string;
-  status: "pending" | "running" | "completed" | "failed" | "skipped";
+  status: "pending" | "running" | "completed" | "failed" | "skipped" | "degraded";
   startedAt?: string;
   completedAt?: string;
   durationMs?: number;
@@ -532,7 +532,7 @@ export interface PipelineResult {
   /** Per-step execution status (for the UI pipeline visualization) */
   steps: PipelineStep[];
   /** Overall pipeline status */
-  status: "running" | "completed" | "failed";
+  status: "running" | "completed" | "failed" | "degraded";
   /** Error message (only if status === "failed") */
   error?: string;
   /** Provider that generated the optimized resume */
@@ -1547,10 +1547,11 @@ ${jobMemory.industry}`);
       }).length;
       result.metCharTarget = false;
 
-      // Mark step as COMPLETED (not failed) so the pipeline continues
+      // Mark step as DEGRADED — NOT completed. The optimizer did NOT succeed.
       step.completedAt = new Date().toISOString();
       step.durationMs = Date.now() - new Date(step.startedAt).getTime();
-      step.status = "completed";
+      step.status = "degraded";
+      result.status = "degraded";
       emitProgress(3, `⚠ AI providers unavailable. Original resume returned as-is. Retry later for full optimization.`);
       // Skip the throw — continue to QA step
     }
@@ -2018,7 +2019,10 @@ ${jobMemory.industry}`);
     });
   }
 
-  if (result.status !== "failed") result.status = "completed";
+  // Preserve "degraded" status — don't collapse it to "completed".
+  if (result.status !== "failed" && result.status !== "degraded") {
+    result.status = "completed";
+  }
 
   // Diagnostic: log final pipeline outcome so we can see if it completed
   // successfully or failed, and what the key metrics are.
@@ -2046,8 +2050,8 @@ ${jobMemory.industry}`);
   }
 
   // Assert Quality Gate: status must be completed or failed with non-null error
-  if (!(result.status === "completed" || result.error != null)) {
-    throw new Error("Quality Gate: Pipeline result must be completed or have a non-null error");
+  if (!(result.status === "completed" || result.status === "degraded" || result.error != null)) {
+    throw new Error("Quality Gate: Pipeline result must be completed, degraded, or have a non-null error");
   }
 
   // ========================================================================

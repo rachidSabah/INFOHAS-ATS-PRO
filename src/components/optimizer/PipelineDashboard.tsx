@@ -42,6 +42,7 @@ export function PipelineDashboard() {
   const completed = agentList.filter((a) => a.status === "completed" || a.status === "cached").length;
   const failed = agentList.filter((a) => a.status === "failed").length;
   const running = agentList.filter((a) => a.status === "running").length;
+  const degraded = agentList.filter((a) => a.status === "degraded").length;
   const successRate = getPipelineSuccessRate(metrics);
   const avgDuration = getAveragePipelineDuration(metrics);
   const totalRetries = Object.values(metrics).reduce((sum, m) => sum + m.retries, 0);
@@ -68,7 +69,7 @@ export function PipelineDashboard() {
                 )}
               </CardTitle>
               <CardDescription className="text-xs mt-1">
-                Unified pipeline · {completed} completed · {running} running · {failed} failed
+                Unified pipeline · {completed} completed · {running} running · {failed} failed{degraded > 0 ? ` · ${degraded} degraded` : ""}
               </CardDescription>
             </div>
             <div className="flex items-center gap-2 text-xs">
@@ -213,6 +214,7 @@ function AgentCard({ agent }: { agent: AgentState }) {
     running: { color: "#1154A3", bg: "bg-brand/10", icon: "Loader2" },
     completed: { color: "#10B981", bg: "bg-emerald-500/10", icon: "CheckCircle2" },
     failed: { color: "#DC2626", bg: "bg-red-500/10", icon: "AlertCircle" },
+    degraded: { color: "#F59E0B", bg: "bg-amber-500/10", icon: "AlertTriangle" },
     skipped: { color: "#94A3B8", bg: "bg-muted/30", icon: "MinusCircle" },
     cached: { color: "#8B5CF6", bg: "bg-purple-500/10", icon: "Database" },
   };

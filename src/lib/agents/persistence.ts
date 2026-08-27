@@ -211,7 +211,7 @@ export interface TimelineEntry {
   /** Agent name (human-readable) */
   agentName: string;
   /** Event type */
-  event: "start" | "complete" | "retry" | "fail" | "recover" | "cache-hit";
+  event: "start" | "complete" | "retry" | "fail" | "recover" | "cache-hit" | "degraded";
   /** Duration in ms (for complete/fail events) */
   durationMs?: number;
   /** Error message (for fail events) */

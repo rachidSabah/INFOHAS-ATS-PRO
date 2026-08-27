@@ -155,6 +155,7 @@ export function PipelineProgressView({ progress, isRunning, result, error, onRet
               className={`flex items-center gap-2.5 p-2 rounded-lg transition ${
                 status === "running" ? "bg-brand/10 border border-brand/30" :
                 status === "completed" ? "bg-emerald-50 dark:bg-emerald-950/15" :
+                status === "degraded" ? "bg-amber-50 dark:bg-amber-950/15 border border-amber-200 dark:border-amber-900" :
                 status === "failed" ? "bg-red-50 dark:bg-red-950/15 border border-red-200 dark:border-red-900" :
                 status === "skipped" ? "bg-secondary/30 opacity-60" :
                 "bg-secondary/40"
@@ -164,6 +165,7 @@ export function PipelineProgressView({ progress, isRunning, result, error, onRet
               <div className="shrink-0">
                 {status === "running" && <Icon name="Loader2" className="w-4 h-4 text-brand animate-spin" />}
                 {status === "completed" && <Icon name="CheckCircle2" className="w-4 h-4 text-emerald-600" />}
+                {status === "degraded" && <Icon name="AlertTriangle" className="w-4 h-4 text-amber-600" />}
                 {status === "failed" && <Icon name="XCircle" className="w-4 h-4 text-red-600" />}
                 {status === "skipped" && <Icon name="Minus" className="w-4 h-4 text-muted-foreground" />}
                 {status === "pending" && (
@@ -176,7 +178,7 @@ export function PipelineProgressView({ progress, isRunning, result, error, onRet
               {/* Step name */}
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-1.5">
-                  <span className={`text-xs font-medium ${status === "failed" ? "text-red-700 dark:text-red-400" : status === "completed" ? "text-emerald-700 dark:text-emerald-400" : status === "running" ? "text-brand" : "text-muted-foreground"}`}>
+                  <span className={`text-xs font-medium ${status === "failed" ? "text-red-700 dark:text-red-400" : status === "degraded" ? "text-amber-700 dark:text-amber-400" : status === "completed" ? "text-emerald-700 dark:text-emerald-400" : status === "running" ? "text-brand" : "text-muted-foreground"}`}>
                     {step.name}
                   </span>
                   {isOptional && status === "pending" && (

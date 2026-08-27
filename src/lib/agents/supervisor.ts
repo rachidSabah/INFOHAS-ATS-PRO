@@ -289,6 +289,15 @@ function updateAgent(id: AgentId, patch: Partial<AgentState>): void {
       if (prevStatus === "running") {
         recordAgentMetric(id, "success", patch.durationMs);
       }
+    } else if (newStatus === "degraded") {
+      appendTimelineEntry({
+        timestamp: now, agentId: id, agentName, event: "degraded",
+        durationMs: patch.durationMs,
+        message: patch.log ?? `${agentName} degraded — fallback used.`,
+      });
+      if (prevStatus === "running") {
+        recordAgentMetric(id, "failure", patch.durationMs);
+      }
     } else if (newStatus === "failed") {
       appendTimelineEntry({
         timestamp: now, agentId: id, agentName, event: "fail",
@@ -376,6 +385,7 @@ async function reportAgentStatusToD1(
     failed: 100,
     skipped: 100,
     cached: 100,
+    degraded: 100,
   };
 
   const messageMap: Record<AgentStatus, string> = {
@@ -385,6 +395,7 @@ async function reportAgentStatusToD1(
     failed: patch.error || `${agentId} failed`,
     skipped: `${agentId} skipped`,
     cached: `${agentId} cached`,
+    degraded: patch.log || `${agentId} degraded — fallback used`,
   };
 
   try {
@@ -526,7 +537,7 @@ export function syncCoreAgentStatusesFromPipeline(result: PipelineResult): void 
     if (!step) continue;
     for (const agentId of agentIds) {
       updateAgent(agentId, {
-        status: step.status === "completed" ? "completed" : step.status === "failed" ? "failed" : step.status === "skipped" ? "skipped" : "pending",
+        status: step.status === "completed" ? "completed" : step.status === "failed" ? "failed" : step.status === "skipped" ? "skipped" : step.status === "degraded" ? "degraded" : "pending",
         startedAt: step.startedAt,
         completedAt: step.completedAt,
         durationMs: step.durationMs,
@@ -654,8 +665,27 @@ function finalizeSupervisorStatus(): void {
     .map((id) => state.agents[id])
     .filter((a) => a && a.status === "failed");
 
+  const degradedCore = coreRequiredAgentIds
+    .map((id) => state.agents[id])
+    .filter((a) => a && a.status === "degraded");
+
   const failedAgents = agentList.filter((a) => a.status === "failed");
 
+  // === DEGRADED CHECK ===
+  if (degradedCore.length > 0) {
+    const completedCount = agentList.filter((a) => a.status === "completed" || a.status === "cached").length;
+    const skippedCount = agentList.filter((a) => a.status === "skipped").length;
+    const failedCount = failedAgents.length;
+    const degradedCount = agentList.filter((a) => a.status === "degraded").length;
+    updateAgent("supervisor", {
+      status: "degraded",
+      completedAt: new Date().toISOString(),
+      log: `Pipeline DEGRADED: ${completedCount} completed, ${degradedCount} degraded, ${skippedCount} skipped, ${failedCount} failed. ` +
+        `Core agent(s) degraded: ${degradedCore.map((a) => a.name).join(", ")}. ` +
+        `The optimization did NOT use AI — the original resume was returned. Please retry when AI providers recover.`,
+    });
+    return;
+  }
   // FALSE PARSE FAILURE FIX: If core agents failed but fallback succeeded,
   // mark the pipeline as COMPLETED (not FAILED). The user got a valid result.
   if (failedCore.length > 0 && !fallbackSucceeded) {
@@ -691,9 +721,8 @@ function finalizeSupervisorStatus(): void {
     const failedCount = failedAgents.length;
     const failedPostOpt = failedAgents.filter((a) => postOptAgentIds.includes(a.id));
 
-    const status = failedPostOpt.length > 0 ? "completed" : "completed";
     updateAgent("supervisor", {
-      status,
+      status: "completed",
       completedAt: new Date().toISOString(),
       log: `Pipeline complete: ${completedCount} completed, ${skippedCount} skipped, ${failedCount} failed.` +
         (failedPostOpt.length > 0 ? ` ⚠ Post-optimization issues: ${failedPostOpt.map((a) => a.name).join(", ")}.` : ""),
@@ -948,9 +977,18 @@ export async function handleOptimizationRequested(
     // or the pipeline status is "failed". Local Engine results ARE accepted
     // now — they return the original resume with JD keywords added, which is
     // better than no result at all. The user can retry when AI providers recover.
+    const isDegraded = result.status === "degraded"
+      || (result.provider || "").includes("Local Engine (degraded)")
+      || (result.optimizedResume as any)?.source === "ai-optimized-degraded";
+
     const isRealOptimization = result.status !== "failed"
+      && result.status !== "degraded"
       && (result.charCount ?? 0) >= 500;
-    if (!isRealOptimization) {
+
+    if (isDegraded) {
+      console.warn(`[Supervisor] Optimization DEGRADED — AI providers failed. provider=${result.provider}, status=${result.status}, charCount=${result.charCount ?? 0}.`);
+      setCached(cacheK, result);
+    } else if (!isRealOptimization) {
       const reason = result.status === "failed"
         ? `status is "failed"`
         : `charCount ${result.charCount ?? 0} < 500`;
@@ -962,7 +1000,7 @@ export async function handleOptimizationRequested(
       cache.delete(cacheK);
       throw new Error(
         result.error
-        || (result.provider === "Local Engine (offline mode)"
+        || ((result.provider || "").includes("Local Engine")
           ? "No AI provider available. Optimization could not be completed. Configure an API provider in Settings or sign in to Puter."
           : `Optimization produced insufficient content (charCount=${result.charCount ?? 0}, provider=${result.provider}). Please try again or reduce resume content.`)
       );
