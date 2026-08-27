@@ -38,6 +38,7 @@
 
 import type { ResumeData, JobDescription, OptimizerDirectiveConfig } from "../types";
 import { computeExperienceFingerprint } from "../experience-fingerprint";
+import { getVisibleCharCount } from "../layout-validator";
 
 // ============================================================================
 // Page-fill estimation
@@ -77,12 +78,16 @@ export interface PageFillTarget {
 export function computePageFillTarget(directive?: OptimizerDirectiveConfig | null): PageFillTarget {
   // Use the directive's values if available, otherwise use defaults
   // matching the InfoHAS Pro master layout.
-  const fontSize = directive?.bodyFontSizePt ?? 10.5;
-  const lineHeight = directive?.lineHeight ?? 1.2;
-  const marginTopMm = directive?.marginTopMm ?? 6.35;
-  const marginBottomMm = directive?.marginBottomMm ?? 6.35;
-  const marginLeftMm = directive?.marginLeftMm ?? 8.89;
-  const marginRightMm = directive?.marginRightMm ?? 8.89;
+  // Defaults match the real InfoHAS Pro A4 master template (see FALLBACK_CONFIG
+  // in optimizer-directive-engine.ts): 10pt body, 1.15 line-height, 12mm top/bottom
+  // and 15mm left/right margins. Using the old 10.5pt/1.2/6.35mm values overshot
+  // the capacity estimate by ~2x and left pages under-filled.
+  const fontSize = directive?.bodyFontSizePt ?? 10;
+  const lineHeight = directive?.lineHeight ?? 1.15;
+  const marginTopMm = directive?.marginTopMm ?? 12;
+  const marginBottomMm = directive?.marginBottomMm ?? 12;
+  const marginLeftMm = directive?.marginLeftMm ?? 15;
+  const marginRightMm = directive?.marginRightMm ?? 15;
 
   // A4 dimensions
   const pageWidthMm = 210;
@@ -103,15 +108,13 @@ export function computePageFillTarget(directive?: OptimizerDirectiveConfig | nul
   // Raw character capacity (if every line were full text)
   const rawCapacity = charsPerLine * linesPerPage;
 
-  // Effective capacity: text is ~52-60% of raw capacity due to:
-  // - Section headers (uppercase, bold, take space)
-  // - Bullet points (indented, not full-width)
-  // - Spacing between sections
-  // - Two-column header (name + photo)
-  // Use 0.58 as the effective ratio (calibrated against the InfoHAS Pro layout)
-  const effectiveCapacity = Math.floor(rawCapacity * 0.58);
+  // Effective capacity: calibrate so that the OPTIMAL 98% fill target lands at
+  // ~3,200 VISIBLE chars, which is exactly the export gate's 100% full-page
+  // mark (Layout Validator: charCount / 3200). With the real InfoHAS A4
+  // template this gives effectiveCapacity ≈ 3,268 (ratio ≈ 0.574).
+  const effectiveCapacity = Math.floor(rawCapacity * 0.574);
 
-  // 80% minimum page fill, 90-98% target sweet spot
+  // 85% minimum page fill, 98% OPTIMAL single-page fill target (== overflow cap)
   const minChars = Math.floor(effectiveCapacity * 0.85);
   const targetChars = Math.floor(effectiveCapacity * 0.98);
   const maxChars = Math.floor(effectiveCapacity * 0.98);
@@ -129,13 +132,10 @@ export function computePageFillTarget(directive?: OptimizerDirectiveConfig | nul
  * This matches the metric used by the orchestrator's quality gates.
  */
 export function computeResumeCharCount(resume: ResumeData): number {
-  return JSON.stringify({
-    summary: resume.summary,
-    experience: resume.experience,
-    skills: resume.skills,
-    education: resume.education,
-    languages: resume.languages,
-  }).length;
+  // Count VISIBLE text (what actually fills the page), not JSON structure.
+  // This matches layout-validator.getVisibleCharCount so the optimizer's
+  // page-fill decision and the export quality gate use the same ground truth.
+  return getVisibleCharCount(resume);
 }
 
 // ============================================================================
@@ -193,7 +193,8 @@ export function expandResume(
     if (!origExp) return exp;
 
     const newBullets = [...exp.bullets];
-    const maxBullets = 4;
+    const maxBullets = 5;
+    let addedBullets = 0;
 
     // Find JD responsibilities that match this role
     const relevantResponsibilities = (jd.responsibilities ?? []).filter((r) => {
@@ -201,16 +202,14 @@ export function expandResume(
       // Check if the responsibility is relevant to the role title or company
       return (
         rLower.includes(exp.title?.toLowerCase().split(" ")[0] ?? "") ||
-        rLower.includes("customer") && /customer|client|passenger|guest/i.test(origExp.title) ||
-        rLower.includes("team") && /lead|manager|senior/i.test(origExp.title)
+        (rLower.includes("customer") && /customer|client|passenger|guest/i.test(origExp.title)) ||
+        (rLower.includes("team") && /lead|manager|senior/i.test(origExp.title))
       );
     });
 
-    // Add at most 1-2 bullets, only if we have < 4 and the responsibility
-    // isn't already covered by an existing bullet
+    // Add up to 2 JD-derived bullets (cap at 5 total), only if not already covered
     for (const resp of relevantResponsibilities) {
-      if (newBullets.length >= maxBullets) break;
-      // Check if this responsibility is already covered
+      if (newBullets.length >= maxBullets || addedBullets >= 2) break;
       const alreadyCovered = newBullets.some((b) =>
         b.toLowerCase().includes(resp.toLowerCase().slice(0, 20)),
       );
@@ -225,6 +224,7 @@ export function expandResume(
         ? `${actionVerb} ${resp.toLowerCase().replace(/^(responsible for|duties include|tasks include)\s*/i, "")}, achieving ${metric} improvement.`
         : `${actionVerb} ${resp.toLowerCase().replace(/^(responsible for|duties include|tasks include)\s*/i, "")} in alignment with organizational standards.`;
       newBullets.push(bullet);
+      addedBullets++;
     }
 
     return { ...exp, bullets: newBullets };
@@ -492,7 +492,7 @@ export function validatePageFill(
 
   const summary = `Page usage: ${pageUsage}% (${charCount} chars, target ${target.targetChars}). ${
     inSweetSpot ? "✓ In sweet spot (90-98%)." :
-    wouldOverflow ? "⚠ Would overflow — compressing." :
+    wouldOverflow || pageUsage > 98 ? "⚠ Above 98% — compressing." :
     pageUsage < 85 ? "✗ Below 85% minimum — expanding." :
     "Slightly under target — expanding."
   }`;

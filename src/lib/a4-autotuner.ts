@@ -59,8 +59,16 @@ export async function autotuneA4Density(
   onProgress?.(`Initial visual density: ${initialFill}% A4 page height`, initialFill);
 
   // Ideal target range: 94.0% to 98.0% (leaves 2-4% safety buffer for Word/DOCX line heights)
-  if (initialFill >= 94.0 && initialFill <= 98.0) {
-    onProgress?.(`Resume is already perfectly tuned at ${initialFill}% A4 density!`, initialFill);
+  // NOTE: getA4FillPercentage (layout-simulator) tends to over-report fill, so we
+  // additionally check the accurate visible-char metric. Expand if EITHER says
+  // we are under 94% (so genuinely thin resumes get filled), only stop on overflow.
+  const { validatePageFill } = await import("./agents/page-balancer");
+  let visibleUsage = 100;
+  try {
+    visibleUsage = validatePageFill(resume, null).pageUsage;
+  } catch { /* non-fatal */ }
+  if ((initialFill >= 94.0 && initialFill <= 98.0) || (visibleUsage >= 94.0 && visibleUsage <= 98.0)) {
+    onProgress?.(`Resume is already perfectly tuned at ${Math.max(initialFill, visibleUsage)}% A4 density!`, initialFill);
     return {
       resume: currentResume,
       initialFillPercent: initialFill,

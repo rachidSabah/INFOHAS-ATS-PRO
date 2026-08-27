@@ -1445,9 +1445,17 @@ ${jobMemory.industry}`);
             // === STAGE 4 DETERMINISTIC A4 AUTOTUNER (Guarantees 98-100% A4 visual density) ===
             try {
               const { autotuneA4Density, getA4FillPercentage } = await import("../a4-autotuner");
-              const fillBefore = getA4FillPercentage(result.optimizedResume!);
-              if (fillBefore < 95 || fillBefore > 100) {
-                log("Resume Optimizer", `Autotuning A4 page visual density (currently ${fillBefore}%)...`);
+              const { validatePageFill } = await import("./page-balancer");
+              // Use the accurate visible-char page fill (not the A4 physical
+              // simulator, which over-reports and skips expansion). The A4
+              // simulator is still used as a hard overflow guard below.
+              const visibleFill = validatePageFill(result.optimizedResume!, directiveConfig);
+              const fillBefore = visibleFill.pageUsage;
+              // Hard overflow guard: never let a 2-page resume through.
+              const a4Fill = getA4FillPercentage(result.optimizedResume!);
+              const overflow = a4Fill > 101;
+              if (fillBefore < 98 || overflow) {
+                log("Resume Optimizer", `Autotuning A4 page visual density (currently ${fillBefore}% visible / ${a4Fill}% simulated)...`);
                 emitProgress(3, `Autotuning A4 visual page fill (${fillBefore}% → target 98-100%)...`);
                 const tuned = await autotuneA4Density(result.optimizedResume!, jd);
                 result.optimizedResume = tuned.resume;

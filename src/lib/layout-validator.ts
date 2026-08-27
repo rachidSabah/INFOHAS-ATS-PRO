@@ -38,8 +38,11 @@ const MIN_PAGE_FILL = 85; // %
 
 /**
  * Calculate the visible character count of a resume (not JSON structure).
+ * This is the single source of truth for "how full is the page" — the
+ * page-balancer's computeResumeCharCount delegates to it so the optimizer
+ * and the export gate agree on the same metric.
  */
-function getVisibleCharCount(resume: ResumeData): number {
+export function getVisibleCharCount(resume: ResumeData): number {
   const parts: string[] = [];
   parts.push(resume.name || "");
   parts.push(resume.headline || "");
