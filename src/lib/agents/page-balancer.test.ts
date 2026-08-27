@@ -142,10 +142,12 @@ describe("computePageFillTarget", () => {
     expect(target.maxChars).toBeLessThanOrEqual(3500);
   });
 
-  it("min < target < max", () => {
+  it("min < target (98% optimal fill, target equals the 98% cap)", () => {
     const target = computePageFillTarget(null);
     expect(target.minChars).toBeLessThan(target.targetChars);
-    expect(target.targetChars).toBeLessThan(target.maxChars);
+    // targetChars is the 98% optimal-fill target and also the 98% overflow cap,
+    // so it must be <= maxChars (they are equal by design).
+    expect(target.targetChars).toBeLessThanOrEqual(target.maxChars);
   });
 
   it("estimatePageUsage returns 0 for 0 chars", () => {

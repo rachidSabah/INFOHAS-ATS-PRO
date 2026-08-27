@@ -112,8 +112,8 @@ export function computePageFillTarget(directive?: OptimizerDirectiveConfig | nul
   const effectiveCapacity = Math.floor(rawCapacity * 0.58);
 
   // 80% minimum page fill, 90-98% target sweet spot
-  const minChars = Math.floor(effectiveCapacity * 0.80);
-  const targetChars = Math.floor(effectiveCapacity * 0.94);
+  const minChars = Math.floor(effectiveCapacity * 0.85);
+  const targetChars = Math.floor(effectiveCapacity * 0.98);
   const maxChars = Math.floor(effectiveCapacity * 0.98);
 
   const estimatePageUsage = (chars: number): number => {
@@ -487,7 +487,8 @@ export function validatePageFill(
 
   let action: "expand" | "compress" | "none" = "none";
   if (wouldOverflow) action = "compress";
-  else if (pageUsage < 90) action = "expand";
+  // Expand until we reach the OPTIMAL 98% single-page fill (not just past 90%).
+  else if (pageUsage < 98) action = "expand";
 
   const summary = `Page usage: ${pageUsage}% (${charCount} chars, target ${target.targetChars}). ${
     inSweetSpot ? "✓ In sweet spot (90-98%)." :

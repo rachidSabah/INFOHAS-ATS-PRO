@@ -11,7 +11,7 @@ import { Badge, Icon } from "@/components/shared";
 import { useApp, uid } from "@/lib/store";
 import { ProviderManager } from "@/lib/ai/services";
 import { toast } from "sonner";
-import type { AIProvider, AIProviderType } from "@/lib/types";
+import type { AIProvider } from "@/lib/types";
 import { isOpenCodeZenFree } from "@/lib/provider-capabilities";
 import { ProviderEditor } from "./AIProviderEditor";
 import { ProviderAnalytics } from "./ProviderAnalytics";
@@ -21,32 +21,16 @@ import { PuterAuthCard } from "./PuterAuthCard";
 import { ConnectAntigravityDialog } from "./ConnectAntigravityDialog";
 import { getPuterProvider } from "@/lib/providers";
 import type { ProviderAuthStatus } from "@/lib/providers/interface";
+import { PROVIDER_CATALOG, type ProviderCatalogEntry } from "@/lib/ai/provider-catalog";
 import {
   AreaChart, Area, BarChart, Bar, PieChart, Pie, Cell,
   XAxis, YAxis, Tooltip, ResponsiveContainer, Legend,
 } from "recharts";
 
-const PROVIDER_TYPES: { type: AIProviderType; label: string; icon: string; defaultUrl?: string; defaultModel?: string; authType?: "bearer" | "header" | "query" | "none" }[] = [
-  { type: "puter", label: "Puter.js (Free)", icon: "Sparkles", defaultUrl: "https://api.puter.com", defaultModel: "claude-sonnet-4" },
-  { type: "openai", label: "OpenAI", icon: "Bot", defaultUrl: "https://api.openai.com/v1", defaultModel: "gpt-4o-mini", authType: "bearer" },
-  { type: "claude", label: "Anthropic Claude", icon: "Bot", defaultUrl: "https://api.anthropic.com/v1", defaultModel: "claude-3-5-sonnet-20241022", authType: "header" },
-  { type: "gemini", label: "Google Gemini", icon: "Bot", defaultUrl: "https://generativelanguage.googleapis.com/v1beta", defaultModel: "gemini-2.0-flash", authType: "bearer" },
-  { type: "deepseek", label: "DeepSeek", icon: "Bot", defaultUrl: "https://api.deepseek.com/v1", defaultModel: "deepseek-chat", authType: "bearer" },
-  { type: "groq", label: "Groq", icon: "Zap", defaultUrl: "https://api.groq.com/openai/v1", defaultModel: "llama-3.3-70b-versatile", authType: "bearer" },
-  { type: "mistral", label: "Mistral AI", icon: "Bot", defaultUrl: "https://api.mistral.ai/v1", defaultModel: "mistral-large-latest", authType: "bearer" },
-  { type: "cohere", label: "Cohere", icon: "Bot", defaultUrl: "https://api.cohere.com/v1", defaultModel: "command-r-plus", authType: "bearer" },
-  { type: "perplexity", label: "Perplexity", icon: "Search", defaultUrl: "https://api.perplexity.ai", defaultModel: "llama-3.1-sonar-large-128k-online", authType: "bearer" },
-  { type: "openrouter", label: "OpenRouter", icon: "Network", defaultUrl: "https://openrouter.ai/api/v1", defaultModel: "anthropic/claude-3.5-sonnet", authType: "bearer" },
-  { type: "together", label: "Together AI", icon: "Users", defaultUrl: "https://api.together.xyz/v1", defaultModel: "meta-llama/Llama-3.3-70B-Instruct-Turbo", authType: "bearer" },
-  { type: "huggingface", label: "HuggingFace", icon: "Box", defaultUrl: "https://api-inference.huggingface.co", defaultModel: "meta-llama/Llama-3.3-70B-Instruct", authType: "bearer" },
-  { type: "cerebras", label: "Cerebras (Free)", icon: "Zap", defaultUrl: "https://api.cerebras.ai/v1", defaultModel: "qwen-3-235b", authType: "bearer" },
-  { type: "sambanova", label: "SambaNova (Free)", icon: "Zap", defaultUrl: "https://api.sambanova.ai/v1", defaultModel: "Meta-Llama-4-Maverick-17B-128E-Instruct", authType: "bearer" },
-  { type: "ollama", label: "Ollama (self-hosted)", icon: "HardDrive", defaultUrl: "http://localhost:11434", defaultModel: "llama3.3:70b", authType: "none" },
-  { type: "azure-openai", label: "Azure OpenAI", icon: "Cloud", defaultUrl: "https://{resource}.openai.azure.com/openai/deployments/{deployment}", defaultModel: "gpt-4o", authType: "header" },
-  { type: "bedrock", label: "AWS Bedrock", icon: "Cloud", defaultUrl: "https://bedrock-runtime.us-east-1.amazonaws.com", defaultModel: "anthropic.claude-3-5-sonnet-20241022-v1:0", authType: "bearer" },
-  { type: "custom", label: "Custom / self-hosted LLM", icon: "Settings", defaultUrl: "", defaultModel: "", authType: "bearer" },
-  { type: "antigravity", label: "Antigravity CLI (Token)", icon: "Terminal", defaultUrl: "https://api.antigravity.io/v1", defaultModel: "claude-sonnet-4", authType: "bearer" },
-];
+// Single source of truth = lib/ai/provider-catalog.ts (so every seeded type
+// such as nvidia / zencode / opencode / github renders with the correct icon,
+// label and Base URL, and matches the Add/Edit provider editor exactly).
+const PROVIDER_TYPES: ProviderCatalogEntry[] = PROVIDER_CATALOG;
 
 type Tab = "providers" | "auth" | "analytics" | "logs";
 

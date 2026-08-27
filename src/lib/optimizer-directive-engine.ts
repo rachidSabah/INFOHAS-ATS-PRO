@@ -247,7 +247,7 @@ PAGE FORMAT & CONTENT DENSITY
 - Required pages: EXACTLY 1
 - NEVER generate a second page.
 - NEVER produce a half-empty page.
-- Target: 2,500–3,000 characters of content (aim for ~2,900).
+- Target: 2,500–3,000 characters of content (aim for ~3,000 — OPTIMAL 98% single-page fill).
 - Fully utilize the A4 page — no excessive whitespace.
 - Dynamic adjustment: if the candidate has less experience, expand bullets with more detail. If more experience, keep all roles and all bullets.
 ${c.enforceOnePage ? "- Validation: assert(pdf.pages === 1)" : ""}

@@ -10,33 +10,12 @@ import { Badge, Icon } from "@/components/shared";
 import { ProviderManager } from "@/lib/ai/services";
 import { toast } from "sonner";
 import type { AIProvider, AIProviderType } from "@/lib/types";
+import { PROVIDER_CATALOG, getProviderCatalogEntry, type ProviderCatalogEntry } from "@/lib/ai/provider-catalog";
 
-const PROVIDER_TYPES: { type: AIProviderType; label: string; icon: string; defaultUrl?: string; defaultModel?: string; authType?: "bearer" | "header" | "query" | "none" }[] = [
-  { type: "antigravity", label: "Antigravity CLI (Token)", icon: "Terminal", defaultUrl: "https://api.antigravity.io/v1", defaultModel: "claude-sonnet-4", authType: "bearer" },
-  { type: "puter", label: "Puter.js (Free)", icon: "Sparkles", defaultUrl: "https://api.puter.com", defaultModel: "claude-sonnet-4", authType: "none" },
-  { type: "opencode", label: "OpenCode Zen (Free models)", icon: "Gift", defaultUrl: "https://opencode.ai/zen/v1", defaultModel: "deepseek-v4-flash-free", authType: "bearer" },
-  { type: "opencode-zen", label: "OpenCode Zen (Free)", icon: "Gift", defaultUrl: "https://opencode.ai/zen/v1", defaultModel: "deepseek-v4-flash-free", authType: "bearer" },
-  { type: "nvidia", label: "NVIDIA NIM (Free)", icon: "Bot", defaultUrl: "https://integrate.api.nvidia.com/v1", defaultModel: "stepfun-ai/step-3.7-flash", authType: "bearer" },
-  { type: "zencode", label: "ZenCode API", icon: "Zap", defaultUrl: "https://opencode.ai/zen/v1", defaultModel: "deepseek-v4-flash-free", authType: "bearer" },
-  { type: "openai", label: "OpenAI", icon: "Bot", defaultUrl: "https://api.openai.com/v1", defaultModel: "gpt-4o-mini", authType: "bearer" },
-  { type: "github", label: "GitHub Models", icon: "Github", defaultUrl: "https://models.inference.ai.azure.com", defaultModel: "gpt-4o", authType: "bearer" },
-  { type: "claude", label: "Anthropic Claude", icon: "Bot", defaultUrl: "https://api.anthropic.com/v1", defaultModel: "claude-3-5-sonnet-20241022", authType: "header" },
-  { type: "gemini", label: "Google Gemini", icon: "Bot", defaultUrl: "https://generativelanguage.googleapis.com/v1beta", defaultModel: "gemini-2.0-flash", authType: "query" },
-  { type: "deepseek", label: "DeepSeek", icon: "Bot", defaultUrl: "https://api.deepseek.com/v1", defaultModel: "deepseek-chat", authType: "bearer" },
-  { type: "groq", label: "Groq", icon: "Zap", defaultUrl: "https://api.groq.com/openai/v1", defaultModel: "llama-3.3-70b-versatile", authType: "bearer" },
-  { type: "mistral", label: "Mistral AI", icon: "Bot", defaultUrl: "https://api.mistral.ai/v1", defaultModel: "mistral-large-latest", authType: "bearer" },
-  { type: "cohere", label: "Cohere", icon: "Bot", defaultUrl: "https://api.cohere.com/v2", defaultModel: "command-r-plus", authType: "bearer" },
-  { type: "perplexity", label: "Perplexity", icon: "Search", defaultUrl: "https://api.perplexity.ai", defaultModel: "llama-3.1-sonar-large-128k-online", authType: "bearer" },
-  { type: "openrouter", label: "OpenRouter", icon: "Network", defaultUrl: "https://openrouter.ai/api/v1", defaultModel: "anthropic/claude-3.5-sonnet", authType: "bearer" },
-  { type: "together", label: "Together AI", icon: "Users", defaultUrl: "https://api.together.xyz/v1", defaultModel: "meta-llama/Llama-3.3-70B-Instruct-Turbo", authType: "bearer" },
-  { type: "huggingface", label: "HuggingFace", icon: "Box", defaultUrl: "https://api-inference.huggingface.co/models", defaultModel: "meta-llama/Llama-3.3-70B-Instruct", authType: "bearer" },
-  { type: "cerebras", label: "Cerebras (Free)", icon: "Zap", defaultUrl: "https://api.cerebras.ai/v1", defaultModel: "qwen-3-235b", authType: "bearer" },
-  { type: "sambanova", label: "SambaNova (Free)", icon: "Zap", defaultUrl: "https://api.sambanova.ai/v1", defaultModel: "Meta-Llama-4-Maverick-17B-128E-Instruct", authType: "bearer" },
-  { type: "ollama", label: "Ollama (self-hosted)", icon: "HardDrive", defaultUrl: "http://localhost:11434", defaultModel: "llama3.3:70b", authType: "none" },
-  { type: "azure-openai", label: "Azure OpenAI", icon: "Cloud", defaultUrl: "https://{resource}.openai.azure.com/openai/deployments/{deployment}", defaultModel: "gpt-4o", authType: "header" },
-  { type: "bedrock", label: "AWS Bedrock", icon: "Cloud", defaultUrl: "https://bedrock-runtime.us-east-1.amazonaws.com", defaultModel: "anthropic.claude-3-5-sonnet-20241022-v1:0", authType: "bearer" },
-  { type: "custom", label: "Custom / self-hosted LLM", icon: "Settings", defaultUrl: "", defaultModel: "", authType: "bearer" },
-];
+// Re-exported as PROVIDER_TYPES for the existing JSX references below.
+// Source of truth is the shared catalog (lib/ai/provider-catalog.ts) so the
+// auto-inserted Base URL / model / auth type is always correct for the type.
+const PROVIDER_TYPES: ProviderCatalogEntry[] = PROVIDER_CATALOG;
 
 export function ProviderEditor({ provider, onClose, onSave }: {
   provider: AIProvider | null;
@@ -81,11 +60,11 @@ export function ProviderEditor({ provider, onClose, onSave }: {
   const isCustom = form.type === "custom";
   const isPuter = form.type === "puter";
 
-  const onTypeChange = (type: AIProviderType) => {
+  const onTypeChange = (type: string) => {
     const t = PROVIDER_TYPES.find((x) => x.type === type) ?? PROVIDER_TYPES[0];
     setForm((f) => ({
       ...f,
-      type,
+      type: t.type as AIProviderType,
       baseUrl: f.baseUrl || t.defaultUrl || "",
       modelName: f.modelName || t.defaultModel || "",
       authType: t.authType ?? "bearer",
