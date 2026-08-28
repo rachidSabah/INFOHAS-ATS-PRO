@@ -29,6 +29,7 @@ import { validateExperienceFingerprints } from "./experience-fingerprint";
 import { ensureExperienceIds } from "./entity-lock";
 import { createDebugArtifacts, persistDebugArtifacts } from "./debug-persistence";
 import { expandResume, compressResume, validatePageFill } from "./agents/page-balancer";
+import { getVisibleCharCount } from "./layout-validator";
 import { extractBlueprint, type ResumeBlueprint } from "./resume-blueprint-agent";
 import { extractTemplateBlueprint, type ResumeTemplateBlueprint, validateTemplatePreserved } from "./resume-template-blueprint-agent";
 import { runGuardianValidation, type GuardianVerdict } from "./resume-guardian-agent";
@@ -697,16 +698,42 @@ export async function runLockedPipeline(
   // with a degraded-optimization status instead of hard-failing.
   // This allows the user to still export their original resume while being
   // notified that AI optimization was unavailable.
-  console.warn(`[Locked Pipeline] All ${attempts} attempts failed. Returning source resume with degraded-optimization status.`);
-  reportDegradedOptimization("All AI providers failed or returned degraded results. Returning original resume.");
-  warnings.push("Optimization failed after all attempts. Returning original resume without changes.");
-  errors.push("All AI providers failed. Optimization unavailable.");
-  const fallbackCharCount = JSON.stringify({
-    summary: fallbackResume.summary, experience: fallbackResume.experience,
-    skills: fallbackResume.skills, education: fallbackResume.education, languages: fallbackResume.languages,
-  }).length;
+  //
+  // CRITICAL FIX: even in the degraded path we still run the page-balancer
+  // expansion so the exported DOCX fills the page (≈98% A4). Previously the
+  // degraded fallback returned the raw thin source resume (~55% fill), which
+  // produced a half-empty page. We expand using only the candidate's own
+  // content + JD keywords — no fabrication.
+  console.warn(`[Locked Pipeline] All ${attempts} attempts failed. Returning expanded source resume with degraded-optimization status.`);
+  reportDegradedOptimization("All AI providers failed or returned degraded results. Returning resume with local page-fill expansion.");
+  warnings.push("AI optimization unavailable — applied local page-fill expansion to keep the resume full.");
+  errors.push("All AI providers failed. Optimization unavailable (local fill applied).");
+
+  let degradedResume = fallbackResume;
+  let degradedCharCount = getVisibleCharCount(fallbackResume);
+  try {
+    const pageFill = validatePageFill(fallbackResume, directiveConfig);
+    if (pageFill.action === "expand") {
+      const jdKeywords = (jd?.keywords ?? []);
+      const resumeText = JSON.stringify(fallbackResume).toLowerCase();
+      const missingKeywords = jdKeywords.filter((k: string) => !resumeText.includes(k.toLowerCase()));
+      degradedResume = expandResume(fallbackResume, {
+        originalResume: fallbackResume,
+        jd: jd ?? { title: "", company: "", description: "", responsibilities: [], keywords: [], rawText: "" },
+        targetChars: pageFill.targetChars,
+        currentChars: pageFill.charCount,
+        missingKeywords,
+        directiveConfig,
+      });
+      degradedCharCount = getVisibleCharCount(degradedResume);
+    }
+  } catch (pbErr: any) {
+    console.warn("[Locked Pipeline Degraded Page Balancer] Failed (non-fatal):", pbErr?.message);
+  }
+
+  const fallbackCharCount = degradedCharCount;
   return {
-    resume: fallbackResume,
+    resume: degradedResume,
     provider: "degraded-optimization",
     charCount: fallbackCharCount,
     keywordsAdded: 0,
