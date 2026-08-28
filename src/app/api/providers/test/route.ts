@@ -148,11 +148,19 @@ export async function POST(req: NextRequest) {
         }
       } catch (e) { console.warn("[ProviderTest] Invalid headersJson:", e); }
     }
+    // Rewrite Google Gemini API to OpenAI-compatible endpoint
+    if (baseUrl.includes("generativelanguage.googleapis.com")) {
+      if (!baseUrl.includes("/openai")) {
+        baseUrl = baseUrl.replace(/\/v1beta\/?$/, "/v1beta/openai").replace(/\/v1\/?$/, "/v1/openai");
+        if (!baseUrl.includes("/openai")) {
+          baseUrl = `${baseUrl.replace(/\/$/, "")}/openai`;
+        }
+      }
+    }
+
     if (apiKey) {
       if (baseUrl.includes("generativelanguage.googleapis.com")) {
-        if (baseUrl.includes("/openai/")) {
-          headers["Authorization"] = `Bearer ${apiKey}`;
-        }
+        headers["Authorization"] = `Bearer ${apiKey}`;
       } else if (authType === "header") {
         headers["x-api-key"] = apiKey;
       } else {
@@ -175,9 +183,6 @@ export async function POST(req: NextRequest) {
       };
     } else if (baseUrl.includes("generativelanguage.googleapis.com")) {
       url = `${baseUrl.replace(/\/$/, "")}/chat/completions`;
-      if (!baseUrl.includes("/openai/")) {
-        url += `?key=${encodeURIComponent(apiKey || "")}`;
-      }
       reqBody = {
         model: model || "gemini-2.5-flash",
         messages: [{ role: "user", content: testPrompt || "Reply with exactly: OK" }],

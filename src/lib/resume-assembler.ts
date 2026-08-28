@@ -245,41 +245,36 @@ export function assembleResume(
     }
   }
 
-  // Reject summary that contains JD company names (hallucinated references)
+  // Reject summary that contains JD company names ONLY if they were not already in source resume
   if (summary) {
     const jdCompaniesForSummary = [
-      "qatar duty free", "qatar airways", "hamad international",
-      "the millennium hotel", "emaar", "madini perfume",
+      "qatar duty free", "qatar airways", "the millennium hotel", "emaar", "madini perfume",
     ];
     const summaryLower = summary.toLowerCase();
-    const containsJdCompany = jdCompaniesForSummary.some((c) => summaryLower.includes(c));
-    if (containsJdCompany) {
-      warnings.push("Optimizer summary contains JD company name — using source summary");
+    const sourceSummaryLower = (sourceResume.summary || "").toLowerCase();
+    const containsNewJdCompany = jdCompaniesForSummary.some(
+      (c) => summaryLower.includes(c) && !sourceSummaryLower.includes(c)
+    );
+    if (containsNewJdCompany) {
+      warnings.push("Optimizer summary contains unverified JD company name — using source summary");
       summary = sourceResume.summary ?? "";
     }
   }
 
   // ========================================================================
-  // 3. HEADLINE — from optimizer, but reject if JD company injected
+  // 3. HEADLINE — from optimizer, tailored to target role
   // ========================================================================
   let headline: string = optimizerOutput.headline ?? sourceResume.headline ?? "";
   headline = cleanupGrammar(headline);
   const jdCompanyNames = [
-    "qatar duty free", "qatar airways", "hamad international",
-    "doha", "qatar", "dubai", "abu dhabi", "uae",
-    "riyadh", "saudi arabia", "kuwait", "bahrain", "oman", "muscat",
+    "qatar duty free", "qatar airways", "the millennium hotel", "emaar", "madini perfume",
   ];
   const headlineLower = (headline || "").toLowerCase();
-  const containsJdCompany = jdCompanyNames.some((name) => headlineLower.includes(name));
-  const origHeadlineLower = (sourceResume.headline || "").toLowerCase().trim();
-  const origFirst3 = origHeadlineLower.split(/\s+/).slice(0, 3).join(" ");
-  const aiFirst3 = headlineLower.split(/\s+/).slice(0, 3).join(" ");
-  const headlinesDiverge = origFirst3 && aiFirst3 && origFirst3 !== aiFirst3;
-  if (containsJdCompany || headlinesDiverge || !headline?.trim()) {
+  const srcHlLower = (sourceResume.headline || "").toLowerCase();
+  const containsJdCompany = jdCompanyNames.some((name) => headlineLower.includes(name) && !srcHlLower.includes(name));
+  if (containsJdCompany || !headline?.trim()) {
     if (containsJdCompany) {
       warnings.push(`Headline rejected (contained JD company name: "${headline}") — using source headline`);
-    } else if (headlinesDiverge) {
-      warnings.push(`Headline rejected (first 3 words changed: "${aiFirst3}" vs "${origFirst3}") — using source headline`);
     }
     headline = sourceResume.headline ?? "";
   }

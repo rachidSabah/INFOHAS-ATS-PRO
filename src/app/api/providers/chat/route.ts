@@ -70,6 +70,16 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    // Rewrite Google Gemini API to OpenAI-compatible endpoint
+    if (baseUrl.includes("generativelanguage.googleapis.com")) {
+      if (!baseUrl.includes("/openai")) {
+        baseUrl = baseUrl.replace(/\/v1beta\/?$/, "/v1beta/openai").replace(/\/v1\/?$/, "/v1/openai");
+        if (!baseUrl.includes("/openai")) {
+          baseUrl = `${baseUrl.replace(/\/$/, "")}/openai`;
+        }
+      }
+    }
+
     const headers: Record<string, string> = { "Content-Type": "application/json" };
     if (headersJson) {
       try {
@@ -82,23 +92,20 @@ export async function POST(req: NextRequest) {
       } catch (e) { console.warn("[ProviderChat] Invalid headersJson:", e); }
     }
     if (apiKey) {
-      const isGemini = baseUrl.includes("generativelanguage.googleapis.com");
-      const isGeminiOpenAI = isGemini && baseUrl.includes("/openai/");
-      if (isGemini) {
-        if (isGeminiOpenAI) { headers["Authorization"] = `Bearer ${apiKey}`; }
-      } else if (authType === "header") { headers["x-api-key"] = apiKey; }
-      else { headers["Authorization"] = `Bearer ${apiKey}`; }
+      if (baseUrl.includes("generativelanguage.googleapis.com")) {
+        headers["Authorization"] = `Bearer ${apiKey}`;
+      } else if (authType === "header") {
+        headers["x-api-key"] = apiKey;
+      } else {
+        headers["Authorization"] = `Bearer ${apiKey}`;
+      }
     }
 
     let url = baseUrl.endsWith("/chat/completions")
       ? baseUrl
       : `${baseUrl.replace(/\/$/, "")}/chat/completions`;
 
-    const isGemini = baseUrl.includes("generativelanguage.googleapis.com");
-    if (isGemini && !baseUrl.includes("/openai/") && apiKey) {
-      const sep = url.includes("?") ? "&" : "?";
-      url = `${url}${sep}key=${encodeURIComponent(apiKey)}`;
-    } else if (authType === "query" && apiKey) {
+    if (authType === "query" && apiKey && !baseUrl.includes("generativelanguage.googleapis.com")) {
       const sep = url.includes("?") ? "&" : "?";
       url = `${url}${sep}key=${encodeURIComponent(apiKey)}`;
     }

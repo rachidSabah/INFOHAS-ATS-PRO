@@ -994,11 +994,9 @@ export function verifyEntityIntegrity(
     }
   }
 
-  // === Check 8: Character count ===
-  // Limit is 6500 chars (JSON serialization of a full single-page resume).
-  // The old 4200 limit was too tight: a normal 2-experience resume with full
-  // bullets + skills + education easily exceeds it, causing every optimization
-  // attempt to be vetoed by the Guardian before the user could see any result.
+  // === Check 8: Character count (emergency safety cap against payload explosion) ===
+  // Note: Page utilization and layout density are validated by Layout Validator & Page Balancer.
+  // Entity integrity only fails if there is a severe runaway string generation (>25,000 JSON chars).
   const charCount = JSON.stringify({
     summary: optimized.summary,
     experience: optimized.experience,
@@ -1006,13 +1004,15 @@ export function verifyEntityIntegrity(
     education: optimized.education,
     languages: optimized.languages,
   }).length;
-  if (charCount > 6500) {
+  if (charCount > 25000) {
     criticalFailures.push({
-      type: "summary_corruption", // Reuse type for size violation
-      message: `Resume exceeds 6500 character limit: ${charCount} chars`,
+      type: "summary_corruption",
+      message: `Resume payload exceeds maximum allowable size: ${charCount} chars`,
       actual: String(charCount),
     });
     score -= 10;
+  } else if (charCount > 8000) {
+    warnings.push(`Resume JSON payload is large (${charCount} chars) — layout validator will adjust page fit`);
   }
 
   return {
