@@ -20,7 +20,11 @@ export type ProviderCatalogEntry = {
 };
 
 export const PROVIDER_CATALOG: ProviderCatalogEntry[] = [
-  { type: "antigravity", label: "Antigravity CLI (Token)", icon: "Terminal", defaultUrl: "https://api.antigravity.io/v1", defaultModel: "claude-sonnet-4", authType: "bearer" },
+  // defaultUrl is the LIVE Cloud Code PA endpoint (matches the seeded provider
+  // config + SSRF allowlist). The previous api.antigravity.io/v1 entry was a
+  // dead host — endpoint "repair" toward it could never validate, so
+  // Antigravity providers always froze at CONFIGURATION ERROR.
+  { type: "antigravity", label: "Antigravity CLI (Token)", icon: "Terminal", defaultUrl: "https://cloudcode-pa.googleapis.com", defaultModel: "claude-sonnet-4", authType: "bearer" },
   { type: "puter", label: "Puter.js (Free)", icon: "Sparkles", defaultUrl: "https://api.puter.com", defaultModel: "claude-sonnet-4", authType: "none" },
   { type: "opencode", label: "OpenCode Zen (Free models)", icon: "Gift", defaultUrl: "https://opencode.ai/zen/v1", defaultModel: "deepseek-v4-flash-free", authType: "bearer" },
   { type: "opencode-zen", label: "OpenCode Zen (Free)", icon: "Gift", defaultUrl: "https://opencode.ai/zen/v1", defaultModel: "deepseek-v4-flash-free", authType: "bearer" },

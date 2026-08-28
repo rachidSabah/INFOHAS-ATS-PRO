@@ -247,6 +247,39 @@ export class ProviderHealer {
       cls = classifyProviderFailure(rawError, { providerType: provider.type });
     }
 
+    // === GENERALIZED STALE-EVIDENCE GATE (bug fix — the frozen-card killer) ===
+    // The stored error may be HOURS old, or a generic historical message such
+    // as the pre-fix "Post-cooldown re-test failed — provider still not
+    // healthy" text. Previously ONLY endpoint errors got a fresh re-check;
+    // every other kind re-classified the OLD error and demanded Manual Heal
+    // WITHOUT ever re-testing the provider — those cards could literally
+    // never recover themselves. When healing WITHOUT a fresh trigger and the
+    // stored failure is stale, run ONE fresh validation ping first:
+    //   pass → recover with ZERO configuration changes;
+    //   fail → classify the FRESH error and repair from it (the fresh error
+    //          becomes the trigger, so no second gate ping — bounded).
+    if (!trigger && rawError && rawError === (provider.health?.lastError ?? "") && provider.health?.lastFailureAt) {
+      const age = Date.now() - new Date(provider.health.lastFailureAt).getTime();
+      if (age > this.STALE_ERROR_MS) {
+        const fresh = await d.ping(provider);
+        if (fresh.ok) {
+          await this.markRecovered(provider, fresh.latencyMs, "Fresh validation ping succeeded — the stored error was stale.");
+          const entry: HealReportEntry = {
+            ...base, problem: "Stale stored error", failureKind: cls.kind,
+            diagnosis: `The stored error was stale (${Math.round(age / 1000)}s old) — a fresh validation request succeeded.`,
+            action: "No configuration change. Provider recovered via fresh validation.",
+            result: "recovered", latencyMs: fresh.latencyMs,
+          };
+          recordHealEvent(entry);
+          return entry;
+        }
+        // Fresh evidence differs from the stored story — repair from the FRESH error.
+        trigger = fresh.error ?? "";
+        rawError = trigger;
+        cls = classifyProviderFailure(rawError, { providerType: provider.type });
+      }
+    }
+
     patchHealth(provider, {
       healState: "healing",
       lastDiagnosis: cls.humanMessage,
@@ -353,37 +386,10 @@ export class ProviderHealer {
 
       case "endpoint_error": {
         const previousEndpoint = provider.baseUrl || provider.apiUrl;
-        // === STALE-ERROR GATE (bug fix): the stored error may be hours old.
-        // Transient SSL 525 / proxy failures froze providers as
-        // "CONFIGURATION ERROR" cards with no fresh validation. If the only
-        // error we have is stale, run ONE fresh ping first: a pass recovers
-        // the provider without touching its configuration; a different fresh
-        // failure is re-routed to its own repair branch.
-        if (!trigger && provider.health?.lastFailureAt) {
-          const age = Date.now() - new Date(provider.health.lastFailureAt).getTime();
-          if (age > this.STALE_ERROR_MS) {
-            const fresh = await d.ping(provider);
-            if (fresh.ok) {
-              await this.markRecovered(provider, fresh.latencyMs, "Fresh validation ping succeeded — the stored endpoint error was stale.");
-              const entry: HealReportEntry = {
-                ...base, problem: "API endpoint returned 404", failureKind: cls.kind,
-                diagnosis: "The stored endpoint error was stale — a fresh validation request succeeded.",
-                action: "No configuration change. Provider recovered via fresh validation.",
-                previousEndpoint, result: "recovered", latencyMs: fresh.latencyMs,
-              };
-              recordHealEvent(entry);
-              return entry;
-            }
-            const freshCls = classifyProviderFailure(fresh.error ?? "", { providerType: provider.type });
-            if (freshCls.kind !== "endpoint_error") {
-              // Re-route once to the correct branch with the FRESH error (the
-              // trigger guarantees no second fresh ping — bounded depth).
-              return this.healProvider(provider, mode, fresh.error ?? "", deps);
-            }
-            rawError = fresh.error ?? rawError;
-            cls = freshCls;
-          }
-        }
+        // NOTE: stale stored errors are handled by the GENERALIZED
+        // stale-evidence gate above (all failure kinds) — by the time this
+        // branch runs, `rawError`/`cls` reflect FRESH evidence when the
+        // stored error was stale, so no endpoint-specific re-check is needed.
 
         const catalogEntry = getProviderCatalogEntry(provider.type);
         const knownGood = catalogEntry.defaultUrl;

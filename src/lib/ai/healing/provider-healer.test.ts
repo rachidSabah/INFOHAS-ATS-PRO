@@ -202,6 +202,83 @@ describe("ProviderHealer", () => {
     expect(reports[1].result).toBe("recovered");
   });
 
+  it("DEEP 6 — stale GENERIC stored error (frozen card) re-tests first: pass recovers without repair", async () => {
+    // THE frozen-card scenario: providers stuck at CONFIGURATION ERROR with a
+    // generic historical message (e.g. the pre-fix "Post-cooldown re-test
+    // failed" text) could never recover — every heal re-classified the OLD
+    // error and demanded Manual Heal without re-testing. The generalized
+    // stale-evidence gate must re-validate first.
+    providers[0] = makeProvider({
+      health: {
+        consecutiveFailures: 2, consecutiveSuccesses: 0,
+        healState: "configuration_error",
+        lastError: "Post-cooldown re-test failed — provider still not healthy",
+        lastFailureKind: "unknown",
+        lastFailureAt: new Date(Date.now() - 30 * 60 * 1000).toISOString(), // 30 min old
+      },
+    });
+    const ping = vi.fn().mockResolvedValue({ ok: true, latencyMs: 60, reply: "READY" });
+    const fetchCatalog = vi.fn();
+
+    const report = await ProviderHealer.healProvider("p_groq", "manual", undefined, { ping, fetchCatalog });
+
+    expect(report.result).toBe("recovered");
+    expect(ping).toHaveBeenCalledTimes(1); // exactly the fresh validation
+    expect(fetchCatalog).not.toHaveBeenCalled(); // no repair machinery ran
+    const wroteModel = updateProvider.mock.calls.some((c) => "modelName" in (c[1] ?? {}));
+    const wroteUrl = updateProvider.mock.calls.some((c) => "baseUrl" in (c[1] ?? {}));
+    expect(wroteModel).toBe(false);
+    expect(wroteUrl).toBe(false);
+    expect(report.diagnosis).toMatch(/stale/i);
+  });
+
+  it("DEEP 7 — stale stored error + fresh MODEL failure: heal repairs from the FRESH error", async () => {
+    providers[0] = makeProvider({
+      health: {
+        consecutiveFailures: 1, consecutiveSuccesses: 0,
+        healState: "configuration_error",
+        lastError: "Post-cooldown re-test failed — provider still not healthy",
+        lastFailureKind: "unknown",
+        lastFailureAt: new Date(Date.now() - 30 * 60 * 1000).toISOString(),
+      },
+    });
+    // 1st ping = stale-gate fresh evidence (surfaces a REAL model error);
+    // 2nd ping = validation of the catalog replacement.
+    const ping = vi.fn()
+      .mockResolvedValueOnce({ ok: false, latencyMs: 25, error: "The model `hy3-free` does not exist" })
+      .mockResolvedValueOnce({ ok: true, latencyMs: 45, reply: "READY" });
+    const fetchCatalog = vi.fn().mockResolvedValue({ ok: true, models: ["llama-3.3-70b-versatile"] });
+
+    const report = await ProviderHealer.healProvider("p_groq", "auto", undefined, { ping, fetchCatalog });
+
+    expect(report.result).toBe("recovered");
+    expect(report.newModel).toBe("llama-3.3-70b-versatile");
+    expect(ping).toHaveBeenCalledTimes(2); // fresh evidence + validation — no more
+  });
+
+  it("DEEP 8 — stale auth error re-tests first: a persistent 401 stays honest manual_required", async () => {
+    providers[0] = makeProvider({
+      health: {
+        consecutiveFailures: 3, consecutiveSuccesses: 0,
+        healState: "auth_error",
+        lastError: "HTTP 401: invalid api key",
+        lastFailureKind: "auth_error",
+        lastFailureAt: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString(), // 2 h old
+      },
+    });
+    const ping = vi.fn().mockResolvedValue({ ok: false, latencyMs: 30, error: "HTTP 401: unauthorized" });
+    const fetchCatalog = vi.fn();
+
+    const report = await ProviderHealer.healProvider("p_groq", "manual", undefined, { ping, fetchCatalog });
+
+    expect(report.result).toBe("manual_required");
+    expect(report.failureKind).toBe("auth_error");
+    expect(ping).toHaveBeenCalledTimes(1); // fresh evidence gathered BEFORE the verdict
+    expect(fetchCatalog).not.toHaveBeenCalled();
+    const wroteApiKey = updateProvider.mock.calls.some((c) => "apiKey" in (c[1] ?? {}));
+    expect(wroteApiKey).toBe(false);
+  });
+
   it("TEST 3 — cooldown: no configuration change, cooldown result, re-test scheduled", async () => {
     providers[0] = makeProvider({
       health: { consecutiveFailures: 1, consecutiveSuccesses: 0, rateLimitedUntil: new Date(Date.now() + 60000).toISOString() },
