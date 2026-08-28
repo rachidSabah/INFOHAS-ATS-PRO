@@ -17,6 +17,8 @@ import { ProviderEditor } from "./AIProviderEditor";
 import { ProviderAnalytics } from "./ProviderAnalytics";
 import { ProviderLogsTable } from "./ProviderLogsTable";
 import { TestConnectionModal } from "./TestConnectionModal";
+import { ProviderHealthPanel } from "./ProviderHealthPanel";
+import { ProviderHealer } from "@/lib/ai/healing/provider-healer";
 import { PuterAuthCard } from "./PuterAuthCard";
 import { ConnectAntigravityDialog } from "./ConnectAntigravityDialog";
 import { getPuterProvider } from "@/lib/providers";
@@ -50,6 +52,7 @@ export function AIProviders() {
   const [showAdd, setShowAdd] = useState(false);
   const [editing, setEditing] = useState<AIProvider | null>(null);
   const [testing, setTesting] = useState<AIProvider | null>(null);
+  const [healingId, setHealingId] = useState<string | null>(null);
   const [q, setQ] = useState("");
 
   // Refresh auth status from providers
@@ -83,6 +86,20 @@ export function AIProviders() {
 
   const handleTest = async (provider: AIProvider) => {
     setTesting(provider);
+  };
+
+  /** Per-provider manual heal (directives #7, #9): diagnose → repair → validate → report. */
+  const handleHealOne = async (provider: AIProvider) => {
+    setHealingId(provider.id);
+    try {
+      const report = await ProviderHealer.healProvider(provider.id, "manual");
+      if (report.result === "recovered") toast.success(`${report.providerName}: healed — ${report.action}`);
+      else toast.warning(`${report.providerName}: ${report.result.replace("_", " ")} — ${report.action}`, { duration: 7000 });
+    } catch (e: any) {
+      toast.error(e?.message || "Heal failed");
+    } finally {
+      setHealingId(null);
+    }
   };
 
   const importRef = useRef<HTMLInputElement>(null);
@@ -218,6 +235,10 @@ export function AIProviders() {
         ))}
       </div>
 
+      {/* Provider Health — Auto-Heal + Manual Heal (directives #7–#20).
+          Always visible on the provider management surface, above every tab. */}
+      <ProviderHealthPanel />
+
       {/* Tabs */}
       <div className="flex gap-1 p-1 bg-secondary rounded-lg w-fit">
         {[
@@ -331,6 +352,7 @@ export function AIProviders() {
                           <div className="flex gap-0.5 justify-end">
                             <IconBtn icon="Pencil" label="Edit" onClick={() => { setEditing(p); setShowAdd(true); }} />
                             <IconBtn icon="Zap" label="Test connection" onClick={() => handleTest(p)} color="#F59E2B" />
+                            <IconBtn icon="Wrench" label="Heal provider (diagnose + repair + validate)" onClick={() => { if (healingId !== p.id) handleHealOne(p); }} color={healingId === p.id ? "#D97706" : "#D97706"} />
                             <IconBtn icon="Copy" label="Duplicate" onClick={() => { const id = ProviderManager.duplicate(p.id); if (id) toast.success("Provider duplicated."); }} />
                             <IconBtn icon={p.isDefault ? "Star" : "StarOff"} label="Set as default" onClick={() => { ProviderManager.setDefault(p.id); toast.success(`${p.name} set as default.`); }} color={p.isDefault ? "#F59E2B" : undefined} />
                             <IconBtn icon="Trash2" label="Delete" color="#DC2626" onClick={() => { if (confirm(`Delete provider "${p.name}"?`)) { ProviderManager.remove(p.id); toast.success(`Provider deleted.`); } }} />

@@ -9,7 +9,7 @@
 // ============================================================================
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import type { AgentConfig } from "../../pipeline-orchestration-types";
+import type { AgentConfig } from "../pipeline-orchestration-types";
 
 // Minimal in-test store — the real store pulls the whole world in.
 const storeState: { agentConfigs: AgentConfig[] } = { agentConfigs: [] };
