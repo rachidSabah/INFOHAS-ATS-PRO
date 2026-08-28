@@ -81,10 +81,22 @@ describe("ProviderHealer", () => {
     expect(healthPatch.health.healState).toBe("recovered");
   });
 
-  it("model_error with an enabledModels replacement tries it first", () => {
+  it("model_error replacement prefers the LIVE catalog over the static enabledModels list", () => {
+    // enabledModels is the static seed list — often holds RETIRED ids.
+    // The live catalog (freshly fetched) must win so heal never swaps one
+    // retired model id for another.
     const picked = pickReplacementModel(
       makeProvider({ enabledModels: ["deepseek-v4-flash-free"] }),
-      ["llama-3.3-70b-versatile"],
+      ["mistral-small-2506", "unknown-family-model"],
+      "hy3-free"
+    );
+    expect(picked).toBe("mistral-small-2506");
+  });
+
+  it("model_error replacement falls back to enabledModels when the live catalog is unavailable", () => {
+    const picked = pickReplacementModel(
+      makeProvider({ enabledModels: ["deepseek-v4-flash-free"] }),
+      [], // catalog fetch failed
       "hy3-free"
     );
     expect(picked).toBe("deepseek-v4-flash-free");

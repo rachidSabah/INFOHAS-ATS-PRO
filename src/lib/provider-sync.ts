@@ -57,7 +57,8 @@ export function mergeProviderWithSeed(d1Provider: AIProvider, seedProvider?: AIP
     merged.baseUrl = seedProvider.baseUrl || seedProvider.apiUrl || "";
   }
 
-  // Update enabledModels: union the D1 models and the seed models to ensure the seed's defaults are always available
+  // Update enabledModels: union the D1 models and the seed models to ensure
+  // both the seed's defaults AND the admin's live-selected model stay available
   const seedModels = seedProvider.enabledModels || [];
   const currentModels = merged.enabledModels || [];
   const mergedModels = Array.from(new Set([...seedModels, ...currentModels]));
@@ -65,20 +66,21 @@ export function mergeProviderWithSeed(d1Provider: AIProvider, seedProvider?: AIP
     merged.enabledModels = mergedModels;
   }
 
-  // Fix model name: if the D1 model is not in the seed's enabledModels,
-  // use the seed's default model (which is known to work)
-  const enabledModels = seedProvider.enabledModels || [];
-  if (merged.modelName && enabledModels.length > 0 && !enabledModels.includes(merged.modelName)) {
-    console.warn(
-      `[PROVIDER SYNC] Provider "${merged.name}" has model "${merged.modelName}" ` +
-      `which is not in enabledModels. Restoring to seed default "${seedProvider.modelName}".`
-    );
+  // === MODEL SELECTION IS AUTHORITATIVE (bug fix) ===
+  // The admin's configured modelName wins — it is typically a model picked
+  // from the provider's LIVE catalog via "Fetch models", while the seed's
+  // static enabledModels list goes stale (retired model ids). Reverting a
+  // non-empty modelName to the seed default here silently discarded every
+  // model the user saved and forced heal/benchmark pings onto retired ids.
+  // The seed model is used ONLY to fill a missing/empty modelName.
+  if (!merged.modelName || merged.modelName.trim() === "") {
     merged.modelName = seedProvider.modelName;
   }
 
-  // If model name is empty, use seed default
-  if (!merged.modelName || merged.modelName.trim() === "") {
-    merged.modelName = seedProvider.modelName;
+  // Union the configured model into enabledModels so every downstream
+  // consumer (benchmark, heal, router rotation) keeps it available.
+  if (merged.modelName && !mergedModels.includes(merged.modelName)) {
+    merged.enabledModels = [merged.modelName, ...(merged.enabledModels || [])];
   }
 
   // Restore timeout/maxTokens from seed if D1 has 0 or invalid values
@@ -169,11 +171,10 @@ export function detectProviderDrift(
       drift.push(`${d1.name}: API key is empty (seed has one)`);
     }
 
-    // Invalid model
-    const enabledModels = seed.enabledModels || [];
-    if (d1.modelName && enabledModels.length > 0 && !enabledModels.includes(d1.modelName)) {
-      drift.push(`${d1.name}: model "${d1.modelName}" not in enabledModels`);
-    }
+    // NOTE: a modelName outside the seed's static enabledModels is NOT drift.
+    // Admins pick models from the provider's LIVE catalog ("Fetch models");
+    // flagging those as drift caused the sync to overwrite them with retired
+    // seed ids (the "selected model not saved" bug).
   }
 
   return drift;

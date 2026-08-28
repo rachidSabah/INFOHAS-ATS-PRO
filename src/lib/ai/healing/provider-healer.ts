@@ -115,15 +115,27 @@ export function cooldownRemainingSeconds(provider: AIProvider): number {
   return Math.max(fromHealth, Math.ceil(rateLimitTracker.getCooldownRemainingMs(provider.id) / 1000), getCooldownRemaining(provider.id || provider.name || provider.type));
 }
 
-/** Choose the best compatible replacement model from a catalog. */
+/**
+ * Choose the best compatible replacement model for a failed provider.
+ *
+ * BUG FIX (replacement authority): the provider's LIVE catalog — fetched
+ * fresh from its own API at heal time — is now the FIRST choice. Previously
+ * the static `enabledModels` seed list won, which frequently swapped one
+ * retired model id for another retired model id (heal kept failing).
+ * Priority: live catalog (ATS-friendly family preferred) → enabledModels
+ * (minus failed) → catalog default.
+ */
 export function pickReplacementModel(provider: AIProvider, catalogModels: string[], failedModel?: string): string | undefined {
+  const family = /deepseek|llama|gpt|gemini|mistral|qwen|nemotron|claude|glm/i;
+  const pool = (catalogModels ?? []).filter((m) => m && m !== failedModel);
+  if (pool.length > 0) {
+    return pool.find((m) => family.test(m)) ?? pool[0];
+  }
+  // Live catalog unavailable (fetch failed or empty) — fall back to the
+  // provider's own enabled list, which may still hold working alternates.
   const enabled = (provider.enabledModels ?? []).filter((m) => m && m !== failedModel);
   if (enabled.length > 0) return enabled[0];
-  const pool = (catalogModels ?? []).filter((m) => m && m !== failedModel);
-  if (pool.length === 0) return getProviderCatalogEntry(provider.type).defaultModel || undefined;
-  // Prefer model families known to work well for ATS/optimization workloads.
-  const family = /deepseek|llama|gpt|gemini|mistral|qwen|nemotron|claude|glm/i;
-  return pool.find((m) => family.test(m)) ?? pool[0];
+  return getProviderCatalogEntry(provider.type).defaultModel || undefined;
 }
 
 function patchHealth(provider: AIProvider, patch: NonNullable<AIProvider["health"]> extends infer H ? Partial<H> : never): void {
@@ -228,7 +240,7 @@ export class ProviderHealer {
     switch (cls.kind) {
       case "model_error":
       case "api_version_error": {
-        const previousModel = provider.modelName;
+        const previousModel = provider.modelName || (provider.enabledModels ?? [])[0];
         const catalog = await d.fetchCatalog(provider);
         const replacement = pickReplacementModel(provider, catalog.ok ? catalog.models : [], previousModel);
         if (!replacement || replacement === previousModel) {

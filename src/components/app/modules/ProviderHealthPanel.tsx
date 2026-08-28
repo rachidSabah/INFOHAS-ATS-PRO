@@ -221,7 +221,7 @@ export function ProviderHealthPanel() {
                     </Badge>
                     <span className="font-semibold">{r.providerName}</span>
                     <span className="font-mono text-[10px] text-muted-foreground">model: {r.resolvedModel}</span>
-                    <Badge variant="outline" className="text-[9px]">{r.modelSource === "enabled" ? "FROM ENABLED" : r.modelSource === "default" ? "PROVIDER DEFAULT" : r.modelSource === "catalog" ? "FROM CATALOG" : "NO MODEL"}</Badge>
+                    <Badge variant="outline" className="text-[9px]">{r.modelSource === "configured" ? "CONFIGURED MODEL" : r.modelSource === "enabled" ? "FROM ENABLED" : r.modelSource === "catalog" ? "FROM CATALOG" : "NO MODEL"}</Badge>
                     {r.ok && <Badge variant="success" className="text-[9px]">{r.latencyMs}ms</Badge>}
                     {r.autoHeal?.repaired && <Badge variant="warning" className="text-[9px]"><Icon name="Wrench" className="w-3 h-3 mr-0.5" /> AUTO-HEALED</Badge>}
                   </div>

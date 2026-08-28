@@ -30,8 +30,8 @@ export interface BenchmarkRow {
   providerType: string;
   /** The provider-compatible model actually used for this ping. */
   resolvedModel: string;
-  /** How the model was resolved (enabledModels / default / catalog). */
-  modelSource: "enabled" | "default" | "catalog" | "none";
+  /** How the model was resolved (configured model / enabledModels / catalog). */
+  modelSource: "configured" | "enabled" | "catalog" | "none";
   status: BenchmarkStatus;
   chip: HealthChip;
   ok: boolean;
@@ -54,11 +54,22 @@ export interface BenchmarkReport {
   totalMs: number;
 }
 
-/** Resolve the model this specific provider should be pinged with. */
+/**
+ * Resolve the model this specific provider should be pinged with.
+ *
+ * BUG FIX (model selection authority): the provider's own configured
+ * `modelName` — typically picked from the provider's LIVE catalog via
+ * "Fetch models" — is now pinged FIRST. Previously this preferred
+ * `enabledModels[0]`, i.e. the first entry of the static seed list, which
+ * frequently holds a RETIRED model id. That made every benchmark/heal cycle
+ * fail with model errors even when the provider was correctly configured.
+ */
 export function resolveProviderBenchmarkModel(provider: AIProvider): { model: string; source: BenchmarkRow["modelSource"] } {
+  if (provider.modelName && provider.modelName.trim() !== "") {
+    return { model: provider.modelName, source: "configured" };
+  }
   const enabled = provider.enabledModels ?? [];
   if (enabled.length > 0 && enabled[0]) return { model: enabled[0], source: "enabled" };
-  if (provider.modelName) return { model: provider.modelName, source: "default" };
   const catalogDefault = getProviderCatalogEntry(provider.type).defaultModel;
   if (catalogDefault) return { model: catalogDefault, source: "catalog" };
   return { model: "(none configured)", source: "none" };

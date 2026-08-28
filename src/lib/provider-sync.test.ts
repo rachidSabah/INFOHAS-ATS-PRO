@@ -96,13 +96,33 @@ describe("Provider Sync & Matching Logic", () => {
       expect(merged.apiKey).toBe("user-configured-key");
     });
 
-    it("should restore default model if D1 model is not in seed's enabledModels", () => {
+    it("should KEEP a user-selected live model even if not in seed enabledModels (model selection is authoritative)", () => {
       const d1Provider = {
         id: "p_nvidia",
         name: "Nvidia",
         apiKey: "user-configured-key",
         apiUrl: "https://integrate.api.nvidia.com/v1",
-        modelName: "nvidia/nemotron-3-super-120b-a12b", // not in seed enabledModels
+        modelName: "nvidia/nemotron-3-super-120b-a12b", // picked live from "Fetch models" — not in static seed list
+        timeout: 90000,
+        maxTokens: 8192,
+      } as any;
+
+      const merged = mergeProviderWithSeed(d1Provider, mockSeedProviders[0]);
+      // REGRESSION ("selected model not saved"): the seed merge must never
+      // revert a non-empty modelName to the seed default.
+      expect(merged.modelName).toBe("nvidia/nemotron-3-super-120b-a12b");
+      // The selected model is unioned into enabledModels so downstream
+      // consumers (benchmark, heal, router rotation) keep it available.
+      expect(merged.enabledModels).toContain("nvidia/nemotron-3-super-120b-a12b");
+    });
+
+    it("should fill ONLY an empty modelName from the seed default", () => {
+      const d1Provider = {
+        id: "p_nvidia",
+        name: "Nvidia",
+        apiKey: "user-configured-key",
+        apiUrl: "https://integrate.api.nvidia.com/v1",
+        modelName: "",
         timeout: 90000,
         maxTokens: 8192,
       } as any;
@@ -190,13 +210,15 @@ describe("Provider Sync & Matching Logic", () => {
       expect(drift.some((d) => d.includes("Missing provider"))).toBe(true);
     });
 
-    it("should detect invalid model name in D1 provider", () => {
+    it("should NOT flag a live-selected model as drift (model selection is authoritative)", () => {
       const d1 = [
         { id: "p_nvidia", name: "NVIDIA", modelName: "bogus-model" } as any,
         { id: "p_opencode", name: "OpenCode Zen", modelName: "deepseek-v4-flash-free" } as any,
       ];
       const drift = detectProviderDrift(d1, mockSeedProviders);
-      expect(drift.some((d) => d.includes("not in enabledModels"))).toBe(true);
+      // A model outside the static seed list is a legitimate live selection —
+      // flagging it caused the sync to overwrite it with retired seed ids.
+      expect(drift.some((d) => d.includes("not in enabledModels"))).toBe(false);
     });
 
     it("should detect empty API key", () => {

@@ -326,11 +326,21 @@ export function ProviderEditor({ provider, onClose, onSave }: {
           <Button
             onClick={() => {
               if (!form.name.trim()) { toast.error("Please enter a display name."); return; }
+              if (!form.modelName.trim()) { toast.error("Please select or enter a model name."); return; }
+              // BUG FIX: the model picked from "Fetch models" (or typed manually)
+              // must be unioned into enabledModels — downstream consumers (seed
+              // merge, benchmark, heal, router rotation) read this list. Without
+              // the union the selection could be dropped by stale static lists.
+              const enabledModels = Array.from(new Set([
+                form.modelName.trim(),
+                ...(form.enabledModels.split(",").map((s) => s.trim()).filter(Boolean)),
+              ]));
               onSave({
                 ...form,
+                modelName: form.modelName.trim(),
                 baseUrl: form.baseUrl,
                 apiUrl: form.baseUrl, // keep both in sync
-                enabledModels: form.enabledModels.split(",").map((s) => s.trim()).filter(Boolean),
+                enabledModels,
               });
             }}
             className="bg-brand hover:bg-brand-dark text-white gap-2"
