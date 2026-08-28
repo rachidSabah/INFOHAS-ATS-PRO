@@ -255,6 +255,22 @@ export async function POST(req: NextRequest) {
         });
       }
 
+      if (res.status === 429) {
+        // 429 means the request REACHED the provider and the key was ACCEPTED
+        // (otherwise the API would answer 401/403). The account/model has hit
+        // a rate or usage limit. Distinguish quota exhaustion (e.g. OpenCode
+        // Zen "FreeUsageLimitError") from a transient per-second rate limit.
+        const isQuotaExhaustion = /FreeUsageLimitError|usage.?limit|quota|daily|monthly/i.test(errorMessage);
+        return NextResponse.json({
+          ok: false,
+          rateLimited: true,
+          latencyMs,
+          message: isQuotaExhaustion
+            ? `Rate-limited (HTTP 429) — provider is reachable and the API key was accepted, but this account/model has exhausted its usage quota. Detail: ${errorMessage}. Wait for the quota window to reset, switch to another model, or top up the plan. Note: this test is a raw single-shot diagnostic (no retries) — normal chats automatically rotate keys/models and fail over to fallback providers.`
+            : `Rate-limited (HTTP 429) — provider is reachable and the API key was accepted, but the request exceeded a temporary rate limit. Detail: ${errorMessage}. Retry in a few seconds. Note: this test is a raw single-shot diagnostic (no retries) — normal chats automatically rotate keys/models and fail over to fallback providers.`,
+        });
+      }
+
       if (res.status === 525) {
         const isAntigravity = baseUrl.includes("antigravity.io");
         return NextResponse.json({

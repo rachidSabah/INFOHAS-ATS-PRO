@@ -14,6 +14,8 @@ interface TestResult {
   response?: string;
   inputTokens?: number;
   outputTokens?: number;
+  /** HTTP 429 — provider reachable + key accepted, but rate/quota limited */
+  rateLimited?: boolean;
 }
 
 export function TestConnectionModal({ provider, onClose }: { provider: AIProvider; onClose: () => void }) {
@@ -98,6 +100,9 @@ export function TestConnectionModal({ provider, onClose }: { provider: AIProvide
               <><Icon name="Play" className="w-4 h-4" /> Run test connection</>
             )}
           </Button>
+          <p className="text-[11px] text-muted-foreground leading-relaxed">
+            This test sends a single raw request with exactly this provider&apos;s key, model and base URL — no retries or rotation — so you see the provider&apos;s true response. Regular chats go through the rotator: on 429 they retry, rotate alternate keys/models, and fail over to your fallback providers.
+          </p>
 
           {/* Steps log */}
           {steps.length > 0 && (
@@ -112,18 +117,18 @@ export function TestConnectionModal({ provider, onClose }: { provider: AIProvide
             </div>
           )}
 
-          {/* Result */}
+          {/* Result — ok = green, rateLimited = amber (reachable but quota/rate limited), else red */}
           {status === "done" && result && (
             <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="space-y-3">
-              <div className={`rounded-lg p-4 ${result.ok ? "bg-emerald-100 dark:bg-emerald-400/10 border border-emerald-300" : "bg-red-100 dark:bg-red-400/10 border border-red-300"}`}>
+              <div className={`rounded-lg p-4 ${result.ok ? "bg-emerald-100 dark:bg-emerald-400/10 border border-emerald-300" : result.rateLimited ? "bg-amber-100 dark:bg-amber-400/10 border border-amber-300" : "bg-red-100 dark:bg-red-400/10 border border-red-300"}`}>
                 <div className="flex items-center gap-2">
-                  <Icon name={result.ok ? "CheckCircle2" : "XCircle"} className={`w-5 h-5 ${result.ok ? "text-emerald-600" : "text-red-600"}`} />
-                  <span className={`font-semibold ${result.ok ? "text-emerald-800 dark:text-emerald-300" : "text-red-800 dark:text-red-300"}`}>
-                    {result.ok ? "Connection successful" : "Connection failed"}
+                  <Icon name={result.ok ? "CheckCircle2" : result.rateLimited ? "AlertTriangle" : "XCircle"} className={`w-5 h-5 ${result.ok ? "text-emerald-600" : result.rateLimited ? "text-amber-600" : "text-red-600"}`} />
+                  <span className={`font-semibold ${result.ok ? "text-emerald-800 dark:text-emerald-300" : result.rateLimited ? "text-amber-800 dark:text-amber-300" : "text-red-800 dark:text-red-300"}`}>
+                    {result.ok ? "Connection successful" : result.rateLimited ? "Rate-limited — provider reachable" : "Connection failed"}
                   </span>
-                  <Badge variant={result.ok ? "success" : "danger"} className="ml-auto">{result.latencyMs}ms</Badge>
+                  <Badge variant={result.ok ? "success" : result.rateLimited ? "warning" : "danger"} className="ml-auto">{result.latencyMs}ms</Badge>
                 </div>
-                <div className={`mt-2 text-sm ${result.ok ? "text-emerald-700 dark:text-emerald-400" : "text-red-700 dark:text-red-400"}`}>{result.message}</div>
+                <div className={`mt-2 text-sm ${result.ok ? "text-emerald-700 dark:text-emerald-400" : result.rateLimited ? "text-amber-700 dark:text-amber-400" : "text-red-700 dark:text-red-400"}`}>{result.message}</div>
               </div>
 
               {result.response && (
