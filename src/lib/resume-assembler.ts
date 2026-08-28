@@ -245,22 +245,6 @@ export function assembleResume(
     }
   }
 
-  // Reject summary that contains JD company names ONLY if they were not already in source resume
-  if (summary) {
-    const jdCompaniesForSummary = [
-      "qatar duty free", "qatar airways", "the millennium hotel", "emaar", "madini perfume",
-    ];
-    const summaryLower = summary.toLowerCase();
-    const sourceSummaryLower = (sourceResume.summary || "").toLowerCase();
-    const containsNewJdCompany = jdCompaniesForSummary.some(
-      (c) => summaryLower.includes(c) && !sourceSummaryLower.includes(c)
-    );
-    if (containsNewJdCompany) {
-      warnings.push("Optimizer summary contains unverified JD company name — using source summary");
-      summary = sourceResume.summary ?? "";
-    }
-  }
-
   // ========================================================================
   // 3. HEADLINE — from optimizer, tailored to target role
   // ========================================================================
