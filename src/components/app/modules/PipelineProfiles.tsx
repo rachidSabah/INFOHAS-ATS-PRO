@@ -309,11 +309,15 @@ export function PipelineProfiles() {
         </CardHeader>
         <CardContent className="space-y-2 text-sm text-muted-foreground">
           <p>1. The Supervisor Agent loads the selected profile at the start of each pipeline run.</p>
-          <p>2. The profile determines: which agents run, in what order, which providers/models they use, and what quality gates are enforced.</p>
+          <p>2. The profile is LIVE — it decides the locked pipeline, optimizer retry attempts, V3 post-optimization agents, targeted regeneration, assembler matching strategy, and the QA reflection threshold.</p>
           <p>3. Built-in profiles (Legacy V2, Legacy V3, Locked, Hybrid) are read-only but can be cloned to create custom profiles.</p>
           <p>4. Custom profiles are fully editable and persisted to D1.</p>
-          <p>5. Changes take effect immediately — no restart required. All pipelines, routes, and agents use the selected profile.</p>
+          <p>5. Changes take effect immediately — no restart required. The profile (and its updatedAt) is part of the Supervisor's result-cache key, so edits always apply to the next run.</p>
           <p>6. Per-agent configuration (provider, model, temperature, prompts, retry, fallback) is available in the Agent Configuration Center.</p>
+          <p className="flex items-start gap-1.5 pt-1 text-foreground">
+            <Icon name="ShieldCheck" className="w-4 h-4 text-brand shrink-0 mt-0.5" />
+            <span><span className="font-semibold">AI governance:</span> during Resume Optimization the provider+model are decided exclusively by the AI Readiness Gate lock (TEST FIRST → SELECT BEST → LOCK); the profile governs pipeline architecture, and per-agent provider/model preferences from the Agent Configuration Center apply only to non-locked runs.</span>
+          </p>
         </CardContent>
       </Card>
     </div>

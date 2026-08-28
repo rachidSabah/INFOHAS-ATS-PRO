@@ -102,14 +102,17 @@ export interface DirectiveComplianceResult {
  * @param jd Optional job description (for ATS + relevance checks)
  * @param ji Optional job intelligence (for relevance checks)
  * @param originalResume Optional original resume (for factual consistency check)
- * @param options { checkExport?: boolean } — whether to run the export quality check (default: false, slow)
+ * @param options { checkExport?: boolean, reflectionThreshold?: number } — whether to run the export quality
+ *        check (default: false, slow); and the QA confidence below which the
+ *        Reflection Agent triggers (default: 75; wired from the selected
+ *        Pipeline Profile's validationThresholds.minConfidenceScore).
  */
 export async function runQA(
   optimizedResume: ResumeData,
   jd?: JobDescription | null,
   ji?: JobIntelligence | null,
   originalResume?: ResumeData | null,
-  options?: { checkExport?: boolean },
+  options?: { checkExport?: boolean; reflectionThreshold?: number },
   optimizationPolicy?: OptimizationPolicy | null,
 ): Promise<QAResult> {
   // === Run the existing validation pipeline (7 checks) ===
@@ -254,11 +257,16 @@ export async function runQA(
   const confidence = totalWeight > 0 ? Math.round(weightedScore / totalWeight) : 0;
 
   // === Determine if Reflection Agent should trigger ===
-  // Trigger if confidence < 75 OR any critical check failed.
-  // (Threshold lowered from 80 to 75 per spec — Reflection should only run
-  // when there's a real quality concern, not on every request.)
+  // Trigger if confidence < threshold OR any critical check failed.
+  // The threshold comes from the selected Pipeline Profile
+  // (validationThresholds.minConfidenceScore) — default 75 (pre-profile
+  // behavior). Reflection should only run when there's a real quality
+  // concern, not on every request.
+  const reflectionThreshold = typeof options?.reflectionThreshold === "number" && Number.isFinite(options.reflectionThreshold)
+    ? Math.min(100, Math.max(0, options.reflectionThreshold))
+    : 75;
   const criticalFailures = checks.filter((c) => !c.passed && (weights[c.name] ?? 1) >= 2);
-  const shouldReflect = confidence < 75 || criticalFailures.length > 0;
+  const shouldReflect = confidence < reflectionThreshold || criticalFailures.length > 0;
 
   const allPassed = checks.every((c) => c.passed);
 

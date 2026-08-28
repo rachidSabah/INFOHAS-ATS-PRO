@@ -72,6 +72,12 @@ export function Optimizer() {
 
   const config = useApp((s) => s.optimizerDirective);
   const updateOptimizerDirective = useApp((s) => s.updateOptimizerDirective);
+  // Task 7 — Pipeline Profiles are LIVE: show the active profile in the AI Engine dashboard.
+  const activePipelineProfileName = useApp((s) =>
+    s.pipelineProfiles?.find((p) => p.id === s.selectedProfileId)?.name
+    ?? s.pipelineProfiles?.find((p) => p.isDefault)?.name
+    ?? undefined,
+  );
 
   const [step, setStep] = useState<Step>("upload");
   // Honor the active resume / JD from the store so navigation from
@@ -2046,6 +2052,7 @@ Guidelines:
                       )}
                       <Badge variant="outline">Readiness {aiEngineLock.readiness}/100</Badge>
                       <Badge variant="outline">{aiEngineLock.latencyMs}ms</Badge>
+                      {activePipelineProfileName && <Badge variant="outline"><Icon name="Workflow" className="w-3 h-3 mr-0.5" /> {activePipelineProfileName}</Badge>}
                       {aiEngineLock.fallback && <span className="text-[10px] text-muted-foreground">Fallback: {aiEngineLock.fallback}</span>}
                       <Badge variant="outline" className="ml-auto"><Icon name="ShieldCheck" className="w-3 h-3 mr-0.5" /> Supervisor: FAILOVER PROTECTED</Badge>
                     </div>

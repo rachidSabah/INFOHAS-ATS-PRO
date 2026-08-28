@@ -69,6 +69,7 @@ export interface AdminSlice {
   removePipelineProfile: (id: string) => void;
   selectPipelineProfile: (id: string) => void;
   updateAgentConfig: (agentType: string, patch: Partial<AgentConfig>) => void;
+  applyOptimalAgentDefaults: () => void;
   updatePromptVersion: (id: string, patch: Partial<PromptVersion>) => void;
   addPromptVersion: (prompt: PromptVersion) => void;
   resetPipelineOrchestration: () => void;
@@ -370,6 +371,13 @@ export const createAdminSlice: StateCreator<AppState, [], [], AdminSlice> = (set
     }));
     cloudApiSafe(cloudApi.updateBranding as any)({ agentConfigs: get().agentConfigs }).catch((e) => { console.warn("[store] Cloud sync failed:", e); });
     get().log({ actor: get().user?.email ?? "admin", action: "Agent config updated", category: "admin", details: `Agent: ${agentType}, fields: ${Object.keys(patch).join(", ")}`, severity: "info" });
+  },
+
+  applyOptimalAgentDefaults: () => {
+    const now = new Date().toISOString();
+    set({ agentConfigs: SEED_AGENT_CONFIGS.map((a) => ({ ...a, createdAt: now, updatedAt: now })) });
+    cloudApiSafe(cloudApi.updateBranding as any)({ agentConfigs: get().agentConfigs }).catch((e) => { console.warn("[store] Cloud sync failed:", e); });
+    get().log({ actor: get().user?.email ?? "admin", action: "Optimal agent defaults applied", category: "admin", details: `${SEED_AGENT_CONFIGS.length} agent configs restored to tuned optimal values (Task 7)`, severity: "warning" });
   },
 
   updatePromptVersion: (id, patch) => {

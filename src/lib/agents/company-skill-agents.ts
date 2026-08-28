@@ -108,6 +108,10 @@ Be specific to ${companyName}. If information is not available for a field, use 
     maxTokens: 1800,
     temperature: 0.3,
     taskCategory: "document",
+    // SUPERVISED pipeline agent: inherits the job AI configuration lock +
+    // supervised recovery; Agent Configuration Center contributes defaults.
+    isOptimizerCall: true,
+    pipelineAgent: "company-intelligence",
     // Free-tier models can take 40-80s on this prompt.
     timeoutMs: PIPELINE_STEP_CALL_TIMEOUT_MS,
   });
@@ -252,6 +256,10 @@ Be honest. If the candidate is a poor match, say so. The bridging strategy must 
     temperature: 0.3,
     taskCategory: "document",
     // Free-tier models can take 40-80s on this prompt.
+    // SUPERVISED pipeline agent: inherits the job AI configuration lock +
+    // supervised recovery; Agent Configuration Center contributes defaults.
+    isOptimizerCall: true,
+    pipelineAgent: "skill-gap",
     timeoutMs: PIPELINE_STEP_CALL_TIMEOUT_MS,
   });
 

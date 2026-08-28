@@ -181,7 +181,20 @@ export const SEED_PIPELINE_PROFILES: PipelineProfile[] = [
 ];
 
 // ============================================================================
-// 2. DEFAULT AGENT CONFIGURATIONS
+// 2. DEFAULT AGENT CONFIGURATIONS (OPTIMAL — Task 7)
+//
+// Per-agent tuned defaults aligned with the Auto-Heal / AI Readiness Gate
+// architecture (commit 374847fe):
+//   - Deterministic agents (lock, assemble, validate) → temperature 0.0-0.1.
+//   - Creative-but-factual optimizers → 0.15-0.3 (quality without drift).
+//   - maxTokens sized to each agent's output shape (no truncation, no waste).
+//   - requestTimeoutMs sized for free-tier latency (40-80s typical).
+//   - maxRetryCount ≤ 3 + exponential backoff — the job AI lock adds ONE
+//     supervised recovery cycle ON TOP (directive #14/#35: no retry loops).
+//   - Provider/model left EMPTY = use the app default chain / job AI lock.
+//     Set them in the Agent Configuration Center to pin an agent's
+//     preference for non-locked runs; under an optimization job the
+//     readiness-gate lock ALWAYS wins (directive #31).
 // ============================================================================
 
 function createDefaultAgentConfig(
@@ -189,8 +202,7 @@ function createDefaultAgentConfig(
   displayName: string,
   description: string,
   executionOrder: number,
-  providerId: string = "",  // empty = use primary provider
-  model: string = "",       // empty = use provider's default model
+  overrides: Partial<AgentConfig> = {},
 ): AgentConfig {
   return {
     id: `agent-${agentType}`,
@@ -205,8 +217,8 @@ function createDefaultAgentConfig(
     runOnlyWhenRequired: false,
     enableLogging: false,
     enableDebugMode: false,
-    providerId,
-    model,
+    providerId: "",  // empty = app default chain (or job AI lock during optimization)
+    model: "",       // empty = provider's default model
     qualityMode: "balanced",
     temperature: 0.15,
     topP: 1.0,
@@ -224,7 +236,7 @@ function createDefaultAgentConfig(
     streamThinkingProcess: false,
     streamTokenStatistics: false,
     maxRetryCount: 2,
-    retryDelayMs: 1000,
+    retryDelayMs: 1500,
     exponentialBackoff: true,
     retryOnTimeout: true,
     retryOnRateLimit: true,
@@ -252,27 +264,70 @@ function createDefaultAgentConfig(
     outputVisibility: "internal",
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
+    ...overrides,
   };
 }
 
 export const SEED_AGENT_CONFIGS: AgentConfig[] = [
-  createDefaultAgentConfig("supervisor", "Supervisor Agent", "Orchestrates the entire pipeline — planning, scheduling, retries, validation.", 0),
-  createDefaultAgentConfig("parser", "Resume Parser", "Parses uploaded resume (PDF/DOCX/TXT/HTML) into structured ResumeData.", 1),
-  createDefaultAgentConfig("entity-lock", "Entity Lock Agent", "Locks immutable entities (company, dates, education, languages) before optimization.", 2),
-  createDefaultAgentConfig("job-intelligence", "Job Intelligence Agent", "Analyzes JD to extract industry, required skills, recruiter intent, priority keywords.", 3),
-  createDefaultAgentConfig("company-intelligence", "Company Intelligence Agent", "Researches the target company — culture, values, hiring priorities, ATS system.", 3),
-  createDefaultAgentConfig("skill-gap", "Skill Gap Agent", "Identifies gaps between candidate skills and JD requirements. Suggests transferable skills.", 3),
-  createDefaultAgentConfig("ats-analysis", "ATS Analysis Agent", "Computes ATS score and identifies missing keywords.", 4),
-  createDefaultAgentConfig("summary-optimizer", "Summary Optimization Agent", "Rewrites the professional summary for ATS + readability.", 5),
-  createDefaultAgentConfig("skills-optimizer", "Skills Optimization Agent", "Enriches skills with transferable skills and JD-relevant keywords.", 5),
-  createDefaultAgentConfig("experience-optimizer", "Experience Optimization Agent", "Rewrites experience bullets for impact + ATS keywords. Title/company/dates locked.", 5),
-  createDefaultAgentConfig("education-languages", "Education & Languages Agent", "Formatting only — no inference or additions.", 5),
-  createDefaultAgentConfig("resume-assembler", "Resume Assembler Agent", "Merges immutable source fields with mutable optimizer output. Application-owned.", 6),
-  createDefaultAgentConfig("structure-guardian", "Structure Guardian Agent", "Validates final resume for corruption, duplicates, malformed fragments.", 7),
-  createDefaultAgentConfig("factual-consistency", "Factual Consistency Agent", "Compares optimized resume against source to detect hallucinations.", 7),
-  createDefaultAgentConfig("quality-assurance", "Quality Assurance Agent", "Final quality check — ATS score, readability, completeness.", 8),
-  createDefaultAgentConfig("reflection", "Reflection Agent", "Reviews diff between original and optimized. Triggers when QA confidence < 80.", 8),
-  createDefaultAgentConfig("recovery", "Recovery Agent", "Handles pipeline failures — snapshot rollback, fallback generation.", 99),
+  createDefaultAgentConfig("supervisor", "Supervisor Agent", "Orchestrates the entire pipeline — planning, scheduling, retries, validation.", 0, {
+    temperature: 0.1, maxTokens: 4000, maxRetryCount: 2,
+  }),
+  createDefaultAgentConfig("parser", "Resume Parser", "Parses uploaded resume (PDF/DOCX/TXT/HTML) into structured ResumeData.", 1, {
+    temperature: 0.0, maxTokens: 8000, requestTimeoutMs: 90000,
+  }),
+  createDefaultAgentConfig("entity-lock", "Entity Lock Agent", "Locks immutable entities (company, dates, education, languages) before optimization.", 2, {
+    temperature: 0.0, maxTokens: 3000, maxRetryCount: 2, onFailureAction: "retry",
+  }),
+  createDefaultAgentConfig("resume-optimizer", "Resume Optimizer", "Bullet-only optimizer + assembler output (locked pipeline) or full-resume optimizer (legacy path). The pipeline's main AI engine.", 3, {
+    temperature: 0.15, maxTokens: 8000, maxRetryCount: 3, requestTimeoutMs: 120000,
+    totalAgentTimeoutMs: 180000, qualityMode: "high-quality", streamingEnabled: true,
+    streamPartialResponses: true, minQualityScore: 80, onFailureAction: "fallback-model",
+  }),
+  createDefaultAgentConfig("job-intelligence", "Job Intelligence Agent", "Analyzes JD to extract industry, required skills, recruiter intent, priority keywords.", 3, {
+    temperature: 0.2, maxTokens: 3000, requestTimeoutMs: 90000, minConfidenceScore: 75,
+  }),
+  createDefaultAgentConfig("company-intelligence", "Company Intelligence Agent", "Researches the target company — culture, values, hiring priorities, ATS system.", 3, {
+    temperature: 0.3, maxTokens: 1800, requestTimeoutMs: 90000, runOnlyWhenRequired: true,
+  }),
+  createDefaultAgentConfig("skill-gap", "Skill Gap Agent", "Identifies gaps between candidate skills and JD requirements. Suggests transferable skills.", 3, {
+    temperature: 0.2, maxTokens: 2200, requestTimeoutMs: 90000, minConfidenceScore: 75,
+  }),
+  createDefaultAgentConfig("ats-analysis", "ATS Analysis Agent", "Computes ATS score and identifies missing keywords.", 4, {
+    temperature: 0.0, maxTokens: 2500, requestTimeoutMs: 90000,
+  }),
+  createDefaultAgentConfig("summary-optimizer", "Summary Optimization Agent", "Rewrites the professional summary for ATS + readability.", 5, {
+    temperature: 0.3, maxTokens: 2000, maxRetryCount: 3, requestTimeoutMs: 120000,
+    minQualityScore: 80, onFailureAction: "fallback-model",
+  }),
+  createDefaultAgentConfig("skills-optimizer", "Skills Optimization Agent", "Enriches skills with transferable skills and JD-relevant keywords.", 5, {
+    temperature: 0.2, maxTokens: 1500, maxRetryCount: 3, requestTimeoutMs: 120000,
+    onFailureAction: "fallback-model",
+  }),
+  createDefaultAgentConfig("experience-optimizer", "Experience Optimization Agent", "Rewrites experience bullets for impact + ATS keywords. Title/company/dates locked.", 5, {
+    temperature: 0.15, maxTokens: 4000, maxRetryCount: 3, requestTimeoutMs: 120000,
+    totalAgentTimeoutMs: 180000, minQualityScore: 80, onFailureAction: "fallback-model",
+  }),
+  createDefaultAgentConfig("education-languages", "Education & Languages Agent", "Formatting only — no inference or additions.", 5, {
+    temperature: 0.0, maxTokens: 2000, maxRetryCount: 2,
+  }),
+  createDefaultAgentConfig("resume-assembler", "Resume Assembler Agent", "Merges immutable source fields with mutable optimizer output. Application-owned.", 6, {
+    temperature: 0.0, maxTokens: 4000, maxRetryCount: 1,
+  }),
+  createDefaultAgentConfig("structure-guardian", "Structure Guardian Agent", "Validates final resume for corruption, duplicates, malformed fragments.", 7, {
+    temperature: 0.0, maxTokens: 2000, maxRetryCount: 2, minQualityScore: 85,
+  }),
+  createDefaultAgentConfig("factual-consistency", "Factual Consistency Agent", "Compares optimized resume against source to detect hallucinations.", 7, {
+    temperature: 0.0, maxTokens: 2000, maxRetryCount: 2, minConfidenceScore: 95,
+  }),
+  createDefaultAgentConfig("quality-assurance", "Quality Assurance Agent", "Final quality check — ATS score, readability, completeness.", 8, {
+    temperature: 0.0, maxTokens: 2000, maxRetryCount: 2, minQualityScore: 80,
+  }),
+  createDefaultAgentConfig("reflection", "Reflection Agent", "Reviews diff between original and optimized. Triggers when QA confidence < threshold.", 8, {
+    temperature: 0.2, maxTokens: 1500, maxRetryCount: 2, requestTimeoutMs: 90000,
+  }),
+  createDefaultAgentConfig("recovery", "Recovery Agent", "Handles pipeline failures — snapshot rollback, fallback generation.", 99, {
+    temperature: 0.0, maxTokens: 2000, maxRetryCount: 1, runOnlyWhenRequired: true,
+  }),
 ];
 
 // ============================================================================

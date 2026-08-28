@@ -42,6 +42,7 @@ import { runDynamicSectionPipeline } from "./dynamic-section-engine";
 import { reportDegradedOptimization } from "./degradation";
 import { selectProviderForAgent, getOrderedFallbackProviders } from "./ai";
 import { useApp } from "./store";
+import type { MatchingStrategy } from "./agents/profile-resolution";
 
 export interface LockedPipelineResult {
   resume: ResumeData;
@@ -106,6 +107,8 @@ export async function runLockedPipeline(
   feedback?: string,
   baselineResume?: ResumeData, // Added for Localized Diff-Only Processing
   onChunk?: (chunk: string) => void,
+  /** Task 7 — matching strategy from the selected Pipeline Profile. */
+  options?: { matchingStrategy?: MatchingStrategy; hybridMatchingThreshold?: number },
 ): Promise<LockedPipelineResult> {
   const agentDirectives = directiveConfig?.agentDirectives;
   const warnings: string[] = [];
@@ -249,8 +252,8 @@ export async function runLockedPipeline(
         if (pRes && sRes) {
           const { scoreATS } = await import("./ats");
           // Assemble temporary resumes to check ATS scores
-          const pResume = assembleResume(idReadyResume, pRes.output).resume;
-          const sResume = assembleResume(idReadyResume, sRes.output).resume;
+          const pResume = assembleResume(idReadyResume, pRes.output, { matchingStrategy: options?.matchingStrategy }).resume;
+          const sResume = assembleResume(idReadyResume, sRes.output, { matchingStrategy: options?.matchingStrategy }).resume;
           const pScore = scoreATS(pResume, jd).scores.ats;
           const sScore = scoreATS(sResume, jd).scores.ats;
           console.info(`[Model Arena] Primary ATS score: ${pScore}/100. Secondary ATS score: ${sScore}/100.`);
@@ -278,7 +281,7 @@ export async function runLockedPipeline(
       // ========================================================================
       // Step 3: Assemble Resume (application-owned)
       // ========================================================================
-      const assembleResult = assembleResume(idReadyResume, optimizerResult.output);
+      const assembleResult = assembleResume(idReadyResume, optimizerResult.output, { matchingStrategy: options?.matchingStrategy });
       warnings.push(...assembleResult.warnings);
       errors.push(...assembleResult.errors);
 

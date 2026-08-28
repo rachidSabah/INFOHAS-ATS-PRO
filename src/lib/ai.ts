@@ -110,8 +110,20 @@ export interface AICallOptions {
   enableRetries?: boolean;
   enableProviderSwitch?: boolean;
   agentType?: "optimizer" | "supervisor" | "guardian" | "assembler" | "emergency" | "simple" | "reasoning";
-  /** Task hint forwarded to ProviderRouter for capability-weighted model selection (Phase 8.1.3.1). */
+  /**
+   * Task hint forwarded to ProviderRouter for capability-weighted model
+   * selection (Phase 8.1.3.1).
+   */
   agentTask?: string;
+  /**
+   * Pipeline agent identity (Agent Configuration Center key, e.g.
+   * "job-intelligence", "summary-optimizer", "reflection"). When set, the
+   * call participates in the per-agent AI config resolution:
+   *   explicit pinning > job AI lock > Agent Config Center > app defaults.
+   * Any call carrying this flag is treated as SUPERVISED (inherits the job
+   * AI configuration lock + single supervised recovery cycle).
+   */
+  pipelineAgent?: string;
   providerId?: string;
   messages?: { role: "system" | "user" | "assistant"; content: string }[];
   modelOverride?: string;
@@ -233,15 +245,25 @@ export async function callAIRaw(opts: AICallOptions): Promise<AICallResult> {
   // model. The fallback chain is additionally RESTRICTED to the locked,
   // pre-validated providers (no unvalidated failovers). Explicit per-call
   // pinning (providerId already set) takes precedence.
+  //
+  // === AGENT CONFIGURATION CENTER (Task 7) ===
+  // Calls tagged with `pipelineAgent` are SUPERVISED calls: they inherit the
+  // job lock AND receive generation-parameter defaults (temperature /
+  // maxTokens / timeout) from the agent's stored configuration. Outside a
+  // locked job, a configured agent may also contribute its preferred
+  // provider+model (resolution: explicit > lock > agent config > defaults).
+  const supervisedCall = !!opts.isOptimizerCall || !!opts.pipelineAgent;
   let lockProviderId = opts.providerId;
   let lockModel = opts.modelOverride;
   let lockExclude: string[] | undefined;
-  if (opts.isOptimizerCall && !lockProviderId && !lockModel) {
+  let lockActive = false;
+  if (supervisedCall && !lockProviderId && !lockModel) {
     try {
       const { getJobAILock, getActiveJobModel } = await import("./ai/readiness/config-lock");
       const lock = getJobAILock();
       const active = lock ? getActiveJobModel() : null;
       if (lock && active) {
+        lockActive = true;
         lockProviderId = active.providerId;
         lockModel = active.model;
         const validated = new Set([lock.primary.providerId, ...lock.fallbacks.map((f) => f.providerId)]);
@@ -252,6 +274,28 @@ export async function callAIRaw(opts: AICallOptions): Promise<AICallResult> {
     }
   }
 
+  // Per-agent config contribution (Agent Configuration Center). Provider/model
+  // only when NO lock is active and the caller did not pin explicitly.
+  let agentCfg: { providerId?: string; model?: string; temperature?: number; maxTokens?: number; timeoutMs?: number } | null = null;
+  if (opts.pipelineAgent) {
+    try {
+      const { resolveAgentAIOptions } = await import("./agents/agent-ai-config");
+      agentCfg = resolveAgentAIOptions(
+        opts.pipelineAgent,
+        !!(opts.providerId || opts.modelOverride),
+        lockActive,
+      );
+    } catch {
+      // agent config module unavailable — proceed with call-site values only
+    }
+  }
+
+  const effProviderId = opts.providerId ?? lockProviderId ?? agentCfg?.providerId;
+  const effModel = opts.modelOverride ?? lockModel ?? agentCfg?.model;
+  const effTemperature = opts.temperature ?? agentCfg?.temperature;
+  const effMaxTokens = opts.maxTokens ?? agentCfg?.maxTokens;
+  const effTimeoutMs = opts.timeoutMs ?? agentCfg?.timeoutMs;
+
   const chatRequest: ChatRequest = {
     messages: opts.messages
       ? opts.messages
@@ -261,19 +305,22 @@ export async function callAIRaw(opts: AICallOptions): Promise<AICallResult> {
             { role: "user", content: userPrompt },
           ]
         : [{ role: "user", content: userPrompt }],
-    model: lockModel,
-    temperature: opts.temperature,
+    model: effModel,
+    temperature: effTemperature,
     topP: opts.topP,
-    maxTokens: opts.maxTokens,
+    maxTokens: effMaxTokens,
     signal: opts.signal,
   };
 
   const routerOptions: RouterOptions = {
-    preferredProviderId: lockProviderId,
+    preferredProviderId: effProviderId,
     requestType: "chat",
     ...opts,
-    providerId: lockProviderId,
-    modelOverride: lockModel,
+    providerId: effProviderId,
+    modelOverride: effModel,
+    temperature: effTemperature,
+    maxTokens: effMaxTokens,
+    timeoutMs: effTimeoutMs,
     excludeProviderIds: lockExclude?.length
       ? Array.from(new Set([...(opts.excludeProviderIds ?? []), ...lockExclude]))
       : opts.excludeProviderIds,
@@ -286,7 +333,7 @@ export async function callAIRaw(opts: AICallOptions): Promise<AICallResult> {
   try {
     res = await ProviderRouter.chat(chatRequest, routerOptions);
   } catch (primaryErr: any) {
-    if (opts.isOptimizerCall && !controllerAborted(opts.signal)) {
+    if (supervisedCall && !controllerAborted(opts.signal)) {
       try {
         const { supervisedRecovery } = await import("./ai/readiness/preflight");
         const recovered = await supervisedRecovery(primaryErr);
@@ -365,15 +412,22 @@ export async function callAIRawStreamed(
   const userPrompt = opts.userPrompt ?? "";
 
   // === AI READINESS GATE — JOB CONFIG LOCK (streaming parity, directives #30/#31) ===
+  // Same resolution as callAIRaw: supervised calls (isOptimizerCall or
+  // pipelineAgent) inherit the job lock; the Agent Configuration Center
+  // contributes generation defaults — and provider/model ONLY when no lock
+  // is active and the caller did not pin explicitly.
+  const supervisedCallStream = !!opts.isOptimizerCall || !!opts.pipelineAgent;
   let lockProviderId = opts.providerId;
   let lockModel = opts.modelOverride;
   let lockExcludeStream: string[] | undefined;
-  if (opts.isOptimizerCall && !lockProviderId && !lockModel) {
+  let lockActiveStream = false;
+  if (supervisedCallStream && !lockProviderId && !lockModel) {
     try {
       const { getJobAILock, getActiveJobModel } = await import("./ai/readiness/config-lock");
       const lock = getJobAILock();
       const active = lock ? getActiveJobModel() : null;
       if (lock && active) {
+        lockActiveStream = true;
         lockProviderId = active.providerId;
         lockModel = active.model;
         const validated = new Set([lock.primary.providerId, ...lock.fallbacks.map((f) => f.providerId)]);
@@ -384,6 +438,26 @@ export async function callAIRawStreamed(
     }
   }
 
+  let agentCfgStream: { providerId?: string; model?: string; temperature?: number; maxTokens?: number; timeoutMs?: number } | null = null;
+  if (opts.pipelineAgent) {
+    try {
+      const { resolveAgentAIOptions } = await import("./agents/agent-ai-config");
+      agentCfgStream = resolveAgentAIOptions(
+        opts.pipelineAgent,
+        !!(opts.providerId || opts.modelOverride),
+        lockActiveStream,
+      );
+    } catch {
+      // agent config module unavailable — proceed with call-site values only
+    }
+  }
+
+  const effProviderIdStream = opts.providerId ?? lockProviderId ?? agentCfgStream?.providerId;
+  const effModelStream = opts.modelOverride ?? lockModel ?? agentCfgStream?.model;
+  const effTemperatureStream = opts.temperature ?? agentCfgStream?.temperature;
+  const effMaxTokensStream = opts.maxTokens ?? agentCfgStream?.maxTokens;
+  const effTimeoutMsStream = opts.timeoutMs ?? agentCfgStream?.timeoutMs;
+
   const chatRequest: ChatRequest = {
     messages: opts.messages
       ? opts.messages
@@ -393,19 +467,22 @@ export async function callAIRawStreamed(
             { role: "user", content: userPrompt },
           ]
         : [{ role: "user", content: userPrompt }],
-    model: lockModel,
-    temperature: opts.temperature,
+    model: effModelStream,
+    temperature: effTemperatureStream,
     topP: opts.topP,
-    maxTokens: opts.maxTokens,
+    maxTokens: effMaxTokensStream,
     signal: opts.signal,
   };
 
   const routerOptions: RouterOptions = {
-    preferredProviderId: lockProviderId,
+    preferredProviderId: effProviderIdStream,
     requestType: "chat",
     ...opts,
-    providerId: lockProviderId,
-    modelOverride: lockModel,
+    providerId: effProviderIdStream,
+    modelOverride: effModelStream,
+    temperature: effTemperatureStream,
+    maxTokens: effMaxTokensStream,
+    timeoutMs: effTimeoutMsStream,
     excludeProviderIds: lockExcludeStream?.length
       ? Array.from(new Set([...(opts.excludeProviderIds ?? []), ...lockExcludeStream]))
       : opts.excludeProviderIds,

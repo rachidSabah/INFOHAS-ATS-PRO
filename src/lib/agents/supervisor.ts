@@ -28,6 +28,8 @@ setFlightScope({ scope: "future-agents", feature: "Supervisor Agent", module: "s
 import type { ResumeData, JobDescription } from "../types";
 import { useApp } from "../store";
 import { runOptimizationPipeline, type PipelineResult, type PipelineProgress } from "./orchestrator";
+import { getSelectedProfile, resolveProfileRuntime, describeProfileRuntime } from "./profile-resolution";
+import { agentConfigSignature } from "./agent-ai-config";
 import { createPlan } from "./pipeline-planner";
 import { analyzeCompanyIntelligence, analyzeSkillGap } from "./company-skill-agents";
 import { callAI, extractJSON } from "../ai";
@@ -895,14 +897,21 @@ export async function handleOptimizationRequested(
     jobTitle: jd.title ?? null,
   });
 
-  // Check cache — include provider/model/directiveHash so switching providers or directives invalidates cache
+  // Check cache — include provider/model/directiveHash so switching providers or directives invalidates cache.
+  // Task 7: also include the SELECTED PIPELINE PROFILE (id + updatedAt) and the
+  // Agent Configuration Center signature, so profile/agent config edits take
+  // effect immediately ("no restart required") — cached results built under a
+  // different profile or agent config are never served.
   const appState = useApp.getState();
   const activeProvider = appState?.providerSettings?.defaultProviderId ?? "none";
   const activeModel = appState?.providers?.find((p: any) => p.id === activeProvider)?.modelName ?? "";
   const dHash = directiveHash(userDirectives || JSON.stringify(appState?.optimizerDirective || {}));
   const rHash = resumeHash(resume);
   const jHash = jdHash(jd);
-  const cacheK = cacheKey("optimization", resume.id, rHash, jd.id, jHash, activeProvider, activeModel, dHash);
+  const selectedProfile = getSelectedProfile();
+  const agentSig = agentConfigSignature();
+  const profileCfg = resolveProfileRuntime(selectedProfile, process.env.NEXT_PUBLIC_USE_LOCKED_PIPELINE);
+  const cacheK = cacheKey("optimization", resume.id, rHash, jd.id, jHash, activeProvider, activeModel, dHash, selectedProfile?.id, selectedProfile?.updatedAt, agentSig);
   const cachedResult = getCached<PipelineResult>(cacheK);
   if (cachedResult) {
     // === SYNC CORE AGENT STATUSES FROM CACHE ===
@@ -964,7 +973,7 @@ export async function handleOptimizationRequested(
       completedAt: new Date().toISOString(),
       log: `Plan: ${plan.summary}`,
     });
-    updateAgent("supervisor", { status: "running", startedAt: new Date().toISOString(), log: `Running pipeline (${plan.summary})…` });
+    updateAgent("supervisor", { status: "running", startedAt: new Date().toISOString(), log: `Profile: ${describeProfileRuntime(profileCfg)}. Running pipeline (${plan.summary})…` });
 
     result = await runOptimizationPipeline({
       resume,
@@ -975,6 +984,9 @@ export async function handleOptimizationRequested(
       deepAgenticMode,
       checkExport: false,
       onProgress,
+      // Task 7 — Pipeline Profiles are LIVE: the Supervisor loads the selected
+      // profile at the start of each run and passes it to the pipeline.
+      profile: selectedProfile ?? undefined,
     });
 
     // === SYNC CORE AGENT STATUSES FROM THE V2 PIPELINE RESULT ===

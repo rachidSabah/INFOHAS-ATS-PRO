@@ -405,6 +405,7 @@ export async function runBulletOnlyOptimizer(
   const result = await callAIStreamed({
     systemPrompt,
     isOptimizerCall: true,
+    pipelineAgent: "resume-optimizer",
     userPrompt,
     maxTokens: 6000, // smaller than before — output is much smaller now
     temperature: temp,

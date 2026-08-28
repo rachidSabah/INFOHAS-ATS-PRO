@@ -103,11 +103,16 @@ export interface AssembleResult {
  *
  * @param sourceResume - The parsed resume from the PDF (source of truth)
  * @param optimizerOutput - The LLM's output (summary, skills, bullets only)
+ * @param options.matchingStrategy - Task 7 (Pipeline Profiles): strict = ID
+ *        only (fingerprint fallback disabled), hybrid/fuzzy = ID → fingerprint
+ *        (default — pre-profile behavior). Unmatched entries ALWAYS keep their
+ *        source bullets (data preservation is not optional in any strategy).
  * @returns AssembleResult with the final resume + diagnostics
  */
 export function assembleResume(
   sourceResume: ResumeData,
   optimizerOutput: OptimizerOutput,
+  options?: { matchingStrategy?: "strict" | "hybrid" | "fuzzy" },
 ): AssembleResult {
   const warnings: string[] = [];
   const errors: string[] = [];
@@ -127,6 +132,9 @@ export function assembleResume(
       optimizerById.set(opt.id, { bullets: opt.bullets });
     }
   }
+  // Matching strategy gate (Task 7): "strict" disables the fingerprint
+  // fallback — entries must match by ID or they keep their source bullets.
+  const allowFingerprintFallback = options?.matchingStrategy !== "strict";
 
   const finalExperience: ResumeExperience[] = sourceResume.experience.map((srcExp, index) => {
     // Try to find matching optimizer output by ID
@@ -154,9 +162,11 @@ export function assembleResume(
     // If no ID match, try fingerprint matching
     // (this handles the case where the LLM changed the ID but kept the entry)
     const srcFp = computeExperienceFingerprint(srcExp);
-    const fuzzyMatch = optimizerExperiences.find((opt) => {
-      return computeExperienceFingerprint(opt as any) === srcFp;
-    });
+    const fuzzyMatch = allowFingerprintFallback
+      ? optimizerExperiences.find((opt) => {
+          return computeExperienceFingerprint(opt as any) === srcFp;
+        })
+      : undefined;
 
     if (fuzzyMatch) {
       matchedByFingerprint++;

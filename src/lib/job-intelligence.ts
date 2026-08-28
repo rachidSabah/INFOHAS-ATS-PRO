@@ -145,6 +145,11 @@ Return ONLY valid JSON:
       temperature: 0.3,
       taskCategory: "document",
       agentType: "simple",
+      // SUPERVISED pipeline agent (Agent Configuration Center): inherits the
+      // job AI configuration lock + supervised recovery, contributes
+      // generation defaults from the agent's stored config.
+      isOptimizerCall: true,
+      pipelineAgent: "job-intelligence",
       // Free-tier models (OpenCode free, Nvidia build-free) can take 40-80s
       // even on this smaller prompt. The default 60s was too tight.
       timeoutMs: PIPELINE_STEP_CALL_TIMEOUT_MS,

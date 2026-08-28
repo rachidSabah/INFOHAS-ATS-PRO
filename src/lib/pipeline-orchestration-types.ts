@@ -75,6 +75,7 @@ export type AgentType =
   | "supervisor"
   | "parser"
   | "entity-lock"
+  | "resume-optimizer"
   | "job-intelligence"
   | "company-intelligence"
   | "skill-gap"

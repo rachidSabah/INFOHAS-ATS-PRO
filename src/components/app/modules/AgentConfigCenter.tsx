@@ -15,7 +15,14 @@ export function AgentConfigCenter() {
   const agentConfigs = useApp((s) => s.agentConfigs);
   const providers = useApp((s) => s.providers);
   const updateAgentConfig = useApp((s) => s.updateAgentConfig);
+  const applyOptimalAgentDefaults = useApp((s) => s.applyOptimalAgentDefaults);
   const promptVersions = useApp((s) => s.promptVersions);
+
+  const handleApplyOptimal = () => {
+    if (!confirm("Reset ALL agent configurations to the tuned optimal defaults?\n\nThis restores per-agent temperature, tokens, timeouts and retry policies (Task 7 optimal values). Custom provider/model preferences will be cleared.")) return;
+    applyOptimalAgentDefaults();
+    toast.success("Optimal agent defaults applied. All agents now use the tuned Task 7 configuration.");
+  };
 
   const [selectedAgentType, setSelectedAgentType] = useState<AgentType | null>(null);
   const [draft, setDraft] = useState<AgentConfig | null>(null);
@@ -78,11 +85,30 @@ export function AgentConfigCenter() {
         </p>
       </div>
 
+      {/* AI Governance banner (Task 7) */}
+      <div className="rounded-lg border border-brand/30 bg-brand/5 p-3 text-sm text-muted-foreground flex items-start gap-2">
+        <Icon name="ShieldCheck" className="w-4 h-4 text-brand mt-0.5 shrink-0" />
+        <div>
+          <span className="font-semibold text-foreground">AI governance — resolution order:</span> explicit call pinning → job AI lock (readiness gate) → <span className="text-foreground">this configuration</span> → app default chain. During an optimization job the readiness-gate lock ALWAYS decides the provider+model (Supervisor-exclusive); this center then contributes each agent's temperature, tokens and timeout defaults, and its provider/model preference applies only to non-locked runs.
+        </div>
+      </div>
+
       <div className="grid lg:grid-cols-[280px_1fr] gap-6">
         {/* Agent list sidebar */}
         <Card>
           <CardHeader>
-            <CardTitle className="text-base">Agents ({agentConfigs.length})</CardTitle>
+            <div className="flex items-center justify-between">
+              <CardTitle className="text-base">Agents ({agentConfigs.length})</CardTitle>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleApplyOptimal}
+                className="h-7 text-[10px] gap-1"
+                title="Restore all agents to the tuned optimal defaults"
+              >
+                <Icon name="Sparkles" className="w-3 h-3" /> OPTIMAL
+              </Button>
+            </div>
           </CardHeader>
           <CardContent className="space-y-1 max-h-[600px] overflow-y-auto">
             {agentConfigs

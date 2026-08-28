@@ -48,6 +48,8 @@ import { buildOptimizationPolicy, formatPolicyForPrompt, type OptimizationPolicy
 import { analyzeCompanyIntelligence, analyzeSkillGap, type CompanyIntelligence, type SkillGapIntelligence } from "./company-skill-agents";
 import { uid, useApp } from "../store";
 import type { ResumeSkill } from "../types";
+import type { PipelineProfile } from "../pipeline-orchestration-types";
+import { resolveProfileRuntime, getSelectedProfile, describeProfileRuntime, type ProfileRuntimeConfig } from "./profile-resolution";
 // Phase 11: Live JD Fetch Integration — additive, zero-touch existing pipeline
 import { prepareLiveJD, verifyOptimizationHonesty, checkCandidateEligibility } from "../jd-fetch-integration";
 import {
@@ -482,6 +484,14 @@ export interface PipelineInput {
   baselineResume?: ResumeData;
   /** Optional: human approval gate callback to block and confirm critical pipeline steps */
   requestApproval?: (stepName: string, details: string) => Promise<boolean>;
+  /**
+   * Optional: the Pipeline Profile to run under (Task 7 — Pipeline Profiles
+   * are LIVE). When omitted, the currently SELECTED profile from the app
+   * store is loaded at run start — "changes take effect immediately, no
+   * restart required". When no profile exists at all, the pre-profile env
+   * fallback applies (locked pipeline ON, 4 attempts).
+   */
+  profile?: PipelineProfile;
 }
 
 export interface PipelineProgress {
@@ -767,6 +777,19 @@ async function _runOptimizationPipelineInner(input: PipelineInput, watchdog: Opt
   const { resume, jd, userDirectives, aviationMode, checkExport = false, enableReflection = true, deepAgenticMode = false, baselineResume, providerId } = input;
 
   // ============================================================
+  // PIPELINE PROFILE (Task 7 — Pipeline Profiles are LIVE)
+  // The Supervisor (or any caller) may pass the profile explicitly;
+  // otherwise the currently selected profile is loaded at run start.
+  // Decides: locked pipeline, optimizer attempts, V3 agents, targeted
+  // regeneration, matching strategy, reflection threshold.
+  // ============================================================
+  const profileCfg: ProfileRuntimeConfig = resolveProfileRuntime(
+    input.profile ?? getSelectedProfile(),
+    process.env.NEXT_PUBLIC_USE_LOCKED_PIPELINE,
+  );
+  console.info(`[Pipeline] Profile: ${describeProfileRuntime(profileCfg)} (${profileCfg.source})`);
+
+  // ============================================================
   // Load Optimizer Directive — Single Source of Truth
   // ============================================================
   const directiveText = userDirectives?.trim() || getOptimizerDirective();
@@ -974,7 +997,7 @@ async function _runOptimizationPipelineInner(input: PipelineInput, watchdog: Opt
     emitProgress(3, aviationMode ? `Optimizing for ${aviationMode.airlineProfile}…` : "Optimizing resume with full intelligence context…");
 
     let optimizeAttempt = 0;
-    const maxOptimizeAttempts = 4; // 1 initial + 3 retries
+    const maxOptimizeAttempts = profileCfg.maxOptimizeAttempts; // from the selected Pipeline Profile (1 initial + retries)
     let success = false;
     let optimizeResult: {
       resume: ResumeData;
@@ -1036,7 +1059,10 @@ async function _runOptimizationPipelineInner(input: PipelineInput, watchdog: Opt
         // This eliminates: missing company names, missing dates, duplicated
         // experiences, hallucinated employers, education/language corruption.
         // ====================================================================
-        const useLockedPipeline = process.env.NEXT_PUBLIC_USE_LOCKED_PIPELINE !== "false"; // default: enabled
+        // Locked-pipeline switch now comes from the selected Pipeline Profile
+        // (Task 7). The env var only applies when no profile could be resolved
+        // (resolveProfileRuntime env fallback). Default profile = Hybrid → ON.
+        const useLockedPipeline = profileCfg.useLockedPipeline;
         // GUARD: Don't use the locked pipeline if the source resume has NO experience
         // entries. The locked pipeline requires experience IDs to match — if there
         // are none, it will produce an empty resume. Fall back to the legacy path
@@ -1048,7 +1074,7 @@ async function _runOptimizationPipelineInner(input: PipelineInput, watchdog: Opt
           log("Resume Optimizer", `Source resume has no content — using legacy path instead of locked pipeline.`);
         }
         if (useLockedPipelineEffective) {
-          log("Resume Optimizer", `Locked Pipeline (bullet-only optimizer + assembler)${aviationMode ? ` [Industry ATS: ${aviationMode.airlineProfile}]` : ""} — attempt ${optimizeAttempt}/${maxOptimizeAttempts}.`);
+          log("Resume Optimizer", `Locked Pipeline (bullet-only optimizer + assembler)${aviationMode ? ` [Industry ATS: ${aviationMode.airlineProfile}]` : ""} — attempt ${optimizeAttempt}/${maxOptimizeAttempts}. Profile: ${profileCfg.profileName}.`);
           emitProgress(3, `Running locked pipeline: bullet-only optimizer → assembler → structure guardian…`);
 
           // Build the intelligence context (same as standard path)
@@ -1165,7 +1191,10 @@ ${jobMemory.industry}`);
               (chunk) => {
                 accumulatedText += chunk;
                 emitProgress(3, `Optimizing resume: generating rewritten content…`, accumulatedText);
-              }
+              },
+              // Matching strategy from the selected Pipeline Profile (Task 7):
+              // strict = ID-only, hybrid = ID → fingerprint, fuzzy = + index.
+              { matchingStrategy: profileCfg.matchingStrategy, hybridMatchingThreshold: profileCfg.hybridMatchingThreshold }
             );
 
             optimizeResult = {
@@ -1416,10 +1445,18 @@ ${jobMemory.industry}`);
       // Recompute whether the locked pipeline was used (the variable was scoped
       // inside the try block above, so we recompute it here for the V3 decision).
       const _sourceHasContent = resume.experience.length > 0 || resume.education.length > 0 || resume.languages.length > 0;
-      const _useLockedPipeline = process.env.NEXT_PUBLIC_USE_LOCKED_PIPELINE !== "false";
+      // PIPELINE PROFILE (Task 7): locked-pipeline switch + V3 gating both come
+      // from the profile. Profile-truthful behavior: Hybrid (locked + V3 ON)
+      // runs V3 agents AFTER the locked pipeline (safe — V3 re-applies
+      // enforceLockedFields); Locked profile (V3 OFF) and Legacy V2 skip V3;
+      // Legacy V3 (standard path) runs V3 as before.
+      const _useLockedPipeline = profileCfg.useLockedPipeline;
       const useLockedPipelineForV3 = _useLockedPipeline && _sourceHasContent;
-      if (useLockedPipelineForV3) {
+      const v3Enabled = profileCfg.enableV3PostOptimization;
+      if (useLockedPipelineForV3 && !v3Enabled) {
         log("Resume Optimizer", `Skipping V3 pipeline (locked pipeline already produced validated output).`);
+      } else if (!v3Enabled) {
+        log("Resume Optimizer", `Skipping V3 pipeline (disabled by profile "${profileCfg.profileName}").`);
       } else {
         try {
           const { runV3PostOptimizationPipeline } = await import("./supervisor");
@@ -1760,7 +1797,7 @@ ${jobMemory.industry}`);
       jd,
       result.jobIntelligence,
       resume, // original — for factual consistency check
-      { checkExport },
+      { checkExport, reflectionThreshold: profileCfg.reflectionConfidenceThreshold },
       null as import("../directive-policy").OptimizationPolicy | null,
     );
 
@@ -1846,8 +1883,14 @@ ${jobMemory.industry}`);
     // Multi-Agent Self-Healing Loop (Up to 3 Attempts)
     // ========================================================================
     if (result.optimizedResume && result.status !== "failed" && result.status !== "degraded") {
+      // TARGETED REGENERATION (Task 7 — Pipeline Profile knob): the QA-driven
+      // self-correction rounds re-run the locked pipeline with critique
+      // feedback. Profiles with Regeneration: OFF (Legacy V2/V3) skip the loop.
       let healingAttempt = 0;
-      const maxHealingAttempts = 3;
+      const maxHealingAttempts = profileCfg.enableTargetedRegeneration ? 3 : 0;
+      if (maxHealingAttempts === 0) {
+        log("Quality Assurance", `Targeted regeneration is disabled by profile "${profileCfg.profileName}" — skipping self-correction rounds.`);
+      }
       let qaVerdict = result.qa;
       let needsCorrection = Boolean(
         (qaVerdict && qaVerdict.confidence < 95) || 
@@ -1902,7 +1945,10 @@ ${jobMemory.industry}`);
             directiveConfig,
             optimizationPolicy,
             critique,
-            baselineResume // Pass baselineResume for Localized Diff-Only Processing
+            baselineResume, // Pass baselineResume for Localized Diff-Only Processing
+            undefined,
+            // Same profile-driven matching strategy as the main locked run.
+            { matchingStrategy: profileCfg.matchingStrategy, hybridMatchingThreshold: profileCfg.hybridMatchingThreshold }
           );
 
           if (correctedResult.resume) {
@@ -1915,7 +1961,7 @@ ${jobMemory.industry}`);
               jd,
               result.jobIntelligence,
               resume,
-              { checkExport },
+              { checkExport, reflectionThreshold: profileCfg.reflectionConfidenceThreshold },
               null as any
             );
             
@@ -2623,6 +2669,7 @@ CONTENT REQUIREMENTS:
   const result = await callAI({
     systemPrompt: systemPromptText,
     isOptimizerCall: true,
+    pipelineAgent: "resume-optimizer",
     userPrompt: userPromptText,
     maxTokens: 8000,
     temperature: 0.15,
@@ -2796,6 +2843,7 @@ CONTENT REQUIREMENTS:
       const retryResult = await callAI({
         systemPrompt: retrySystem,
         isOptimizerCall: true,
+        pipelineAgent: "resume-optimizer",
         userPrompt: retryUserPrompt,
         maxTokens: 8000,
         temperature: 0.4,
@@ -3367,6 +3415,10 @@ Return ONLY valid JSON:
       maxTokens: 1500,
       temperature: 0.3,
       taskCategory: "document",
+      // SUPERVISED pipeline agent: inherits the job AI configuration lock +
+      // supervised recovery; Agent Configuration Center contributes defaults.
+      isOptimizerCall: true,
+      pipelineAgent: "reflection",
       // Free-tier models can take 40-80s on this prompt.
       timeoutMs: PIPELINE_STEP_CALL_TIMEOUT_MS,
       // Reflection inherits the Arena-selected provider for consistency.
