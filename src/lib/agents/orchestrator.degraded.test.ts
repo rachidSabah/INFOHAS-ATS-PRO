@@ -1,14 +1,19 @@
-// Regression test: the locked pipeline's degraded return must propagate as a
-// DEGRADED pipeline result — not a false-green "completed" success.
+// Regression test — DIRECTIVE §2/§15/§48/§49: the pipeline must NEVER return
+// the original uploaded resume as the "optimized" result.
 //
-// Production evidence: a run with all AI providers down returned the source
-// resume with local page-fill expansion (provider="degraded-optimization",
-// isDegraded=true), but the orchestrator ignored the flag — afterATS was
-// computed (+4 pts from junk keyword injection), the supervisor cached it and
-// reported "0 failed", and the user saw a success toast for an optimization
-// that never happened.
+// Historical production failure: a run with all AI providers down returned the
+// source resume with local page-fill expansion (provider="degraded-optimization",
+// isDegraded=true), the supervisor counted it as a degraded completion, and the
+// user received their untouched resume labeled as the optimization result.
+//
+// NEW CONTRACT (this file):
+//   1. When every validated optimizer attempt fails (OptimizerUnrecoverableError),
+//      the pipeline returns status="recoverable_error" with optimizedResume=null —
+//      the SOURCE snapshot is never substituted as the RESULT.
+//   2. A stale/degraded locked-pipeline payload (isDegraded / "degraded-optimization")
+//      is REJECTED by defense-in-depth in the orchestrator.
 
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import type { ResumeData, JobDescription } from "../types";
 
 // Mock the AI layer — with the locked pipeline mocked out below, the only
@@ -38,65 +43,20 @@ vi.mock("../ai", () => ({
   extractJSON: vi.fn(async () => ({})),
 }));
 
-// Mock the locked pipeline to return the DEGRADED shape exactly as
-// src/lib/locked-pipeline.ts does when all AI providers fail.
+// Mock the locked pipeline. Default: every attempt failed → the pipeline throws
+// OptimizerUnrecoverableError (the NEW post-degraded contract).
 vi.mock("../locked-pipeline", () => ({
-  runLockedPipeline: vi.fn(() =>
-    Promise.resolve({
-      resume: {
-        id: "r-degraded",
-        name: "Test User",
-        headline: "Software Engineer",
-        summary: "Software engineer with 10 years of experience building scalable web applications and leading teams.",
-        experience: [
-          {
-            id: "e1",
-            title: "Engineer",
-            company: "Tech Corp",
-            location: "SF",
-            startDate: "2020-01",
-            endDate: "Present",
-            bullets: [
-              "Led migration to microservices architecture, reducing deployment time by 65%.",
-              "Mentored 5 junior engineers, with 3 receiving promotions within 18 months.",
-            ],
-          },
-        ],
-        education: [{ id: "ed1", institution: "UC Berkeley", degree: "B.S.", field: "CS", startDate: "2012", endDate: "2016" }],
-        skills: [
-          { id: "s1", name: "JavaScript", category: "Frontend" },
-          { id: "s2", name: "Node.js", category: "Backend" },
-        ],
-        languages: [{ id: "l1", name: "English", proficiency: "native" }],
-        projects: [],
-        certifications: [],
-        template: "ats-professional",
-        accentColor: "#1154A3",
-        createdAt: "2025-01-01T00:00:00Z",
-        updatedAt: "2025-01-01T00:00:00Z",
-        source: "manual",
-      } as unknown as ResumeData,
-      provider: "degraded-optimization",
-      charCount: 1200,
-      keywordsAdded: 0,
-      warnings: ["AI optimization unavailable — applied local page-fill expansion."],
-      errors: ["All AI providers failed."],
-      guardianScore: 0,
-      guardianStatus: "REQUIRES_MANUAL_REVIEW",
-      fingerprintValid: true,
-      blueprintValid: true,
-      templateBlueprintValid: true,
-      guardianVerdict: undefined,
-      retryCount: 1,
-      isDegraded: true,
-      assemblerStats: { matchedById: 0, matchedByFingerprint: 0, matchedByTitleCompany: 0, matchedByIndex: 0, unmatched: 0 },
-      blueprint: undefined,
-      assembler: undefined,
-    }),
-  ),
+  runLockedPipeline: vi.fn(),
+  OptimizerUnrecoverableError: class OptimizerUnrecoverableError extends Error {
+    constructor(message: string) {
+      super(message);
+      this.name = "OptimizerUnrecoverableError";
+    }
+  },
 }));
 
 import { runOptimizationPipeline } from "./orchestrator";
+import { runLockedPipeline } from "../locked-pipeline";
 
 function makeTestResume(): ResumeData {
   return {
@@ -159,8 +119,20 @@ function makeTestJD(): JobDescription {
   };
 }
 
-describe("Orchestrator — locked pipeline degraded propagation (false-green fix)", () => {
-  it("marks the run degraded when the locked pipeline returns isDegraded", async () => {
+describe("Orchestrator — NO ORIGINAL-RESUME FALLBACK (directive §2/§15/§48)", () => {
+  beforeEach(() => {
+    vi.mocked(runLockedPipeline).mockReset();
+    vi.mocked(runLockedPipeline).mockImplementation(() =>
+      Promise.reject(
+        Object.assign(
+          new Error("Optimization could not be completed after 4 validated attempt(s). The original resume was NOT substituted as the result."),
+          { name: "OptimizerUnrecoverableError" },
+        ),
+      ),
+    );
+  });
+
+  it("returns an honest RECOVERABLE_ERROR with optimizedResume=null when all attempts fail", async () => {
     const result = await runOptimizationPipeline({
       resume: makeTestResume(),
       jd: makeTestJD(),
@@ -168,14 +140,52 @@ describe("Orchestrator — locked pipeline degraded propagation (false-green fix
       checkExport: false,
     });
 
-    expect(result.provider).toBe("degraded-optimization");
-    expect(result.status).toBe("degraded");
-    // Optimizer step must be degraded (not overwritten back to completed).
+    // RESULT ≠ SOURCE: no original-resume substitution, ever.
+    expect(result.optimizedResume).toBeNull();
+    expect(result.status).toBe("recoverable_error");
+    // The optimizer step is RECOVERABLE, not completed/degraded-success.
     const optimizerStep = result.steps.find((s) => s.name === "Resume Optimizer");
-    expect(optimizerStep?.status).toBe("degraded");
-    // P0: no after-ATS is computed for degraded runs (no fake BEFORE≠AFTER).
+    expect(optimizerStep?.status).toBe("recoverable_error");
+    // No after-ATS can exist — there is no optimized resume to score.
     expect(result.afterATS).toBeNull();
-    // A usable resume is still returned (source + local expansion).
-    expect(result.optimizedResume).toBeTruthy();
+    // Completed upstream intelligence is PRESERVED for the recovery retry.
+    expect(result.jobIntelligence).not.toBeNull();
+    // The locked pipeline was retried by the supervisor's retry policy —
+    // not silently abandoned after attempt 1.
+    expect(vi.mocked(runLockedPipeline).mock.calls.length).toBeGreaterThan(1);
+  });
+
+  it("REJECTS a stale degraded-optimization payload (defense in depth)", async () => {
+    // Simulate a stale code path returning the OLD degraded shape.
+    vi.mocked(runLockedPipeline).mockImplementation(() =>
+      Promise.resolve({
+        resume: makeTestResume(),
+        provider: "degraded-optimization",
+        charCount: 1200,
+        keywordsAdded: 0,
+        warnings: ["AI optimization unavailable — applied local page-fill expansion."],
+        errors: ["All AI providers failed."],
+        guardianScore: 0,
+        guardianStatus: "REQUIRES_MANUAL_REVIEW",
+        fingerprintValid: true,
+        blueprintValid: true,
+        templateBlueprintValid: true,
+        guardianVerdict: undefined,
+        retryCount: 1,
+        isDegraded: true,
+        assemblerStats: { matchedById: 0, matchedByFingerprint: 0, matchedByTitleCompany: 0, matchedByIndex: 0, unmatched: 0 },
+      } as any),
+    );
+
+    const result = await runOptimizationPipeline({
+      resume: makeTestResume(),
+      jd: makeTestJD(),
+      enableReflection: false,
+      checkExport: false,
+    });
+
+    expect(result.optimizedResume).toBeNull();
+    expect(result.status).toBe("recoverable_error");
+    expect(result.provider).not.toBe("degraded-optimization");
   });
 });

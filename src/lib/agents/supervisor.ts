@@ -400,6 +400,8 @@ async function reportAgentStatusToD1(
     skipped: 100,
     cached: 100,
     degraded: 100,
+    recovering: 50,
+    recoverable_error: 100,
   };
 
   const messageMap: Record<AgentStatus, string> = {
@@ -410,6 +412,8 @@ async function reportAgentStatusToD1(
     skipped: `${agentId} skipped`,
     cached: `${agentId} cached`,
     degraded: patch.log || `${agentId} degraded — fallback used`,
+    recovering: patch.log || `${agentId} recovering — auto-heal in progress`,
+    recoverable_error: patch.error || `${agentId} recoverable error — state preserved`,
   };
 
   try {
@@ -551,7 +555,7 @@ export function syncCoreAgentStatusesFromPipeline(result: PipelineResult): void 
     if (!step) continue;
     for (const agentId of agentIds) {
       updateAgent(agentId, {
-        status: step.status === "completed" ? "completed" : step.status === "failed" ? "failed" : step.status === "skipped" ? "skipped" : step.status === "degraded" ? "degraded" : "pending",
+        status: step.status === "completed" ? "completed" : step.status === "failed" ? "failed" : step.status === "skipped" ? "skipped" : step.status === "degraded" ? "degraded" : step.status === "recovering" ? "recovering" : step.status === "recoverable_error" ? "recoverable_error" : "pending",
         startedAt: step.startedAt,
         completedAt: step.completedAt,
         durationMs: step.durationMs,
@@ -588,11 +592,13 @@ export function syncCoreAgentStatusesFromPipeline(result: PipelineResult): void 
     log: "Research bundled with Job Intelligence.",
   });
 
-  // Planner + Memory — mark as completed (they ran as part of the Supervisor setup)
+  // Planner + Memory — mark as completed (they ran as part of the Supervisor setup).
+  // Directive §46 — the planner log MUST report the profile that ACTUALLY ran
+  // (UI profile and runtime profile share ONE canonical source of truth).
   updateAgent("planner", {
     status: "completed",
     completedAt: new Date().toISOString(),
-    log: "Plan: run V2 pipeline → post-optimization agents.",
+    log: `Plan: run ${result.profile ?? "selected profile"} pipeline → post-optimization agents.`,
   });
   updateAgent("memory", {
     status: "completed",
@@ -679,24 +685,28 @@ function finalizeSupervisorStatus(): void {
     .map((id) => state.agents[id])
     .filter((a) => a && a.status === "failed");
 
-  const degradedCore = coreRequiredAgentIds
-    .map((id) => state.agents[id])
-    .filter((a) => a && a.status === "degraded");
-
   const failedAgents = agentList.filter((a) => a.status === "failed");
 
-  // === DEGRADED CHECK ===
-  if (degradedCore.length > 0) {
+  // === DEGRADED / RECOVERABLE CHECK (directive §36/§37) ===
+  // "Degraded → Completed" is FORBIDDEN for the optimization core. When the
+  // Optimizer could not produce a valid optimized result (all validated
+  // attempts + auto-heal + fallbacks exhausted), the Supervisor reports an
+  // honest RECOVERABLE_ERROR: completed agents stay preserved, the original
+  // resume was NOT substituted, and the user can retry without restarting.
+  const recoverableCore = coreRequiredAgentIds
+    .map((id) => state.agents[id])
+    .filter((a) => a && (a.status === "recoverable_error" || a.status === "degraded"));
+
+  if (recoverableCore.length > 0) {
     const completedCount = agentList.filter((a) => a.status === "completed" || a.status === "cached").length;
     const skippedCount = agentList.filter((a) => a.status === "skipped").length;
-    const failedCount = failedAgents.length;
-    const degradedCount = agentList.filter((a) => a.status === "degraded").length;
     updateAgent("supervisor", {
-      status: "degraded",
+      status: "recoverable_error",
       completedAt: new Date().toISOString(),
-      log: `Pipeline DEGRADED: ${completedCount} completed, ${degradedCount} degraded, ${skippedCount} skipped, ${failedCount} failed. ` +
-        `Core agent(s) degraded: ${degradedCore.map((a) => a.name).join(", ")}. ` +
-        `The optimization did NOT use AI — the original resume was returned. Please retry when AI providers recover.`,
+      log: `Optimization INCOMPLETE (recoverable): ${completedCount} completed, ${skippedCount} skipped. ` +
+        `Core agent(s) not recovered: ${recoverableCore.map((a) => a.name).join(", ")}. ` +
+        `All validated retries, auto-heal and fallbacks were exhausted. Completed analyses and snapshots are PRESERVED — ` +
+        `the original resume was NOT substituted as the result. Retry when AI providers recover (HEAL PROVIDERS available).`,
     });
     return;
   }
@@ -1006,11 +1016,19 @@ export async function handleOptimizationRequested(
       || (result.provider || "").includes("degraded-optimization")
       || (result.optimizedResume as any)?.source === "ai-optimized-degraded";
 
+    // DIRECTIVE §15/§16/§39 — recoverable runs are NEVER cached and NEVER
+    // reported as success. They are returned honestly so the UI shows the
+    // RECOVERABLE state (state preserved, no original-resume substitution).
+    const isRecoverable = result.status === "recoverable_error";
+
     const isRealOptimization = result.status !== "failed"
       && result.status !== "degraded"
+      && !isRecoverable
       && (result.charCount ?? 0) >= 500;
 
-    if (isDegraded) {
+    if (isRecoverable) {
+      console.warn(`[Supervisor] Optimization RECOVERABLE — AI providers unavailable after all validated retries + auto-heal. provider=${result.provider}, status=${result.status}. NOT caching; original resume NOT substituted; completed agents preserved.`);
+    } else if (isDegraded) {
       // DEGRADED FIX: do NOT cache degraded results. Caching them made every
       // retry within the 10-minute TTL return the same degraded result
       // instantly, so the user could never recover by clicking Optimize again

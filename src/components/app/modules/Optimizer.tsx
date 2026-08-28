@@ -1138,7 +1138,7 @@ Guidelines:
       // Stream the per-step logs into the legacy aiLog panel
       for (const step of result.steps) {
         if (step.log) {
-          setAiLog((l) => [...l, `${step.status === "failed" ? "⚠" : "✓"} ${step.name}: ${step.log}`]);
+          setAiLog((l) => [...l, `${step.status === "failed" ? "⚠" : step.status === "recoverable_error" ? "↻" : "✓"} ${step.name}: ${step.log}`]);
         }
       }
 
@@ -1162,6 +1162,37 @@ Guidelines:
           strategies: [],
           successes: [],
           failures: [errMsg],
+        });
+        return;
+      }
+
+      // === RECOVERABLE ERROR HANDLING (directive §36–§39) ===
+      // All validated optimizer attempts + auto-heal + fallbacks failed. The
+      // pipeline NEVER substituted the original resume as the "optimized"
+      // result. Show an honest RECOVERABLE state — no success toast, no usage
+      // credit, no fake resume — and keep the job retryable in place.
+      if (result.status === "recoverable_error") {
+        const cov = result.keywordCoverage;
+        setPipelineError(
+          "Optimization INCOMPLETE (recoverable): every validated AI attempt failed after retries, auto-heal and fallbacks. " +
+          "Your completed analyses and snapshots are preserved and the original resume was NOT substituted as a result. " +
+          "Use AI Providers → HEAL PROVIDERS, then retry — no re-upload needed."
+        );
+        setAiLog((l) => [
+          ...l,
+          "↻ Supervisor RECOVERING — Optimizer AI provider failure detected. Pipeline state preserved.",
+          `↻ Recovery exhausted: validated retries + auto-heal + fallback${cov ? ` (keyword coverage at failure: ${cov.integrated} integrated / ${cov.total} JD keywords)` : ""}.`,
+          "STATUS: RECOVERABLE_ERROR — optimization NOT completed. The original resume remains the SOURCE snapshot, never the result.",
+        ]);
+        setAiThinking(false);
+        // Stay on the optimize step so the user can retry in place
+        toast.warning("Optimization incomplete — AI providers unavailable. State preserved; original resume NOT substituted. Retry when providers recover.", { duration: 9000 });
+        OptimizationSession.getInstance().completeRound({
+          beforeATS: result.beforeATS?.scores.ats ?? 0,
+          afterATS: 0, // No after-score — optimization did not complete
+          strategies: result.steps.map((s) => s.name),
+          successes: result.steps.filter((s) => s.status === "completed").map((s) => s.name),
+          failures: result.steps.filter((s) => s.status === "recoverable_error" || s.status === "degraded" || s.status === "failed").map((s) => s.name),
         });
         return;
       }

@@ -39,9 +39,10 @@ import { globalEventBus } from "./agent-event-bus";
 import { getCachedOptimization, setCachedOptimization } from "./semantic-cache";
 import { recordProviderSuccess, recordProviderFailure } from "./provider-health-monitor";
 import { runDynamicSectionPipeline } from "./dynamic-section-engine";
-import { reportDegradedOptimization } from "./degradation";
 import { selectProviderForAgent, getOrderedFallbackProviders } from "./ai";
 import { useApp } from "./store";
+import { ProviderHealer } from "./ai/healing/provider-healer";
+import { validateOptimizerOutput, type KeywordCoverageReport } from "./agents/optimizer-output-validator";
 import type { MatchingStrategy } from "./agents/profile-resolution";
 
 export interface LockedPipelineResult {
@@ -71,6 +72,8 @@ export interface LockedPipelineResult {
   templateBlueprintValid: boolean;
   guardianVerdict?: GuardianVerdict;
   retryCount: number;
+  /** Directive §11 — keyword accountability report for the Supervisor/UI. */
+  keywordCoverage?: KeywordCoverageReport;
   assemblerStats: {
     matchedById: number;
     matchedByFingerprint: number;
@@ -84,6 +87,27 @@ export class LockedPipelineError extends Error {
   constructor(message: string, public readonly status: "REQUIRES_MANUAL_REVIEW", public readonly issues: string[]) {
     super(message);
     this.name = "LockedPipelineError";
+  }
+}
+
+/**
+ * Thrown when every optimizer attempt (with bounded auto-heal between
+ * attempts) failed and NO valid optimization could be produced.
+ *
+ * Directive §2/§15/§49: the ORIGINAL RESUME MUST NEVER be substituted as the
+ * optimized result. This error keeps the job RECOVERABLE — the supervisor
+ * preserves all completed agents/snapshots and surfaces an honest
+ * RECOVERABLE state instead of a degraded "success".
+ */
+export class OptimizerUnrecoverableError extends Error {
+  constructor(
+    message: string,
+    public readonly attempts: number,
+    public readonly attemptErrors: string[],
+    public readonly keywordCoverage?: KeywordCoverageReport,
+  ) {
+    super(message);
+    this.name = "OptimizerUnrecoverableError";
   }
 }
 
@@ -108,7 +132,12 @@ export async function runLockedPipeline(
   baselineResume?: ResumeData, // Added for Localized Diff-Only Processing
   onChunk?: (chunk: string) => void,
   /** Task 7 — matching strategy from the selected Pipeline Profile. */
-  options?: { matchingStrategy?: MatchingStrategy; hybridMatchingThreshold?: number },
+  options?: {
+    matchingStrategy?: MatchingStrategy;
+    hybridMatchingThreshold?: number;
+    /** Directive §6/§23 — the Supervisor's retry policy governs the optimizer. */
+    maxOptimizerAttempts?: number;
+  },
 ): Promise<LockedPipelineResult> {
   const agentDirectives = directiveConfig?.agentDirectives;
   const warnings: string[] = [];
@@ -124,11 +153,6 @@ export async function runLockedPipeline(
 
   // Generate IDs for any experience/education entries that are missing them
   const idReadyResume = ensureExperienceIds(sourceResume);
-  // CRITICAL: Deep clone the id-ready resume for the degraded fallback path.
-  // During optimization, the optimizer and assembler receive shallow references and
-  // may mutate fields in place. If all attempts fail, we must return the ORIGINAL
-  // data — not a partially-mutated version.
-  const fallbackResume: ResumeData = JSON.parse(JSON.stringify(idReadyResume));
   console.info(`[Locked Pipeline] ensureExperienceIds: ${sourceResume.experience.filter(e => !e.id).length} experiences + ${sourceResume.education.filter(e => !(e as any).id).length} education entries got IDs`);
 
   // ========================================================================
@@ -220,8 +244,20 @@ export async function runLockedPipeline(
 
   const excludeProviderIds: string[] = [];
   let attempts = 0;
-  // If supervisor settings enable provider switch, allow up to 3 attempts, else 1
-  const maxAttempts = agentDirectives?.supervisor?.enableProviderSwitch ? 3 : 1;
+  const attemptErrors: string[] = [];
+  let lastKeywordCoverage: KeywordCoverageReport | undefined;
+  // Directive §6/§23 — the Supervisor's retry policy governs the optimizer.
+  // NEVER silently 1 attempt when a retry policy is configured: the orchestrator
+  // passes the profile-derived budget; the legacy enableProviderSwitch toggle
+  // remains as fallback. Bounded at 6 to prevent infinite loops (directive §23).
+  const maxAttempts = Math.min(
+    6,
+    Math.max(1, options?.maxOptimizerAttempts ?? (agentDirectives?.supervisor?.enableProviderSwitch ? 3 : 1)),
+  );
+  const autoHealOn = useApp.getState().providerSettings?.autoHealProviders !== false;
+  // Directive §23 — corrective feedback accumulates across attempts so each
+  // retry knows exactly what the previous attempt got wrong.
+  let attemptFeedback = feedback;
 
   while (attempts < maxAttempts) {
     attempts++;
@@ -229,7 +265,7 @@ export async function runLockedPipeline(
       // ========================================================================
       // Step 2: Run Bullet-Only Optimizer (supports excludeProviderIds)
       // ========================================================================
-      const optimizerInput = buildOptimizerInput(idReadyResume, jd, intelligenceContext, directiveConfig, optimizationPolicy, feedback);
+      const optimizerInput = buildOptimizerInput(idReadyResume, jd, intelligenceContext, directiveConfig, optimizationPolicy, attemptFeedback);
       let optimizerResult;
       const flags = (useApp.getState() as any).flags || {};
       const primaryProvider = await selectProviderForAgent("optimizer", excludeProviderIds);
@@ -275,6 +311,25 @@ export async function runLockedPipeline(
         throw new Error("Optimizer failed to return a result.");
       }
       warnings.push(...optimizerResult.warnings);
+
+      // ========================================================================
+      // Step 2b: OptimizerOutputValidator (directive §11 + §24/§25).
+      // A rejected output NEVER reaches the assembler or any downstream agent —
+      // the attempt fails and the retry carries corrective feedback.
+      // ========================================================================
+      const outputValidation = validateOptimizerOutput(idReadyResume, optimizerResult.output, jd);
+      lastKeywordCoverage = outputValidation.keywordCoverage;
+      if (!outputValidation.valid) {
+        const actionable = outputValidation.keywordCoverage.total - outputValidation.keywordCoverage.alreadyPresent;
+        attemptFeedback = [
+          attemptFeedback,
+          `PREVIOUS ATTEMPT REJECTED by OptimizerOutputValidator: ${outputValidation.violations.join("; ")}`,
+          `Keyword coverage: ${outputValidation.keywordCoverage.integrated}/${actionable} actionable keywords integrated — integrate the missing ones NATURALLY (no stuffing): ${outputValidation.keywordCoverage.stillMissing.slice(0, 8).join(", ")}`,
+        ].filter(Boolean).join("\n");
+        const errObj: any = new Error(`Optimizer output validation failed: ${outputValidation.violations.join("; ")}`);
+        errObj.kind = "output-validation";
+        throw errObj;
+      }
 
       console.info(`[Locked Pipeline] Attempt ${attempts}: Optimizer returned: ${optimizerResult.output.experiences?.length ?? 0} experiences, ${optimizerResult.output.skills?.length ?? 0} skills`);
 
@@ -646,6 +701,7 @@ export async function runLockedPipeline(
         templateBlueprintValid: blueprintCheck,
         guardianVerdict,
         retryCount: attempts,
+        keywordCoverage: lastKeywordCoverage,
         isDegraded: false,
         rationales: optimizerResult.output.rationales,
         layoutDiagnostics,
@@ -687,72 +743,46 @@ export async function runLockedPipeline(
 
     } catch (err: any) {
       console.warn(`[Locked Pipeline] Attempt ${attempts} failed: ${err.message || err}`);
+      attemptErrors.push(err?.message || String(err));
       if (err.provider) {
         excludeProviderIds.push(err.provider);
       }
+      // Directive §7 — FAILURE → CLASSIFY → AUTO-HEAL → RETRY (bounded by
+      // maxAttempts; never infinite). Provider-class failures trigger ONE safe
+      // auto-heal round before the next attempt. Output-validation failures
+      // rely on the corrective feedback instead (config unchanged).
+      if (autoHealOn && err?.kind !== "output-validation") {
+        try {
+          console.info("[Locked Pipeline] Running bounded auto-heal round before retry…");
+          await ProviderHealer.healAllProviders("auto");
+        } catch (hErr: any) {
+          console.warn("[Locked Pipeline] Auto-heal round failed (non-fatal):", hErr?.message);
+        }
+      }
       if (attempts >= maxAttempts) {
-        // Exceeded max attempts — let the post-loop degraded fallback run
-        console.warn(`[Locked Pipeline] All ${maxAttempts} attempt(s) exhausted. Falling through to degraded return.`);
+        console.warn(`[Locked Pipeline] All ${maxAttempts} attempt(s) exhausted.`);
       }
     }
   }
 
-  // After all retries exhausted, fall back to returning the source resume
-  // with a degraded-optimization status instead of hard-failing.
-  // This allows the user to still export their original resume while being
-  // notified that AI optimization was unavailable.
+  // ========================================================================
+  // ALL ATTEMPTS EXHAUSTED — NO ORIGINAL-RESUME FALLBACK (directive §2/§15/§49).
   //
-  // CRITICAL FIX: even in the degraded path we still run the page-balancer
-  // expansion so the exported DOCX fills the page (≈98% A4). Previously the
-  // degraded fallback returned the raw thin source resume (~55% fill), which
-  // produced a half-empty page. We expand using only the candidate's own
-  // content + JD keywords — no fabrication.
-  console.warn(`[Locked Pipeline] All ${attempts} attempts failed. Returning expanded source resume with degraded-optimization status.`);
-  reportDegradedOptimization("All AI providers failed or returned degraded results. Returning resume with local page-fill expansion.");
-  warnings.push("AI optimization unavailable — applied local page-fill expansion to keep the resume full.");
-  errors.push("All AI providers failed. Optimization unavailable (local fill applied).");
-
-  let degradedResume = fallbackResume;
-  let degradedCharCount = getVisibleCharCount(fallbackResume);
-  try {
-    const pageFill = validatePageFill(fallbackResume, directiveConfig);
-    if (pageFill.action === "expand") {
-      const jdKeywords = (jd?.keywords ?? []);
-      const resumeText = JSON.stringify(fallbackResume).toLowerCase();
-      const missingKeywords = jdKeywords.filter((k: string) => !resumeText.includes(k.toLowerCase()));
-      degradedResume = expandResume(fallbackResume, {
-        originalResume: fallbackResume,
-        jd: jd ?? { title: "", company: "", description: "", responsibilities: [], keywords: [], rawText: "" },
-        targetChars: pageFill.targetChars,
-        currentChars: pageFill.charCount,
-        missingKeywords,
-        directiveConfig,
-      });
-      degradedCharCount = getVisibleCharCount(degradedResume);
-    }
-  } catch (pbErr: any) {
-    console.warn("[Locked Pipeline Degraded Page Balancer] Failed (non-fatal):", pbErr?.message);
-  }
-
-  const fallbackCharCount = degradedCharCount;
-  return {
-    resume: degradedResume,
-    provider: "degraded-optimization",
-    charCount: fallbackCharCount,
-    keywordsAdded: 0,
-    warnings,
-    errors,
-    guardianScore: 0,
-    guardianStatus: "REQUIRES_MANUAL_REVIEW",
-    fingerprintValid: true,
-    blueprintValid: true,
-    templateBlueprintValid: true,
-    guardianVerdict: undefined,
-    retryCount: attempts,
-    isDegraded: true,
-    assemblerStats: {
-      matchedById: 0, matchedByFingerprint: 0, matchedByTitleCompany: 0,
-      matchedByIndex: 0, unmatched: 0,
-    },
-  };
+  // The previous behaviour returned the source resume with provider
+  // "degraded-optimization" + isDegraded:true — the supervisor then counted it
+  // as a (degraded) completion and the user received their UNTOUCHED original
+  // resume labeled as the optimization result. THAT FLOW IS REMOVED.
+  //
+  // Instead the locked pipeline throws a typed recoverable error carrying
+  // every attempt's diagnosis. The orchestrator/supervisor keep the job in a
+  // RECOVERABLE state (completed agents + snapshots preserved). The original
+  // resume remains the SOURCE snapshot — never the OPTIMIZED RESULT.
+  // ========================================================================
+  console.error(`[Locked Pipeline] Optimization UNRECOVERABLE after ${attempts} attempt(s). No original-resume substitution. Errors: ${attemptErrors.join(" | ")}`);
+  throw new OptimizerUnrecoverableError(
+    `Optimization could not be completed after ${attempts} validated attempt(s) (bounded auto-heal ran between attempts). The original resume was NOT substituted as the result.`,
+    attempts,
+    attemptErrors,
+    lastKeywordCoverage,
+  );
 }

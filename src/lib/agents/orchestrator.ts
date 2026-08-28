@@ -515,7 +515,7 @@ export interface PipelineProgress {
 
 export interface PipelineStep {
   name: string;
-  status: "pending" | "running" | "completed" | "failed" | "skipped" | "degraded";
+  status: "pending" | "running" | "completed" | "failed" | "skipped" | "degraded" | "recovering" | "recoverable_error";
   startedAt?: string;
   completedAt?: string;
   durationMs?: number;
@@ -544,11 +544,15 @@ export interface PipelineResult {
   /** Per-step execution status (for the UI pipeline visualization) */
   steps: PipelineStep[];
   /** Overall pipeline status */
-  status: "running" | "completed" | "failed" | "degraded";
+  status: "running" | "completed" | "failed" | "degraded" | "recoverable_error";
   /** Error message (only if status === "failed") */
   error?: string;
   /** Provider that generated the optimized resume */
   provider: string;
+  /** Directive §46 — the Pipeline Profile actually resolved at runtime (UI/runtime parity). */
+  profile?: string;
+  /** Directive §11 — keyword accountability report from the optimizer. */
+  keywordCoverage?: import("./optimizer-output-validator").KeywordCoverageReport;
   /** Character count of the optimized resume body content */
   charCount: number;
   /** Whether the optimization met the ~2900 char target */
@@ -1006,6 +1010,7 @@ async function _runOptimizationPipelineInner(input: PipelineInput, watchdog: Opt
       keywordsAdded: number;
       rationales?: any[];
       layoutDiagnostics?: any;
+      keywordCoverage?: import("./optimizer-output-validator").KeywordCoverageReport;
     } | null = null;
     let optimizeError: string | null = null;
     // P2 FIX: Track the failure reason from the previous attempt so we can
@@ -1075,6 +1080,9 @@ async function _runOptimizationPipelineInner(input: PipelineInput, watchdog: Opt
         }
         if (useLockedPipelineEffective) {
           log("Resume Optimizer", `Locked Pipeline (bullet-only optimizer + assembler)${aviationMode ? ` [Industry ATS: ${aviationMode.airlineProfile}]` : ""} — attempt ${optimizeAttempt}/${maxOptimizeAttempts}. Profile: ${profileCfg.profileName}.`);
+          // Directive §46 — expose the runtime-resolved profile on the result so
+          // the Supervisor's planner log and the UI always report the SAME profile.
+          result.profile = profileCfg.profileName;
           emitProgress(3, `Running locked pipeline: bullet-only optimizer → assembler → structure guardian…`);
 
           // Build the intelligence context (same as standard path)
@@ -1194,7 +1202,14 @@ ${jobMemory.industry}`);
               },
               // Matching strategy from the selected Pipeline Profile (Task 7):
               // strict = ID-only, hybrid = ID → fingerprint, fuzzy = + index.
-              { matchingStrategy: profileCfg.matchingStrategy, hybridMatchingThreshold: profileCfg.hybridMatchingThreshold }
+              // Directive §6/§23 — the Supervisor's retry policy governs the
+              // optimizer: the profile-derived attempt budget is threaded into
+              // the locked pipeline (never silently 1 attempt).
+              {
+                matchingStrategy: profileCfg.matchingStrategy,
+                hybridMatchingThreshold: profileCfg.hybridMatchingThreshold,
+                maxOptimizerAttempts: Math.min(3, Math.max(2, profileCfg.maxOptimizeAttempts - 1)),
+              }
             );
 
             optimizeResult = {
@@ -1204,22 +1219,16 @@ ${jobMemory.industry}`);
               keywordsAdded: lockedResult.keywordsAdded,
               rationales: lockedResult.rationales,
               layoutDiagnostics: lockedResult.layoutDiagnostics,
+              keywordCoverage: lockedResult.keywordCoverage,
             };
 
-            // FALSE-GREEN FIX (degraded-optimization): the locked pipeline
-            // signals "all AI providers failed — local page-fill expansion
-            // only" via isDegraded / provider="degraded-optimization", while
-            // still returning a usable resume. Previously this flag was
-            // IGNORED here, so the run flowed through as a full success:
-            // afterATS was computed (BEFORE≠AFTER from keyword injection),
-            // the supervisor cached it and reported "0 failed", and the user
-            // saw a success toast for an optimization that never happened.
-            // Mark the run degraded so the existing degraded handling applies.
+            // DIRECTIVE §2/§15 — defense in depth: a degraded (original-resume)
+            // result can never flow downstream. The locked pipeline no longer
+            // produces one; if a stale path ever does, reject it here.
             if (lockedResult.isDegraded || lockedResult.provider === "degraded-optimization") {
-              result.status = "degraded";
-              step.status = "degraded";
-              log("Resume Optimizer", "⚠ Locked pipeline degraded — all AI providers failed. Original resume with local page-fill expansion returned (no AI optimization).");
-              emitProgress(3, "⚠ AI providers unavailable — local page-fill expansion only. Retry later for full AI optimization.");
+              const errObj: any = new Error("Locked pipeline returned a degraded (original-resume) payload — invalid optimization output. Original resume is NOT a valid optimization result.");
+              errObj.name = "OptimizerUnrecoverableError";
+              throw errObj;
             }
 
           // Log warnings
@@ -1383,21 +1392,30 @@ ${jobMemory.industry}`);
         optHandle.complete();
       } catch (e: any) {
         optHandle.fail(e);
-        if (e instanceof OptimizationProviderExhaustedError) {
-          optimizeError = e.message;
-          console.warn(`[Pipeline] Resume Optimizer: provider exhausted (non-retryable). ${e.message}`);
-          break;
-        }
         optimizeError = e?.message || "Unknown error";
         // P2 FIX: Record the failure reason so the next retry can adapt
         lastFailureReason = optimizeError;
         console.warn(`[Pipeline] Resume Optimizer attempt ${optimizeAttempt}/${maxOptimizeAttempts} failed: ${optimizeError}`);
         log("Resume Optimizer", `Attempt ${optimizeAttempt} failed: ${optimizeError}`);
+        // DIRECTIVE §7/§28 — provider exhaustion is a RECOVERY EVENT, not an
+        // immediate abandonment: run one bounded auto-heal round, then let the
+        // outer Supervisor retry policy decide (continue), never silently stop
+        // after attempt 1.
+        if (useApp.getState().providerSettings?.autoHealProviders !== false) {
+          try {
+            const { ProviderHealer } = await import("../ai/healing/provider-healer");
+            log("Resume Optimizer", "↻ RECOVERING — classifying failure and running bounded provider auto-heal…");
+            emitProgress(3, "Provider failure detected — auto-healing providers before retry…");
+            await ProviderHealer.healAllProviders("auto");
+          } catch (healErr: any) {
+            console.warn("[Pipeline] Optimizer auto-heal round failed (non-fatal):", healErr?.message);
+          }
+        }
         if (optimizeAttempt < maxOptimizeAttempts) {
           // P2 FIX: Modify the prompt strategy based on the failure reason
           const retryStrategy = getRetryStrategy(optimizeAttempt, lastFailureReason);
-          log("Resume Optimizer", `Retrying with modified strategy: ${retryStrategy.description}…`);
-          emitProgress(3, `Optimization failed (attempt ${optimizeAttempt}). Retrying with ${retryStrategy.description}…`);
+          log("Resume Optimizer", `RETRYING with modified strategy: ${retryStrategy.description}… (attempt ${optimizeAttempt + 1}/${maxOptimizeAttempts})`);
+          emitProgress(3, `Recovering (attempt ${optimizeAttempt}/${maxOptimizeAttempts}). Retrying with ${retryStrategy.description}…`);
         }
         continue;
       }
@@ -1411,6 +1429,7 @@ ${jobMemory.industry}`);
       result.charCount = optimizeResult.charCount;
       result.rationales = optimizeResult.rationales || [];
       result.layoutDiagnostics = optimizeResult.layoutDiagnostics;
+      result.keywordCoverage = (optimizeResult as any).keywordCoverage;
 
       // ========================================================================
       // [V3.5] ResumeRepairAgent — fix structural issues from optimizer
@@ -1706,7 +1725,9 @@ ${jobMemory.industry}`);
         }
 
         success = true;
-        const optLog = `✓ Generated ${result.charCount} chars (page fill ${pageFillVal.pageUsage}%) via ${result.provider}. Embedded ${optimizeResult.keywordsAdded} keywords. Attempts: ${optimizeAttempt}.`;
+        const coverage = result.keywordCoverage;
+        const coverageStr = coverage ? ` Keywords integrated: ${coverage.integrated} new + ${coverage.alreadyPresent} present of ${coverage.total} JD keywords (coverage ${coverage.coveragePct}%).` : "";
+        const optLog = `✓ Generated ${result.charCount} chars (page fill ${pageFillVal.pageUsage}%) via ${result.provider}. Embedded ${optimizeResult.keywordsAdded} keywords. Attempts: ${optimizeAttempt}.${coverageStr}`;
         log("Resume Optimizer", optLog);
         emitProgress(3, optLog);
         break;
@@ -1721,32 +1742,26 @@ ${jobMemory.industry}`);
     }
 
     if (!success || !result.optimizedResume) {
-      // === GRACEFUL DEGRADATION ===
-      // Instead of hard-failing when all AI providers are rate-limited/unavailable,
-      // return the ORIGINAL resume with JD keywords added to skills.
-      // This ensures the user always gets a usable result and can retry later.
-      console.warn(`[Pipeline] All ${maxOptimizeAttempts} optimization attempts failed. Returning original resume as-is (no AI provider available).`);
-      log("Resume Optimizer", `⚠ All AI providers failed after ${maxOptimizeAttempts} attempts. Returning original resume. Please retry when AI providers recover.`);
-
-      // Return original resume as-is — do NOT inject JD keywords as "Targeted Keywords" skills
-      result.optimizedResume = { ...resume, updatedAt: new Date().toISOString(), source: "ai-optimized-degraded" as any };
-      result.provider = "Local Engine (degraded)";
-      result.charCount = JSON.stringify({
-        summary: result.optimizedResume.summary,
-        experience: result.optimizedResume.experience,
-        skills: result.optimizedResume.skills,
-        education: result.optimizedResume.education,
-        languages: result.optimizedResume.languages,
-      }).length;
-      result.metCharTarget = false;
-
-      // Mark step as DEGRADED — NOT completed. The optimizer did NOT succeed.
-      step.completedAt = new Date().toISOString();
-      step.durationMs = Date.now() - new Date(step.startedAt).getTime();
-      step.status = "degraded";
-      result.status = "degraded";
-      emitProgress(3, `⚠ AI providers unavailable. Original resume returned as-is. Retry later for full optimization.`);
-      // Skip the throw — continue to QA step
+      // ========================================================================
+      // ALL ATTEMPTS EXHAUSTED — NO ORIGINAL-RESUME FALLBACK (directive §2/§15).
+      //
+      // The previous "graceful degradation" returned the ORIGINAL uploaded
+      // resume as the optimized result and marked the run degraded. That flow
+      // is REMOVED: an optimization request must never complete with the
+      // source resume as its "result". We throw a typed recoverable error so
+      // the Supervisor keeps the job RECOVERABLE (all completed agents,
+      // intelligence, and snapshots preserved) and the user sees an honest
+      // RECOVERABLE state — never a false completion.
+      // ========================================================================
+      const lastErr = optimizeError || lastFailureReason || "unknown error";
+      log("Resume Optimizer", `✗ All ${maxOptimizeAttempts} validated attempts failed (auto-heal ran between attempts). Optimization is INCOMPLETE — original resume NOT substituted. Last error: ${lastErr}`);
+      emitProgress(3, "Optimization incomplete — AI providers unavailable. State preserved for recovery.");
+      const errObj: any = new Error(
+        `Optimization could not be completed after ${maxOptimizeAttempts} validated attempts (auto-heal + strategy feedback between attempts). Original resume NOT substituted. Last error: ${lastErr}`
+      );
+      errObj.name = "OptimizerUnrecoverableError";
+      errObj.recoverable = true;
+      throw errObj;
     }
 
     if (input.requestApproval && result.optimizedResume) {
@@ -1761,24 +1776,44 @@ ${jobMemory.industry}`);
 
     step.completedAt = new Date().toISOString();
     step.durationMs = Date.now() - new Date(step.startedAt).getTime();
-    // DEGRADED FIX: the graceful-degradation block above sets step.status to
-    // "degraded". This trailing assignment previously overwrote it back to
-    // "completed", so the step list (PipelineProgressView) and the supervisor's
-    // syncCoreAgentStatusesFromPipeline reported the optimizer as fully
-    // completed even though it produced no AI optimization.
-    if (step.status !== "degraded") {
-      step.status = "completed";
-    }
+    // The optimizer reached a validated success — mark completed. (The old
+    // "degraded" guard is gone: a degraded original-resume result now throws
+    // before reaching this point, so this assignment can never mask a failure.)
+    step.status = "completed";
   } catch (e: any) {
-    // === AUTO-RECOVERY: restore original resume when optimizer fails ===
-    steps[3].status = "failed";
-    steps[3].error = e?.message ?? "Optimizer failed";
-    log("Resume Optimizer", `✗ Optimizer failed: ${e?.message}. Preserving original resume.`);
-    emitProgress(3, `Optimization failed. Original resume preserved.`);
-    result.optimizedResume = resume; // Restore original
-    result.status = "failed";
-    result.error = e?.message ?? "Optimizer failed";
-    result.provider = "Local Engine (offline mode)";
+    // ========================================================================
+    // DIRECTIVE §15/§29/§48 — RECOVERABLE ERROR, NOT AN ORIGINAL-RESUME RESET.
+    //
+    // The previous catch "restored" the original resume as optimizedResume and
+    // returned it — silently substituting SOURCE for RESULT. Removed.
+    //
+    // New behaviour: the job ends in an honest RECOVERABLE_ERROR state:
+    //   - optimizedResume stays null (RESULT = NOT YET COMPLETE, §48)
+    //   - every completed agent's output (job intelligence, ATS analysis,
+    //     snapshots, skill gap…) remains preserved in the result
+    //   - the user is told the truth and can retry without re-uploading.
+    //
+    // USER CANCELLATION is NOT a provider failure: a rejected approval gate is
+    // a deliberate user action and is reported as a genuine "failed" status.
+    // ========================================================================
+    const msg = e?.message ?? "Optimizer failed";
+    // USER CANCELLATION only — the approval-gate messages are the sole legal
+    // user-driven aborts. Never classify provider/system errors as user action.
+    if (/^Optimization cancelled/i.test(msg)) {
+      steps[3].status = "failed";
+      steps[3].error = msg;
+      result.optimizedResume = null;
+      result.status = "failed";
+      result.error = msg;
+      return result;
+    }
+    steps[3].status = "recoverable_error";
+    steps[3].error = msg;
+    log("Resume Optimizer", `↻ Optimization could not complete: ${msg}. Pipeline state preserved — completed analyses kept, original resume NOT substituted. Retry when AI providers recover.`);
+    emitProgress(3, "Recoverable: AI provider unavailable — optimization state preserved.");
+    result.optimizedResume = null; // RESULT ≠ SOURCE — never substitute (§48)
+    result.status = "recoverable_error";
+    result.error = msg;
     return result;
   }
 

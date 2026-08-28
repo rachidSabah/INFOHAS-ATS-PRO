@@ -88,7 +88,7 @@ export interface CareerRecommendations {
 // Agent status tracking (for the pipeline visualization UI)
 // ============================================================================
 
-export type AgentStatus = "pending" | "running" | "completed" | "failed" | "skipped" | "cached" | "degraded";
+export type AgentStatus = "pending" | "running" | "completed" | "failed" | "skipped" | "cached" | "degraded" | "recovering" | "recoverable_error";
 
 export interface AgentState {
   /** Agent identifier (matches the agent name in the Supervisor) */
