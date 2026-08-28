@@ -22,7 +22,7 @@ setFlightScope({ scope: "resume-copilot", feature: "AI Copilot Panel", module: "
 import React, { useState, useEffect, useRef } from "react";
 import { Icon } from "@/components/shared";
 import { toast } from "sonner";
-import { callAI, getOptimizerDirective } from "@/lib/ai";
+import { callAI, getOptimizerDirective, extractJSON } from "@/lib/ai";
 import type { ResumeData, JobDescription } from "@/lib/types";
 import { saveAIModification, loadAIModifications, type AIModification } from "@/lib/builder-persistence";
 import { useApp } from "@/lib/store";
@@ -312,6 +312,8 @@ EXECUTIVE INTELLIGENCE DIRECTIVES:
 
   // Apply the generated suggestion to the state
   const applyEnhancement = async (textToApply: string, actionName: string, modelName = "AI Copilot") => {
+    if (!textToApply) return;
+
     if (!activeElement) {
       // Fallback: apply to summary if nothing focused
       patch({ summary: textToApply });
@@ -324,62 +326,112 @@ EXECUTIVE INTELLIGENCE DIRECTIVES:
 
     if (section === "summary") {
       patch({ summary: textToApply });
-    } else if (section === "experience" && id) {
-      nextResume.experience = nextResume.experience.map((exp) => {
-        if (exp.id === id) {
-          if (field === "bullets" && bulletIndex !== undefined) {
-            const nextBullets = [...exp.bullets];
-            nextBullets[bulletIndex] = textToApply;
-            return { ...exp, bullets: nextBullets };
-          } else if (field === "bullets") {
-            return { ...exp, bullets: textToApply.split("\n").map((b) => b.trim()).filter(Boolean) };
-          } else if (field === "title") {
-            return { ...exp, title: textToApply };
-          } else if (field === "company") {
-            return { ...exp, company: textToApply };
-          } else if (field === "location") {
-            return { ...exp, location: textToApply };
-          } else if (field === "startDate") {
-            return { ...exp, startDate: textToApply };
-          } else if (field === "endDate") {
-            return { ...exp, endDate: textToApply };
+    } else if (section === "experience") {
+      if (nextResume.experience && nextResume.experience.length > 0) {
+        let matched = false;
+        nextResume.experience = nextResume.experience.map((exp, idx) => {
+          const isMatch = (id && exp.id === id) || (!id && idx === 0);
+          if (isMatch) {
+            matched = true;
+            if (field === "bullets" && bulletIndex !== undefined) {
+              const nextBullets = [...(exp.bullets || [])];
+              nextBullets[bulletIndex] = textToApply;
+              return { ...exp, bullets: nextBullets };
+            } else if (field === "bullets") {
+              return { ...exp, bullets: textToApply.split("\n").map((b) => b.trim()).filter(Boolean) };
+            } else if (field === "title") {
+              return { ...exp, title: textToApply };
+            } else if (field === "company") {
+              return { ...exp, company: textToApply };
+            } else if (field === "location") {
+              return { ...exp, location: textToApply };
+            } else if (field === "startDate") {
+              return { ...exp, startDate: textToApply };
+            } else if (field === "endDate") {
+              return { ...exp, endDate: textToApply };
+            } else {
+              return { ...exp, bullets: textToApply.split("\n").map((b) => b.trim()).filter(Boolean) };
+            }
           }
+          return exp;
+        });
+        if (matched) {
+          patch({ experience: nextResume.experience });
         }
-        return exp;
-      });
-      patch({ experience: nextResume.experience });
-    } else if (section === "education" && id) {
-      nextResume.education = nextResume.education.map((edu) => {
-        if (edu.id === id) {
-          if (field === "institution") return { ...edu, institution: textToApply };
-          if (field === "degree") return { ...edu, degree: textToApply };
-          if (field === "location") return { ...edu, location: textToApply };
-          if (field === "startDate") return { ...edu, startDate: textToApply };
-          if (field === "endDate") return { ...edu, endDate: textToApply };
-          if (field === "highlights") {
-            return { ...edu, highlights: textToApply.trim() ? [`Modules: ${textToApply.replace(/^Modules: /, "")}`] : [] };
+      }
+    } else if (section === "education") {
+      if (nextResume.education && nextResume.education.length > 0) {
+        let matched = false;
+        nextResume.education = nextResume.education.map((edu, idx) => {
+          const isMatch = (id && edu.id === id) || (!id && idx === 0);
+          if (isMatch) {
+            matched = true;
+            if (field === "institution") return { ...edu, institution: textToApply };
+            if (field === "degree") return { ...edu, degree: textToApply };
+            if (field === "field") return { ...edu, field: textToApply };
+            if (field === "location") return { ...edu, location: textToApply };
+            if (field === "startDate") return { ...edu, startDate: textToApply };
+            if (field === "endDate") return { ...edu, endDate: textToApply };
+            if (field === "highlights") {
+              return { ...edu, highlights: textToApply.trim() ? [textToApply.trim()] : [] };
+            }
+            return { ...edu, degree: textToApply };
           }
+          return edu;
+        });
+        if (matched) {
+          patch({ education: nextResume.education });
         }
-        return edu;
-      });
-      patch({ education: nextResume.education });
-    } else if (section === "skills" && id) {
-      nextResume.skills = nextResume.skills.map((s) => {
-        if (s.id === id) {
-          return { ...s, name: textToApply };
+      }
+    } else if (section === "skills") {
+      if (id && nextResume.skills) {
+        nextResume.skills = nextResume.skills.map((s) => {
+          if (s.id === id) {
+            return { ...s, name: textToApply };
+          }
+          return s;
+        });
+        patch({ skills: nextResume.skills });
+      } else {
+        const skillNames = textToApply.split(/[,\n•·]/).map((s) => s.trim()).filter(Boolean);
+        if (skillNames.length > 0) {
+          const updatedSkills = skillNames.map((name, sIdx) => ({
+            id: nextResume.skills?.[sIdx]?.id || `s_${sIdx}_${Date.now()}`,
+            name,
+            category: nextResume.skills?.[sIdx]?.category || "General",
+          }));
+          patch({ skills: updatedSkills });
         }
-        return s;
-      });
-      patch({ skills: nextResume.skills });
-    } else if (section === "languages" && id) {
-      nextResume.languages = nextResume.languages.map((l) => {
-        if (l.id === id) {
-          if (field === "name") return { ...l, name: textToApply };
-          if (field === "level") return { ...l, level: textToApply };
+      }
+    } else if (section === "languages") {
+      const normalizeProficiency = (p?: string): "basic" | "conversational" | "fluent" | "native" => {
+        const lower = (p || "").toLowerCase();
+        if (lower.includes("nat") || lower.includes("moth")) return "native";
+        if (lower.includes("conv") || lower.includes("inter")) return "conversational";
+        if (lower.includes("bas") || lower.includes("elem") || lower.includes("beg")) return "basic";
+        return "fluent";
+      };
+
+      if (id && nextResume.languages) {
+        nextResume.languages = nextResume.languages.map((l) => {
+          if (l.id === id) {
+            if (field === "name") return { ...l, name: textToApply };
+            if (field === "proficiency" || field === "level") return { ...l, proficiency: normalizeProficiency(textToApply) };
+          }
+          return l;
+        });
+        patch({ languages: nextResume.languages });
+      } else {
+        const langNames = textToApply.split(/[,\n•·]/).map((s) => s.trim()).filter(Boolean);
+        if (langNames.length > 0) {
+          const updatedLangs = langNames.map((name, lIdx) => ({
+            id: nextResume.languages?.[lIdx]?.id || `l_${lIdx}_${Date.now()}`,
+            name,
+            proficiency: normalizeProficiency(nextResume.languages?.[lIdx]?.proficiency),
+          }));
+          patch({ languages: updatedLangs });
         }
-        return l;
-      });
-      patch({ languages: nextResume.languages });
+      }
     } else if (section === "basics") {
       const contact = { ...resume.contact };
       if (field === "name") {
@@ -396,6 +448,12 @@ EXECUTIVE INTELLIGENCE DIRECTIVES:
         patch({ contact });
       } else if (field === "email") {
         contact.email = textToApply;
+        patch({ contact });
+      } else if (field === "website") {
+        contact.website = textToApply;
+        patch({ contact });
+      } else if (field === "linkedin") {
+        contact.linkedin = textToApply;
         patch({ contact });
       }
     }
@@ -537,21 +595,28 @@ Respond ONLY with a JSON object following this exact format, no markdown:
         taskCategory: "document"
       });
 
-      const jsonStr = (res.text || "").replace(/```json|```/g, "").trim();
-      const data = JSON.parse(jsonStr);
+      let data: any = null;
+      try {
+        data = extractJSON(res.text || "{}");
+      } catch {
+        const jsonStr = (res.text || "").replace(/```json|```/g, "").trim();
+        try { data = JSON.parse(jsonStr); } catch {}
+      }
 
       if (data) {
-        const nextExperience = resume.experience.map(e => {
-          const match = data.experience?.find((x: any) => x.id === e.id);
-          return match ? { ...e, bullets: match.bullets } : e;
+        const nextExperience = resume.experience.map((e, idx) => {
+          let match = data.experience?.find((x: any) => x.id === e.id);
+          if (!match && data.experience?.[idx]) match = data.experience[idx];
+          return match && Array.isArray(match.bullets) ? { ...e, bullets: match.bullets.map((b: any) => String(b).replace(/\*\*([^*]+)\*\*/g, "$1").trim()).filter(Boolean) } : e;
         });
-        const nextEducation = resume.education.map(e => {
-          const match = data.education?.find((x: any) => x.id === e.id);
-          return match ? { ...e, highlights: match.highlights } : e;
+        const nextEducation = resume.education.map((e, idx) => {
+          let match = data.education?.find((x: any) => x.id === e.id);
+          if (!match && data.education?.[idx]) match = data.education[idx];
+          return match && Array.isArray(match.highlights) ? { ...e, highlights: match.highlights.map((h: any) => String(h).replace(/\*\*([^*]+)\*\*/g, "$1").trim()).filter(Boolean) } : e;
         });
 
         patch({
-          summary: data.summary || resume.summary,
+          summary: data.summary ? String(data.summary).replace(/\*\*([^*]+)\*\*/g, "$1").trim() : resume.summary,
           experience: nextExperience,
           education: nextEducation,
         });
@@ -589,10 +654,22 @@ Respond ONLY with a JSON object following this exact format, no markdown:
         const expData = resume.experience.map(e => ({ id: e.id, title: e.title, company: e.company, bullets: e.bullets }));
         prompt = `You are an expert ATS resume writer.\nEnhance ALL experience bullet points to be highly quantified, outcome-focused, and ATS-optimized.\nContext: ${jdContext}\n\nCurrent experience:\n${JSON.stringify(expData)}\n\nGuidelines:\n- Each bullet must start with a strong action verb\n- Add metrics, percentages, and impact where plausible\n- At least 4-5 bullets per role\n- Return ONLY a JSON array: [{"id": "...", "bullets": ["...","..."]}]`;
         const res = await recordAI({ systemPrompt: "Professional resume writer. Return ONLY valid JSON array, no markdown.", userPrompt: prompt, maxTokens: 3000, temperature: 0.3, taskCategory: "document" });
-        const jsonStr = (res.text || "").replace(/```json|```/g, "").trim();
-        const data = JSON.parse(jsonStr);
-        if (Array.isArray(data)) {
-          const nextExp = resume.experience.map(e => { const m = data.find((x: any) => x.id === e.id); return m ? { ...e, bullets: m.bullets } : e; });
+        let data: any = null;
+        try {
+          data = extractJSON(res.text || "[]");
+        } catch {
+          const jsonStr = (res.text || "").replace(/```json|```/g, "").trim();
+          try { data = JSON.parse(jsonStr); } catch {}
+        }
+        if (Array.isArray(data) && data.length > 0) {
+          const nextExp = resume.experience.map((e, idx) => {
+            let m = data.find((x: any) => x.id === e.id);
+            if (!m && data[idx]) m = data[idx];
+            if (m && Array.isArray(m.bullets)) {
+              return { ...e, bullets: m.bullets.map((b: any) => String(b).replace(/\*\*([^*]+)\*\*/g, "$1").trim()).filter(Boolean) };
+            }
+            return e;
+          });
           patch({ experience: nextExp });
         }
         toast.success("Experience bullets enhanced!", { id: toastId });
@@ -601,19 +678,50 @@ Respond ONLY with a JSON object following this exact format, no markdown:
         const currentSkills = resume.skills.map(s => s.name);
         prompt = `You are an expert ATS resume writer.\nContext: ${jdContext}\n\nCurrent skills: ${currentSkills.join(", ")}\n\nTask: Return an enhanced, comprehensive skills list that:\n- Keeps all existing skills\n- Adds highly relevant missing ATS keywords for this role\n- Groups logically (same categories as input)\n- Returns ONLY a JSON array: [{"id": "skill-id", "name": "skill name", "category": "category"}]\n\nExisting skill IDs to preserve: ${JSON.stringify(resume.skills.map(s => ({ id: s.id, name: s.name, category: s.category })))}\nAdd new skills with new unique IDs (format: skill-NEW-n).`;
         const res = await recordAI({ systemPrompt: "Professional resume writer. Return ONLY valid JSON array.", userPrompt: prompt, maxTokens: 2000, temperature: 0.3, taskCategory: "document" });
-        const jsonStr = (res.text || "").replace(/```json|```/g, "").trim();
-        const data = JSON.parse(jsonStr);
-        if (Array.isArray(data)) patch({ skills: data });
+        let data: any = null;
+        try {
+          data = extractJSON(res.text || "[]");
+        } catch {
+          const jsonStr = (res.text || "").replace(/```json|```/g, "").trim();
+          try { data = JSON.parse(jsonStr); } catch {}
+        }
+        if (Array.isArray(data) && data.length > 0) {
+          const nextSkills = data.map((s: any, idx: number) => {
+            if (typeof s === "string") {
+              return { id: resume.skills[idx]?.id || `s_${idx}_${Date.now()}`, name: s.trim(), category: resume.skills[idx]?.category || "General" };
+            }
+            return {
+              id: s.id || resume.skills[idx]?.id || `s_${idx}_${Date.now()}`,
+              name: String(s.name || "").replace(/\*\*([^*]+)\*\*/g, "$1").trim(),
+              category: String(s.category || resume.skills[idx]?.category || "General").trim()
+            };
+          }).filter(s => s.name);
+          if (nextSkills.length > 0) {
+            patch({ skills: nextSkills });
+          }
+        }
         toast.success("Skills enhanced!", { id: toastId });
 
       } else if (sectionName === "education") {
         const eduData = resume.education.map(e => ({ id: e.id, degree: e.degree, institution: e.institution, field: e.field, highlights: e.highlights }));
         prompt = `You are an expert ATS resume writer.\nContext: ${jdContext}\n\nCurrent education:\n${JSON.stringify(eduData)}\n\nTask: Enhance education entries by adding comprehensive module/course highlights relevant to the target role.\nFor each entry, provide a highlights array with a single comma-separated modules string like: "Module1, Module2, Module3, Module4, Module5, Module6, Module7"\nKeep all degree names, institutions, and dates UNCHANGED.\nReturn ONLY JSON: [{"id": "...", "highlights": ["Module1, Module2, Module3, Module4, ..."]}]`;
         const res = await recordAI({ systemPrompt: "Professional resume writer. Return ONLY valid JSON array.", userPrompt: prompt, maxTokens: 1500, temperature: 0.3, taskCategory: "document" });
-        const jsonStr = (res.text || "").replace(/```json|```/g, "").trim();
-        const data = JSON.parse(jsonStr);
-        if (Array.isArray(data)) {
-          const nextEdu = resume.education.map(e => { const m = data.find((x: any) => x.id === e.id); return m ? { ...e, highlights: m.highlights } : e; });
+        let data: any = null;
+        try {
+          data = extractJSON(res.text || "[]");
+        } catch {
+          const jsonStr = (res.text || "").replace(/```json|```/g, "").trim();
+          try { data = JSON.parse(jsonStr); } catch {}
+        }
+        if (Array.isArray(data) && data.length > 0) {
+          const nextEdu = resume.education.map((e, idx) => {
+            let m = data.find((x: any) => x.id === e.id);
+            if (!m && data[idx]) m = data[idx];
+            if (m && Array.isArray(m.highlights)) {
+              return { ...e, highlights: m.highlights.map((h: any) => String(h).replace(/\*\*([^*]+)\*\*/g, "$1").trim()).filter(Boolean) };
+            }
+            return e;
+          });
           patch({ education: nextEdu });
         }
         toast.success("Education modules enhanced!", { id: toastId });
@@ -700,17 +808,23 @@ Respond ONLY with a JSON object of the updated sections following this format, w
         taskCategory: "document"
       });
 
-      const jsonStr = (res.text || "").replace(/```json|```/g, "").trim();
-      const data = JSON.parse(jsonStr);
+      let data: any = null;
+      try {
+        data = extractJSON(res.text || "{}");
+      } catch {
+        const jsonStr = (res.text || "").replace(/```json|```/g, "").trim();
+        try { data = JSON.parse(jsonStr); } catch {}
+      }
 
       if (data) {
-        const nextExperience = resume.experience.map(e => {
-          const match = data.experience?.find((x: any) => x.id === e.id);
-          return match ? { ...e, bullets: match.bullets } : e;
+        const nextExperience = resume.experience.map((e, idx) => {
+          let match = data.experience?.find((x: any) => x.id === e.id);
+          if (!match && data.experience?.[idx]) match = data.experience[idx];
+          return match && Array.isArray(match.bullets) ? { ...e, bullets: match.bullets.map((b: any) => String(b).replace(/\*\*([^*]+)\*\*/g, "$1").trim()).filter(Boolean) } : e;
         });
 
         patch({
-          summary: data.summary || resume.summary,
+          summary: data.summary ? String(data.summary).replace(/\*\*([^*]+)\*\*/g, "$1").trim() : resume.summary,
           experience: nextExperience
         });
 

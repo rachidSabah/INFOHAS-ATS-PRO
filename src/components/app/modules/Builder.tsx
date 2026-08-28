@@ -1789,14 +1789,15 @@ ${resumeContext}
   }, [resume]);
 
   const onExportPDF = async () => {
-    assertResumeExportable(resume);
+    const currentResume = useApp.getState().resumes.find((r) => r.id === (activeId || resume?.id)) ?? resume;
+    assertResumeExportable(currentResume);
     setExporting(true);
     await new Promise((r) => setTimeout(r, 100));
-    const result = await exportResumePDF(resume, { enforceOnePage: true });
+    const result = await exportResumePDF(currentResume, { enforceOnePage: true });
     setExporting(false);
     if (result.ok) {
       incUsage("downloads");
-      log({ actor: "you", action: "Exported resume (PDF)", category: "export", details: `${resume.name}_resume.pdf · 1 page`, severity: "info" });
+      log({ actor: "you", action: "Exported resume (PDF)", category: "export", details: `${currentResume.name}_resume.pdf · 1 page`, severity: "info" });
       toast.success("PDF exported. Validated: 1 A4 page.");
     } else {
       toast.error(result.error || "Export failed.");
@@ -1805,10 +1806,11 @@ ${resumeContext}
   const onExportDOCX = async () => {
     setExporting(true);
     try {
-      assertResumeExportable(resume);
-      await exportResumeDOCX(resume);
+      const currentResume = useApp.getState().resumes.find((r) => r.id === (activeId || resume?.id)) ?? resume;
+      assertResumeExportable(currentResume);
+      await exportResumeDOCX(currentResume);
       incUsage("downloads");
-      log({ actor: "you", action: "Exported resume (DOCX)", category: "export", details: `${resume.name}_resume.docx`, severity: "info" });
+      log({ actor: "you", action: "Exported resume (DOCX)", category: "export", details: `${currentResume.name}_resume.docx`, severity: "info" });
       toast.success("DOCX exported.");
     } catch (e: any) {
       toast.error(e?.message || "DOCX export failed.");
@@ -1817,18 +1819,20 @@ ${resumeContext}
     }
   };
   const onExportTXT = () => {
-    assertResumeExportable(resume);
-    exportResumeTXT(resume);
+    const currentResume = useApp.getState().resumes.find((r) => r.id === (activeId || resume?.id)) ?? resume;
+    assertResumeExportable(currentResume);
+    exportResumeTXT(currentResume);
     incUsage("downloads");
-    log({ actor: "you", action: "Exported resume (TXT)", category: "export", details: `${resume.name}_resume.txt`, severity: "info" });
+    log({ actor: "you", action: "Exported resume (TXT)", category: "export", details: `${currentResume.name}_resume.txt`, severity: "info" });
     toast.success("TXT exported.");
   };
   const onExportDOC = () => {
-    assertResumeExportable(resume);
-    const template = resume.template === "modern" ? "modern" : resume.template === "minimal" || resume.template === "ats-professional" ? "minimal" : "professional";
-    exportResumeDOC(resume, template as any);
+    const currentResume = useApp.getState().resumes.find((r) => r.id === (activeId || resume?.id)) ?? resume;
+    assertResumeExportable(currentResume);
+    const template = currentResume.template === "modern" ? "modern" : currentResume.template === "minimal" || currentResume.template === "ats-professional" ? "minimal" : "professional";
+    exportResumeDOC(currentResume, template as any);
     incUsage("downloads");
-    log({ actor: "you", action: "Exported resume (DOC — strict A4)", category: "export", details: `${resume.name}_resume.doc · Times New Roman 12pt · @page A4`, severity: "info" });
+    log({ actor: "you", action: "Exported resume (DOC — strict A4)", category: "export", details: `${currentResume.name}_resume.doc · Times New Roman 12pt · @page A4`, severity: "info" });
     toast.success("DOC exported — strict A4 one-page layout.");
   };
 
@@ -1911,6 +1915,9 @@ ${resumeContext}
             <Button
               variant="outline"
               onClick={async () => {
+                if (resume) {
+                  updateResume(resume.id, { ...resume, updatedAt: new Date().toISOString() });
+                }
                 const ok = await triggerSave();
                 if (ok) {
                   toast.success("Resume saved successfully!");
