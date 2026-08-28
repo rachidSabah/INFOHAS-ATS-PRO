@@ -15,6 +15,7 @@ import type { ResumeData, JobDescription } from "../types";
 import { scoreATS, scoreLabel } from "../ats";
 import { COMMON_ATS_KEYWORDS, WEAK_VERBS, STRONG_ACTION_VERBS, getIndustryKeywords } from "../keyword-banks";
 import { mapToIndustryMode } from "../industry-mapper";
+import { filterJunkKeywords } from "../keyword-quality";
 import {
   detectATSFromContext,
   simulateATSParser,
@@ -678,7 +679,9 @@ function calculateSkillsMatch(resume: ResumeData, jd?: JobDescription | null): n
   if (!jd) return 80;
   const jdSkills = [...(jd.requiredSkills || []), ...(jd.preferredSkills || [])];
   if (jdSkills.length === 0) {
-    const jdKeywords = jd.keywords || [];
+    // KEYWORD QUALITY FIX: filter junk tokens from the keyword fallback so a
+    // fragmented JD doesn't drag the skills-match score down with noise.
+    const jdKeywords = filterJunkKeywords(jd.keywords || []);
     if (jdKeywords.length === 0) return 80;
     const matched = jdKeywords.filter(k => resume.skills.some(s => s.name.toLowerCase().includes(k.toLowerCase())));
     return Math.round((matched.length / jdKeywords.length) * 100);

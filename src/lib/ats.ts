@@ -4,6 +4,7 @@ import type {
   ResumeData, JobDescription, ATSReport, ATSScoreBreakdown, ATSRecommendation,
 } from "./types";
 import { uid } from "./store";
+import { filterJunkKeywords } from "./keyword-quality";
 
 const COMMON_ATS_KEYWORDS = [
   "experience", "team", "project", "management", "leadership", "strategy",
@@ -61,12 +62,15 @@ export function scoreATS(resumeRaw: ResumeData, jd?: JobDescription): ATSReport 
 
   // Missing keywords — defensive against jd.keywords being undefined/null
   // (can happen with JDs from stale localStorage backups or older D1 rows).
+  // KEYWORD QUALITY FIX: junk tokens ("go", "basic", "job", "company"...) are
+  // filtered BEFORE matching so the missing/matched lists, the keyword score,
+  // and the recommendations panel all stay consistent — junk tokens previously
+  // produced absurd "add Go, Basic, Job to your resume" recommendations.
+  const jdKeywords = jd ? filterJunkKeywords(Array.isArray(jd.keywords) ? jd.keywords : []) : [];
   if (jd) {
-    const jdKeywords = Array.isArray(jd.keywords) ? jd.keywords : [];
-    const resumeText = resumeToText(resume).toLowerCase();
+    const resumeTextKw = resumeToText(resume).toLowerCase();
     for (const k of jdKeywords) {
-      if (typeof k !== "string") continue;
-      if (resumeText.includes(k.toLowerCase())) matchedKeywords.push(k);
+      if (resumeTextKw.includes(k.toLowerCase())) matchedKeywords.push(k);
       else missingKeywords.push(k);
     }
     if (missingKeywords.length > 0) {
@@ -183,7 +187,7 @@ export function scoreATS(resumeRaw: ResumeData, jd?: JobDescription): ATSReport 
   if (resume.education.length === 0) weakSections.push("Education");
 
   const jdMatchPercent = jd
-    ? Math.round((matchedKeywords.length / Math.max(1, (Array.isArray(jd.keywords) ? jd.keywords : []).length)) * 100)
+    ? Math.round((matchedKeywords.length / Math.max(1, filterJunkKeywords(Array.isArray(jd.keywords) ? jd.keywords : []).length)) * 100)
     : undefined;
 
   return {
@@ -231,8 +235,10 @@ function scoreKeywords(r: ResumeData, jd?: JobDescription): number {
   }
   const text = resumeToText(r).toLowerCase();
   // Defensive: jd.keywords may be undefined/null on JDs from stale sources.
-  const jdKeywords = Array.isArray(jd.keywords) ? jd.keywords : [];
-  const hits = jdKeywords.filter((k) => typeof k === "string" && text.includes(k.toLowerCase())).length;
+  // KEYWORD QUALITY FIX: filter junk tokens so the score denominators match
+  // the missing/matched computation in scoreATS (same deterministic filter).
+  const jdKeywords = filterJunkKeywords(Array.isArray(jd.keywords) ? jd.keywords : []);
+  const hits = jdKeywords.filter((k) => text.includes(k.toLowerCase())).length;
   return clamp(Math.round((hits / Math.max(1, jdKeywords.length)) * 100));
 }
 

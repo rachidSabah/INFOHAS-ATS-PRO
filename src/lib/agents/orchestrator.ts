@@ -30,6 +30,7 @@ import { validateResumeContent } from "../ai-error-filter";
 import { normalizeResumeObject, normalizeToText } from "../ai-response-normalizer";
 import { extractLockedFacts, computeFactDiff, isPlaceholder } from "../locked-facts";
 import { rankProvidersForTask } from "./smart-provider-selection";
+import { filterJunkKeywords } from "../keyword-quality";
 import {
   computePageFillTarget,
   computeResumeCharCount,
@@ -1093,7 +1094,7 @@ Bridging Strategy: ${result.skillGap.bridgingStrategy}`);
           }
           const jdKeywords = jd.keywords ?? [];
           const resumeText = JSON.stringify(resume).toLowerCase();
-          const missingKeywords = jdKeywords.filter((k) => !resumeText.includes(k.toLowerCase()));
+          const missingKeywords = filterJunkKeywords(jdKeywords.filter((k) => !resumeText.includes(k.toLowerCase())));
           intelligenceBlocks.push(`MISSING JD KEYWORDS TO EMBED NATURALLY (semantic optimization, NOT stuffing): ${missingKeywords.join(", ") || "(none — focus on rewriting for impact)"}`);
 
           // Inject JobMemory into the intelligence context
@@ -1175,6 +1176,22 @@ ${jobMemory.industry}`);
               rationales: lockedResult.rationales,
               layoutDiagnostics: lockedResult.layoutDiagnostics,
             };
+
+            // FALSE-GREEN FIX (degraded-optimization): the locked pipeline
+            // signals "all AI providers failed — local page-fill expansion
+            // only" via isDegraded / provider="degraded-optimization", while
+            // still returning a usable resume. Previously this flag was
+            // IGNORED here, so the run flowed through as a full success:
+            // afterATS was computed (BEFORE≠AFTER from keyword injection),
+            // the supervisor cached it and reported "0 failed", and the user
+            // saw a success toast for an optimization that never happened.
+            // Mark the run degraded so the existing degraded handling applies.
+            if (lockedResult.isDegraded || lockedResult.provider === "degraded-optimization") {
+              result.status = "degraded";
+              step.status = "degraded";
+              log("Resume Optimizer", "⚠ Locked pipeline degraded — all AI providers failed. Original resume with local page-fill expansion returned (no AI optimization).");
+              emitProgress(3, "⚠ AI providers unavailable — local page-fill expansion only. Retry later for full AI optimization.");
+            }
 
           // Log warnings
           for (const w of lockedResult.warnings) {
@@ -1561,7 +1578,9 @@ ${jobMemory.industry}`);
             if (pageFill.action === "expand") {
               const jdKeywords = jd.keywords ?? [];
               const resumeText = JSON.stringify(result.optimizedResume!).toLowerCase();
-              const missingKeywords = jdKeywords.filter((k) => !resumeText.includes(k.toLowerCase()));
+              // KEYWORD QUALITY FIX: filter junk tokens so the page-fill
+              // expansion never injects "Go, Basic, Job, Company" as skills.
+              const missingKeywords = filterJunkKeywords(jdKeywords.filter((k) => !resumeText.includes(k.toLowerCase())));
               result.optimizedResume = expandResume(result.optimizedResume!, {
                 originalResume: resume,
                 jd,

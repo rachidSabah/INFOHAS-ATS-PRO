@@ -313,7 +313,19 @@ function updateAgent(id: AgentId, patch: Partial<AgentState>): void {
 
   setState((prev) => ({
     ...prev,
-    agents: { ...prev.agents, [id]: { ...prev.agents[id], ...patch } },
+    agents: {
+      ...prev.agents,
+      [id]: {
+        ...prev.agents[id],
+        ...patch,
+        // STALE-ERROR FIX: agent state is MERGED, so an `error` set by a
+        // failed attempt in a previous run persisted forever — the UI showed
+        // "Cover letter generated (6139 chars)" side-by-side with the old
+        // "Cover letter too short after retry (284 chars)" failure.
+        // Clear the error whenever the agent reaches a non-failed terminal state.
+        ...((newStatus === "completed" || newStatus === "cached" || newStatus === "degraded") ? { error: undefined } : {}),
+      },
+    },
   }));
 
   // === D1 Task Tracking (replaces Durable Objects) ===
@@ -979,6 +991,7 @@ export async function handleOptimizationRequested(
     // better than no result at all. The user can retry when AI providers recover.
     const isDegraded = result.status === "degraded"
       || (result.provider || "").includes("Local Engine (degraded)")
+      || (result.provider || "").includes("degraded-optimization")
       || (result.optimizedResume as any)?.source === "ai-optimized-degraded";
 
     const isRealOptimization = result.status !== "failed"

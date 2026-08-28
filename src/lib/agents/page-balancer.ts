@@ -39,6 +39,7 @@
 import type { ResumeData, JobDescription, OptimizerDirectiveConfig } from "../types";
 import { computeExperienceFingerprint } from "../experience-fingerprint";
 import { getVisibleCharCount } from "../layout-validator";
+import { filterJunkKeywords } from "../keyword-quality";
 
 // ============================================================================
 // Page-fill estimation
@@ -233,11 +234,14 @@ export function expandResume(
   // === Strategy 2: Add missing keywords to skills naturally ===
   // ResumeSkill is a flat structure: { id, name, category? }
   // We add new skills as individual entries (grouped by category).
+  // KEYWORD QUALITY FIX: junk tokens ("go", "ensure", "free"...) are filtered
+  // out BEFORE injection. The degraded page-fill expansion previously injected
+  // junk as fake skills — "Job-Relevant: Duty, Free, Ensure, Till, Assistant."
   if (missingKeywords.length > 0 && expanded.skills.length > 0) {
     const existingSkillNames = new Set(
       expanded.skills.map((s) => (s.name ?? "").toLowerCase()),
     );
-    const keywordsToAdd = missingKeywords
+    const keywordsToAdd = filterJunkKeywords(missingKeywords)
       .filter((k) => !existingSkillNames.has(k.toLowerCase()))
       .slice(0, 5); // max 5 new keywords
 

@@ -16,6 +16,7 @@ import { Badge, Icon, ScoreRing, AICopilotPanel } from "@/components/shared";
 import { useApp, uid } from "@/lib/store";
 import { parseResumeFile, parseResumeText } from "@/lib/parser";
 import { scoreATS } from "@/lib/ats";
+import { filterJunkKeywords } from "@/lib/keyword-quality";
 import { analyzeATS } from "@/lib/agents/ats-analysis";
 import { callAI, extractJSON } from "@/lib/ai";
 import { validateResumeForExport } from "@/lib/ai-response-processor";
@@ -809,13 +810,22 @@ Guidelines:
         source: "text",
         createdAt: new Date().toISOString(),
       };
+      // KEYWORD QUALITY FIX: AI parsers sometimes return junk tokens ("Go",
+      // "Basic", "Job", "Company"...) as keywords. Filter them ONCE at parse
+      // time so ATS scoring, missing-keyword panels, and optimization prompts
+      // all operate on a clean list downstream.
+      parsed.keywords = filterJunkKeywords(parsed.keywords);
       setAiLog((l) => [...l, `Found ${parsed.keywords.length} keywords, ${parsed.requiredSkills.length} required skills.`]);
     } catch {
       // Fallback: simple heuristic
       const words = jdText.toLowerCase().match(/\b[a-z][a-z0-9+#.]+\b/g) ?? [];
       const freq: Record<string, number> = {};
       for (const w of words) if (w.length > 2) freq[w] = (freq[w] || 0) + 1;
-      const keywords = Object.entries(freq).sort((a, b) => b[1] - a[1]).slice(0, 12).map(([k]) => k);
+      // KEYWORD QUALITY FIX: apply the shared junk filter (the old heuristic
+      // only checked length > 2, letting "job", "company", "ensure"... through).
+      const keywords = filterJunkKeywords(
+        Object.entries(freq).sort((a, b) => b[1] - a[1]).slice(0, 20).map(([k]) => k),
+      ).slice(0, 12);
       parsed = {
         id: uid("jd"),
         title: "Parsed role",
