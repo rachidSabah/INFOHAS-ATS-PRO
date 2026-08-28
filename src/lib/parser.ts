@@ -611,13 +611,20 @@ async function parsePdf(file: File): Promise<string> {
   return extracted;
 }
 
+// Local Tesseract.js assets served same-origin from /public/tesseract.
+// Bundled locally so OCR works offline and on Cloudflare Pages without
+// reaching the default jsDelivr CDN (which fails silently and produced blank resumes).
+const TESS_BASE = "/tesseract";
+const TESS_WORKER = `${TESS_BASE}/worker.min.js`;
+const TESS_CORE = `${TESS_BASE}/tesseract-core-simd-lstm.wasm.js`;
+const TESS_LANG_PATH = `${TESS_BASE}/lang`;
+
 async function ocrPdf(arrayBuffer: ArrayBuffer): Promise<string> {
   // Dynamically load Tesseract.js
   const Tesseract: any = await import("tesseract.js");
-  const blob = new Blob([arrayBuffer], { type: "application/pdf" });
 
-  // Tesseract works on images — convert PDF pages to canvas, then OCR each page.
-  // Load pdf.js (should already be loaded by caller, but guard here too)
+  // Tesseract works on images — render each PDF page to canvas, then OCR.
+  // pdf.js must already be loaded by the caller (parsePdf); guard otherwise.
   const pdfjsLib =
     (window as any).pdfjsLib ||
     (() => {
@@ -627,19 +634,30 @@ async function ocrPdf(arrayBuffer: ArrayBuffer): Promise<string> {
   const pdf = await pdfjsLib.getDocument({ data: arrayBuffer.slice(0) }).promise;
   const textParts: string[] = [];
 
-  for (let i = 1; i <= Math.min(pdf.numPages, 5); i++) {
-    const page = await pdf.getPage(i);
-    const viewport = page.getViewport({ scale: 2.0 }); // 2x for OCR quality
-    const canvas = document.createElement("canvas");
-    canvas.width = viewport.width;
-    canvas.height = viewport.height;
-    const ctx = canvas.getContext("2d")!;
-    await page.render({ canvasContext: ctx, viewport }).promise;
+  // Use an explicit worker with local asset paths so OCR never depends on a CDN.
+  const worker = await Tesseract.createWorker("eng+ara+fra", 1, {
+    workerPath: TESS_WORKER,
+    corePath: TESS_CORE,
+    langPath: TESS_LANG_PATH,
+    logger: () => {}, // silent
+    errorHandler: () => {}, // swallow non-fatal progress errors
+  });
 
-    const { data } = await Tesseract.recognize(canvas.toDataURL("image/png"), "eng+fra", {
-      logger: () => {}, // silent
-    });
-    textParts.push(data.text);
+  try {
+    for (let i = 1; i <= Math.min(pdf.numPages, 5); i++) {
+      const page = await pdf.getPage(i);
+      const viewport = page.getViewport({ scale: 2.0 }); // 2x for OCR quality
+      const canvas = document.createElement("canvas");
+      canvas.width = viewport.width;
+      canvas.height = viewport.height;
+      const ctx = canvas.getContext("2d")!;
+      await page.render({ canvasContext: ctx, viewport }).promise;
+
+      const { data } = await worker.recognize(canvas);
+      textParts.push(data.text);
+    }
+  } finally {
+    await worker.terminate();
   }
 
   return textParts.join("\n\n");

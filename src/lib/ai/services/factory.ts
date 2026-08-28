@@ -1,7 +1,7 @@
 // ProviderFactory — maps a provider type string to its adapter instance.
 // To add a new provider type, register it here. No other code changes needed.
 import type { AIProviderAdapter } from "../providers/interface";
-import { OpenAICompatibleProvider, openaiProvider, deepseekProvider, groqProvider, openrouterProvider, togetherProvider, huggingfaceProvider, mistralProvider, cohereProvider, perplexityProvider, ProviderError } from "../providers/openai-compatible";
+import { OpenAICompatibleProvider, openaiProvider, deepseekProvider, groqProvider, openrouterProvider, togetherProvider, huggingfaceProvider, mistralProvider, cohereProvider, perplexityProvider, ProviderError, classifyProviderError, PROVIDER_ERROR_CATEGORY_LABELS } from "../providers/openai-compatible";
 import { claudeProvider } from "../providers/claude";
 import { geminiProvider } from "../providers/gemini";
 import { ollamaProvider } from "../providers/ollama";
@@ -60,4 +60,4 @@ export class ProviderFactory {
   }
 }
 
-export { ProviderError };
+export { ProviderError, classifyProviderError, PROVIDER_ERROR_CATEGORY_LABELS };

@@ -515,9 +515,11 @@ const NVIDIA_PROVIDER: AIProvider = {
   // Reverted from llama-4-scout-17b back to llama-3.3-70b: Llama 4 Scout
   // was returning errors on the Nvidia free tier. Llama-3.3-70b was working
   // (returned 2874 chars in testing) and has good instruction-following.
-  modelName: "stepfun-ai/step-3.7-flash",
+  // NVIDIA NIM default now points to a model NVIDIA still serves.
+  // stepfun-ai/step-3.7-flash was retired (HTTP 410 EOL on 2026-08-28).
+  modelName: "nvidia/nemotron-3-super-120b-a12b",
   enabledModels: [
-    "stepfun-ai/step-3.7-flash",
+    "nvidia/nemotron-3-super-120b-a12b",
     "deepseek-ai/deepseek-v4-flash",
     "deepseek-ai/deepseek-v4-pro",
     "minimaxai/minimax-m2.7",
@@ -977,7 +979,7 @@ export const SEED_FALLBACK_CHAIN: FallbackChainConfig = {
     {
       id: "fb_003",
       providerId: "p_nvidia",
-      model: "stepfun-ai/step-3.7-flash",
+      model: "nvidia/nemotron-3-super-120b-a12b",
       enabled: true,
       temperature: 0.15,
       maxTokens: 8192,

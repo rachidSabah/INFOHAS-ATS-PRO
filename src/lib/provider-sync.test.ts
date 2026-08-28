@@ -102,7 +102,7 @@ describe("Provider Sync & Matching Logic", () => {
         name: "Nvidia",
         apiKey: "user-configured-key",
         apiUrl: "https://integrate.api.nvidia.com/v1",
-        modelName: "stepfun-ai/step-3.7-flash", // not in seed enabledModels
+        modelName: "nvidia/nemotron-3-super-120b-a12b", // not in seed enabledModels
         timeout: 90000,
         maxTokens: 8192,
       } as any;
@@ -217,7 +217,7 @@ describe("Provider Sync & Matching Logic", () => {
       // Provide ALL seed providers with models valid in the global SEED_PROVIDERS,
       // so no backfill, no model repair, and no apiKey drift occurs on either pass
       const providers = [
-        { id: "p_nvidia",      name: "NVIDIA NIM (Llama free)",   modelName: "stepfun-ai/step-3.7-flash", apiKey: "key",        isActive: true } as any,
+        { id: "p_nvidia",      name: "NVIDIA NIM (Llama free)",   modelName: "nvidia/nemotron-3-super-120b-a12b", apiKey: "key",        isActive: true } as any,
         { id: "p_opencode",    name: "OpenCode Zen (Free models)", modelName: "deepseek-v4-flash-free",    apiKey: "key",        isActive: true } as any,
         { id: "p_puter",       name: "Puter.js (Free, browser-auth)", modelName: "gpt-5.4-nano",         apiKey: "puter-auth", isActive: true } as any,
         { id: "p_antigravity", name: "Antigravity CLI",            modelName: "claude-sonnet-4",           apiKey: "ant-key",    isActive: true } as any,

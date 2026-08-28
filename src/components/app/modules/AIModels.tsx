@@ -125,7 +125,7 @@ const MODEL_CATALOG: Record<string, { name: string; contextWindow: string; input
     { name: "openrouter/free", contextWindow: "128K", tags: ["free", "router"] },
   ],
   nvidia: [
-    { name: "stepfun-ai/step-3.7-flash", contextWindow: "32K", tags: ["free", "fast"] },
+    { name: "nvidia/nemotron-3-super-120b-a12b", contextWindow: "128K", tags: ["free", "instruct"] },
     { name: "deepseek-ai/deepseek-v4-flash", contextWindow: "64K", tags: ["free", "fast"] },
     { name: "deepseek-ai/deepseek-v4-pro", contextWindow: "64K", tags: ["free", "reasoning"] },
     { name: "minimaxai/minimax-m3", contextWindow: "32K", tags: ["free"] },

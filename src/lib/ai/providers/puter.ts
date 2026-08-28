@@ -49,6 +49,22 @@ function loadPuterScript(): Promise<void> {
   });
 }
 
+/**
+ * Wrap a non-async iterator (one exposing only `.next()`) into an
+ * AsyncIterable so it can be consumed with `for await`. This handles
+ * Puter.js stream responses that return a plain iterator object rather than
+ * a native AsyncIterable.
+ */
+function makeAsyncIterable(iterator: any): AsyncIterable<any> {
+  return {
+    [Symbol.asyncIterator]() {
+      return {
+        next: () => Promise.resolve(iterator.next()),
+      };
+    },
+  };
+}
+
 export class PuterProvider implements AIProviderAdapter {
   readonly type = "puter";
 
@@ -121,14 +137,30 @@ export class PuterProvider implements AIProviderAdapter {
     const model = req.model || config.modelName;
     if (model) chatOpts.model = model;
 
-    const response: any = window.puter.ai.chat(messages as any, chatOpts);
-    if (!response || typeof (response as any)[Symbol.asyncIterator] !== "function") {
+    let response: any = window.puter.ai.chat(messages as any, chatOpts);
+    // window.puter.ai.chat(..., {stream:true}) may return either:
+    //   (a) an AsyncIterable directly, or
+    //   (b) a Promise that resolves to an AsyncIterable, or
+    //   (c) a plain iterator object exposing a `.next()` method.
+    // Await if it's a thenable (case b) before the iterable check.
+    if (response && typeof response.then === "function") {
+      response = await response;
+    }
+    const isAsyncIterable =
+      response && typeof (response as any)[Symbol.asyncIterator] === "function";
+    const isIterator =
+      response && typeof (response as any).next === "function";
+    if (!response || (!isAsyncIterable && !isIterator)) {
       throw new Error("Puter.js streaming response was not iterable.");
     }
 
     let fullText = "";
     let sawError = "";
-    for await (const part of response as AsyncIterable<any>) {
+    // Normalize to an AsyncIterable for the for-await loop.
+    const iterable: AsyncIterable<any> = isAsyncIterable
+      ? (response as AsyncIterable<any>)
+      : makeAsyncIterable(response);
+    for await (const part of iterable) {
       if (part?.type === "text" && part.text) {
         fullText += part.text;
         onChunk(part.text);

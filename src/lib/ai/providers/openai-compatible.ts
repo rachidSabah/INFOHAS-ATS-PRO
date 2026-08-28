@@ -169,10 +169,103 @@ export class OpenAICompatibleProvider implements AIProviderAdapter {
   }
 }
 
+export type ProviderErrorCategory =
+  | "AUTHENTICATION_ERROR"
+  | "AUTHORIZATION_ERROR"
+  | "MODEL_NOT_FOUND"
+  | "MODEL_UNAVAILABLE"
+  | "RATE_LIMIT"
+  | "PROVIDER_TIMEOUT"
+  | "PROVIDER_NETWORK_ERROR"
+  | "INVALID_REQUEST"
+  | "PROVIDER_ENDPOINT_ERROR"
+  | "COOLDOWN"
+  | "UNKNOWN_PROVIDER_ERROR"
+  | "UNKNOWN";
+
+export const PROVIDER_ERROR_CATEGORY_LABELS: Record<ProviderErrorCategory, string> = {
+  AUTHENTICATION_ERROR: "Authentication Configuration Error",
+  AUTHORIZATION_ERROR: "Authorization Error",
+  MODEL_NOT_FOUND: "Model Not Found",
+  MODEL_UNAVAILABLE: "Model Unavailable",
+  RATE_LIMIT: "Rate Limited",
+  PROVIDER_TIMEOUT: "Provider Timeout",
+  PROVIDER_NETWORK_ERROR: "Network Error",
+  INVALID_REQUEST: "Invalid Request",
+  PROVIDER_ENDPOINT_ERROR: "Provider Endpoint Error",
+  COOLDOWN: "Provider In Cooldown",
+  UNKNOWN_PROVIDER_ERROR: "Unknown Provider",
+  UNKNOWN: "Unknown Error",
+};
+
+/**
+ * Map an arbitrary provider error (status code + message) to a stable
+ * diagnostic category. This lets the UI distinguish, e.g., a missing API key
+ * (AUTHENTICATION_ERROR) from a model that simply doesn't exist on the
+ * provider (MODEL_NOT_FOUND), instead of lumping everything into "failed".
+ */
+export function classifyProviderError(err: unknown): {
+  category: ProviderErrorCategory;
+  statusCode: number;
+  message: string;
+} {
+  const message = (typeof err === "string" ? err : (err as any)?.message) || "Unknown provider error";
+  const statusCode = (err as any)?.statusCode ?? (err as any)?.status ?? 0;
+
+  // Message-pattern matches take priority because proxy errors often carry a
+  // descriptive string even when the HTTP status is generic.
+  const m = message.toLowerCase();
+  if (m.includes("missing or invalid authorization") || m.includes("invalid api key") || m.includes("unauthorized") || m.includes("authentication")) {
+    return { category: "AUTHENTICATION_ERROR", statusCode, message };
+  }
+  if (m.includes("forbidden") || m.includes("permission") || m.includes("not allowed")) {
+    return { category: "AUTHORIZATION_ERROR", statusCode, message };
+  }
+  if (m.includes("end of life") || m.includes("no longer available") || m.includes("deprecated") || m.includes("model is unavailable")) {
+    return { category: "MODEL_UNAVAILABLE", statusCode, message };
+  }
+  if (m.includes("does not exist") || m.includes("not found") || m.includes("unknown model") || m.includes("invalid model")) {
+    return { category: "MODEL_NOT_FOUND", statusCode, message };
+  }
+  if (m.includes("rate limit") || m.includes("too many requests")) {
+    return { category: "RATE_LIMIT", statusCode, message };
+  }
+  if (m.includes("timeout") || m.includes("timed out") || m.includes("upstream request failed")) {
+    return { category: "PROVIDER_TIMEOUT", statusCode, message };
+  }
+  if (m.includes("network") || m.includes("econnrefused") || m.includes("dns") || m.includes("fetch failed")) {
+    return { category: "PROVIDER_NETWORK_ERROR", statusCode, message };
+  }
+  if (m.includes("cooldown")) {
+    return { category: "COOLDOWN", statusCode, message };
+  }
+
+  // Fall back to HTTP status code.
+  switch (statusCode) {
+    case 400: return { category: "INVALID_REQUEST", statusCode, message };
+    case 401: return { category: "AUTHENTICATION_ERROR", statusCode, message };
+    case 403: return { category: "AUTHORIZATION_ERROR", statusCode, message };
+    case 404: return { category: "PROVIDER_ENDPOINT_ERROR", statusCode, message };
+    case 408: return { category: "PROVIDER_TIMEOUT", statusCode, message };
+    case 410: return { category: "MODEL_UNAVAILABLE", statusCode, message };
+    case 422: return { category: "INVALID_REQUEST", statusCode, message };
+    case 429: return { category: "RATE_LIMIT", statusCode, message };
+    case 500:
+    case 502:
+    case 503:
+    case 504: return { category: "PROVIDER_ENDPOINT_ERROR", statusCode, message };
+    default:
+      if (statusCode >= 400) return { category: "UNKNOWN", statusCode, message };
+      return { category: "UNKNOWN_PROVIDER_ERROR", statusCode, message };
+  }
+}
+
 export class ProviderError extends Error {
-  constructor(message: string, public statusCode: number, public latencyMs: number) {
+  category: ProviderErrorCategory;
+  constructor(message: string, public statusCode: number, public latencyMs: number, category?: ProviderErrorCategory) {
     super(message);
     this.name = "ProviderError";
+    this.category = category ?? classifyProviderError({ message, statusCode }).category;
   }
 }
 
