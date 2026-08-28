@@ -207,7 +207,9 @@ export async function runProviderAwareBenchmark(opts: {
     // === Failure: record + classify + optional Auto-Heal (directives #3, #13) ===
     const current = provider.health || { consecutiveFailures: 0, consecutiveSuccesses: 0 };
     useApp.getState().updateProvider(provider.id, {
-      status: cls.temporary ? "degraded" : "degraded",
+      // Both temporary and permanent failures keep the provider "degraded" —
+      // only a PASS (or a healed re-ping) flips it back to "healthy".
+      status: "degraded",
       health: {
         ...current,
         consecutiveFailures: (current.consecutiveFailures ?? 0) + 1,
