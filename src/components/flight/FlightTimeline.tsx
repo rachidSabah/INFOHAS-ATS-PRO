@@ -20,16 +20,16 @@ const SPAN_COLOR: Record<string, string> = {
   persist: "#6B7280",
 };
 
-export function FlightTimeline({ spans }: { spans: FlightSpan[] }) {
-  if (!spans?.length) return <p className="text-sm text-muted-foreground">No timeline recorded.</p>;
+export function FlightTimeline({ spans = [] }: { spans?: FlightSpan[] }) {
+  if (!spans || spans.length === 0) return <p className="text-sm text-muted-foreground">No timeline recorded.</p>;
   const t0 = spans[0]?.at ?? 0;
   return (
     <ol className="space-y-1.5">
       {spans.map((s, i) => (
-        <li key={`${s.name}-${i}`} className="flex items-center gap-3 text-sm">
-          <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ background: SPAN_COLOR[s.name] ?? "#6B7280" }} />
-          <span className="w-24 font-medium capitalize">{s.name}</span>
-          <span className="text-xs text-muted-foreground w-20">+{Math.max(0, s.at - t0)}ms</span>
+        <li key={`${s.name || "span"}-${i}`} className="flex items-center gap-3 text-sm">
+          <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ background: (s.name && SPAN_COLOR[s.name]) ? SPAN_COLOR[s.name] : "#6B7280" }} />
+          <span className="w-24 font-medium capitalize">{s.name || "span"}</span>
+          <span className="text-xs text-muted-foreground w-20">+{Math.max(0, (s.at || 0) - t0)}ms</span>
           {s.ms != null && <span className="text-xs text-muted-foreground">{s.ms}ms</span>}
           {s.detail && <span className="text-xs text-muted-foreground truncate">· {s.detail}</span>}
         </li>

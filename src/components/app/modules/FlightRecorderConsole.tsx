@@ -32,33 +32,36 @@ export function FlightRecorderConsole() {
     const f: FlightFilter = {};
     if (providerFilter) f.provider = providerFilter;
     if (onlyErrors) f.hasErrors = true;
-    return flightRecords
-      .filter((r) => matchesFlightFilter(r, f))
+    return (flightRecords || [])
+      .filter((r) => r && matchesFlightFilter(r, f))
       .filter((r) => {
         if (!query) return true;
         const q = query.toLowerCase();
         return (
-          r.executionId.toLowerCase().includes(q) ||
+          (r.executionId || "").toLowerCase().includes(q) ||
           (r.feature ?? "").toLowerCase().includes(q) ||
           (r.module ?? "").toLowerCase().includes(q) ||
-          r.provider.toLowerCase().includes(q) ||
-          r.model.toLowerCase().includes(q) ||
-          r.scope.toLowerCase().includes(q)
+          (r.provider || "").toLowerCase().includes(q) ||
+          (r.model || "").toLowerCase().includes(q) ||
+          (r.scope || "").toLowerCase().includes(q)
         );
       });
   }, [flightRecords, query, providerFilter, onlyErrors]);
 
   const selected = filtered.find((r) => r.executionId === selectedId) ?? filtered[0] ?? null;
-  const providers = useMemo(() => Array.from(new Set(flightRecords.map((r) => r.provider))).sort(), [flightRecords]);
+  const providers = useMemo(
+    () => Array.from(new Set((flightRecords || []).map((r) => r.provider).filter(Boolean))).sort(),
+    [flightRecords]
+  );
 
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between gap-3 flex-wrap">
         <div>
           <h1 className="font-display text-2xl font-bold">Flight Recorder Console</h1>
-          <p className="text-sm text-muted-foreground">{flightRecords.length} executions captured this session.</p>
+          <p className="text-sm text-muted-foreground">{(flightRecords || []).length} executions captured this session.</p>
         </div>
-        <Button variant="outline" size="sm" onClick={clearFlightLog} disabled={!flightRecords.length}>
+        <Button variant="outline" size="sm" onClick={clearFlightLog} disabled={!(flightRecords || []).length}>
           <Icon name="Trash2" className="w-4 h-4 mr-2" /> Clear log
         </Button>
       </div>
@@ -92,7 +95,7 @@ export function FlightRecorderConsole() {
         </CardContent>
       </Card>
 
-      {flightRecords.length === 0 ? (
+      {(flightRecords || []).length === 0 ? (
         <Card>
           <CardContent className="p-10 text-center text-muted-foreground">
             <Icon name="Plane" className="w-10 h-10 mx-auto mb-3 opacity-50" />
@@ -118,9 +121,9 @@ export function FlightRecorderConsole() {
                   >
                     <div className="flex items-center justify-between gap-2">
                       <span className="font-medium truncate">{r.feature ?? r.scope}</span>
-                      {r.errors.length > 0 && <Badge className="bg-red-500/10 text-red-500 border-red-500/40">err</Badge>}
+                      {(r.errors?.length ?? 0) > 0 && <Badge className="bg-red-500/10 text-red-500 border-red-500/40">err</Badge>}
                     </div>
-                    <div className="text-xs text-muted-foreground truncate">{r.provider} · {r.model} · {r.latencyMs}ms</div>
+                    <div className="text-xs text-muted-foreground truncate">{r.provider} · {r.model} · {r.latencyMs ?? 0}ms</div>
                   </button>
                 );
               })}
@@ -146,47 +149,47 @@ function FlightDetail({ record: r }: { record: FlightRecord }) {
           <CardDescription className="font-mono text-xs">{r.executionId}</CardDescription>
         </CardHeader>
         <CardContent className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-          <Stat label="Provider" value={r.provider} />
-          <Stat label="Model" value={r.model} />
-          <Stat label="Latency" value={`${r.latencyMs}ms`} />
-          <Stat label="Duration" value={`${r.durationMs}ms`} />
-          <Stat label="Tokens" value={String(r.tokenUsage)} />
-          <Stat label="Cost" value={`$${r.cost.estimatedCost.toFixed(4)}`} />
-          <Stat label="Prompt ver" value={r.promptVersion} />
-          <Stat label="Retries" value={String(r.retryCount)} />
+          <Stat label="Provider" value={r.provider || "unknown"} />
+          <Stat label="Model" value={r.model || "unknown"} />
+          <Stat label="Latency" value={`${r.latencyMs ?? 0}ms`} />
+          <Stat label="Duration" value={`${r.durationMs ?? 0}ms`} />
+          <Stat label="Tokens" value={String(r.tokenUsage ?? 0)} />
+          <Stat label="Cost" value={`$${(r.cost?.estimatedCost ?? 0).toFixed(4)}`} />
+          <Stat label="Prompt ver" value={r.promptVersion || "1.0"} />
+          <Stat label="Retries" value={String(r.retryCount ?? 0)} />
         </CardContent>
       </Card>
 
       <Card>
         <CardHeader><CardTitle className="text-base">Execution Timeline</CardTitle></CardHeader>
-        <CardContent><FlightTimeline spans={r.timeline} /></CardContent>
+        <CardContent><FlightTimeline spans={r.timeline || []} /></CardContent>
       </Card>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <EngineCard title="Reflection" present={!!r.reflection} rows={r.reflection && [
-          ["Outcome", r.reflection.outcome], ["Score", String(r.reflection.score)],
-          ["Confidence", String(r.reflection.confidence)], ["Retry", String(r.reflection.retryRecommended)],
+          ["Outcome", r.reflection.outcome || "unknown"], ["Score", String(r.reflection.score ?? 0)],
+          ["Confidence", String(r.reflection.confidence ?? 0)], ["Retry", String(r.reflection.retryRecommended ?? false)],
         ]} />
         <EngineCard title="QA" present={!!r.qa} rows={r.qa && [
-          ["Outcome", r.qa.outcome], ["Score", String(r.qa.score)],
-          ["Findings", String(r.qa.findings?.length ?? 0)], ["Fail rec", String(r.qa.failRecommended)],
+          ["Outcome", r.qa.outcome || "unknown"], ["Score", String(r.qa.score ?? 0)],
+          ["Findings", String(r.qa.findings?.length ?? 0)], ["Fail rec", String(r.qa.failRecommended ?? false)],
         ]} />
         <EngineCard title="Validation" present={!!r.validation} rows={r.validation && [
-          ["Outcome", r.validation.outcome], ["Score", String(r.validation.score)],
-          ["Critical", String(r.validation.criticalFailures)], ["Profile", r.validation.profile],
+          ["Outcome", r.validation.outcome || "unknown"], ["Score", String(r.validation.score ?? 0)],
+          ["Critical", String(r.validation.criticalFailures ?? 0)], ["Profile", r.validation.profile || "none"],
         ]} />
         <EngineCard title="Decision" present={!!r.decision} rows={r.decision && [
-          ["Status", r.decision.status], ["Confidence", String(r.decision.confidence)],
-          ["Rules", String(r.decision.rules.length)], ["Reason", r.decision.reason],
+          ["Status", r.decision.status || "unknown"], ["Confidence", String(r.decision.confidence ?? 0)],
+          ["Rules", String(r.decision.rules?.length ?? 0)], ["Reason", r.decision.reason || "none"],
         ]} />
       </div>
 
-      {(r.errors.length > 0 || r.warnings.length > 0) && (
+      {(((r.errors?.length ?? 0) > 0) || ((r.warnings?.length ?? 0) > 0)) && (
         <Card>
           <CardHeader><CardTitle className="text-base">Diagnostics</CardTitle></CardHeader>
           <CardContent className="space-y-1 text-sm">
-            {r.errors.map((e, i) => <div key={`e${i}`} className="text-red-500">✕ {e}</div>)}
-            {r.warnings.map((w, i) => <div key={`w${i}`} className="text-amber-500">⚠ {w}</div>)}
+            {(r.errors || []).map((e, i) => <div key={`e${i}`} className="text-red-500">✕ {e}</div>)}
+            {(r.warnings || []).map((w, i) => <div key={`w${i}`} className="text-amber-500">⚠ {w}</div>)}
           </CardContent>
         </Card>
       )}

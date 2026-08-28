@@ -381,11 +381,17 @@ export async function inspectRoutes(): Promise<AIDevReport> {
         const file = await readFile(appShellFile);
         // Find all view keys in VIEW_COMPONENTS
         const viewKeysInMap: string[] = [];
+        let inViewComponents = false;
         for (let i = 0; i < file.lines.length; i++) {
           const line = file.lines[i];
-          const match = line.match(/^\s*["']([^"']+)["']\s*:/);
-          if (match && line.includes(":") && !line.includes("const") && !line.includes("//")) {
-            viewKeysInMap.push(match[1]);
+          if (line.includes("VIEW_COMPONENTS")) { inViewComponents = true; continue; }
+          if (inViewComponents) {
+            if (line.includes("};")) { inViewComponents = false; break; }
+            const match = line.match(/^\s*(?:["']([^"']+)["']|([a-zA-Z0-9_-]+))\s*:/);
+            if (match && !line.includes("const") && !line.trim().startsWith("//")) {
+              const k = match[1] || match[2];
+              if (k) viewKeysInMap.push(k);
+            }
           }
         }
 
@@ -498,8 +504,8 @@ export async function inspectRoutes(): Promise<AIDevReport> {
       const match = r.match.match(/setView\(["']([^"']+)["']\)/);
       if (match) {
         const viewKey = match[1];
-        // Check if this viewKey exists in VIEW_COMPONENTS
-        const viewCheck = await searchRepository(`"${viewKey}"`, { filePattern: "**/AppShell.tsx" });
+        // Check if this viewKey exists in VIEW_COMPONENTS (both quoted and unquoted)
+        const viewCheck = await searchRepository(`(?:["']${viewKey}["']|\\b${viewKey}\\s*:)`, { regex: true, filePattern: "**/AppShell.tsx" });
         if (viewCheck.length === 0) {
           issues.push({
             id: `iss_${Math.random().toString(36).slice(2, 9)}`,
