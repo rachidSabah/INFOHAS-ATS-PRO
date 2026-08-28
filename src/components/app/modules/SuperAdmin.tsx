@@ -14,11 +14,17 @@ export function SuperAdmin() {
 
   const activeProviders = providers.filter((p) => p.isActive).length;
   const activePrompts = prompts.filter((p) => p.isActive).length;
+  // Real health: count providers whose runtime status proves they work
+  // ("healthy") or hasn't failed yet ("untested"). This reflects actual
+  // serviceability rather than just the toggle count. A provider marked
+  // "down"/"degraded" after a live connection test is excluded.
+  const healthyProviders = providers.filter(
+    (p) => p.status === "healthy" || p.status === "untested"
+  ).length;
   const systemHealth = Math.round(
-    (activeProviders / Math.max(1, providers.length)) * 0.4 +
-    (activePrompts / Math.max(1, prompts.length)) * 0.3 +
-    (flags.maintenanceMode ? 0 : 0.3)
-  * 100
+    ((healthyProviders / Math.max(1, providers.length)) * 0.5 +
+    (activePrompts / Math.max(1, prompts.length)) * 0.2 +
+    (flags.maintenanceMode ? 0 : 0.3)) * 100
   );
 
   const quickLinks = [

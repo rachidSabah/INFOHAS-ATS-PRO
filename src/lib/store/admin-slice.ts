@@ -29,6 +29,44 @@ const {
   updateBranding, updateFlag,
 } = cloudApi;
 
+// ----------------------------------------------------------------------------
+// Persist provider / prompt active-toggles to localStorage so a page refresh
+// no longer resets them to the SEED_PROVIDERS defaults. Without this, the
+// Super Admin health gauge bounced (e.g. 97% -> 31%) on every reload because
+// the `providers` array is re-seeded from defaults each load.
+// ----------------------------------------------------------------------------
+const PROVIDER_ACTIVE_KEY = "resumeai-provider-active";
+const PROMPT_ACTIVE_KEY = "resumeai-prompt-active";
+
+function loadActiveOverrides(key: string): Record<string, boolean> {
+  if (typeof localStorage === "undefined") return {};
+  try {
+    const raw = localStorage.getItem(key);
+    return raw ? (JSON.parse(raw) as Record<string, boolean>) : {};
+  } catch {
+    return {};
+  }
+}
+
+function saveActiveOverrides(key: string, map: Record<string, boolean>): void {
+  if (typeof localStorage === "undefined") return;
+  try {
+    localStorage.setItem(key, JSON.stringify(map));
+  } catch {
+    /* ignore quota / private-mode errors */
+  }
+}
+
+function applyActiveOverrides<T extends { id: string; isActive: boolean }>(
+  items: T[],
+  overrides: Record<string, boolean>
+): T[] {
+  if (!overrides || Object.keys(overrides).length === 0) return items;
+  return items.map((it) =>
+    overrides[it.id] !== undefined ? { ...it, isActive: overrides[it.id] } : it
+  );
+}
+
 export interface AdminSlice {
   providers: AIProvider[];
   providerLogs: AIProviderLog[];
@@ -76,7 +114,7 @@ export interface AdminSlice {
 }
 
 export const createAdminSlice: StateCreator<AppState, [], [], AdminSlice> = (set, get) => ({
-  providers: SEED_PROVIDERS,
+  providers: applyActiveOverrides(SEED_PROVIDERS, loadActiveOverrides(PROVIDER_ACTIVE_KEY)),
   providerLogs: SEED_PROVIDER_LOGS,
   providerSettings: (() => {
     if (typeof localStorage === "undefined") return SEED_PROVIDER_SETTINGS;
@@ -96,13 +134,19 @@ export const createAdminSlice: StateCreator<AppState, [], [], AdminSlice> = (set
   selectedProfileId: SEED_PIPELINE_PROFILES.find((p) => p.isDefault)?.id || SEED_PIPELINE_PROFILES[0]?.id || "",
   agentConfigs: SEED_AGENT_CONFIGS,
   promptVersions: SEED_PROMPT_VERSIONS,
-  prompts: SEED_PROMPTS,
+  prompts: applyActiveOverrides(SEED_PROMPTS, loadActiveOverrides(PROMPT_ACTIVE_KEY)),
   branding: SEED_BRANDING,
   flags: SEED_FLAGS,
   optimizerDirective: SEED_OPTIMIZER_DIRECTIVE,
 
   addProvider: (p) => {
     set((s) => ({ providers: [...s.providers, p] }));
+    // Persist active-toggle so it survives refresh.
+    try {
+      const current = loadActiveOverrides(PROVIDER_ACTIVE_KEY);
+      current[p.id] = p.isActive;
+      saveActiveOverrides(PROVIDER_ACTIVE_KEY, current);
+    } catch {}
     cloudApiSafe(createProvider)(p).catch((e) => { console.warn("[store] Cloud sync failed:", e); });
     try {
       import("../provider-sync").then(({ syncProviderConfigs, calculateProviderHash }) => {
@@ -124,6 +168,14 @@ export const createAdminSlice: StateCreator<AppState, [], [], AdminSlice> = (set
   updateProvider: (id, patch) => {
     set((s) => ({ providers: s.providers.map((p) => (p.id === id ? { ...p, ...patch, updatedAt: new Date().toISOString() } : p)) }));
     cloudApiSafe(cloudUpdateProvider)(id, patch).catch((e) => { console.warn("[store] Cloud sync failed:", e); });
+    // Persist active-toggle so it survives refresh.
+    if (patch.isActive !== undefined) {
+      try {
+        const current = loadActiveOverrides(PROVIDER_ACTIVE_KEY);
+        current[id] = patch.isActive;
+        saveActiveOverrides(PROVIDER_ACTIVE_KEY, current);
+      } catch {}
+    }
     try {
       import("../provider-sync").then(({ syncProviderConfigs, calculateProviderHash }) => {
         const currentProviders = get().providers as any[];
@@ -151,6 +203,9 @@ export const createAdminSlice: StateCreator<AppState, [], [], AdminSlice> = (set
         if (!deleted.includes(id)) {
           localStorage.setItem("resumeai-deleted-providers", JSON.stringify([...deleted, id]));
         }
+        const activeMap = loadActiveOverrides(PROVIDER_ACTIVE_KEY);
+        delete activeMap[id];
+        saveActiveOverrides(PROVIDER_ACTIVE_KEY, activeMap);
       } catch (e) { console.warn("[store] Failed to save deleted provider to localStorage:", e); }
     }
     set((s) => ({
@@ -287,6 +342,13 @@ export const createAdminSlice: StateCreator<AppState, [], [], AdminSlice> = (set
     set((s) => ({
       prompts: s.prompts.map((p) => (p.id === id ? { ...p, ...patch, version: p.version + 1 } : p)),
     }));
+    if (patch.isActive !== undefined) {
+      try {
+        const current = loadActiveOverrides(PROMPT_ACTIVE_KEY);
+        current[id] = patch.isActive;
+        saveActiveOverrides(PROMPT_ACTIVE_KEY, current);
+      } catch {}
+    }
     cloudApiSafe(cloudUpdatePrompt)(id, patch).catch((e) => { console.warn("[store] Cloud sync failed:", e); });
   },
 
