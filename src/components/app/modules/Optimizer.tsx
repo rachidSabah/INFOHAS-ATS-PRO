@@ -981,6 +981,13 @@ Guidelines:
   //   - Memoized callbacks (useCallback) to prevent unnecessary rerenders
   // ============================================================================
   const [pipelineError, setPipelineError] = useState<string | null>(null);
+  // === AI ENGINE DASHBOARD (directives #39, #40) — live snapshot of the locked
+  // AI configuration for the running job, incl. supervisor failovers. ===
+  const [aiEngineLock, setAiEngineLock] = useState<{
+    providerName: string; model: string; readiness: number; latencyMs: number;
+    fallback: string | null; lockedAt: string;
+  } | null>(null);
+  const [aiEngineLive, setAiEngineLive] = useState<{ failovers: number; activeProvider: string; activeModel: string; lastEvent: string | null } | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   // P1 FIX: Pipeline version token — prevents stale results from being
   // committed to React state. Each runPipeline call increments this counter.
@@ -1030,6 +1037,37 @@ Guidelines:
     });
 
     try {
+      // === AI READINESS GATE (directives #24–#46): TEST FIRST → SELECT BEST → LOCK ===
+      // A REAL preflight request per candidate provider+model. Optimization
+      // NEVER begins unless at least one provider/model passed validation.
+      // The selected configuration is locked for this job — every agent
+      // inherits it through the single raw call path (no unvalidated
+      // failovers, no per-agent model picking).
+      setAiLog((l) => [...l, "🧪 AI readiness gate: running REAL preflight requests against candidate providers…"]);
+      const { runReadinessGate } = await import("@/lib/ai/readiness/preflight");
+      const gate = await runReadinessGate({ jobId: `opt_${Date.now()}`, maxCandidates: 6 });
+      setAiLog((l) => [...l, `🧪 ${gate.summary}`]);
+      if (gate.healed) {
+        setAiLog((l) => [...l, "🔧 Auto-Heal repaired one or more providers during the readiness gate — preflight re-run completed."]);
+      }
+      if (!gate.lock) {
+        // ABSOLUTE RULE #46: no validated provider+model → optimization MUST NOT start.
+        const errMsg = gate.summary;
+        setPipelineError(errMsg);
+        setAiLog((l) => [...l, "✗ AI readiness gate failed — optimization cannot start. Open AI Models → HEAL PROVIDERS."]);
+        setAiThinking(false);
+        toast.error("AI readiness check failed — no validated AI engine. Open AI Models and click HEAL PROVIDERS.", { duration: 8000 });
+        OptimizationSession.getInstance().completeRound({
+          beforeATS: 0,
+          afterATS: 0,
+          strategies: [],
+          successes: [],
+          failures: ["AI readiness gate: no validated provider"],
+        });
+        return;
+      }
+      setAiEngineLock({ providerName: gate.lock.primary.providerName, model: gate.lock.primary.model, readiness: gate.lock.primary.readinessScore, latencyMs: gate.lock.primary.latencyMs ?? 0, fallback: gate.lock.fallbacks[0] ? `${gate.lock.fallbacks[0].providerName} — ${gate.lock.fallbacks[0].model}` : null, lockedAt: gate.lock.lockedAt });
+
       // === V3: Delegate to the Supervisor, which wraps the existing V2
       // pipeline AND triggers post-optimization agents (CoverLetter,
       // Interview, CareerCoach) in parallel after optimization completes.
@@ -1170,6 +1208,9 @@ Guidelines:
       setAiThinking(false);
       setStep("done");
 
+      // Job finished — release the AI configuration lock (directives #30).
+      import("@/lib/ai/readiness/config-lock").then(({ clearJobAILock }) => clearJobAILock()).catch(() => {});
+
       const delta = (result.afterATS?.scores.ats ?? 0) - (result.beforeATS?.scores.ats ?? 0);
       const confidence = result.qa?.confidence ?? 0;
       const deltaStr = delta >= 0 ? `+${delta}` : `${delta}`;
@@ -1199,6 +1240,8 @@ Guidelines:
       setAiLog((l) => [...l, `✗ Pipeline failed: ${errMsg}`]);
       setAiThinking(false);
       toast.error(errMsg);
+      // Job ended — release the AI configuration lock.
+      import("@/lib/ai/readiness/config-lock").then(({ clearJobAILock }) => clearJobAILock()).catch(() => {});
     }
   }, [resume, jdParsed, beforeReport, industryMode, industryId, industrySettings, addResume, addATS, incUsage, log]);
 
@@ -1309,6 +1352,32 @@ Guidelines:
       if (abortRef.current) abortRef.current.abort();
     };
   }, []);
+
+  // === AI ENGINE DASHBOARD live polling (directives #39, #43) ===
+  // While the pipeline runs, poll the job lock for failovers/health so the
+  // user sees the active engine, failover count and last supervisor event.
+  useEffect(() => {
+    if (!aiThinking || !aiEngineLock) { setAiEngineLive(null); return; }
+    let alive = true;
+    const tick = async () => {
+      try {
+        const { getJobAILock, getActiveJobModel } = await import("@/lib/ai/readiness/config-lock");
+        const lock = getJobAILock();
+        if (!alive || !lock) return;
+        const active = getActiveJobModel();
+        const lastEv = lock.events[lock.events.length - 1];
+        setAiEngineLive({
+          failovers: lock.failoverCount,
+          activeProvider: active?.providerName ?? lock.primary.providerName,
+          activeModel: active?.model ?? lock.primary.model,
+          lastEvent: lastEv ? `${lastEv.type}: ${lastEv.note}` : null,
+        });
+      } catch { /* lock module unavailable */ }
+    };
+    tick();
+    const iv = setInterval(tick, 3000);
+    return () => { alive = false; clearInterval(iv); };
+  }, [aiThinking, aiEngineLock]);
 
   // === Auto-load active JD when arriving from AI Resume Review ===
   // If the user navigated here with an activeJdId set (e.g. from the
@@ -1962,6 +2031,29 @@ Guidelines:
                     </Button>
                   )}
                 </div>
+
+                {/* === AI ENGINE DASHBOARD (directive #39) === */}
+                {aiThinking && aiEngineLock && (
+                  <div className="mt-4 rounded-lg border border-brand/25 bg-brand/5 dark:bg-brand/10 p-3">
+                    <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-xs">
+                      <span className="font-semibold flex items-center gap-1.5"><Icon name="Cpu" className="w-4 h-4 text-brand" /> AI ENGINE</span>
+                      <span className="text-muted-foreground">Primary:</span>
+                      <span className="font-medium">{aiEngineLock.providerName} — <span className="font-mono">{aiEngineLock.model}</span></span>
+                      {aiEngineLive && (aiEngineLive.activeProvider !== aiEngineLock.providerName || aiEngineLive.failovers > 0) ? (
+                        <Badge variant="warning"><Icon name="Shuffle" className="w-3 h-3 mr-0.5" /> FAILOVER {aiEngineLive.failovers} — now on {aiEngineLive.activeProvider}</Badge>
+                      ) : (
+                        <Badge variant="success">● HEALTHY</Badge>
+                      )}
+                      <Badge variant="outline">Readiness {aiEngineLock.readiness}/100</Badge>
+                      <Badge variant="outline">{aiEngineLock.latencyMs}ms</Badge>
+                      {aiEngineLock.fallback && <span className="text-[10px] text-muted-foreground">Fallback: {aiEngineLock.fallback}</span>}
+                      <Badge variant="outline" className="ml-auto"><Icon name="ShieldCheck" className="w-3 h-3 mr-0.5" /> Supervisor: FAILOVER PROTECTED</Badge>
+                    </div>
+                    {aiEngineLive?.lastEvent && (
+                      <div className="mt-1.5 text-[10px] text-muted-foreground font-mono truncate">{aiEngineLive.lastEvent}</div>
+                    )}
+                  </div>
+                )}
 
                 {/* === 5-agent pipeline progress tracker (shows during run + on error) === */}
                 {(aiThinking || pipelineError) && (

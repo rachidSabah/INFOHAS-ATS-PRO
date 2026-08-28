@@ -37,6 +37,8 @@ import { shouldSkipForOptimization, EMERGENCY_ONLY_PROVIDERS } from "../../circu
 export interface RouterOptions {
   /** Override the default provider for this single call. */
   preferredProviderId?: string;
+  /** Caller-facing provider pin (mirrored from AICallOptions.providerId). */
+  providerId?: string;
   /** Skip the failover chain — only try this one provider. */
   singleProvider?: boolean;
   /** Mark this request as a "test" rather than "chat" in logs. */
@@ -200,7 +202,8 @@ export class ProviderRouter {
           settings,
           opts.requestType || "chat",
           attemptTimeout,
-          opts
+          opts,
+          ProviderRouter.modelForProvider(provider, opts, req)
         );
 
         // Success path
@@ -316,9 +319,10 @@ export class ProviderRouter {
       }
 
       // Per-provider rotation state — same dedup semantics as chat().
+      const modelForAttempt = ProviderRouter.modelForProvider(provider, opts, req);
       const rotationState = {
         triedKeys: new Set<string>([provider.apiKey || ""]),
-        triedModels: new Set<string>([opts.modelOverride || req.model || provider.modelName || ""]),
+        triedModels: new Set<string>([modelForAttempt || provider.modelName || ""]),
         tokenRotationTried: false,
       };
 
@@ -330,13 +334,13 @@ export class ProviderRouter {
         let res: ChatResponse;
         if (typeof (adapter as any).stream === "function" && provider.type !== "local") {
           res = await withTimeout(
-            (adapter as any).stream({ ...req, model: opts.modelOverride || req.model }, config, onChunk),
+            (adapter as any).stream({ ...req, model: modelForAttempt }, config, onChunk),
             attemptTimeout,
             `${provider.name}.stream`
           );
         } else {
           res = await withTimeout(
-            adapter.chat({ ...req, model: opts.modelOverride || req.model }, config),
+            adapter.chat({ ...req, model: modelForAttempt }, config),
             attemptTimeout,
             `${provider.name}.generate`
           );
@@ -388,7 +392,8 @@ export class ProviderRouter {
               attemptTimeout,
               opts,
               opts.requestType || "chat",
-              rotationState
+              rotationState,
+              modelForAttempt
             );
             if (rotated) {
               for (const token of rotated.text.split(/(\s+)/)) onChunk(token);
@@ -432,6 +437,18 @@ export class ProviderRouter {
     opts: RouterOptions
   ): Promise<any[]> {
     let chain = FallbackManager.buildChain(providers, settings);
+
+    // === EXPLICIT SINGLE-PROVIDER PIN ===
+    // When `singleProvider` is set (benchmark pings, preflight validation,
+    // diagnostics), the chain is cut to EXACTLY the preferred provider. This
+    // makes it structurally impossible for one provider's request — and its
+    // model override — to leak into other providers' configurations.
+    if (opts.singleProvider && opts.preferredProviderId) {
+      const pinned = chain.find((p) => p.id === opts.preferredProviderId);
+      if (pinned) return [pinned];
+      const found = providers.find((p) => p.id === opts.preferredProviderId);
+      return found ? [found] : [];
+    }
 
     const prefId = opts.preferredProviderId;
     if (prefId) {
@@ -479,6 +496,39 @@ export class ProviderRouter {
   }
 
   /**
+   * MODEL-ROUTING SAFETY — never propagate one model id across providers.
+   *
+   * A model override / requested model is only valid for the provider it was
+   * resolved against (the pinned provider). Every OTHER provider in the chain
+   * must use its own configured model — previously `hy3-free` (a ZenCode free
+   * model) leaked into the whole fallback chain and produced model_error 404s
+   * on NVIDIA/Google/Mistral/Groq ("The model `hy3-free` does not exist").
+   *
+   * Returns the model to use for THIS provider, or undefined to let the
+   * adapter fall back to the provider's own configured model.
+   */
+  static modelForProvider(provider: AIProvider, opts: RouterOptions, req: ChatRequest): string | undefined {
+    const requested = opts.modelOverride || req.model;
+    if (opts.preferredProviderId && provider.id === opts.preferredProviderId) {
+      // The pinned provider is the one the request was resolved against —
+      // honour the override/requested model there.
+      return requested;
+    }
+    if (!opts.preferredProviderId) {
+      // No explicit pin: the chain reflects the user's own fallback config, so
+      // the requested model is honoured only when this provider supports it.
+      const supported = (provider.enabledModels as string[] | undefined) || [];
+      if (requested && supported.length > 0 && !supported.includes(requested)) {
+        return undefined; // provider's own default model instead
+      }
+      return requested;
+    }
+    // A different, non-pinned provider downstream of a pinned request: always
+    // use that provider's own configured model.
+    return undefined;
+  }
+
+  /**
    * Classify whether an error is worth rotating credentials/models for.
    *
    * Deliberately NARROW. The previous matcher treated ANY error message
@@ -489,9 +539,13 @@ export class ProviderRouter {
    *
    *   keyRotation   — 401/402/403/429, rate-limit, quota, billing, credits,
    *                   unauthorized, invalid API key: a DIFFERENT KEY may help.
-   *   modelRotation — 429 / rate-limit / quota only: a DIFFERENT MODEL may
-   *                   have a separate quota. Auth/credit errors exclude this
-   *                   (another model on the same dead credential won't help).
+   *   modelRotation — 429 / rate-limit / quota: a DIFFERENT MODEL may have a
+   *                   separate quota. Auth/credit errors exclude this (another
+   *                   model on the same dead credential won't help).
+   *                   MODEL ERRORS ("model X not found / not supported /
+   *                   invalid model") now ALSO trigger model rotation: trying
+   *                   the provider's other enabledModels is exactly the safe
+   *                   first-line repair for a stale model id (directive #3/#11).
    */
   private static classifyRotationError(e: any): { keyRotation: boolean; modelRotation: boolean } {
     const statusCode = e?.statusCode || e?.status || 0;
@@ -511,7 +565,8 @@ export class ProviderRouter {
       /429/.test(eMsg) ||
       /rate.?limit/i.test(eMsg) ||
       /quota/i.test(eMsg) ||
-      /FreeUsageLimitError/i.test(eMsg);
+      /FreeUsageLimitError/i.test(eMsg) ||
+      /model[s]?[\s`"'/.\w-]{0,60}?(?:not.?found|does.?not.?exist|is.?not.?supported|unsupported|error\b)|not.?found.?for.?api.?version|invalid.?model|decommissioned/i.test(eMsg);
     return { keyRotation, modelRotation };
   }
 
@@ -533,7 +588,8 @@ export class ProviderRouter {
     timeoutMs: number,
     opts: RouterOptions,
     requestType: AIProviderLog["requestType"],
-    rotationState: { triedKeys: Set<string>; triedModels: Set<string>; tokenRotationTried: boolean }
+    rotationState: { triedKeys: Set<string>; triedModels: Set<string>; tokenRotationTried: boolean },
+    modelForAttempt?: string
   ): Promise<ChatResponse | null> {
     const adapter = ProviderFactory.get(provider.type);
 
@@ -549,7 +605,7 @@ export class ProviderRouter {
         try {
           const altConfig = { ...config, apiKey: altKey };
           const res = await withTimeout(
-            adapter.chat({ ...req, model: opts.modelOverride || req.model }, altConfig),
+            adapter.chat({ ...req, model: modelForAttempt }, altConfig),
             timeoutMs,
             `${provider.name}.generate`
           );
@@ -598,7 +654,7 @@ export class ProviderRouter {
             : config;
           try {
             const res = await withTimeout(
-              adapter.chat({ ...req, model: opts.modelOverride || req.model }, rotatedConfig),
+              adapter.chat({ ...req, model: modelForAttempt }, rotatedConfig),
               timeoutMs,
               `${provider.name}.generate`
             );
@@ -627,7 +683,7 @@ export class ProviderRouter {
 
     // === C. Model rotation ===
     const enabledModels = (provider.enabledModels as string[] | undefined) || [];
-    const currentModel = opts.modelOverride || req.model || config.modelName || "";
+    const currentModel = modelForAttempt || req.model || config.modelName || "";
     if (enabledModels.length > 1) {
       const otherModels = enabledModels.filter((m: string) => m !== currentModel && !rotationState.triedModels.has(m));
       const maxAltModels = otherModels.slice(0, 3);
@@ -677,7 +733,8 @@ export class ProviderRouter {
     settings: AIProviderSettings,
     requestType: AIProviderLog["requestType"],
     timeoutMs: number,
-    opts: RouterOptions
+    opts: RouterOptions,
+    modelForAttempt?: string
   ): Promise<ChatResponse> {
     const adapter = ProviderFactory.get(provider.type);
     const config = toProviderConfig(provider);
@@ -688,7 +745,7 @@ export class ProviderRouter {
     // (previously: up to 3 attempts × (1 + N keys + 1 + 3 models) calls).
     const rotationState = {
       triedKeys: new Set<string>([config.apiKey || ""]),
-      triedModels: new Set<string>([opts.modelOverride || req.model || config.modelName || ""]),
+      triedModels: new Set<string>([modelForAttempt || req.model || config.modelName || ""]),
       tokenRotationTried: false,
     };
 
@@ -697,7 +754,7 @@ export class ProviderRouter {
       try {
         // Run with timeout watchdog
         const res = await withTimeout(
-          adapter.chat({ ...req, model: opts.modelOverride || req.model }, config),
+          adapter.chat({ ...req, model: modelForAttempt }, config),
           timeoutMs,
           `${provider.name}.generate`
         );
@@ -726,7 +783,7 @@ export class ProviderRouter {
         const { keyRotation, modelRotation } = this.classifyRotationError(e);
         if (keyRotation || modelRotation) {
           const rotated = await this.tryRotationFallbacks(
-            provider, req, config, e, timeoutMs, opts, requestType, rotationState
+            provider, req, config, e, timeoutMs, opts, requestType, rotationState, modelForAttempt
           );
           if (rotated) return rotated;
         }

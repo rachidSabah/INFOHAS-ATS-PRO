@@ -225,6 +225,33 @@ export function extractJSON<T = any>(raw: string): T {
  */
 export async function callAIRaw(opts: AICallOptions): Promise<AICallResult> {
   const userPrompt = opts.userPrompt ?? "";
+
+  // === AI READINESS GATE — JOB CONFIG LOCK (directives #30, #31, #36, #42) ===
+  // When the Resume Optimizer runs under a locked AI configuration, EVERY
+  // optimizer agent inherits the locked provider+model from the single raw
+  // call path — no agent may independently select an arbitrary/unvalidated
+  // model. The fallback chain is additionally RESTRICTED to the locked,
+  // pre-validated providers (no unvalidated failovers). Explicit per-call
+  // pinning (providerId already set) takes precedence.
+  let lockProviderId = opts.providerId;
+  let lockModel = opts.modelOverride;
+  let lockExclude: string[] | undefined;
+  if (opts.isOptimizerCall && !lockProviderId && !lockModel) {
+    try {
+      const { getJobAILock, getActiveJobModel } = await import("./ai/readiness/config-lock");
+      const lock = getJobAILock();
+      const active = lock ? getActiveJobModel() : null;
+      if (lock && active) {
+        lockProviderId = active.providerId;
+        lockModel = active.model;
+        const validated = new Set([lock.primary.providerId, ...lock.fallbacks.map((f) => f.providerId)]);
+        lockExclude = lock.eligibleProviderIds.filter((id) => !validated.has(id));
+      }
+    } catch {
+      // lock module unavailable — proceed with normal routing
+    }
+  }
+
   const chatRequest: ChatRequest = {
     messages: opts.messages
       ? opts.messages
@@ -234,7 +261,7 @@ export async function callAIRaw(opts: AICallOptions): Promise<AICallResult> {
             { role: "user", content: userPrompt },
           ]
         : [{ role: "user", content: userPrompt }],
-    model: opts.modelOverride,
+    model: lockModel,
     temperature: opts.temperature,
     topP: opts.topP,
     maxTokens: opts.maxTokens,
@@ -242,13 +269,55 @@ export async function callAIRaw(opts: AICallOptions): Promise<AICallResult> {
   };
 
   const routerOptions: RouterOptions = {
-    preferredProviderId: opts.providerId,
-    singleProvider: !!opts.providerId,
+    preferredProviderId: lockProviderId,
     requestType: "chat",
     ...opts,
-  };
+    providerId: lockProviderId,
+    modelOverride: lockModel,
+    excludeProviderIds: lockExclude?.length
+      ? Array.from(new Set([...(opts.excludeProviderIds ?? []), ...lockExclude]))
+      : opts.excludeProviderIds,
+  } as RouterOptions;
 
-  const res = await ProviderRouter.chat(chatRequest, routerOptions);
+  // Single execution path with ONE supervised recovery cycle (directives
+  // #14/#35): FAIL → CLASSIFY → AUTO-HEAL → VALIDATE → one repaired retry,
+  // or failover to a pre-validated fallback. Never an infinite retry loop.
+  let res;
+  try {
+    res = await ProviderRouter.chat(chatRequest, routerOptions);
+  } catch (primaryErr: any) {
+    if (opts.isOptimizerCall && !controllerAborted(opts.signal)) {
+      try {
+        const { supervisedRecovery } = await import("./ai/readiness/preflight");
+        const recovered = await supervisedRecovery(primaryErr);
+        if (recovered) {
+          console.warn(`[AI] Supervised recovery: retrying once via ${recovered.providerId} (${recovered.model})`);
+          const retryRes = await ProviderRouter.chat(
+            { ...chatRequest, model: recovered.model },
+            {
+              ...routerOptions,
+              preferredProviderId: recovered.providerId,
+              providerId: recovered.providerId,
+              modelOverride: recovered.model,
+              singleProvider: true,
+            }
+          );
+          return {
+            text: retryRes.text,
+            provider: retryRes.provider,
+            latencyMs: retryRes.latencyMs,
+            tokensEstimate: retryRes.inputTokens
+              ? (retryRes.inputTokens + (retryRes.outputTokens ?? 0))
+              : estTokens(userPrompt),
+            isLocalEngine: retryRes.provider.includes("Local Engine") || !!(retryRes as any).isLocalEngine,
+          };
+        }
+      } catch (recoveryErr: any) {
+        console.warn(`[AI] Supervised recovery failed: ${recoveryErr?.message ?? recoveryErr}`);
+      }
+    }
+    throw primaryErr;
+  }
 
   return {
     text: res.text,
@@ -259,6 +328,11 @@ export async function callAIRaw(opts: AICallOptions): Promise<AICallResult> {
       : estTokens(userPrompt),
     isLocalEngine: res.provider.includes("Local Engine") || !!(res as any).isLocalEngine,
   };
+}
+
+/** True when the caller's AbortSignal already fired — recovery is pointless. */
+function controllerAborted(signal?: AbortSignal): boolean {
+  return !!signal && signal.aborted;
 }
 
 /**
@@ -289,6 +363,27 @@ export async function callAIRawStreamed(
   onChunk: (chunk: string) => void
 ): Promise<AICallResult> {
   const userPrompt = opts.userPrompt ?? "";
+
+  // === AI READINESS GATE — JOB CONFIG LOCK (streaming parity, directives #30/#31) ===
+  let lockProviderId = opts.providerId;
+  let lockModel = opts.modelOverride;
+  let lockExcludeStream: string[] | undefined;
+  if (opts.isOptimizerCall && !lockProviderId && !lockModel) {
+    try {
+      const { getJobAILock, getActiveJobModel } = await import("./ai/readiness/config-lock");
+      const lock = getJobAILock();
+      const active = lock ? getActiveJobModel() : null;
+      if (lock && active) {
+        lockProviderId = active.providerId;
+        lockModel = active.model;
+        const validated = new Set([lock.primary.providerId, ...lock.fallbacks.map((f) => f.providerId)]);
+        lockExcludeStream = lock.eligibleProviderIds.filter((id) => !validated.has(id));
+      }
+    } catch {
+      // lock module unavailable — proceed with normal routing
+    }
+  }
+
   const chatRequest: ChatRequest = {
     messages: opts.messages
       ? opts.messages
@@ -298,7 +393,7 @@ export async function callAIRawStreamed(
             { role: "user", content: userPrompt },
           ]
         : [{ role: "user", content: userPrompt }],
-    model: opts.modelOverride,
+    model: lockModel,
     temperature: opts.temperature,
     topP: opts.topP,
     maxTokens: opts.maxTokens,
@@ -306,11 +401,15 @@ export async function callAIRawStreamed(
   };
 
   const routerOptions: RouterOptions = {
-    preferredProviderId: opts.providerId,
-    singleProvider: !!opts.providerId,
+    preferredProviderId: lockProviderId,
     requestType: "chat",
     ...opts,
-  };
+    providerId: lockProviderId,
+    modelOverride: lockModel,
+    excludeProviderIds: lockExcludeStream?.length
+      ? Array.from(new Set([...(opts.excludeProviderIds ?? []), ...lockExcludeStream]))
+      : opts.excludeProviderIds,
+  } as RouterOptions;
 
   const res = await ProviderRouter.stream(chatRequest, routerOptions, onChunk);
 

@@ -513,6 +513,22 @@ export interface AIProvider {
     consecutiveFailures: number;
     consecutiveSuccesses: number;
     rateLimitedUntil?: string;
+    // === AUTO-HEAL STATE (Provider Auto-Heal subsystem) ===
+    /** Coarse health/heal state shown in the AI Models UI. */
+    healState?: "healthy" | "degraded" | "cooldown" | "model_error" | "endpoint_error"
+      | "auth_error" | "healing" | "recovered" | "configuration_error" | "unavailable" | "untested";
+    /** Human-readable diagnosis of the last classified failure. */
+    lastDiagnosis?: string;
+    /** Failure kind from the error classifier (rate_limited, model_error, …). */
+    lastFailureKind?: string;
+    /** ISO timestamp of the last heal attempt. */
+    lastHealAt?: string;
+    /** How many auto-heal attempts have been made for this provider. */
+    autoHealAttempts?: number;
+    /** Repairs that passed validation. */
+    successfulRepairs?: number;
+    /** Repairs that failed validation. */
+    failedRepairs?: number;
   };
 }
 
@@ -542,6 +558,10 @@ export interface AIProviderSettings {
   enableFailover: boolean;
   enableCaching: boolean;
   enableCostTracking: boolean;
+  /** Provider Auto-Heal: when true (default), model/endpoint failures trigger
+   *  safe diagnosis + repair + validation automatically. When false, failures
+   *  are reported and the user must click HEAL PROVIDERS manually. */
+  autoHealProviders?: boolean;
   agentRoutes?: Record<string, string>;
 }
 
