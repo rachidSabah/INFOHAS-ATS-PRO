@@ -91,6 +91,21 @@ export function mergeProviderWithSeed(d1Provider: AIProvider, seedProvider?: AIP
     merged.maxTokens = seedProvider.maxTokens;
   }
 
+  // Restore enabledModels from seed for built-in providers. Cloud D1 can hold
+  // stale model lists (e.g. retired "step-3.7-flash", "big-pickle") that break
+  // benchmarking and routing. The built-in model set is a system default, so the
+  // seed is authoritative. Custom providers have no seed match, so they're untouched.
+  if (seedProvider.enabledModels && seedProvider.enabledModels.length > 0) {
+    merged.enabledModels = seedProvider.enabledModels;
+  }
+
+  // Restore modelName only when the current one is empty or not in the seed's
+  // valid model set (i.e. retired/invalid). Valid custom choices are kept.
+  const seedModelSet = new Set(seedProvider.enabledModels ?? []);
+  if (seedProvider.modelName && (!merged.modelName || !seedModelSet.has(merged.modelName))) {
+    merged.modelName = seedProvider.modelName;
+  }
+
   return merged;
 }
 

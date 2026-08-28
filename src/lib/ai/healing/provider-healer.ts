@@ -143,6 +143,24 @@ function patchHealth(provider: AIProvider, patch: NonNullable<AIProvider["health
   useApp.getState().updateProvider(provider.id, { health: { ...current, ...patch } as AIProvider["health"] });
 }
 
+/**
+ * Safety-net fallback (user directive): when a provider cannot be repaired
+ * (e.g. Antigravity CLI not connected), return the first ACTIVE, FREE
+ * NVIDIA NIM or Mistral provider so the optimizer still has a working model.
+ * Prefers a provider already proven healthy, then any active one. Returns the
+ * provider object (caller validates it with a real ping before trusting it).
+ */
+export function resolveSafeFallbackProvider(): AIProvider | undefined {
+  const candidates = (useApp.getState().providers || []).filter(
+    (p) => p.isActive && (p.type === "nvidia" || p.type === "mistral")
+  );
+  const ranked = [
+    ...candidates.filter((p) => p.status === "healthy"),
+    ...candidates.filter((p) => p.status !== "healthy"),
+  ];
+  return ranked[0];
+}
+
 // ============================================================================
 // The engine
 // ============================================================================
@@ -294,6 +312,35 @@ export class ProviderHealer {
         const catalog = await d.fetchCatalog(provider);
         const replacement = pickReplacementModel(provider, catalog.ok ? catalog.models : [], previousModel);
         if (!replacement || replacement === previousModel) {
+          // === Safety-net: assign a FREE, reachable NVIDIA NIM / Mistral model ===
+          // so the optimizer keeps working even when this provider (e.g. Antigravity
+          // CLI, not connected) cannot be repaired. The fallback provider is validated
+          // with a REAL ping before it is trusted — never assumed healthy.
+          const fb = resolveSafeFallbackProvider();
+          if (fb) {
+            const fbModel = (fb.enabledModels ?? [])[0] || fb.modelName;
+            const fbPing = await d.ping(fb, fbModel);
+            if (fbPing.ok && fbModel) {
+              const enabled = provider.enabledModels ?? [];
+              useApp.getState().updateProvider(provider.id, {
+                modelName: fbModel,
+                enabledModels: enabled.includes(fbModel) ? enabled : [...enabled, fbModel],
+              });
+              await this.markRecovered(provider, fbPing.latencyMs, `Assigned free fallback model ${fbModel} (${fb.name}) — ${provider.name} could not be repaired and is not connected.`, {
+                autoHealAttempts: (provider.health?.autoHealAttempts ?? 0) + 1,
+                successfulRepairs: (provider.health?.successfulRepairs ?? 0) + 1,
+                lastHealAt: new Date().toISOString(),
+              });
+              const entry: HealReportEntry = {
+                ...base, problem: `Invalid model id: ${previousModel || "(empty)"}`, failureKind: cls.kind,
+                diagnosis: cls.humanMessage,
+                action: `Assigned free fallback model ${fbModel} from ${fb.name} (NVIDIA/Mistral) — ${provider.name} has no working model and is not connected; optimization continues on the fallback.`,
+                previousModel, newModel: fbModel, result: "recovered", latencyMs: fbPing.latencyMs, technical: rawError,
+              };
+              recordHealEvent(entry);
+              return entry;
+            }
+          }
           patchHealth(provider, {
             healState: "configuration_error",
             lastDiagnosis: `Auto-Heal could not find a compatible replacement model${catalog.ok ? "" : ` (catalog fetch failed: ${catalog.error ?? "unknown"})`}.`,
