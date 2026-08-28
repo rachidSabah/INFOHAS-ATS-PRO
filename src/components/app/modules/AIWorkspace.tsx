@@ -76,7 +76,7 @@ export function AIWorkspace() {
         ))}
       </div>
 
-      {tab === "overview" && <OverviewTab />}
+      {tab === "overview" && <OverviewTab onNavigate={setTab} />}
       {tab === "repository" && <RepositoryTab />}
       {tab === "editor" && <EditorTab />}
       {tab === "tasks" && <TasksTab />}
@@ -95,7 +95,7 @@ export function AIWorkspace() {
 // Overview Tab
 // ============================================================================
 
-function OverviewTab() {
+function OverviewTab({ onNavigate }: { onNavigate?: (tab: Tab) => void }) {
   const tasks = useApp((s) => s.aiTasks);
   const patches = useApp((s) => s.aiPatches);
   const branches = useApp((s) => s.aiBranches);
@@ -108,10 +108,18 @@ function OverviewTab() {
   return (
     <div className="space-y-6">
       <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        <StatCard label="Active Tasks" value={activeTasks} icon="ListTodo" color="#3B82F6" />
-        <StatCard label="Pending Patches" value={pendingPatches} icon="GitBranch" color="#F59E0B" />
-        <StatCard label="Applied Patches" value={appliedPatches} icon="CheckCircle2" color="#10B981" />
-        <StatCard label="Git Branches" value={branches.length} icon="GitBranch" color="#8B5CF6" />
+        <div onClick={() => onNavigate?.("tasks")} className="cursor-pointer">
+          <StatCard label="Active Tasks" value={activeTasks} icon="ListTodo" color="#3B82F6" />
+        </div>
+        <div onClick={() => onNavigate?.("patches")} className="cursor-pointer">
+          <StatCard label="Pending Patches" value={pendingPatches} icon="GitBranch" color="#F59E0B" />
+        </div>
+        <div onClick={() => onNavigate?.("patches")} className="cursor-pointer">
+          <StatCard label="Applied Patches" value={appliedPatches} icon="CheckCircle2" color="#10B981" />
+        </div>
+        <div onClick={() => onNavigate?.("git")} className="cursor-pointer">
+          <StatCard label="Git Branches" value={branches.length} icon="GitBranch" color="#8B5CF6" />
+        </div>
       </div>
 
       <Card>
@@ -178,7 +186,7 @@ function OverviewTab() {
 
 function StatCard({ label, value, icon, color }: { label: string; value: number; icon: string; color: string }) {
   return (
-    <Card>
+    <Card className="hover:border-primary/50 transition-colors">
       <CardContent className="p-4">
         <div className="flex items-center justify-between">
           <div>
@@ -317,6 +325,51 @@ function EditorTab() {
   const [filePath, setFilePath] = useState("");
   const [content, setContent] = useState("");
   const [diff, setDiff] = useState("");
+  const [suggesting, setSuggesting] = useState(false);
+  const [historyStack, setHistoryStack] = useState<string[]>([]);
+
+  const handleContentChange = (newContent: string) => {
+    setHistoryStack((prev) => [...prev.slice(-20), content]);
+    setContent(newContent);
+  };
+
+  const handleUndo = () => {
+    if (historyStack.length === 0) {
+      toast.info("No previous changes in undo history.");
+      return;
+    }
+    const previous = historyStack[historyStack.length - 1];
+    setHistoryStack((prev) => prev.slice(0, -1));
+    setContent(previous);
+    toast.success("Reverted to previous edit.");
+  };
+
+  const handleAISuggestion = async () => {
+    if (!content.trim() && !filePath.trim()) {
+      toast.error("Please enter a file path or code content first.");
+      return;
+    }
+    setSuggesting(true);
+    try {
+      const { recordAI } = await import("@/lib/ai/flight-recorder");
+      const result = await recordAI({
+        systemPrompt: "You are an expert TypeScript and React software engineer. Suggest clean, modern, and type-safe improvements, bug fixes, or optimizations for the provided code. Return ONLY the improved code without markdown fences.",
+        userPrompt: `File Path: ${filePath || "src/components/MyComponent.tsx"}\n\nCurrent Code:\n${content}`,
+        maxTokens: 4000,
+        temperature: 0.2,
+      });
+
+      const cleanCode = result.text.replace(/```(?:tsx|ts|javascript|typescript|js)?\n([\s\S]*?)```/g, "$1").trim();
+      setHistoryStack((prev) => [...prev.slice(-20), content]);
+      setContent(cleanCode);
+      setDiff(`--- original\n+++ ai-suggestion\n@@ -1,${content.split("\n").length} +1,${cleanCode.split("\n").length} @@\n${cleanCode}`);
+      toast.success("AI suggestion applied to editor!");
+    } catch (e: any) {
+      toast.error(`AI Suggestion failed: ${e?.message || e}`);
+    } finally {
+      setSuggesting(false);
+    }
+  };
 
   return (
     <div className="space-y-4">
@@ -334,24 +387,25 @@ function EditorTab() {
             <Label>Content</Label>
             <Textarea
               value={content}
-              onChange={(e) => setContent(e.target.value)}
+              onChange={(e) => handleContentChange(e.target.value)}
               rows={12}
               className="mt-1 font-mono text-xs"
               placeholder="File content..."
             />
           </div>
-          <div className="flex gap-2">
-            <Button variant="outline" size="sm" className="gap-2">
-              <Icon name="Wand2" className="w-4 h-4" /> AI Suggestion
+          <div className="flex gap-2 flex-wrap">
+            <Button variant="outline" size="sm" className="gap-2 text-brand border-brand/30" onClick={handleAISuggestion} disabled={suggesting}>
+              <Icon name={suggesting ? "Loader2" : "Wand2"} className={`w-4 h-4 ${suggesting ? "animate-spin" : ""}`} />
+              {suggesting ? "Thinking..." : "AI Suggestion"}
             </Button>
             <Button variant="outline" size="sm" className="gap-2" onClick={() => {
               if (!content) { toast.info("Enter content first to see a diff."); return; }
-              setDiff(`--- original\n+++ edited\n@@ -1,1 +1,1 @@\n-${filePath} (original)\n+${filePath} (edited)\n\n(Enter file path and content above, then use this to generate a patch)`);
+              setDiff(`--- original (${filePath || "file"})\n+++ edited\n@@ -1,${content.split("\n").length} @@\n${content}`);
             }}>
               <Icon name="GitCompare" className="w-4 h-4" /> Show Diff
             </Button>
-            <Button variant="outline" size="sm" className="gap-2">
-              <Icon name="Undo2" className="w-4 h-4" /> Undo
+            <Button variant="outline" size="sm" className="gap-2" onClick={handleUndo} disabled={historyStack.length === 0}>
+              <Icon name="Undo2" className="w-4 h-4" /> Undo ({historyStack.length})
             </Button>
           </div>
         </CardContent>

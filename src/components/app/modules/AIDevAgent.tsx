@@ -87,7 +87,7 @@ export function AIDevAgent() {
       </div>
 
       {/* Tab content */}
-      {tab === "overview" && <OverviewTab />}
+      {tab === "overview" && <OverviewTab onNavigate={setTab} />}
       {tab === "code-audit" && <ScanTab title="Code Audit" icon="FileSearch" scan={scanCode} reportType="code_audit" />}
       {tab === "error-analysis" && <ScanTab title="Error Analysis" icon="AlertCircle" scan={analyzeErrors} reportType="error_analysis" />}
       {tab === "route-inspector" && <ScanTab title="Route Inspector" icon="Route" scan={inspectRoutes} reportType="route_inspector" />}
@@ -109,7 +109,7 @@ export function AIDevAgent() {
 // Overview Tab — Health Dashboard
 // ============================================================================
 
-function OverviewTab() {
+function OverviewTab({ onNavigate }: { onNavigate: (tab: Tab) => void }) {
   const reports = useApp((s) => s.aiDevReports);
   const health = computeHealthDashboard(reports);
 
@@ -178,17 +178,17 @@ function OverviewTab() {
           <CardDescription>Run a scan or generate code</CardDescription>
         </CardHeader>
         <CardContent className="grid sm:grid-cols-2 lg:grid-cols-4 gap-2">
-          <Button variant="outline" className="gap-2 justify-start" onClick={() => document.querySelector('[data-tab="code-audit"]')?.dispatchEvent(new Event("click"))}>
-            <Icon name="FileSearch" className="w-4 h-4" /> Run Code Audit
+          <Button variant="outline" className="gap-2 justify-start" onClick={() => onNavigate("code-audit")}>
+            <Icon name="FileSearch" className="w-4 h-4 text-blue-500" /> Run Code Audit
           </Button>
-          <Button variant="outline" className="gap-2 justify-start" onClick={() => {}}>
-            <Icon name="Shield" className="w-4 h-4" /> Security Scan
+          <Button variant="outline" className="gap-2 justify-start" onClick={() => onNavigate("security-scanner")}>
+            <Icon name="Shield" className="w-4 h-4 text-red-500" /> Security Scan
           </Button>
-          <Button variant="outline" className="gap-2 justify-start" onClick={() => {}}>
-            <Icon name="Sparkles" className="w-4 h-4" /> Generate Feature
+          <Button variant="outline" className="gap-2 justify-start" onClick={() => onNavigate("feature-generator")}>
+            <Icon name="Sparkles" className="w-4 h-4 text-brand" /> Generate Feature
           </Button>
-          <Button variant="outline" className="gap-2 justify-start" onClick={() => {}}>
-            <Icon name="Cloud" className="w-4 h-4" /> Validate Deployment
+          <Button variant="outline" className="gap-2 justify-start" onClick={() => onNavigate("deployment-validator")}>
+            <Icon name="Cloud" className="w-4 h-4 text-emerald-500" /> Validate Deployment
           </Button>
         </CardContent>
       </Card>
