@@ -229,8 +229,8 @@ function ScanTab({ title, icon, scan, reportType }: {
       addReport(report);
       addHistory({
         userId: user?.id || "unknown",
-        provider: "DeepSeek",
-        model: settings.modelName,
+        provider: (report as any).provider || "auto (provider chain)",
+        model: (report as any).model || settings.modelName,
         action: reportType,
         prompt: `${title} scan`,
         response: report.summary,
@@ -255,7 +255,7 @@ function ScanTab({ title, icon, scan, reportType }: {
             <div>
               <h3 className="font-semibold">{title}</h3>
               <p className="text-xs text-muted-foreground">
-                Provider: {settings.modelName} · Auto-scan: {settings.autoScanEnabled ? "on" : "off"}
+                Model: {settings.modelName} · Auto-scan: {settings.autoScanEnabled ? "on" : "off"}
               </p>
             </div>
           </div>
@@ -358,8 +358,8 @@ function FeatureGeneratorTab() {
       setFeature(f);
       addHistory({
         userId: user?.id || "unknown",
-        provider: "DeepSeek",
-        model: settings.modelName,
+        provider: f.provider || "auto (provider chain)",
+        model: f.model || settings.modelName,
         action: "feature_generation",
         prompt: request,
         response: `Generated ${f.files.length} files for "${f.title}"`,
@@ -406,7 +406,7 @@ function FeatureGeneratorTab() {
           />
           <div className="flex items-center justify-between flex-wrap gap-2">
             <p className="text-xs text-muted-foreground">
-              Provider: {settings.modelName} · Safe Apply: {settings.safeApplyEnabled ? "on" : "off"}
+              Model: {settings.modelName} · Safe Apply: {settings.safeApplyEnabled ? "on" : "off"}
             </p>
             <Button onClick={generate} disabled={generating} className="bg-brand hover:bg-brand-dark text-white gap-2">
               <Icon name={generating ? "Loader2" : "Wand2"} className={`w-4 h-4 ${generating ? "animate-spin" : ""}`} />
@@ -495,8 +495,8 @@ function PatchGeneratorTab() {
       setPatch(p);
       addHistory({
         userId: user?.id || "unknown",
-        provider: "DeepSeek",
-        model: settings.modelName,
+        provider: p.provider || "auto (provider chain)",
+        model: p.model || settings.modelName,
         action: "patch_generation",
         prompt: issueDescription,
         response: p.title,

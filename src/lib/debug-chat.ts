@@ -119,7 +119,9 @@ Format your response with clear sections:
       maxTokens: 2000,
       temperature: 0.3,
       taskCategory: "development",
-      ...(providerId ? { timeoutMs: 60000 } : {}),
+      timeoutMs: 60000,
+      // Pin the user-selected provider so the selector actually routes the call.
+      ...(providerId ? { providerId } : {}),
     });
 
     // Extract actionable items from the response

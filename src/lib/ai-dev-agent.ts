@@ -58,6 +58,10 @@ function resolveProvider() {
  * Call the AI with the Dev Agent's configured provider + system prompt.
  * Falls back to the configured fallback provider/model if the primary fails.
  * Falls back to callAI's built-in provider chain if no provider is configured.
+ *
+ * The configured provider is PINNED via callAI's providerId option (single-provider
+ * mode) — we never mutate global providerSettings (that would race with concurrent
+ * AI calls elsewhere in the app).
  */
 export async function callDevAgent(opts: {
   userPrompt: string;
@@ -79,13 +83,24 @@ export async function callDevAgent(opts: {
 
   const systemPrompt = opts.systemPromptOverride || settings.systemPrompt;
 
-  // Try the primary provider first
+  // Base options shared by primary + fallback attempts.
+  // timeout is user-configurable in Settings (seconds → ms); providerId pins the
+  // resolved provider so callAI does NOT silently use the app default instead.
+  const baseOpts = {
+    systemPrompt,
+    userPrompt,
+    maxTokens: opts.maxTokens ?? settings.maxTokens,
+    temperature: opts.temperature ?? settings.temperature,
+    timeoutMs: settings.timeout > 0 ? settings.timeout * 1000 : undefined,
+    taskCategory: "development" as const,
+  };
+
+  // Try the primary provider first (pinned when explicitly configured)
   try {
     const result = await callAI({
-      systemPrompt,
-      userPrompt,
-      maxTokens: opts.maxTokens ?? settings.maxTokens,
-      temperature: opts.temperature ?? settings.temperature,
+      ...baseOpts,
+      ...(provider ? { providerId: provider.id } : {}),
+      ...(model ? { modelOverride: model } : {}),
     });
 
     return {
@@ -103,34 +118,11 @@ export async function callDevAgent(opts: {
       const fallbackProvider = (state.providers || []).find((p: any) => p.id === settings.fallbackProviderId && p.isActive);
 
       if (fallbackProvider) {
-        // Override the provider's model with the fallback model for this call
-        const providerWithFallbackModel = { ...fallbackProvider, modelName: settings.fallbackModel };
         try {
-          // Temporarily set the fallback as the default provider so callAI uses it
-          const originalDefault = state.providerSettings.defaultProviderId;
-          const originalModel = state.providerSettings.defaultModel;
-          useApp.setState({
-            providerSettings: {
-              ...state.providerSettings,
-              defaultProviderId: settings.fallbackProviderId,
-              defaultModel: settings.fallbackModel,
-            },
-          });
-
           const result = await callAI({
-            systemPrompt,
-            userPrompt,
-            maxTokens: opts.maxTokens ?? settings.maxTokens,
-            temperature: opts.temperature ?? settings.temperature,
-          });
-
-          // Restore original settings
-          useApp.setState({
-            providerSettings: {
-              ...state.providerSettings,
-              defaultProviderId: originalDefault,
-              defaultModel: originalModel,
-            },
+            ...baseOpts,
+            providerId: settings.fallbackProviderId,
+            modelOverride: settings.fallbackModel,
           });
 
           return {
@@ -141,14 +133,6 @@ export async function callDevAgent(opts: {
           };
         } catch (fallbackError: any) {
           console.warn(`[AI Dev Agent] Fallback provider also failed: ${fallbackError?.message || fallbackError}`);
-          // Restore original settings on error
-          useApp.setState({
-            providerSettings: {
-              ...state.providerSettings,
-              defaultProviderId: state.providerSettings.defaultProviderId,
-              defaultModel: state.providerSettings.defaultModel,
-            },
-          });
         }
       }
     }
@@ -208,6 +192,25 @@ export async function callDevAgentJSON<T = any>(opts: {
 }
 
 /**
+ * Map a report type to a VALID AIDevIssue type. Some report types
+ * (compliance_audit) do not have a matching issue type — those map to the
+ * closest valid category instead of producing an invalid runtime value.
+ */
+function issueTypeForReport(type: AIDevReport["type"]): AIDevIssue["type"] {
+  switch (type) {
+    case "code_audit": return "code";
+    case "error_analysis": return "error";
+    case "route_inspector": return "route";
+    case "database_inspector": return "database";
+    case "security_scan": return "security";
+    case "performance": return "performance";
+    case "deployment_validation": return "deployment";
+    case "compliance_audit": return "security";
+    default: return "code";
+  }
+}
+
+/**
  * Create a report from a prose (non-JSON) AI response.
  * This is a fallback when the AI doesn't return structured JSON.
  * We extract whatever useful info we can from the prose.
@@ -232,7 +235,7 @@ function makeProseReport(
     summary,
     issues: [{
       id: `iss_${Math.random().toString(36).slice(2, 9)}`,
-      type: type.split("_")[0] as AIDevIssue["type"],
+      type: issueTypeForReport(type),
       severity: "warning",
       title: "AI returned prose instead of JSON",
       description: `The AI provider (${provider}/${model}) returned a prose response instead of the requested JSON structure. This is a provider capability issue, not a code issue. The raw response was:\n\n${proseResponse.slice(0, 500)}${proseResponse.length > 500 ? "..." : ""}`,
@@ -240,6 +243,8 @@ function makeProseReport(
       status: "open",
     }],
     score: undefined,
+    provider,
+    model,
     createdBy: useApp.getState().user?.email || "system",
     createdAt: new Date().toISOString(),
   };
@@ -295,6 +300,8 @@ Return ONLY valid JSON:
         summary: data.summary || "Code audit completed",
         issues: (data.issues || []).map(normalizeIssue),
         score: undefined,
+        provider,
+        model,
         createdBy: useApp.getState().user?.email || "system",
       } as Omit<AIDevReport, "id" | "createdAt"> as AIDevReport;
     }
@@ -348,6 +355,8 @@ Return ONLY valid JSON:
         title: "Error Analysis",
         summary: data.summary,
         issues: (data.issues || []).map(normalizeIssue),
+      provider,
+      model,
       createdBy: useApp.getState().user?.email || "system",
     } as AIDevReport;
     }
@@ -578,6 +587,8 @@ Return ONLY valid JSON:
         title: "Database Inspector",
         summary: data.summary,
         issues: (data.issues || []).map(normalizeIssue),
+      provider,
+      model,
       createdBy: useApp.getState().user?.email || "system",
     } as AIDevReport;
     }
@@ -627,6 +638,8 @@ Return ONLY valid JSON:
         summary: data.summary,
         issues: (data.issues || []).map(normalizeIssue),
       score: undefined,
+      provider,
+      model,
       createdBy: useApp.getState().user?.email || "system",
     } as AIDevReport;
     }
@@ -680,6 +693,8 @@ Return ONLY valid JSON:
         title: "Performance Analysis",
         summary: data.summary,
         issues: (data.issues || []).map(normalizeIssue),
+      provider,
+      model,
       createdBy: useApp.getState().user?.email || "system",
     } as AIDevReport;
     }
@@ -729,6 +744,8 @@ Return ONLY valid JSON:
         title: "Deployment Validation",
         summary: data.summary,
         issues: (data.issues || []).map(normalizeIssue),
+      provider,
+      model,
       createdBy: useApp.getState().user?.email || "system",
     } as AIDevReport;
     }
@@ -797,6 +814,8 @@ Return ONLY valid JSON:
           type: f.type || "other",
         })),
         status: "draft",
+        provider,
+        model,
         createdAt: new Date().toISOString(),
       };
     }
@@ -812,6 +831,8 @@ Return ONLY valid JSON:
         type: "other",
       }],
       status: "draft",
+      provider,
+      model,
       createdAt: new Date().toISOString(),
     };
   } catch (e: any) {
@@ -876,6 +897,8 @@ Return ONLY valid JSON:
         riskAnalysis: data.riskAnalysis || "medium",
         generatedTests: data.generatedTests || "",
         status: "draft",
+        provider,
+        model,
         createdAt: new Date().toISOString(),
       };
     }
@@ -891,6 +914,8 @@ Return ONLY valid JSON:
       impactAnalysis: "Unable to determine — AI returned prose instead of structured patch data.",
       riskAnalysis: "high",
       status: "draft",
+      provider,
+      model,
       createdAt: new Date().toISOString(),
     };
   } catch (e: any) {
@@ -1014,7 +1039,7 @@ function makeErrorReport(type: AIDevReport["type"], title: string, errorMsg: str
     summary: `Scan failed: ${errorMsg}`,
     issues: [{
       id: `iss_${Math.random().toString(36).slice(2, 9)}`,
-      type: type.split("_")[0] as AIDevIssue["type"],
+      type: issueTypeForReport(type),
       severity: "error",
       title: "Scan failed",
       description: errorMsg,
@@ -1070,11 +1095,13 @@ Return ONLY valid JSON:
 
     return {
       id: `rpt_${Date.now()}`,
-      type: "compliance_audit" as any,
+      type: "compliance_audit",
       title: "Compliance Audit",
       summary: data.summary || `Found ${issues.length} compliance issue(s).`,
       issues,
       score: Math.max(0, 100 - issues.length * 10),
+      provider,
+      model,
       createdBy: useApp.getState().user?.email || "system",
       createdAt: new Date().toISOString(),
     };

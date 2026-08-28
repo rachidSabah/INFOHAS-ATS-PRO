@@ -16,8 +16,10 @@ import type { AIHealingIssue, AIHealingReport, AIWorkspacePatch, AITask } from "
 const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 /**
- * Run a detailed debug scan across the 12 check areas, finding real codebase issues
- * and padding/seeding to match the requested 18 issues found.
+ * Run a detailed debug scan across the codebase, finding REAL issues only.
+ * Every reported issue is backed by an actual searchRepository match with
+ * file + line evidence. NOTHING is seeded or padded — if the codebase is
+ * clean, the scan reports zero issues.
  */
 export async function runDetailedDebugScan(): Promise<AIHealingIssue[]> {
   const issues: AIHealingIssue[] = [];
@@ -107,120 +109,88 @@ export async function runDetailedDebugScan(): Promise<AIHealingIssue[]> {
     console.warn("any-type scan failed:", e);
   }
 
-  // Seed the remaining issues to hit exactly 18 issues representing all 12 areas
-  const seededIssues: Omit<AIHealingIssue, "id">[] = [
-    {
-      file: "src/lib/providers/puter-provider.ts",
-      line: 71,
-      area: "provider",
-      severity: "error",
-      title: "Broken failover routing / cooldown loops",
-      description: "Puter provider throws rate limits without properly rotating to other providers, creating failure loops.",
-      suggestedFix: "Add provider cooldown logic and update provider failover chain in router.",
-      status: "open",
-      code: "try { await fetch('/api/providers/puter/accounts'); } catch (e) { console.warn(e); }",
-    },
-    {
-      file: "src/lib/providers/session-manager.ts",
-      line: 45,
-      area: "provider",
-      severity: "warning",
-      title: "Provider authentication silent failures",
-      description: "Session recovery fails silently when sessionStorage token is expired.",
-      suggestedFix: "Implement automatic token refresh and trigger re-auth popup on expiration.",
-      status: "open",
-    },
-    {
-      file: "src/lib/agents/orchestrator.ts",
-      line: 120,
-      area: "pipeline",
-      severity: "critical",
-      title: "Optimization Pipeline race condition",
-      description: "Multiple parallel requests for same resume optimize bypass cache due to overlapping database lock operations.",
-      suggestedFix: "Add request queuing and row-locking on optimization table.",
-      status: "open",
-    },
-    {
-      file: "src/components/app/modules/ATSChecker.tsx",
-      line: 182,
-      area: "pipeline",
-      severity: "error",
-      title: "ATS Pipeline dead route / false success state",
-      description: "ATS score finishes with 0% score and reports success when parser fails silently.",
-      suggestedFix: "Enforce fatal QA check and abort optimization on parser crash.",
-      status: "open",
-    },
-    {
-      file: "migrations/0007_task_tracking.sql",
-      line: 14,
-      area: "database",
-      severity: "critical",
-      title: "D1 Schema nullable field crash",
-      description: "Task tracking table insert fails with NOT NULL constraint when username is empty.",
-      suggestedFix: "Alter column to allow NULL or default to 'anonymous'.",
-      status: "open",
-    },
-    {
-      file: "src/app/api/jd-scrape/route.ts",
-      line: 98,
-      area: "api",
-      severity: "error",
-      title: "API missing request validation",
-      description: "Scraper endpoint crashes when url parameter is missing from request body.",
-      suggestedFix: "Implement Zod request validation and return 400 Bad Request.",
-      status: "open",
-    },
-    {
-      file: "src/app/api/providers/test/route.ts",
-      line: 23,
-      area: "api",
-      severity: "warning",
-      title: "API route auth check bug",
-      description: "Provider test endpoint executes without validating administrator role.",
-      suggestedFix: "Inject requireAdmin middleware check before processing request.",
-      status: "open",
-    },
-    {
-      file: "src/lib/auth-utils.ts",
-      line: 114,
-      area: "security",
-      severity: "critical",
-      title: "Cookie token XSS vulnerability",
-      description: "Authentication cookie lacks HttpOnly flag, exposing it to potential cross-site scripting attacks.",
-      suggestedFix: "Configure cookie attributes with HttpOnly: true and Secure: true.",
-      status: "open",
-    },
-    {
-      file: "src/components/resume/EditableA4Preview.tsx",
-      line: 332,
-      area: "performance",
-      severity: "error",
-      title: "Memory leak from duplicate requests",
-      description: "React component triggers multiple concurrent fetch calls on edit keydowns.",
-      suggestedFix: "Debounce the request trigger or implement AbortController to cancel previous calls.",
-      status: "open",
-    },
-  ];
-
-  for (const item of seededIssues) {
-    if (issues.length >= 18) break;
-    issues.push({
-      ...item,
-      id: `h_iss_seed_${Math.random().toString(36).slice(2, 9)}`,
-    });
+  // 5. Real scan for TODO/FIXME comments
+  try {
+    const todoResults = await searchRepository("\\b(?:TODO" + "|FIXME)\\b", { regex: true, filePattern: "*.{ts,tsx}" });
+    for (const r of todoResults.slice(0, 3)) {
+      issues.push({
+        id: `h_iss_todo_${Math.random().toString(36).slice(2, 9)}`,
+        file: r.file,
+        line: r.line,
+        area: "system",
+        severity: "info",
+        title: "TODO/FIXME comment",
+        description: `Unresolved TODO/FIXME in ${r.file}:${r.line} — ${r.match.trim().slice(0, 120)}`,
+        suggestedFix: "Address the TODO/FIXME or move it to the issue tracker.",
+        status: "open",
+        code: r.match,
+      });
+    }
+  } catch (e) {
+    console.warn("TODO scan failed:", e);
   }
 
-  // Ensure we have exactly 18 issues
-  while (issues.length < 18) {
-    issues.push({
-      id: `h_iss_pad_${Math.random().toString(36).slice(2, 9)}`,
-      area: "frontend",
-      severity: "info",
-      title: "TODO Reminder comment",
-      description: "TODO: Refactor styling patterns to utilize Tailwind v4 utility variables.",
-      suggestedFix: "Clean up obsolete comment or move it to GitHub issues.",
-      status: "open",
-    });
+  // 6. Real scan for debugger statements left in code
+  try {
+    const debuggerResults = await searchRepository("^\\s*debugger\\s*;?\\s*$", { regex: true, filePattern: "*.{ts,tsx}" });
+    for (const r of debuggerResults.slice(0, 3)) {
+      issues.push({
+        id: `h_iss_debugger_${Math.random().toString(36).slice(2, 9)}`,
+        file: r.file,
+        line: r.line,
+        area: "frontend",
+        severity: "warning",
+        title: "debugger statement left in production code",
+        description: `A 'debugger' statement in ${r.file}:${r.line} will pause execution when devtools are open.`,
+        suggestedFix: "Remove the debugger statement.",
+        status: "open",
+        code: r.match,
+      });
+    }
+  } catch (e) {
+    console.warn("debugger scan failed:", e);
+  }
+
+  // 7. Real scan for eval usage (security / CSP risk)
+  try {
+    const evalResults = await searchRepository("\\beval\\s*\\(", { regex: true, filePattern: "*.{ts,tsx}" });
+    for (const r of evalResults.slice(0, 3)) {
+      issues.push({
+        id: `h_iss_eval_${Math.random().toString(36).slice(2, 9)}`,
+        file: r.file,
+        line: r.line,
+        area: "security",
+        severity: "warning",
+        title: "eval() usage detected",
+        description: `eval() call in ${r.file}:${r.line} — potential code injection vector and CSP violation.`,
+        suggestedFix: "Replace eval() with safer alternatives (JSON.parse, Function constructor avoidance, or explicit logic).",
+        status: "open",
+        code: r.match,
+      });
+    }
+  } catch (e) {
+    console.warn("eval scan failed:", e);
+  }
+
+  // 8. Real scan for dangerouslySetInnerHTML (XSS risk)
+  try {
+    const dsihResults = await searchRepository("dangerouslySetInnerHTML", { filePattern: "*.tsx" });
+    for (const r of dsihResults.slice(0, 3)) {
+      issues.push({
+        id: `h_iss_dsih_${Math.random().toString(36).slice(2, 9)}`,
+        file: r.file,
+        line: r.line,
+        area: "security",
+        severity: "info",
+        title: "dangerouslySetInnerHTML usage",
+        description: `Raw HTML injection in ${r.file}:${r.line} — verify the content is sanitized.`,
+        suggestedFix: "Ensure the HTML comes from a trusted source or sanitize it (e.g. DOMPurify) before rendering.",
+        status: "open",
+        code: r.match,
+      });
+    }
+  } catch (e) {
+    console.warn("dangerouslySetInnerHTML scan failed:", e);
   }
 
   return issues;
@@ -329,20 +299,14 @@ export async function healIssue(
     }
   }
 
-  // Step 4: Validate Patch
-  setProgress({ status: "validating", currentStep: "Validating patch (Typecheck, Lint, Build, Tests)...", progressPercent: 75 });
-  await delay(1200);
+  // Step 4: Validate Patch — HONEST: a browser-based app cannot execute
+  // typecheck/lint/build/tests. We do NOT fabricate PASS results. Patches are
+  // marked PENDING and require human validation + review before applying.
+  setProgress({ status: "validating", currentStep: "Patch ready — validation must be run manually (browser sandbox)", progressPercent: 75 });
+  await delay(400);
 
-  let buildStatus: "PASS" | "FAIL" = "PASS";
-  let testStatus: "PASS" | "FAIL" = "PASS";
-
-  // Simulate a validation failure for the memory leak performance issue
-  if (issue.title.includes("Memory leak") || issue.id.includes("leak")) {
-    buildStatus = "FAIL";
-    testStatus = "FAIL";
-    setProgress({ status: "fixing", currentStep: "Validation failed! Rolling back patch...", progressPercent: 90 });
-    await delay(1000);
-  }
+  const buildStatus: "PASS" | "FAIL" | "PENDING" = "PENDING";
+  const testStatus: "PASS" | "FAIL" | "PENDING" = "PENDING";
 
   const updatedIssue: AIHealingIssue = {
     ...issue,
@@ -355,20 +319,16 @@ export async function healIssue(
     risk,
     status: generateOnly
       ? "open"
-      : buildStatus === "FAIL"
-      ? "failed"
-      : risk === "HIGH"
+      : patch
       ? "needs_review"
-      : "fixed",
+      : "open",
   };
 
   updateIssue(issue.id, updatedIssue);
 
-  // If validation succeeded and it's not generateOnly, create task and patch in store
-  if (buildStatus === "PASS" && !generateOnly) {
-    const slug = issue.title.toLowerCase().replace(/[^a-z0-9]+/g, "-");
-    
-    // Add to store patches
+  // If a patch was generated and it's not generateOnly, add it to the store
+  // as PENDING — it goes through the standard approval workflow (Safe Apply).
+  if (patch && !generateOnly) {
     store.addAIPatch({
       taskId: `t_healer_${issue.id}`,
       title: `Heal: ${issue.title}`,
@@ -377,47 +337,47 @@ export async function healIssue(
       modifiedFiles: issue.file ? [issue.file] : [],
       newFiles: [],
       deletedFiles: [],
-      impactAnalysis: `Self-healed ${issue.area} issue: ${issue.title}. Root Cause: ${rootCause}`,
+      impactAnalysis: `Healer patch for ${issue.area} issue: ${issue.title}. Root Cause: ${rootCause}`,
       riskAnalysis: risk.toLowerCase() as any,
-      status: risk === "HIGH" ? "pending" : "approved",
+      status: "pending",
       buildResult: {
-        success: true,
+        success: false, // NOT built — browser-based app cannot run builds
         errors: [],
-        warnings: [],
-        duration: 210,
-        output: "Build SUCCESS\nLint SUCCESS\nTypecheck SUCCESS",
+        warnings: [
+          "VALIDATION NOT EXECUTED — this is a browser-based app and cannot run typecheck/lint/build/tests.",
+          "Copy the patched file(s) locally, then run: npx tsc --noEmit && npm run lint && npm run build && npx vitest run",
+        ],
+        duration: 0,
+        output: "Patch generated but NOT validated. Manual validation required before merge.",
         timestamp: new Date().toISOString(),
       },
       testResult: {
-        success: true,
-        total: 10,
-        passed: 10,
+        success: false, // NOT tested
+        total: 0,
+        passed: 0,
         failed: 0,
         skipped: 0,
-        duration: 350,
-        output: "All 10 tests passed.",
+        duration: 0,
+        output: "Tests NOT executed — manual test run required.",
         failures: [],
         timestamp: new Date().toISOString(),
       },
       createdBy: "AI Healer Agent",
     });
 
-    // If it's a fixed issue (low/medium risk), apply it to the simulated production state
-    if (updatedIssue.status === "fixed") {
-      store.log({
-        actor: "AI Healer",
-        action: "AI Auto-Heal Committed",
-        category: "admin",
-        details: `Auto-healed ${issue.title} in ${issue.file || "repository"}`,
-        severity: "info",
-      });
-    }
-  } else if (buildStatus === "FAIL") {
     store.log({
       actor: "AI Healer",
-      action: "AI Auto-Heal Rolled Back",
+      action: "AI Heal Patch Generated",
       category: "admin",
-      details: `Rolled back patch for ${issue.title} due to build/test failure.`,
+      details: `Generated patch for "${issue.title}" in ${issue.file || "repository"} — pending review`,
+      severity: "info",
+    });
+  } else if (!patch) {
+    store.log({
+      actor: "AI Healer",
+      action: "AI Heal Patch Skipped",
+      category: "admin",
+      details: `No patch generated for "${issue.title}" (insufficient evidence or AI generation failed).`,
       severity: "warning",
     });
   }
@@ -469,9 +429,9 @@ export async function healMultipleIssues(
     autoFixed,
     needsReview,
     failed,
-    filesChanged: filesChangedSet.size || 8, // Pad to 8 for final report consistency if needed
-    testsPassed: autoFixed * 3 + 2, // Realistic test pass counts
-    buildStatus: failed > 0 ? "FAIL" : "PASS",
+    filesChanged: filesChangedSet.size, // real count of files with generated patches
+    testsPassed: 0, // HONEST: tests are not executed in the browser sandbox
+    buildStatus: "NOT_RUN", // HONEST: build validation is not executed in the browser
   };
 
   store.setAIHealingReport(report);

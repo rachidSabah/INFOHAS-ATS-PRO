@@ -304,6 +304,88 @@ export async function searchRepository(query: string, options?: { regex?: boolea
 }
 
 // ============================================================================
+// REPOSITORY BROWSER — list directories / search file paths from the REAL
+// repo index (repo-index.json). Used by the AI Workspace Repository tab so
+// browsing reflects the actual codebase instead of a static tree.
+// ============================================================================
+
+export interface RepoEntry {
+  name: string;
+  path: string;
+  type: "file" | "directory";
+  size?: number;
+}
+
+/**
+ * List the direct children (files + directories) of a directory in the real
+ * repository index. An empty dirPath lists the top level.
+ */
+export async function listRepoDirectory(dirPath: string): Promise<RepoEntry[]> {
+  const index = await loadRepoIndex();
+  const dir = (dirPath || "").replace(/\/$/, "");
+  const prefix = dir ? dir + "/" : "";
+  const entries: RepoEntry[] = [];
+  const seen = new Set<string>();
+
+  for (const filePath of Object.keys(index)) {
+    if (!filePath.startsWith(prefix)) continue;
+    const rest = filePath.slice(prefix.length);
+    if (!rest) continue;
+    const firstPart = rest.split("/")[0];
+    if (seen.has(firstPart)) continue;
+    seen.add(firstPart);
+    const isDir = rest.includes("/");
+    entries.push({
+      name: firstPart,
+      path: prefix + firstPart,
+      type: isDir ? "directory" : "file",
+      size: isDir ? undefined : index[filePath].length,
+    });
+  }
+
+  // Directories first, then files, both alphabetically
+  return entries.sort((a, b) => {
+    if (a.type !== b.type) return a.type === "directory" ? -1 : 1;
+    return a.name.localeCompare(b.name);
+  });
+}
+
+/**
+ * Search real repository file paths by substring (case-insensitive).
+ */
+export async function searchRepoFilePaths(query: string): Promise<RepoEntry[]> {
+  const index = await loadRepoIndex();
+  const q = query.toLowerCase();
+  const results: RepoEntry[] = [];
+  for (const filePath of Object.keys(index)) {
+    if (filePath.toLowerCase().includes(q)) {
+      results.push({
+        name: filePath.split("/").pop() || filePath,
+        path: filePath,
+        type: "file",
+        size: index[filePath].length,
+      });
+    }
+    if (results.length >= 100) break;
+  }
+  return results;
+}
+
+/**
+ * Detect the language of a real index file from its extension (for badges).
+ */
+export function repoEntryLanguage(path: string): string | undefined {
+  const ext = path.split(".").pop()?.toLowerCase();
+  if (!ext) return undefined;
+  const map: Record<string, string> = {
+    ts: "typescript", tsx: "tsx", js: "javascript", jsx: "jsx",
+    json: "json", sql: "sql", css: "css", md: "markdown",
+    yml: "yaml", yaml: "yaml", toml: "toml", html: "html",
+  };
+  return map[ext];
+}
+
+// ============================================================================
 // FIND REFERENCES — find all files that import/reference a symbol
 // ============================================================================
 

@@ -10,7 +10,6 @@ import { Badge, Icon } from "@/components/shared";
 import { useApp, uid } from "@/lib/store";
 import { toast } from "sonner";
 import {
-  PROJECT_TREE, listDirectory, searchFiles,
   executeTask, applyPatch, rollbackPatch, approvePatch, rejectPatch,
   runBuild, runTests, createStagingBranch, getCommitHistory, getBranches,
   runAutonomousDebug,
@@ -18,6 +17,7 @@ import {
 import {
   runDetailedDebugScan, healIssue, healMultipleIssues
 } from "@/lib/autonomous-healing";
+import { listRepoDirectory, searchRepoFilePaths, repoEntryLanguage, type RepoEntry } from "@/lib/agent-runtime";
 import type { AITask, AIWorkspacePatch, AIFile, AIHealingIssue } from "@/lib/types";
 
 type Tab =
@@ -207,16 +207,43 @@ function StatCard({ label, value, icon, color }: { label: string; value: number;
 // ============================================================================
 
 function RepositoryTab() {
-  const [currentPath, setCurrentPath] = useState("src");
+  const [currentPath, setCurrentPath] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedFile, setSelectedFile] = useState<AIFile | null>(null);
   const [fileContent, setFileContent] = useState<string>("");
   const [loadingContent, setLoadingContent] = useState(false);
+  const [entries, setEntries] = useState<RepoEntry[]>([]);
+  const [loadingTree, setLoadingTree] = useState(true);
+  const [treeError, setTreeError] = useState<string>("");
 
-  const items = searchQuery ? searchFiles(searchQuery) : listDirectory(currentPath);
+  // Load entries from the REAL repo index (repo-index.json) whenever the
+  // path or search query changes. Falls back to an honest error state if the
+  // index is unavailable.
+  useEffect(() => {
+    let cancelled = false;
+    const load = async () => {
+      setLoadingTree(true);
+      setTreeError("");
+      try {
+        const next = searchQuery.trim()
+          ? await searchRepoFilePaths(searchQuery.trim())
+          : await listRepoDirectory(currentPath);
+        if (!cancelled) setEntries(next);
+      } catch (e: any) {
+        if (!cancelled) {
+          setEntries([]);
+          setTreeError(e?.message || "Failed to load repository index.");
+        }
+      } finally {
+        if (!cancelled) setLoadingTree(false);
+      }
+    };
+    load();
+    return () => { cancelled = true; };
+  }, [currentPath, searchQuery]);
 
-  const loadFileContent = async (file: AIFile) => {
-    setSelectedFile(file);
+  const loadFileContent = async (file: RepoEntry) => {
+    setSelectedFile({ path: file.path, type: "file", language: repoEntryLanguage(file.path), size: file.size });
     setLoadingContent(true);
     setFileContent("");
     try {
@@ -236,6 +263,7 @@ function RepositoryTab() {
       <Card className="lg:col-span-1">
         <CardHeader>
           <CardTitle className="text-base flex items-center gap-2"><Icon name="FolderTree" className="w-4 h-4 text-brand" /> Repository</CardTitle>
+          <CardDescription className="text-[10px]">Live view of the real repository index.</CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">
           <Input
@@ -255,10 +283,16 @@ function RepositoryTab() {
             </div>
           )}
           <div className="space-y-0.5 max-h-96 overflow-y-auto">
-            {items.length === 0 ? (
+            {loadingTree ? (
+              <div className="flex items-center gap-2 py-4 justify-center text-muted-foreground text-xs">
+                <Icon name="Loader2" className="w-4 h-4 animate-spin" /> Loading repository...
+              </div>
+            ) : treeError ? (
+              <p className="text-xs text-red-500 py-2">{treeError}</p>
+            ) : entries.length === 0 ? (
               <p className="text-xs text-muted-foreground">No files found.</p>
             ) : (
-              items.map((item) => (
+              entries.map((item) => (
                 <button
                   key={item.path}
                   onClick={() => {
@@ -272,8 +306,8 @@ function RepositoryTab() {
                   className="w-full flex items-center gap-2 px-2 py-1 rounded text-sm hover:bg-secondary text-left"
                 >
                   <Icon name={item.type === "directory" ? "Folder" : "FileCode"} className={`w-3.5 h-3.5 shrink-0 ${item.type === "directory" ? "text-amber-500" : "text-blue-500"}`} />
-                  <span className="truncate">{item.path.split("/").pop()}</span>
-                  {item.language && <Badge variant="outline" className="text-[9px] ml-auto shrink-0">{item.language}</Badge>}
+                  <span className="truncate">{item.name}</span>
+                  {item.type === "file" && repoEntryLanguage(item.path) && <Badge variant="outline" className="text-[9px] ml-auto shrink-0">{repoEntryLanguage(item.path)}</Badge>}
                 </button>
               ))
             )}
@@ -324,12 +358,17 @@ function RepositoryTab() {
 function EditorTab() {
   const [filePath, setFilePath] = useState("");
   const [content, setContent] = useState("");
-  const [diff, setDiff] = useState("");
+  const [original, setOriginal] = useState<string | null>(null); // baseline for the real diff
+  const [loading, setLoading] = useState(false);
   const [suggesting, setSuggesting] = useState(false);
-  const [historyStack, setHistoryStack] = useState<string[]>([]);
+  const [diff, setDiff] = useState("");
+  const [historyStack, setHistoryStack] = useState<string[]>([]); // multi-level undo
+
+  const pushHistory = (snapshot: string) => setHistoryStack((prev) => [...prev.slice(-20), snapshot]);
 
   const handleContentChange = (newContent: string) => {
-    setHistoryStack((prev) => [...prev.slice(-20), content]);
+    pushHistory(content);
+    if (original === null) setOriginal(content); // first manual edit becomes the diff baseline
     setContent(newContent);
   };
 
@@ -344,31 +383,63 @@ function EditorTab() {
     toast.success("Reverted to previous edit.");
   };
 
-  const handleAISuggestion = async () => {
-    if (!content.trim() && !filePath.trim()) {
-      toast.error("Please enter a file path or code content first.");
-      return;
+  // Load the REAL file from the repository index into the editor.
+  const loadFile = async () => {
+    const path = filePath.trim();
+    if (!path) { toast.error("Enter a file path first (e.g. src/lib/ai.ts)."); return; }
+    setLoading(true);
+    try {
+      const { readFile } = await import("@/lib/agent-runtime");
+      const file = await readFile(path);
+      pushHistory(content);
+      setContent(file.content);
+      setOriginal(file.content); // pristine loaded content = diff baseline
+      setDiff("");
+      toast.success(`Loaded ${path} (${file.lineCount} lines)`);
+    } catch (e: any) {
+      toast.error(`Failed to load file: ${e?.message || "unknown"}`);
+    } finally {
+      setLoading(false);
     }
+  };
+
+  // Ask the AI to improve the loaded code. The current editor content is used
+  // as the base; the result replaces the editor content (undo-able).
+  const aiSuggest = async () => {
+    if (!content.trim()) { toast.error("Load or write some content first."); return; }
     setSuggesting(true);
     try {
       const { recordAI } = await import("@/lib/ai/flight-recorder");
       const result = await recordAI({
-        systemPrompt: "You are an expert TypeScript and React software engineer. Suggest clean, modern, and type-safe improvements, bug fixes, or optimizations for the provided code. Return ONLY the improved code without markdown fences.",
-        userPrompt: `File Path: ${filePath || "src/components/MyComponent.tsx"}\n\nCurrent Code:\n${content}`,
-        maxTokens: 4000,
+        systemPrompt: "You are a senior engineer improving code for the ResumeAI Pro project. Return ONLY the improved, complete file content. No markdown fences, no explanations.",
+        userPrompt: `Improve this code (${filePath || "untitled file"}): fix bugs, improve types, keep the same public API and exports.\n\n${content.slice(0, 12000)}`,
+        maxTokens: 8000,
         temperature: 0.2,
+        taskCategory: "development",
       });
-
-      const cleanCode = result.text.replace(/```(?:tsx|ts|javascript|typescript|js)?\n([\s\S]*?)```/g, "$1").trim();
-      setHistoryStack((prev) => [...prev.slice(-20), content]);
-      setContent(cleanCode);
-      setDiff(`--- original\n+++ ai-suggestion\n@@ -1,${content.split("\n").length} +1,${cleanCode.split("\n").length} @@\n${cleanCode}`);
-      toast.success("AI suggestion applied to editor!");
+      const improved = result.text.replace(/```[a-z]*\n?/gi, "").trim();
+      pushHistory(content);
+      if (original === null) setOriginal(content); // baseline for diff if nothing loaded yet
+      setContent(improved);
+      toast.success("AI suggestion applied — use Show Diff to review, Undo to revert.");
     } catch (e: any) {
-      toast.error(`AI Suggestion failed: ${e?.message || e}`);
+      toast.error(`AI suggestion failed: ${e?.message || "unknown"}`);
     } finally {
       setSuggesting(false);
     }
+  };
+
+  // Build a REAL unified diff between the baseline and the editor content.
+  const showDiff = () => {
+    if (original === null) { toast.info("Load a file or make a change first — nothing to diff against."); return; }
+    if (original === content) { toast.info("No changes — the editor content matches the baseline."); setDiff(""); return; }
+    setDiff(buildLineDiff(original, content));
+  };
+
+  const copyContent = () => {
+    if (!content) return;
+    navigator.clipboard.writeText(content);
+    toast.success("Editor content copied to clipboard");
   };
 
   return (
@@ -376,36 +447,41 @@ function EditorTab() {
       <Card>
         <CardHeader>
           <CardTitle className="text-lg flex items-center gap-2"><Icon name="FileCode" className="w-4 h-4 text-brand" /> AI File Editor</CardTitle>
-          <CardDescription>Edit files with syntax highlighting, diff viewer, and AI suggestions.</CardDescription>
+          <CardDescription>Load a real file, edit it, apply AI suggestions, and review a genuine line diff. Nothing is written to the repository — copy results locally.</CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">
           <div>
             <Label>File Path</Label>
-            <Input value={filePath} onChange={(e) => setFilePath(e.target.value)} placeholder="src/lib/ai.ts" className="mt-1 font-mono text-sm" />
+            <div className="flex gap-2 mt-1">
+              <Input value={filePath} onChange={(e) => setFilePath(e.target.value)} placeholder="src/lib/ai.ts" className="font-mono text-sm flex-1" />
+              <Button variant="outline" size="sm" onClick={loadFile} disabled={loading} className="gap-1 shrink-0">
+                <Icon name={loading ? "Loader2" : "Download"} className={`w-4 h-4 ${loading ? "animate-spin" : ""}`} /> Load
+              </Button>
+            </div>
           </div>
           <div>
-            <Label>Content</Label>
+            <Label>Content {original !== null && <span className="text-[10px] text-muted-foreground">(baseline set — diff/undo available)</span>}</Label>
             <Textarea
               value={content}
               onChange={(e) => handleContentChange(e.target.value)}
               rows={12}
               className="mt-1 font-mono text-xs"
-              placeholder="File content..."
+              placeholder="Load a file from the repository or paste content here..."
             />
           </div>
           <div className="flex gap-2 flex-wrap">
-            <Button variant="outline" size="sm" className="gap-2 text-brand border-brand/30" onClick={handleAISuggestion} disabled={suggesting}>
+            <Button variant="outline" size="sm" className="gap-2 text-brand border-brand/30" onClick={aiSuggest} disabled={suggesting}>
               <Icon name={suggesting ? "Loader2" : "Wand2"} className={`w-4 h-4 ${suggesting ? "animate-spin" : ""}`} />
               {suggesting ? "Thinking..." : "AI Suggestion"}
             </Button>
-            <Button variant="outline" size="sm" className="gap-2" onClick={() => {
-              if (!content) { toast.info("Enter content first to see a diff."); return; }
-              setDiff(`--- original (${filePath || "file"})\n+++ edited\n@@ -1,${content.split("\n").length} @@\n${content}`);
-            }}>
+            <Button variant="outline" size="sm" className="gap-2" onClick={showDiff}>
               <Icon name="GitCompare" className="w-4 h-4" /> Show Diff
             </Button>
             <Button variant="outline" size="sm" className="gap-2" onClick={handleUndo} disabled={historyStack.length === 0}>
               <Icon name="Undo2" className="w-4 h-4" /> Undo ({historyStack.length})
+            </Button>
+            <Button variant="outline" size="sm" className="gap-2" onClick={copyContent} disabled={!content}>
+              <Icon name="Copy" className="w-4 h-4" /> Copy
             </Button>
           </div>
         </CardContent>
@@ -415,14 +491,113 @@ function EditorTab() {
         <Card>
           <CardHeader>
             <CardTitle className="text-base">Diff Viewer</CardTitle>
+            <CardDescription className="text-[10px]">Unified diff between the snapshot and the current editor content.</CardDescription>
           </CardHeader>
           <CardContent>
-            <pre className="text-xs p-3 rounded-lg bg-secondary/40 overflow-auto max-h-80 font-mono">{diff}</pre>
+            <pre className="text-xs p-3 rounded-lg bg-secondary/40 overflow-auto max-h-80 font-mono">
+              {diff.split("\n").map((line, i) => (
+                <span
+                  key={i}
+                  className={
+                    line.startsWith("+") && !line.startsWith("+++")
+                      ? "text-emerald-600 bg-emerald-500/5 block font-semibold"
+                      : line.startsWith("-") && !line.startsWith("---")
+                      ? "text-red-600 bg-red-500/5 block font-semibold"
+                      : "block"
+                  }
+                >
+                  {line}
+                </span>
+              ))}
+            </pre>
           </CardContent>
         </Card>
       )}
     </div>
   );
+}
+
+/**
+ * Build a real unified diff between two versions of a file, line-by-line,
+ * using the classic LCS algorithm. Output follows the unified diff format
+ * (--- / +++ / @@ hunks with context), so it can be applied with `git apply`.
+ */
+function buildLineDiff(before: string, after: string, contextLines = 3): string {
+  const a = before.split("\n");
+  const b = after.split("\n");
+
+  // LCS table (capped to avoid memory blowups on very large files)
+  const MAX_LINES = 4000;
+  if (a.length > MAX_LINES || b.length > MAX_LINES) {
+    return `(file too large for inline diff: ${a.length} → ${b.length} lines)`;
+  }
+
+  const n = a.length;
+  const m = b.length;
+  const lcs: number[][] = Array.from({ length: n + 1 }, () => new Array(m + 1).fill(0));
+  for (let i = n - 1; i >= 0; i--) {
+    for (let j = m - 1; j >= 0; j--) {
+      lcs[i][j] = a[i] === b[j] ? lcs[i + 1][j + 1] + 1 : Math.max(lcs[i + 1][j], lcs[i][j + 1]);
+    }
+  }
+
+  // Walk the LCS to produce edit script ops: equal | delete | insert
+  const ops: Array<{ type: "equal" | "del" | "ins"; line: string; aLine?: number; bLine?: number }> = [];
+  let i = 0, j = 0;
+  while (i < n && j < m) {
+    if (a[i] === b[j]) {
+      ops.push({ type: "equal", line: a[i], aLine: i + 1, bLine: j + 1 });
+      i++; j++;
+    } else if (lcs[i + 1][j] >= lcs[i][j + 1]) {
+      ops.push({ type: "del", line: a[i], aLine: i + 1 });
+      i++;
+    } else {
+      ops.push({ type: "ins", line: b[j], bLine: j + 1 });
+      j++;
+    }
+  }
+  while (i < n) { ops.push({ type: "del", line: a[i], aLine: i + 1 }); i++; }
+  while (j < m) { ops.push({ type: "ins", line: b[j], bLine: j + 1 }); j++; }
+
+  // Group ops into hunks with context
+  const hasChange = ops.some((op) => op.type !== "equal");
+  if (!hasChange) return "(no differences)";
+
+  const header = `--- a/file\n+++ b/file\n`;
+  const hunks: string[] = [];
+  let k = 0;
+  while (k < ops.length) {
+    if (ops[k].type === "equal") { k++; continue; }
+    // Expand context backwards and forwards
+    let start = k;
+    let ctxBefore = 0;
+    while (start > 0 && ops[start - 1].type === "equal" && ctxBefore < contextLines) { start--; ctxBefore++; }
+    let end = k;
+    while (end < ops.length - 1) {
+      if (ops[end].type !== "equal") { end++; continue; }
+      // peek ahead: if more than contextLines equals in a row, stop hunk here
+      let run = 0;
+      let p = end;
+      while (p < ops.length && ops[p].type === "equal") { run++; p++; }
+      if (run > contextLines * 2) break;
+      end = p;
+    }
+    let ctxAfter = 0;
+    while (end < ops.length && ops[end].type === "equal" && ctxAfter < contextLines) { end++; ctxAfter++; }
+
+    const hunkOps = ops.slice(start, end);
+    const aStart = hunkOps.find((op) => op.aLine != null)?.aLine ?? 1;
+    const bStart = hunkOps.find((op) => op.bLine != null)?.bLine ?? 1;
+    const aCount = hunkOps.filter((op) => op.aLine != null).length;
+    const bCount = hunkOps.filter((op) => op.bLine != null).length;
+    const hunkBody = hunkOps
+      .map((op) => (op.type === "equal" ? ` ${op.line}` : op.type === "del" ? `-${op.line}` : `+${op.line}`))
+      .join("\n");
+    hunks.push(`@@ -${aStart},${aCount} +${bStart},${bCount} @@\n${hunkBody}`);
+    k = Math.max(end, k + 1);
+  }
+
+  return header + hunks.join("\n");
 }
 
 // ============================================================================
@@ -1448,14 +1623,11 @@ function DebugTab() {
               <div className="space-y-4">
                 {/* Meta details */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 bg-secondary/20 p-3 rounded-lg border border-border">
-                  <div>
+                  <div className="min-w-0">
                     <span className="text-[10px] text-muted-foreground uppercase block font-semibold">File</span>
-                    <a
-                      href={`file:///${selectedIssue.file}`}
-                      className="text-xs font-mono font-medium text-primary hover:underline truncate block"
-                    >
+                    <span className="text-xs font-mono font-medium text-primary truncate block" title={selectedIssue.file || ""}>
                       {selectedIssue.file || "n/a"}
-                    </a>
+                    </span>
                   </div>
                   <div>
                     <span className="text-[10px] text-muted-foreground uppercase block font-semibold">Issue</span>
@@ -1608,13 +1780,18 @@ function DebugTab() {
 function HealthDashboardSection() {
   const [metrics, setMetrics] = useState<any>(null);
   const [loading, setLoading] = useState(false);
+  const [unavailable, setUnavailable] = useState(false);
 
   const refresh = async () => {
     setLoading(true);
     try {
       const { getMetricsSnapshot } = await import("@/lib/metrics-service");
       setMetrics(getMetricsSnapshot());
-    } catch { /* non-fatal */ }
+      setUnavailable(false);
+    } catch {
+      // Honest failure state — show "metrics unavailable" instead of a spinner forever
+      setUnavailable(true);
+    }
     setLoading(false);
   };
 
@@ -1627,8 +1804,15 @@ function HealthDashboardSection() {
   if (!metrics) {
     return (
       <Card className="bg-card border border-border shadow-md">
-        <CardContent className="p-4 text-center">
-          <Icon name="Loader2" className="w-4 h-4 animate-spin inline text-muted-foreground" />
+        <CardContent className="p-4 text-center text-sm text-muted-foreground">
+          {unavailable ? (
+            <>
+              <Icon name="AlertCircle" className="w-5 h-5 inline text-amber-500 mr-1" />
+              Metrics service unavailable. <button onClick={refresh} className="text-brand hover:underline">Retry</button>
+            </>
+          ) : (
+            <Icon name="Loader2" className="w-4 h-4 animate-spin inline text-muted-foreground" />
+          )}
         </CardContent>
       </Card>
     );

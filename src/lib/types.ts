@@ -1119,6 +1119,8 @@ export interface AIDevPatch {
   riskAnalysis: "low" | "medium" | "high";
   status: "draft" | "staging" | "tested" | "approved" | "applied" | "rejected";
   generatedTests?: string;    // test code generated for this patch
+  provider?: string;          // AI provider that generated this patch
+  model?: string;             // AI model that generated this patch
   createdAt: string;
 }
 
@@ -1134,6 +1136,8 @@ export interface AIDevFeature {
     type: "component" | "api" | "migration" | "test" | "config" | "other";
   }>;
   status: "draft" | "staging" | "tested" | "approved" | "applied" | "rejected";
+  provider?: string;          // AI provider that generated this feature
+  model?: string;             // AI model that generated this feature
   createdAt: string;
 }
 
@@ -1175,6 +1179,8 @@ export interface AIDevReport {
   summary: string;
   issues: AIDevIssue[];
   score?: number;             // 0-100 for health metrics
+  provider?: string;          // AI provider that produced this report (actual, not assumed)
+  model?: string;             // AI model that produced this report
   createdAt: string;
   createdBy: string;
 }
@@ -1381,7 +1387,7 @@ export interface AIHealingReport {
   failed: number;
   filesChanged: number;
   testsPassed: number;
-  buildStatus: "PASS" | "FAIL";
+  buildStatus: "PASS" | "FAIL" | "NOT_RUN";
 }
 
 // ============================================================================
