@@ -29,6 +29,7 @@ import { processAIResponse } from "../ai-response-processor";
 import { validateResumeContent } from "../ai-error-filter";
 import { normalizeResumeObject, normalizeToText } from "../ai-response-normalizer";
 import { extractLockedFacts, computeFactDiff, isPlaceholder } from "../locked-facts";
+import { rankProvidersForTask } from "./smart-provider-selection";
 import {
   computePageFillTarget,
   computeResumeCharCount,
@@ -692,6 +693,24 @@ function getRetryStrategy(attempt: number, failureReason: string | null): RetryS
   };
 }
 
+// P2 FIX (wired): pick the next-best active provider for a rotated retry.
+// Uses the P5 capability matrix so the rotation targets providers that are
+// actually good at resume optimization, excluding the provider that just
+// failed. Falls back to the current provider if the store has no providers.
+function pickRotatedProviderId(currentProviderId: string | undefined): string | undefined {
+  try {
+    const state: any = useApp.getState();
+    const providers = (state?.providers ?? []) as Array<{ id: string; type: string; isActive: boolean; priority: number; modelName?: string }>;
+    if (!providers.length) return currentProviderId;
+    const ranked = rankProvidersForTask(providers, "resume_optimization");
+    if (ranked.length === 0) return currentProviderId;
+    const next = ranked.find((r) => r.provider.id !== currentProviderId) ?? ranked[0];
+    return next.provider.id;
+  } catch {
+    return currentProviderId;
+  }
+}
+
 export async function runOptimizationPipeline(input: PipelineInput): Promise<PipelineResult> {
   // ============================================================
   // Phase 15-24: Wrap the entire pipeline in a 120s hard timeout
@@ -1231,13 +1250,48 @@ ${jobMemory.industry}`);
           optimizeResult = { resume: avi, provider: "aviation-ats", charCount: result.charCount, keywordsAdded: aviationResult.matched_keywords.length };
         } else {
           log("Resume Optimizer", `Standard optimization mode (attempt ${optimizeAttempt}/${maxOptimizeAttempts}).`);
+          // P2 FIX (wired): compute the retry strategy for THIS attempt from the
+          // previous failure and APPLY it. Previously getRetryStrategy() only
+          // fed the log message, so all 4 attempts ran with identical inputs
+          // (same prompt, same intelligence blocks, same provider) and failed
+          // the same way.
+          const attemptStrategy = optimizeAttempt > 1
+            ? getRetryStrategy(optimizeAttempt - 1, lastFailureReason)
+            : null;
+          let effectiveDirective = directiveText;
+          let effectiveJI = result.jobIntelligence;
+          let effectiveCompany = result.companyIntelligence;
+          let effectiveSkillGap = result.skillGap;
+          let effectiveDeep = deepAgenticMode;
+          let effectiveProviderId = input.providerId;
+          if (attemptStrategy) {
+            log("Resume Optimizer", `Applying retry strategy: ${attemptStrategy.description}`);
+            if (attemptStrategy.shortDirective) {
+              effectiveDirective = "Rewrite this resume for the target job. Keep every fact (employers, dates, titles, metrics) exactly as provided. Return valid JSON only.";
+            } else if (attemptStrategy.enforceJsonMode) {
+              effectiveDirective = `${directiveText}\n\nOUTPUT FORMAT (STRICT): Return ONLY valid JSON matching the requested schema — no prose, no markdown code fences, no commentary.`;
+            }
+            if (attemptStrategy.simplifyPrompt) {
+              // Drop the intelligence blocks to cut prompt size (helps timeouts).
+              effectiveJI = null;
+              effectiveCompany = null;
+              effectiveSkillGap = null;
+              effectiveDeep = false;
+            }
+            if (attemptStrategy.rotateProvider) {
+              effectiveProviderId = pickRotatedProviderId(input.providerId);
+              if (effectiveProviderId !== input.providerId) {
+                log("Resume Optimizer", `Provider rotated: ${input.providerId ?? "(default chain)"} → ${effectiveProviderId}.`);
+              }
+            }
+          }
           const optimizeAttemptResult = await optimizeResumeStandard(
-            resume, jd, directiveText,
-            result.jobIntelligence,
-            result.companyIntelligence,
-            result.skillGap,
-            deepAgenticMode,
-            input.providerId,
+            resume, jd, effectiveDirective,
+            effectiveJI,
+            effectiveCompany,
+            effectiveSkillGap,
+            effectiveDeep,
+            effectiveProviderId,
           );
           optimizeResult = optimizeAttemptResult;
         }
@@ -1651,7 +1705,14 @@ ${jobMemory.industry}`);
 
     step.completedAt = new Date().toISOString();
     step.durationMs = Date.now() - new Date(step.startedAt).getTime();
-    step.status = "completed";
+    // DEGRADED FIX: the graceful-degradation block above sets step.status to
+    // "degraded". This trailing assignment previously overwrote it back to
+    // "completed", so the step list (PipelineProgressView) and the supervisor's
+    // syncCoreAgentStatusesFromPipeline reported the optimizer as fully
+    // completed even though it produced no AI optimization.
+    if (step.status !== "degraded") {
+      step.status = "completed";
+    }
   } catch (e: any) {
     // === AUTO-RECOVERY: restore original resume when optimizer fails ===
     steps[3].status = "failed";
@@ -2282,10 +2343,15 @@ async function optimizeResumeStandard(
       }
     } catch (e: any) {
       console.error("[Optimizer] Multi-Agent Supervisor failed, falling back to standard optimizer:", e?.message);
-      result = await optimizeResumeStandardInner(resume, jd, directive, ji, company, skillGap);
+      // PROVIDER PIN FIX: forward providerId here too — dropping it made the
+      // catch-path fallback silently ignore the Arena-selected provider.
+      result = await optimizeResumeStandardInner(resume, jd, directive, ji, company, skillGap, providerId);
     }
   } else {
-    result = await optimizeResumeStandardInner(resume, jd, directive, ji, company, skillGap);
+    // PROVIDER PIN FIX: the standard (non-deep-agentic) path previously dropped
+    // providerId, so Arena runs and any pinned provider silently fell back to
+    // the default failover chain.
+    result = await optimizeResumeStandardInner(resume, jd, directive, ji, company, skillGap, providerId);
   }
 
   try {

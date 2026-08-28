@@ -986,8 +986,11 @@ export async function handleOptimizationRequested(
       && (result.charCount ?? 0) >= 500;
 
     if (isDegraded) {
-      console.warn(`[Supervisor] Optimization DEGRADED — AI providers failed. provider=${result.provider}, status=${result.status}, charCount=${result.charCount ?? 0}.`);
-      setCached(cacheK, result);
+      // DEGRADED FIX: do NOT cache degraded results. Caching them made every
+      // retry within the 10-minute TTL return the same degraded result
+      // instantly, so the user could never recover by clicking Optimize again
+      // after fixing/recovering their AI providers. Always re-run instead.
+      console.warn(`[Supervisor] Optimization DEGRADED — AI providers failed. provider=${result.provider}, status=${result.status}, charCount=${result.charCount ?? 0}. NOT caching (so a retry re-runs).`);
     } else if (!isRealOptimization) {
       const reason = result.status === "failed"
         ? `status is "failed"`
@@ -1004,8 +1007,9 @@ export async function handleOptimizationRequested(
           ? "No AI provider available. Optimization could not be completed. Configure an API provider in Settings or sign in to Puter."
           : `Optimization produced insufficient content (charCount=${result.charCount ?? 0}, provider=${result.provider}). Please try again or reduce resume content.`)
       );
+    } else {
+      setCached(cacheK, result);
     }
-    setCached(cacheK, result);
 
     // === ZERO DATA LOSS VALIDATION (Comprehensive) ===
     // Compare original vs optimized for ALL data types. If any section lost entries,

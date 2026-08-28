@@ -1044,9 +1044,20 @@ Guidelines:
       if (result.status === "degraded") {
         setPipelineError("AI optimization was degraded — all AI providers failed. The original resume was returned unchanged. Please retry when AI providers recover.");
         setAiLog((l) => [...l, "⚠ Optimization degraded — original resume returned. No AI improvement applied."]);
+        // REGRESSION FIX (P0 follow-up): result.afterATS is intentionally null in
+        // degraded runs, but the "done" screen render guard requires `afterReport`.
+        // Without it the results view never mounts — the pipeline appears to
+        // finish while the screen stays blank ("optimization never completes").
+        // Compute the ATS report locally from the returned (original) resume so
+        // the done view renders; the header shows the After score as "N/A" for
+        // degraded runs instead of a misleading BEFORE=AFTER number.
+        if (!result.afterATS) {
+          const degradedAfter = scoreATS(result.optimizedResume, jdParsed);
+          setAfterReport(degradedAfter);
+        }
         setAiThinking(false);
         setStep("done");
-        toast.warning("Optimization degraded — AI providers unavailable. Original resume returned. Please retry later.");
+        toast.warning("Optimization degraded — AI providers unavailable. Original resume returned. Please retry later.", { duration: 8000 });
         OptimizationSession.getInstance().completeRound({
           beforeATS: result.beforeATS?.scores.ats ?? 0,
           afterATS: 0, // No after-score — optimization was degraded
@@ -1922,10 +1933,19 @@ Guidelines:
                   <Icon name="ArrowRight" className="w-5 h-5 opacity-70" />
                   <div className="text-center">
                     <div className="text-xs uppercase tracking-wide opacity-80">After</div>
-                    <div className="text-3xl font-bold font-display text-gold">{pipelineResult?.afterATS?.scores.ats ?? afterReport.scores.ats}</div>
+                    {/* DEGRADED FIX: result.afterATS is null for degraded runs — show N/A instead of a misleading BEFORE=AFTER score. */}
+                    <div className="text-3xl font-bold font-display text-gold">{pipelineResult?.status === "degraded" ? "N/A" : (pipelineResult?.afterATS?.scores.ats ?? afterReport.scores.ats)}</div>
                   </div>
                   <div className="ml-3">
                     {(() => {
+                      // DEGRADED FIX: no delta claim when the run was degraded — no AI optimization happened.
+                      if (pipelineResult?.status === "degraded") {
+                        return (
+                          <Badge variant="warning" className="text-sm">
+                            ⚠ Degraded — no AI optimization applied
+                          </Badge>
+                        );
+                      }
                       const beforeScore = pipelineResult?.beforeATS?.scores.ats ?? beforeReport.scores.ats;
                       const afterScore = pipelineResult?.afterATS?.scores.ats ?? afterReport.scores.ats;
                       const delta = afterScore - beforeScore;
