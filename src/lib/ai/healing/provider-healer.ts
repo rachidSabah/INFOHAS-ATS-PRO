@@ -475,6 +475,34 @@ export class ProviderHealer {
           failedRepairs: (provider.health?.failedRepairs ?? 0) + 1,
           lastHealAt: new Date().toISOString(),
         });
+        // === Safety-net (user directive): if no safe endpoint repair is possible
+        // (e.g. Antigravity CLI not connected), assign a FREE, reachable NVIDIA NIM /
+        // Mistral model so optimization continues. Validated with a REAL ping first.
+        const fb = resolveSafeFallbackProvider();
+        if (fb) {
+          const fbModel = (fb.enabledModels ?? [])[0] || fb.modelName;
+          const fbPing = await d.ping(fb, fbModel);
+          if (fbPing.ok && fbModel) {
+            const enabled = provider.enabledModels ?? [];
+            useApp.getState().updateProvider(provider.id, {
+              modelName: fbModel,
+              enabledModels: enabled.includes(fbModel) ? enabled : [...enabled, fbModel],
+            });
+            await this.markRecovered(provider, fbPing.latencyMs, `Assigned free fallback model ${fbModel} (${fb.name}) — ${provider.name} endpoint could not be repaired and is not connected.`, {
+              autoHealAttempts: (provider.health?.autoHealAttempts ?? 0) + 1,
+              successfulRepairs: (provider.health?.successfulRepairs ?? 0) + 1,
+              lastHealAt: new Date().toISOString(),
+            });
+            const entry: HealReportEntry = {
+              ...base, problem: "API endpoint returned 404", failureKind: cls.kind,
+              diagnosis: cls.humanMessage,
+              action: `Assigned free fallback model ${fbModel} from ${fb.name} (NVIDIA/Mistral) — ${provider.name} endpoint could not be repaired; optimization continues on the fallback.`,
+              previousModel: undefined, newModel: fbModel, result: "recovered", latencyMs: fbPing.latencyMs, technical: rawError,
+            };
+            recordHealEvent(entry);
+            return entry;
+          }
+        }
         const entry: HealReportEntry = {
           ...base, problem: "API endpoint returned 404", failureKind: cls.kind,
           diagnosis: cls.humanMessage,

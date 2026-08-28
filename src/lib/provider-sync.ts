@@ -92,17 +92,19 @@ export function mergeProviderWithSeed(d1Provider: AIProvider, seedProvider?: AIP
   }
 
   // Restore enabledModels from seed for built-in providers. Cloud D1 can hold
-  // stale model lists (e.g. retired "step-3.7-flash", "big-pickle") that break
-  // benchmarking and routing. The built-in model set is a system default, so the
-  // seed is authoritative. Custom providers have no seed match, so they're untouched.
+  // stale/incorrect model lists (retired "step-3.7-flash", wrong "gpt-4o" on
+  // GitHub, bogus "big-pickle") that break benchmarking and routing. The built-in
+  // model set is a system default, so the seed is authoritative and is restored
+  // unconditionally. Custom providers have no seed match, so they're untouched.
   if (seedProvider.enabledModels && seedProvider.enabledModels.length > 0) {
     merged.enabledModels = seedProvider.enabledModels;
   }
 
-  // Restore modelName only when the current one is empty or not in the seed's
-  // valid model set (i.e. retired/invalid). Valid custom choices are kept.
-  const seedModelSet = new Set(seedProvider.enabledModels ?? []);
-  if (seedProvider.modelName && (!merged.modelName || !seedModelSet.has(merged.modelName))) {
+  // Restore modelName from the seed's canonical first model for built-ins. This
+  // corrects wrong ids that the "is it in the seed set?" guard would otherwise
+  // skip (e.g. GitHub's gpt-4o vs the correct gpt-4o-mini). Custom providers keep
+  // whatever they have since they have no seed equivalent.
+  if (seedProvider.modelName) {
     merged.modelName = seedProvider.modelName;
   }
 

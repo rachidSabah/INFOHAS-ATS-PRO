@@ -174,10 +174,11 @@ export const SEED_PROVIDERS: AIProvider[] = [
     temperature: 0.7,
     retryAttempts: 3,
     rateLimitPerMinute: 50,
-    modelName: "gpt-4o",
+    // GitHub Models free tier serves gpt-4o-mini (gpt-4o is paid/rate-limited).
+    modelName: "gpt-4o-mini",
     enabledModels: [
-      "gpt-4o",
       "gpt-4o-mini",
+      "gpt-4o",
       "meta-llama-3.1-400b-instruct",
       "cohere-command-r-plus",
       "mistral-large-2411"
@@ -322,11 +323,14 @@ export const SEED_PROVIDERS: AIProvider[] = [
     temperature: 0.7,
     retryAttempts: 3,
     rateLimitPerMinute: 30,
-    modelName: "llama-3.3-70b-versatile",
+    // Lead with the documented free model; llama-3.3-70b-versatile has been
+    // reported as retired on the Groq free tier — keep it secondary so the
+    // healer's self-repair and the router try the supported id first.
+    modelName: "llama-3.1-8b-instant",
     enabledModels: [
-      "llama-3.3-70b-versatile",
       "llama-3.1-8b-instant",
-      "mixtral-8x7b-32768"
+      "mixtral-8x7b-32768",
+      "llama-3.3-70b-versatile"
     ],
     streamingEnabled: true,
     authType: "bearer",
@@ -358,11 +362,12 @@ export const SEED_PROVIDERS: AIProvider[] = [
     temperature: 0.7,
     retryAttempts: 3,
     rateLimitPerMinute: 20,
-    modelName: "openai/gpt-oss-120b:free",
+    // openai/gpt-oss-120b:free does not exist on OpenRouter; the 20b free variant does.
+    modelName: "openai/gpt-oss-20b:free",
     enabledModels: [
       // ── OpenAI OSS ──
-      "openai/gpt-oss-120b:free",
       "openai/gpt-oss-20b:free",
+      "openai/gpt-oss-120b:free",
       // ── xAI Grok ──
       "x-ai/grok-3-mini:free",
       "x-ai/grok-3-mini-beta:free",
@@ -406,7 +411,6 @@ export const SEED_PROVIDERS: AIProvider[] = [
       "nousresearch/hermes-3-llama-3.1-405b:free",
       // ── StepFun ──
       "stepfun/step-3.5-flash:free",
-      "stepfun/step-3.7-flash",
       // ── Liquid / Poolside ──
       "liquid/lfm-2.5-1.2b-instruct:free",
       "liquid/lfm-2.5-1.2b-thinking:free",
@@ -570,13 +574,15 @@ const ANTIGRAVITY_SEED: AIProvider = {
   temperature: 0.7,
   retryAttempts: 2,
   rateLimitPerMinute: 60,
-  modelName: "gemini-2.5-flash",
+  // Antigravity CLI exposes Claude/GPT/DeepSeek models (not Gemini). The Worker
+  // proxy transparently remaps claude-sonnet-4 → gemini-2.5-flash for the actual
+  // Google Cloud Code Assist call, so the CLI-facing model id stays claude-sonnet-4.
+  modelName: "claude-sonnet-4",
   enabledModels: [
-    "gemini-2.5-flash",
-    "gemini-2.5-pro",
     "claude-sonnet-4",
     "gpt-4.1",
     "deepseek-v4",
+    "gemini-2.5-pro",
   ],
   streamingEnabled: true,
   authType: "bearer",
