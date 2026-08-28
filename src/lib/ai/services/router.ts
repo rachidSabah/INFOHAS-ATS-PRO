@@ -11,7 +11,7 @@
 "use client";
 
 import type { AIProvider, AIProviderSettings, AIProviderLog } from "../../types";
-import type { ChatRequest, ChatResponse } from "../providers/interface";
+import type { ChatRequest, ChatResponse, ProviderConfig } from "../providers/interface";
 import { ProviderFactory, ProviderError } from "./factory";
 import { FallbackManager, toProviderConfig } from "./fallback";
 import { useApp, uid } from "../../store";
@@ -315,6 +315,13 @@ export class ProviderRouter {
         break;
       }
 
+      // Per-provider rotation state — same dedup semantics as chat().
+      const rotationState = {
+        triedKeys: new Set<string>([provider.apiKey || ""]),
+        triedModels: new Set<string>([opts.modelOverride || req.model || provider.modelName || ""]),
+        tokenRotationTried: false,
+      };
+
       try {
         const attemptTimeout = chain.length > 1 ? Math.min(25000, callTimeoutMs - elapsedMs) : callTimeoutMs - elapsedMs;
         const adapter = ProviderFactory.get(provider.type);
@@ -363,6 +370,33 @@ export class ProviderRouter {
           markProvider401Cooldown(cooldownId);
         } else if (isTimeoutError(e)) {
           markProviderTimeoutCooldown(cooldownId);
+        }
+
+        // === Rotation fallbacks (same as chat) ===
+        // A broken stream cannot be resumed, so a rotated retry is delivered
+        // as chunks via the shared onChunk path (same as non-streaming
+        // adapters). Previously streaming had NO key/token/model rotation.
+        const attemptTimeout = chain.length > 1 ? Math.min(25000, callTimeoutMs - Math.round(performance.now() - t0)) : callTimeoutMs - Math.round(performance.now() - t0);
+        const { keyRotation, modelRotation } = this.classifyRotationError(e);
+        if (keyRotation || modelRotation) {
+          try {
+            const rotated = await this.tryRotationFallbacks(
+              provider,
+              req,
+              toProviderConfig(provider),
+              e,
+              attemptTimeout,
+              opts,
+              opts.requestType || "chat",
+              rotationState
+            );
+            if (rotated) {
+              for (const token of rotated.text.split(/(\s+)/)) onChunk(token);
+              return rotated;
+            }
+          } catch (rotErr: any) {
+            console.warn(`[AI Stream] Rotation fallbacks failed for ${provider.name}: ${rotErr?.message || rotErr}`);
+          }
         }
       }
     }
@@ -445,6 +479,196 @@ export class ProviderRouter {
   }
 
   /**
+   * Classify whether an error is worth rotating credentials/models for.
+   *
+   * Deliberately NARROW. The previous matcher treated ANY error message
+   * containing "limit" or "key" as rotatable — so "context length limit
+   * exceeded" or an unrelated 400 with "key" in the prose triggered key
+   * swaps AND permanently rewrote the provider's default model. Errors that
+   * merely mention those words are no longer rotation triggers.
+   *
+   *   keyRotation   — 401/402/403/429, rate-limit, quota, billing, credits,
+   *                   unauthorized, invalid API key: a DIFFERENT KEY may help.
+   *   modelRotation — 429 / rate-limit / quota only: a DIFFERENT MODEL may
+   *                   have a separate quota. Auth/credit errors exclude this
+   *                   (another model on the same dead credential won't help).
+   */
+  private static classifyRotationError(e: any): { keyRotation: boolean; modelRotation: boolean } {
+    const statusCode = e?.statusCode || e?.status || 0;
+    const eMsg = e?.message || String(e ?? "");
+    const keyRotation =
+      statusCode === 401 || statusCode === 402 || statusCode === 403 || statusCode === 429 ||
+      /429/.test(eMsg) ||
+      /rate.?limit/i.test(eMsg) ||
+      /quota/i.test(eMsg) ||
+      /billing/i.test(eMsg) ||
+      /credits?/i.test(eMsg) ||
+      /unauthorized/i.test(eMsg) ||
+      /invalid.?(api.?)?key/i.test(eMsg) ||
+      /FreeUsageLimitError/i.test(eMsg);
+    const modelRotation =
+      statusCode === 429 ||
+      /429/.test(eMsg) ||
+      /rate.?limit/i.test(eMsg) ||
+      /quota/i.test(eMsg) ||
+      /FreeUsageLimitError/i.test(eMsg);
+    return { keyRotation, modelRotation };
+  }
+
+  /**
+   * Try the three rotation fallbacks for a failed provider attempt:
+   *   A. Alternate API keys (skip keys already tried — dedup across retries)
+   *   B. Silent session-token rotation (Puter / ZenCode guest / refreshUrl)
+   *   C. Model rotation within enabledModels (skip models already tried)
+   *
+   * Returns the successful response, or null when every rotation failed.
+   * Shared by chat() (via tryProviderWithRotations) and stream() so BOTH
+   * paths rotate identically — previously streaming had NO rotations at all.
+   */
+  private static async tryRotationFallbacks(
+    provider: AIProvider,
+    req: ChatRequest,
+    config: ProviderConfig,
+    primaryError: any,
+    timeoutMs: number,
+    opts: RouterOptions,
+    requestType: AIProviderLog["requestType"],
+    rotationState: { triedKeys: Set<string>; triedModels: Set<string>; tokenRotationTried: boolean }
+  ): Promise<ChatResponse | null> {
+    const adapter = ProviderFactory.get(provider.type);
+
+    // === A. Alternate API keys rotation ===
+    const alternateKeys = (provider.alternateApiKeys as string[] | undefined) || [];
+    if (alternateKeys.length > 0) {
+      console.log(`[PROVIDER] Rotating API keys for ${provider.name} due to rate-limit/auth error...`);
+      for (let ki = 0; ki < alternateKeys.length; ki++) {
+        const altKey = alternateKeys[ki];
+        if (!altKey || altKey.trim() === "" || rotationState.triedKeys.has(altKey)) continue;
+        rotationState.triedKeys.add(altKey);
+        console.log(`[PROVIDER] Trying alternate API key #${ki + 1} for ${provider.name}...`);
+        try {
+          const altConfig = { ...config, apiKey: altKey };
+          const res = await withTimeout(
+            adapter.chat({ ...req, model: opts.modelOverride || req.model }, altConfig),
+            timeoutMs,
+            `${provider.name}.generate`
+          );
+
+          // Swap alternate key with current primary key in store so future
+          // requests start with the key that actually works.
+          const currentPrimaryKey = provider.apiKey || "";
+          const newAlternateKeys = [...alternateKeys];
+          newAlternateKeys[ki] = currentPrimaryKey;
+          useApp.getState().updateProvider(provider.id, {
+            apiKey: altKey,
+            alternateApiKeys: newAlternateKeys,
+          });
+          console.info(`[PROVIDER] Store updated: primary key replaced with alternate key #${ki + 1}`);
+
+          rateLimitTracker.recordSuccess(provider.id, res.model || config.modelName || "default");
+          this.log({
+            providerId: provider.id,
+            providerName: provider.name,
+            requestType,
+            modelName: res.model,
+            status: "success",
+            latencyMs: res.latencyMs,
+            inputTokens: res.inputTokens,
+            outputTokens: res.outputTokens,
+            requestPreview: req.messages[req.messages.length - 1]?.content?.slice(0, 200),
+            responsePreview: res.text.slice(0, 200),
+          });
+          return res;
+        } catch (altErr: any) {
+          console.warn(`[PROVIDER] Alternate key #${ki + 1} failed for ${provider.name}: ${altErr?.message || altErr}`);
+        }
+      }
+    }
+
+    // === B. Silent session-token rotation ===
+    if (isRotatableAuthError(primaryError) && typeof window !== "undefined" && !rotationState.tokenRotationTried) {
+      rotationState.tokenRotationTried = true;
+      console.info(`[TokenRotation] Detected auth error for ${provider.name} — attempting silent token rotation...`);
+      try {
+        const rotationResult = await tryRotateProviderToken(provider);
+        if (rotationResult.success) {
+          console.info(`[TokenRotation] ${provider.name}: rotation succeeded — retrying...`);
+          const rotatedConfig = rotationResult.newToken
+            ? { ...config, apiKey: rotationResult.newToken }
+            : config;
+          try {
+            const res = await withTimeout(
+              adapter.chat({ ...req, model: opts.modelOverride || req.model }, rotatedConfig),
+              timeoutMs,
+              `${provider.name}.generate`
+            );
+            rateLimitTracker.recordSuccess(provider.id, res.model || config.modelName || "default");
+            this.log({
+              providerId: provider.id,
+              providerName: provider.name,
+              requestType,
+              modelName: res.model,
+              status: "success",
+              latencyMs: res.latencyMs,
+              inputTokens: res.inputTokens,
+              outputTokens: res.outputTokens,
+              requestPreview: req.messages[req.messages.length - 1]?.content?.slice(0, 200),
+              responsePreview: res.text.slice(0, 200),
+            });
+            return res;
+          } catch (retryErr: any) {
+            console.warn(`[TokenRotation] ${provider.name}: post-rotation retry failed: ${retryErr?.message || retryErr}`);
+          }
+        }
+      } catch (rotErr: any) {
+        console.warn(`[TokenRotation] ${provider.name}: rotation error (non-fatal): ${rotErr?.message || rotErr}`);
+      }
+    }
+
+    // === C. Model rotation ===
+    const enabledModels = (provider.enabledModels as string[] | undefined) || [];
+    const currentModel = opts.modelOverride || req.model || config.modelName || "";
+    if (enabledModels.length > 1) {
+      const otherModels = enabledModels.filter((m: string) => m !== currentModel && !rotationState.triedModels.has(m));
+      const maxAltModels = otherModels.slice(0, 3);
+      for (const altModel of maxAltModels) {
+        rotationState.triedModels.add(altModel);
+        console.log(`[PROVIDER] Rotating model to "${altModel}" for ${provider.name}...`);
+        try {
+          const altConfig = { ...config, modelName: altModel };
+          const res = await withTimeout(
+            adapter.chat({ ...req, model: altModel }, altConfig),
+            timeoutMs,
+            `${provider.name}.generate`
+          );
+
+          // Update store default model — the rotated model works.
+          useApp.getState().updateProvider(provider.id, { modelName: altModel });
+
+          rateLimitTracker.recordSuccess(provider.id, res.model || altModel);
+          this.log({
+            providerId: provider.id,
+            providerName: provider.name,
+            requestType,
+            modelName: res.model,
+            status: "success",
+            latencyMs: res.latencyMs,
+            inputTokens: res.inputTokens,
+            outputTokens: res.outputTokens,
+            requestPreview: req.messages[req.messages.length - 1]?.content?.slice(0, 200),
+            responsePreview: res.text.slice(0, 200),
+          });
+          return res;
+        } catch (modelErr: any) {
+          console.warn(`[PROVIDER] Model "${altModel}" failed for ${provider.name}: ${modelErr?.message || modelErr}`);
+        }
+      }
+    }
+
+    return null;
+  }
+
+  /**
    * Try a single provider with retries and alternate key/model/token rotations.
    */
   private static async tryProviderWithRotations(
@@ -458,6 +682,15 @@ export class ProviderRouter {
     const adapter = ProviderFactory.get(provider.type);
     const config = toProviderConfig(provider);
     const maxAttempts = (provider.retryAttempts ?? settings.retryAttempts ?? 2) + 1;
+
+    // Rotation dedup state — shared across retry attempts so an alternate key
+    // or model that already failed is NOT retried on the next attempt
+    // (previously: up to 3 attempts × (1 + N keys + 1 + 3 models) calls).
+    const rotationState = {
+      triedKeys: new Set<string>([config.apiKey || ""]),
+      triedModels: new Set<string>([opts.modelOverride || req.model || config.modelName || ""]),
+      tokenRotationTried: false,
+    };
 
     let lastError: any;
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
@@ -489,118 +722,13 @@ export class ProviderRouter {
         return res;
       } catch (e: any) {
         lastError = e;
-        const eMsg = e?.message || String(e);
 
-        // Check if rate/quota/auth error
-        const isRateOrQuotaOrAuthError =
-          e?.statusCode === 429 ||
-          e?.statusCode === 401 ||
-          e?.statusCode === 403 ||
-          /429/.test(eMsg) ||
-          /rate.?limit/i.test(eMsg) ||
-          /quota/i.test(eMsg) ||
-          /billing/i.test(eMsg) ||
-          /limit/i.test(eMsg) ||
-          /auth/i.test(eMsg) ||
-          /key/i.test(eMsg) ||
-          /FreeUsageLimitError/i.test(eMsg);
-
-        if (isRateOrQuotaOrAuthError) {
-          // A. Try alternate API keys rotation
-          const alternateKeys = provider.alternateApiKeys as string[] | undefined;
-          if (alternateKeys && alternateKeys.length > 0) {
-            console.log(`[PROVIDER] Rotating API keys for ${provider.name} due to rate-limit/auth error...`);
-            for (let ki = 0; ki < alternateKeys.length; ki++) {
-              const altKey = alternateKeys[ki];
-              if (!altKey || altKey.trim() === "") continue;
-              console.log(`[PROVIDER] Trying alternate API key #${ki + 1} for ${provider.name}...`);
-              try {
-                const altConfig = { ...config, apiKey: altKey };
-                const res = await withTimeout(
-                  adapter.chat({ ...req, model: opts.modelOverride || req.model }, altConfig),
-                  timeoutMs,
-                  `${provider.name}.generate`
-                );
-                
-                // Swap alternate key with current primary key in store
-                const currentPrimaryKey = provider.apiKey || "";
-                const newAlternateKeys = [...(provider.alternateApiKeys || [])];
-                newAlternateKeys[ki] = currentPrimaryKey;
-                useApp.getState().updateProvider(provider.id, {
-                  apiKey: altKey,
-                  alternateApiKeys: newAlternateKeys,
-                });
-                console.info(`[PROVIDER] Store updated: primary key replaced with alternate key #${ki + 1}`);
-
-                this.log({
-                  providerId: provider.id,
-                  providerName: provider.name,
-                  requestType,
-                  modelName: res.model,
-                  status: "success",
-                  latencyMs: res.latencyMs,
-                  inputTokens: res.inputTokens,
-                  outputTokens: res.outputTokens,
-                  requestPreview: req.messages[req.messages.length - 1]?.content?.slice(0, 200),
-                  responsePreview: res.text.slice(0, 200),
-                });
-                return res;
-              } catch (altErr: any) {
-                console.warn(`[PROVIDER] Alternate key #${ki + 1} failed for ${provider.name}: ${altErr?.message || altErr}`);
-              }
-            }
-          }
-
-          // B. Silent Token Rotation
-          if (isRotatableAuthError(e) && typeof window !== "undefined") {
-            console.info(`[TokenRotation] Detected auth error for ${provider.name} — attempting silent token rotation...`);
-            try {
-              const rotationResult = await tryRotateProviderToken(provider);
-              if (rotationResult.success) {
-                console.info(`[TokenRotation] ${provider.name}: rotation succeeded — retrying...`);
-                const rotatedConfig = rotationResult.newToken
-                  ? { ...config, apiKey: rotationResult.newToken }
-                  : config;
-                try {
-                  const res = await withTimeout(
-                    adapter.chat({ ...req, model: opts.modelOverride || req.model }, rotatedConfig),
-                    timeoutMs,
-                    `${provider.name}.generate`
-                  );
-                  return res;
-                } catch (retryErr: any) {
-                  console.warn(`[TokenRotation] ${provider.name}: post-rotation retry failed: ${retryErr?.message || retryErr}`);
-                }
-              }
-            } catch (rotErr: any) {
-              console.warn(`[TokenRotation] ${provider.name}: rotation error (non-fatal): ${rotErr?.message || rotErr}`);
-            }
-          }
-
-          // C. Try Model Rotation
-          const enabledModels = provider.enabledModels as string[] | undefined;
-          const currentModel = opts.modelOverride || req.model || config.modelName || "";
-          if (enabledModels && enabledModels.length > 1) {
-            const otherModels = enabledModels.filter((m: string) => m !== currentModel);
-            const maxAltModels = otherModels.slice(0, 3);
-            for (const altModel of maxAltModels) {
-              console.log(`[PROVIDER] Rotating model to "${altModel}" for ${provider.name}...`);
-              try {
-                const altConfig = { ...config, modelName: altModel };
-                const res = await withTimeout(
-                  adapter.chat({ ...req, model: altModel }, altConfig),
-                  timeoutMs,
-                  `${provider.name}.generate`
-                );
-                
-                // Update store default model
-                useApp.getState().updateProvider(provider.id, { modelName: altModel });
-                return res;
-              } catch (modelErr: any) {
-                console.warn(`[PROVIDER] Model "${altModel}" failed for ${provider.name}: ${modelErr?.message || modelErr}`);
-              }
-            }
-          }
+        const { keyRotation, modelRotation } = this.classifyRotationError(e);
+        if (keyRotation || modelRotation) {
+          const rotated = await this.tryRotationFallbacks(
+            provider, req, config, e, timeoutMs, opts, requestType, rotationState
+          );
+          if (rotated) return rotated;
         }
 
         // Log the failure

@@ -242,13 +242,16 @@ export const createAdminSlice: StateCreator<AppState, [], [], AdminSlice> = (set
               ...p,
               lastUsedAt: l.createdAt,
               status: l.status === "success" ? "healthy" : l.status === "timeout" || l.status === "rate_limited" ? "degraded" : "down",
+              // usage may be missing on freshly created providers (editor save /
+              // rotation swaps before first rehydrate) — a crash here would turn
+              // every successful AI call into a thrown error inside the router.
               usage: {
                 ...p.usage,
-                requests: p.usage.requests + 1,
-                tokens: p.usage.tokens + (l.inputTokens ?? 0) + (l.outputTokens ?? 0),
-                errors: p.usage.errors + (l.status === "success" ? 0 : 1),
-                avgLatencyMs: Math.round((p.usage.avgLatencyMs * p.usage.requests + l.latencyMs) / (p.usage.requests + 1)),
-                cost: p.usage.cost + (l.inputTokens ?? 0) * (p.costPerInputToken ?? 0) + (l.outputTokens ?? 0) * (p.costPerOutputToken ?? 0),
+                requests: (p.usage?.requests ?? 0) + 1,
+                tokens: (p.usage?.tokens ?? 0) + (l.inputTokens ?? 0) + (l.outputTokens ?? 0),
+                errors: (p.usage?.errors ?? 0) + (l.status === "success" ? 0 : 1),
+                avgLatencyMs: Math.round(((p.usage?.avgLatencyMs ?? 0) * (p.usage?.requests ?? 0) + l.latencyMs) / ((p.usage?.requests ?? 0) + 1)),
+                cost: (p.usage?.cost ?? 0) + (l.inputTokens ?? 0) * (p.costPerInputToken ?? 0) + (l.outputTokens ?? 0) * (p.costPerOutputToken ?? 0),
               },
             }
           : p
