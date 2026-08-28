@@ -9,6 +9,7 @@ import {
   generateFeature,
   generatePatch,
   generateTests,
+  resolveDevAgentPinning,
 } from "../ai-dev-agent";
 import { useApp } from "../store";
 import { callAI } from "../ai";
@@ -126,5 +127,77 @@ describe("AI Development Agent", () => {
     const res = await callDevAgentJSON<{ summary: string }>({ userPrompt: "Audit code" });
     // First call failed JSON parsing, retried with strict prompt
     expect(res).toBeDefined();
+  });
+
+  describe("resolveDevAgentPinning", () => {
+    const baseSettings = {
+      providerId: "",
+      modelName: "",
+      temperature: 0.4,
+      maxTokens: 8000,
+      timeout: 0,
+      streaming: false,
+      reasoningLevel: "medium" as const,
+      systemPrompt: "",
+      fallbackProviderId: "",
+      fallbackModel: "",
+      autoScanEnabled: false,
+      autoReportEnabled: false,
+      safeApplyEnabled: true,
+      requireApprovalEnabled: true,
+      focusDirectories: [] as string[],
+      excludeFilesPattern: "",
+    };
+
+    it("pins the explicitly configured provider, model, and timeout", () => {
+      const originalState = useApp.getState();
+      useApp.setState({
+        aiDevSettings: { ...baseSettings, providerId: "p_zen", modelName: "deepseek-v4-flash", timeout: 45 } as any,
+        providers: [
+          { id: "p_zen", name: "ZenCode (Free models)", type: "zencode", isActive: true } as any,
+        ],
+      });
+      try {
+        expect(resolveDevAgentPinning()).toEqual({
+          providerId: "p_zen",
+          modelOverride: "deepseek-v4-flash",
+          timeoutMs: 45_000,
+        });
+      } finally {
+        useApp.setState(originalState);
+      }
+    });
+
+    it("resolves the first active DeepSeek provider when providerId is empty (auto-select)", () => {
+      const originalState = useApp.getState();
+      useApp.setState({
+        aiDevSettings: { ...baseSettings, modelName: "deepseek-v4-flash" } as any,
+        providers: [
+          { id: "p_zen", name: "ZenCode (Free models)", type: "zencode", isActive: true } as any,
+          { id: "p_ds", name: "DeepSeek", type: "deepseek", isActive: true } as any,
+        ],
+      });
+      try {
+        const pinning = resolveDevAgentPinning();
+        expect(pinning.providerId).toBe("p_ds");
+        expect(pinning.modelOverride).toBe("deepseek-v4-flash");
+        expect(pinning.timeoutMs).toBeUndefined();
+      } finally {
+        useApp.setState(originalState);
+      }
+    });
+
+    it("returns no pinning keys when nothing is configured", () => {
+      const originalState = useApp.getState();
+      useApp.setState({
+        aiDevSettings: { ...baseSettings } as any,
+        providers: [],
+      });
+      try {
+        expect(resolveDevAgentPinning()).toEqual({});
+      } finally {
+        useApp.setState(originalState);
+      }
+    });
   });
 });

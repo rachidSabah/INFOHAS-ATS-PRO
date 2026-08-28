@@ -55,6 +55,31 @@ function resolveProvider() {
 }
 
 /**
+ * Resolve the provider pinning options shared by every AI Workspace engine.
+ *
+ * AI Workspace (AI Builder Agent) and Autonomous Healing consume the SAME
+ * `aiDevSettings` as the AI Development Agent. Their `recordAI` calls must pin
+ * the user-configured provider + model — otherwise the settings tab is a no-op
+ * and calls silently go through the app-default provider chain.
+ *
+ * Returns a spreadable partial of AICallOptions: `{ providerId, modelOverride,
+ * timeoutMs }` — each key only present when actually configured.
+ */
+export function resolveDevAgentPinning(): {
+  providerId?: string;
+  modelOverride?: string;
+  timeoutMs?: number;
+} {
+  const settings = getAIDevSettings();
+  const { provider, model } = resolveProvider();
+  return {
+    ...(provider ? { providerId: provider.id } : {}),
+    ...(model ? { modelOverride: model } : {}),
+    ...(settings.timeout > 0 ? { timeoutMs: settings.timeout * 1000 } : {}),
+  };
+}
+
+/**
  * Call the AI with the Dev Agent's configured provider + system prompt.
  * Falls back to the configured fallback provider/model if the primary fails.
  * Falls back to callAI's built-in provider chain if no provider is configured.

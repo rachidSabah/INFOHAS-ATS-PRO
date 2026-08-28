@@ -18,6 +18,7 @@ import {
   runDetailedDebugScan, healIssue, healMultipleIssues
 } from "@/lib/autonomous-healing";
 import { listRepoDirectory, searchRepoFilePaths, repoEntryLanguage, type RepoEntry } from "@/lib/agent-runtime";
+import { fetchProviderModels, describeModel, type DetectedModel } from "@/lib/provider-model-detection";
 import type { AITask, AIWorkspacePatch, AIFile, AIHealingIssue } from "@/lib/types";
 
 type Tab =
@@ -2007,56 +2008,308 @@ function DebugChatSection() {
 }
 
 // ============================================================================
-// Settings Tab
+// Settings Tab — with model prefetch (mirrors AI Dev Agent Settings)
 // ============================================================================
 
 function SettingsTab() {
   const settings = useApp((s) => s.aiDevSettings);
   const update = useApp((s) => s.updateAIDevSettings);
   const providers = useApp((s) => s.providers);
+  const [draft, setDraft] = useState(settings);
+  const [dirty, setDirty] = useState(false);
+  const [detectedModels, setDetectedModels] = useState<DetectedModel[]>([]);
+  const [detecting, setDetecting] = useState(false);
+  const [scanningAll, setScanningAll] = useState(false);
+  const [detectionSource, setDetectionSource] = useState<"" | "api" | "configured" | "fallback">("");
+
+  const patch = (p: Partial<typeof draft>) => {
+    setDraft((d) => ({ ...d, ...p }));
+    setDirty(true);
+  };
+
+  const save = () => {
+    update(draft);
+    setDirty(false);
+    toast.success("AI Workspace settings saved.");
+  };
+
+  const activeProviders = providers.filter((p) => p.isActive);
+  const selectedProvider = providers.find((p) => p.id === draft.providerId) || activeProviders[0];
+
+  // Mirror the engine's resolveProvider() fallback so the user can see which
+  // provider will ACTUALLY serve AI Workspace calls when "Auto-select" is set.
+  const resolvedProvider =
+    selectedProvider ||
+    activeProviders.find((p) => p.type === "deepseek" || /deepseek/i.test(p.name)) ||
+    activeProviders.find((p) => /opencode/i.test(p.name)) ||
+    activeProviders[0];
+
+  // === Model prefetch: auto-load models for the selected provider ===
+  const prefetchForProvider = async (providerId: string): Promise<{ models: DetectedModel[]; source: "api" | "configured" | "fallback" } | null> => {
+    const provider = providers.find((p) => p.id === providerId);
+    if (!provider) return null;
+    const result = await fetchProviderModels(provider);
+    if (result.models.length > 0) {
+      // Persist the discovered models on the provider so ALL AI Workspace
+      // features (tasks, patches, build, tests, healing) can use them.
+      useApp.getState().updateProvider(provider.id, {
+        enabledModels: result.models.map((m) => m.id),
+        status: result.source === "api" ? "healthy" : "degraded",
+      });
+    }
+    return { models: result.models, source: result.source };
+  };
+
+  useEffect(() => {
+    const providerId = draft.providerId || resolvedProvider?.id || "";
+    if (!providerId) {
+      setDetectedModels([]);
+      setDetectionSource("");
+      return;
+    }
+    let cancelled = false;
+    const run = async () => {
+      try {
+        const result = await prefetchForProvider(providerId);
+        if (cancelled) return;
+        if (result && result.models.length > 0) {
+          setDetectedModels(result.models);
+          setDetectionSource(result.source);
+          return;
+        }
+      } catch {
+        // fall through to configured models below
+      }
+      if (cancelled) return;
+      const fallback = providers.find((p) => p.id === providerId)?.enabledModels || [];
+      setDetectedModels(fallback.map((id) => ({ id, name: id, supportsStreaming: true })));
+      setDetectionSource(fallback.length > 0 ? "configured" : "");
+    };
+    run();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [draft.providerId]);
+
+  // === Manual prefetch button: re-detect models for the selected provider ===
+  const prefetchSelected = async () => {
+    const providerId = draft.providerId || resolvedProvider?.id || "";
+    if (!providerId) {
+      toast.error("No active provider available to prefetch models from.");
+      return;
+    }
+    setDetecting(true);
+    try {
+      const result = await prefetchForProvider(providerId);
+      if (result && result.models.length > 0) {
+        setDetectedModels(result.models);
+        setDetectionSource(result.source);
+        toast.success(`Prefetched ${result.models.length} model(s) (${result.source === "api" ? "live API" : "saved config"}).`);
+      } else {
+        setDetectedModels([]);
+        setDetectionSource("");
+        toast.warning("No models detected for this provider.");
+      }
+    } catch (e: any) {
+      toast.error(`Model prefetch failed: ${e?.message || e}`);
+    } finally {
+      setDetecting(false);
+    }
+  };
+
+  // === Scan ALL active providers and persist discovered models ===
+  const scanAllProviders = async () => {
+    if (activeProviders.length === 0) {
+      toast.error("No active providers configured.");
+      return;
+    }
+    setScanningAll(true);
+    try {
+      const results = await Promise.allSettled(
+        activeProviders.map(async (provider) => ({ provider, result: await fetchProviderModels(provider) }))
+      );
+      let apiCount = 0;
+      let withModels = 0;
+      for (const r of results) {
+        if (r.status !== "fulfilled" || r.value.result.models.length === 0) continue;
+        const { provider, result } = r.value;
+        useApp.getState().updateProvider(provider.id, {
+          enabledModels: result.models.map((m) => m.id),
+          status: result.source === "api" ? "healthy" : "degraded",
+        });
+        withModels++;
+        if (result.source === "api") apiCount++;
+        if (provider.id === (draft.providerId || resolvedProvider?.id)) {
+          setDetectedModels(result.models);
+          setDetectionSource(result.source);
+        }
+      }
+      toast.success(`Scanned ${activeProviders.length} provider(s): ${withModels} returned models, ${apiCount} via live API. Discovered models are saved and available to all AI Workspace features.`);
+    } finally {
+      setScanningAll(false);
+    }
+  };
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="text-lg flex items-center gap-2"><Icon name="Settings" className="w-4 h-4 text-brand" /> AI Workspace Settings</CardTitle>
-        <CardDescription>Configure the AI Builder Agent provider and model.</CardDescription>
-      </CardHeader>
-      <CardContent className="space-y-4">
-        <div className="grid sm:grid-cols-2 gap-4">
-          <div>
-            <Label>Provider</Label>
-            <select
-              value={settings.providerId}
-              onChange={(e) => update({ providerId: e.target.value })}
-              className="w-full h-9 px-3 rounded-md border border-input bg-background text-sm mt-1"
-            >
-              <option value="">Auto-select (DeepSeek first)</option>
-              {providers.filter((p) => p.isActive).map((p) => (
-                <option key={p.id} value={p.id}>{p.name} ({p.type})</option>
-              ))}
-            </select>
+    <div className="space-y-4">
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-lg flex items-center gap-2"><Icon name="Settings" className="w-4 h-4 text-brand" /> AI Workspace Settings</CardTitle>
+          <CardDescription>Configure the AI Builder Agent provider and model. These settings drive every AI Workspace feature — AI Tasks, File Editor suggestions, Patch generation, Build/Test analysis, and Autonomous Debug/Healing.</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="grid sm:grid-cols-2 gap-4">
+            <div>
+              <Label>Provider</Label>
+              <select
+                value={draft.providerId}
+                onChange={(e) => {
+                  patch({ providerId: e.target.value });
+                  setDetectedModels([]); // clear stale list — auto-prefetch refills it
+                  setDetectionSource("");
+                }}
+                className="w-full h-9 px-3 rounded-md border border-input bg-background text-sm mt-1"
+              >
+                <option value="">Auto-select (DeepSeek first)</option>
+                {providers.map((p) => (
+                  <option key={p.id} value={p.id}>{p.name} ({p.type}){!p.isActive ? " (inactive)" : ""}</option>
+                ))}
+              </select>
+              {resolvedProvider && (
+                <p className="text-[11px] text-muted-foreground mt-1">
+                  Resolves to: <span className="font-medium text-foreground">{resolvedProvider.name}</span>
+                  {resolvedProvider.modelName ? <span className="font-mono"> · {resolvedProvider.modelName}</span> : null}
+                </p>
+              )}
+            </div>
+            <div>
+              <Label>Model</Label>
+              <div className="flex gap-2 mt-1">
+                <Input value={draft.modelName} onChange={(e) => patch({ modelName: e.target.value })} className="font-mono text-sm flex-1" placeholder="deepseek-v4-flash" />
+                {detectedModels.length > 0 && (
+                  <select
+                    value={draft.modelName}
+                    onChange={(e) => patch({ modelName: e.target.value })}
+                    className="h-9 px-2 rounded-md border border-input bg-background text-xs"
+                    title="Select from prefetched models"
+                  >
+                    <option value="">(keep custom)</option>
+                    {detectedModels.map((m) => (
+                      <option key={m.id} value={m.id}>{m.id}</option>
+                    ))}
+                  </select>
+                )}
+              </div>
+            </div>
+            <div>
+              <Label>Temperature</Label>
+              <Input type="number" step={0.1} min={0} max={2} value={draft.temperature} onChange={(e) => patch({ temperature: parseFloat(e.target.value) || 0 })} className="mt-1" />
+            </div>
+            <div>
+              <Label>Max Tokens</Label>
+              <Input type="number" step={500} value={draft.maxTokens} onChange={(e) => patch({ maxTokens: parseInt(e.target.value) || 8000 })} className="mt-1" />
+            </div>
+            <div>
+              <Label>Timeout (seconds)</Label>
+              <Input type="number" step={5} min={0} value={draft.timeout} onChange={(e) => patch({ timeout: parseInt(e.target.value) || 0 })} className="mt-1" />
+              <p className="text-[11px] text-muted-foreground mt-1">0 = no explicit timeout</p>
+            </div>
           </div>
-          <div>
-            <Label>Model</Label>
-            <Input value={settings.modelName} onChange={(e) => update({ modelName: e.target.value })} className="mt-1 font-mono text-sm" />
+
+          {/* Model Prefetch Section */}
+          <div className="rounded-lg border border-border bg-secondary/20 p-4 space-y-3">
+            <div className="flex items-center justify-between gap-3 flex-wrap">
+              <div>
+                <Label className="flex items-center gap-2">
+                  <Icon name="Search" className="w-4 h-4" /> Model Prefetch
+                </Label>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  Fetch all available models from the provider&apos;s API before running AI Workspace features. Discovered models are saved on the provider and used by AI Tasks, Patch generation, Autonomous Debug, and Healing.
+                </p>
+              </div>
+              <div className="flex gap-2 shrink-0">
+                <Button variant="outline" size="sm" onClick={prefetchSelected} disabled={detecting || scanningAll} className="gap-2">
+                  <Icon name={detecting ? "Loader" : "Search"} className={`w-4 h-4 ${detecting ? "animate-spin" : ""}`} />
+                  {detecting ? "Prefetching..." : "Prefetch Models"}
+                </Button>
+                <Button variant="outline" size="sm" onClick={scanAllProviders} disabled={detecting || scanningAll} className="gap-2">
+                  <Icon name={scanningAll ? "Loader" : "Radar"} className={`w-4 h-4 ${scanningAll ? "animate-spin" : ""}`} />
+                  {scanningAll ? "Scanning..." : "Scan All Providers"}
+                </Button>
+              </div>
+            </div>
+
+            {detectionSource && (
+              <div className="flex items-center gap-2">
+                <Badge variant={detectionSource === "api" ? "success" : "warning"} className="text-[10px]">
+                  {detectionSource === "api" ? "FROM API" : "FROM CONFIG"}
+                </Badge>
+                <span className="text-xs text-muted-foreground">
+                  {detectedModels.length} model(s) available{detectionSource !== "api" ? " (provider API unreachable — using saved config)" : ""}
+                </span>
+              </div>
+            )}
+
+            {detectedModels.length > 0 && (
+              <div className="max-h-48 overflow-y-auto rounded-md border border-border bg-background">
+                {detectedModels.map((model) => (
+                  <div
+                    key={model.id}
+                    className={`flex items-center justify-between p-2 border-b border-border last:border-0 cursor-pointer hover:bg-secondary/30 ${
+                      draft.modelName === model.id ? "bg-brand/5" : ""
+                    }`}
+                    onClick={() => patch({ modelName: model.id })}
+                  >
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm font-mono truncate">{model.id}</span>
+                        {draft.modelName === model.id && (
+                          <Badge variant="brand" className="text-[9px]">SELECTED</Badge>
+                        )}
+                      </div>
+                      <div className="text-[10px] text-muted-foreground mt-0.5">
+                        {describeModel(model)}
+                      </div>
+                    </div>
+                    <div className="flex gap-1 shrink-0">
+                      {model.supportsReasoning && <Badge variant="outline" className="text-[9px]">REASONING</Badge>}
+                      {model.supportsVision && <Badge variant="outline" className="text-[9px]">VISION</Badge>}
+                      {model.supportsToolCalling && <Badge variant="outline" className="text-[9px]">TOOLS</Badge>}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
-          <div>
-            <Label>Temperature</Label>
-            <Input type="number" step={0.1} min={0} max={2} value={settings.temperature} onChange={(e) => update({ temperature: parseFloat(e.target.value) || 0 })} className="mt-1" />
+
+          <div className="flex items-center justify-between p-3 rounded-lg bg-secondary/30">
+            <div>
+              <Label>Safe Apply Mode</Label>
+              <p className="text-xs text-muted-foreground">All AI changes must go through staging + approval before production</p>
+            </div>
+            <div className="flex items-center gap-3">
+              <Badge variant={draft.safeApplyEnabled ? "success" : "danger"}>{draft.safeApplyEnabled ? "ENABLED" : "DISABLED"}</Badge>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => patch({ safeApplyEnabled: !draft.safeApplyEnabled })}
+              >
+                {draft.safeApplyEnabled ? "Disable" : "Enable"}
+              </Button>
+            </div>
           </div>
-          <div>
-            <Label>Max Tokens</Label>
-            <Input type="number" step={500} value={settings.maxTokens} onChange={(e) => update({ maxTokens: parseInt(e.target.value) || 8000 })} className="mt-1" />
+
+          <div className="flex items-center gap-2 justify-end">
+            {dirty && (
+              <Button variant="ghost" size="sm" onClick={() => { setDraft(settings); setDirty(false); }}>
+                Reset
+              </Button>
+            )}
+            <Button size="sm" onClick={save} disabled={!dirty} className="gap-2">
+              <Icon name="Save" className="w-4 h-4" /> Save Settings
+            </Button>
           </div>
-        </div>
-        <div className="flex items-center justify-between p-3 rounded-lg bg-secondary/30">
-          <div>
-            <Label>Safe Apply Mode</Label>
-            <p className="text-xs text-muted-foreground">All AI changes must go through staging + approval before production</p>
-          </div>
-          <Badge variant={settings.safeApplyEnabled ? "success" : "danger"}>{settings.safeApplyEnabled ? "ENABLED" : "DISABLED"}</Badge>
-        </div>
-      </CardContent>
-    </Card>
+        </CardContent>
+      </Card>
+    </div>
   );
 }
