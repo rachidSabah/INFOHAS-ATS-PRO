@@ -4,6 +4,7 @@ import type { ResumeData, JobDescription } from "../types";
 import type { JobIntelligence } from "../job-intelligence";
 import { callAI } from "../ai";
 import { uid } from "../store";
+import { parseAgentJSON } from "./structured-output";
 
 export interface ExpansionResult {
   resume: ResumeData;
@@ -153,11 +154,33 @@ Return ONLY a JSON array of strings:
       taskCategory: "document",
     });
     const text = result.text?.trim() ?? "[]";
-    const cleaned = text.replace(/```json\s*/gi, "").replace(/```\s*$/gi, "").trim();
-    const newBullets: string[] = JSON.parse(cleaned);
-    if (Array.isArray(newBullets) && newBullets.length > 0) {
+    // STRUCTURED OUTPUT: robust cascade instead of bare JSON.parse — prose
+    // wraps / truncation previously made bullet expansion a silent no-op.
+    const parsed = parseAgentJSON<string[]>(text, {
+      type: "array", minLength: 1, items: { type: "string" }, label: "expanded bullets",
+    });
+    if (parsed.ok) {
+      const newBullets = parsed.data;
       const allBullets = [...exp.bullets, ...newBullets].slice(0, maxBullets);
       return { ...exp, bullets: allBullets };
+    }
+    // One bounded repair round: re-ask with the parse error.
+    try {
+      const retry = await recordAI({
+        systemPrompt: "Return ONLY a valid JSON array of strings. No prose, no markdown fences, no trailing commas.",
+        userPrompt: `Your previous answer could not be parsed (${parsed.error}). Re-output the additional bullet points for this experience entry as a JSON array of strings:\nRole: ${exp.title} at ${exp.company}\nExisting bullets: ${JSON.stringify(exp.bullets)}`,
+        maxTokens: 500,
+        temperature: 0.3,
+        taskCategory: "document",
+      });
+      const retried = parseAgentJSON<string[]>(retry.text ?? "", {
+        type: "array", minLength: 1, items: { type: "string" }, label: "expanded bullets",
+      });
+      if (retried.ok) {
+        return { ...exp, bullets: [...exp.bullets, ...retried.data].slice(0, maxBullets) };
+      }
+    } catch {
+      // fall through to original
     }
   } catch {
     // Silently fail — return original
@@ -191,10 +214,26 @@ Rules:
       taskCategory: "document"
     });
     const text = result.text?.trim() ?? "[]";
-    const cleaned = text.replace(/```json\s*/gi, "").replace(/```\s*$/gi, "").trim();
-    const trimmed: string[] = JSON.parse(cleaned);
-    if (Array.isArray(trimmed) && trimmed.length > 0) {
-      return trimmed;
+    // STRUCTURED OUTPUT: robust cascade + one bounded repair round instead of
+    // a bare JSON.parse that silently kept the oversized bullets.
+    const parsed = parseAgentJSON<string[]>(text, {
+      type: "array", minLength: 1, items: { type: "string" }, label: "trimmed bullets",
+    });
+    if (parsed.ok) return parsed.data;
+    try {
+      const retry = await recordAI({
+        systemPrompt: "Return ONLY a valid JSON array of strings. No prose, no markdown fences, no trailing commas.",
+        userPrompt: `Your previous answer could not be parsed (${parsed.error}). Re-output the consolidated bullet points as a JSON array of exactly ${targetCount} strings:\nRole: ${exp.title} at ${exp.company}\nCurrent bullets: ${JSON.stringify(exp.bullets)}`,
+        maxTokens: 500,
+        temperature: 0.2,
+        taskCategory: "document",
+      });
+      const retried = parseAgentJSON<string[]>(retry.text ?? "", {
+        type: "array", minLength: 1, items: { type: "string" }, label: "trimmed bullets",
+      });
+      if (retried.ok) return retried.data;
+    } catch {
+      // fall through
     }
   } catch (err) {
     console.warn("[trimExperienceBullets] failed:", err);

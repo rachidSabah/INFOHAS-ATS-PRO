@@ -41,9 +41,20 @@ import { recordProviderSuccess, recordProviderFailure } from "./provider-health-
 import { runDynamicSectionPipeline } from "./dynamic-section-engine";
 import { selectProviderForAgent, getOrderedFallbackProviders } from "./ai";
 import { useApp } from "./store";
+import { getAgentConfig } from "./agents/agent-ai-config";
 import { ProviderHealer } from "./ai/healing/provider-healer";
 import { validateOptimizerOutput, type KeywordCoverageReport } from "./agents/optimizer-output-validator";
+import { runProgressiveOptimization } from "./agents/progressive-generator";
+import { buildStructuredFailureFeedback } from "./agents/failure-feedback";
 import type { MatchingStrategy } from "./agents/profile-resolution";
+
+export interface LockedPipelineNodeRun {
+  node: string;
+  attempt: number;
+  status: "completed" | "failed" | "salvaged";
+  durationMs: number;
+  detail?: string;
+}
 
 export interface LockedPipelineResult {
   resume: ResumeData;
@@ -74,6 +85,8 @@ export interface LockedPipelineResult {
   retryCount: number;
   /** Directive §11 — keyword accountability report for the Supervisor/UI. */
   keywordCoverage?: KeywordCoverageReport;
+  /** Per-node trajectory (agentic observability — consumed by the UI panel). */
+  nodeRuns?: LockedPipelineNodeRun[];
   assemblerStats: {
     matchedById: number;
     matchedByFingerprint: number;
@@ -259,72 +272,158 @@ export async function runLockedPipeline(
   // retry knows exactly what the previous attempt got wrong.
   let attemptFeedback = feedback;
 
+  // DIRECTIVE (agentic observability + per-node contracts): every major node
+  // records {status, durationMs} into the result and emits a trajectory event
+  // — the node contracts are the EXISTING gates (validator / assembler /
+  // guardian / preservation), now explicitly observable. Degradation policy
+  // is unchanged: a failed node fails the attempt (bounded retries), except
+  // nodes already marked non-fatal.
+  const nodeRuns: LockedPipelineNodeRun[] = [];
+  const trackNode = async <T,>(name: string, fn: () => Promise<T> | T): Promise<T> => {
+    const t0 = Date.now();
+    try {
+      const out = await fn();
+      nodeRuns.push({ node: name, attempt: attempts, status: "completed", durationMs: Date.now() - t0 });
+      globalEventBus.emit({ agent: "PipelineNode", action: name, resumeId: sourceResume.id, success: true, duration: Date.now() - t0, metadata: { attempt: attempts } });
+      return out;
+    } catch (e: any) {
+      const detail = String(e?.message ?? e).slice(0, 200);
+      nodeRuns.push({ node: name, attempt: attempts, status: "failed", durationMs: Date.now() - t0, detail });
+      globalEventBus.emit({ agent: "PipelineNode", action: name, resumeId: sourceResume.id, success: false, duration: Date.now() - t0, metadata: { attempt: attempts, error: detail } });
+      throw e;
+    }
+  };
+
   while (attempts < maxAttempts) {
     attempts++;
     try {
       // ========================================================================
       // Step 2: Run Bullet-Only Optimizer (supports excludeProviderIds)
+      // P4 SALVAGE PATH: if the monolithic optimizer throws (provider error,
+      // parse failure, timeout…), the PROGRESSIVE section-by-section generator
+      // runs before the attempt is counted as failed — summary + per-experience
+      // bullets are generated in small independent calls and emitted as the
+      // SAME OptimizerPatch contract, so every downstream gate still applies.
       // ========================================================================
       const optimizerInput = buildOptimizerInput(idReadyResume, jd, intelligenceContext, directiveConfig, optimizationPolicy, attemptFeedback);
       let optimizerResult;
       const flags = (useApp.getState() as any).flags || {};
-      const primaryProvider = await selectProviderForAgent("optimizer", excludeProviderIds);
+      // TWO-TIER ROUTING (draft vs verify): the Agent Configuration Center's
+      // qualityMode drives the DRAFT tier — "high-quality" drafts may use the
+      // strongest provider tier (3), "fast"/"balanced" stay on the cheap
+      // tiers (≤2). Verification agents (QA/guardian/reflection) always keep
+      // their stricter strong-tier defaults — the strongest available model
+      // judges what cheaper models draft.
+      const draftQualityMode = getAgentConfig("optimizer")?.qualityMode ?? "balanced";
+      const draftTierMax = draftQualityMode === "high-quality" ? 3 : 2;
+      const primaryProvider = await selectProviderForAgent("optimizer", excludeProviderIds, { tierMax: draftTierMax });
       const fallbackChain = getOrderedFallbackProviders([primaryProvider.id, ...excludeProviderIds]);
 
+      try {
       if (flags.enableModelArena && fallbackChain.length > 0) {
-        const secondaryProvider = fallbackChain[0].provider;
-        const secondaryProviderId = secondaryProvider.id || secondaryProvider.name || secondaryProvider.type;
-        console.info(`[Model Arena] Running Primary (${primaryProvider.id}) and Secondary (${secondaryProviderId}) in parallel...`);
-        const [pRes, sRes] = await Promise.all([
-          runBulletOnlyOptimizer(idReadyResume, jd, intelligenceContext, directiveConfig, excludeProviderIds, optimizationPolicy, feedback, baselineResume, onChunk).catch(e => {
-            console.warn("[Model Arena] Primary failed:", e);
-            return null;
-          }),
-          runBulletOnlyOptimizer(idReadyResume, jd, intelligenceContext, directiveConfig, [primaryProvider.id, ...excludeProviderIds], optimizationPolicy, feedback, baselineResume).catch(e => {
-            console.warn("[Model Arena] Secondary failed:", e);
-            return null;
-          })
-        ]);
-        if (pRes && sRes) {
+        // BEST-OF-N ARENA (generalized from best-of-2): the primary provider
+        // races the top N-1 fallback providers in parallel; every candidate
+        // is assembled and judged with the DETERMINISTIC ATS scorer; the
+        // highest score wins (ties → primary). N is clamped 2..3.
+        const arenaN = Math.min(3, Math.max(2, Number(flags.modelArenaCandidates) || 2));
+        const arenaProviders = [primaryProvider, ...fallbackChain.slice(0, arenaN - 1).map((f: any) => f.provider)];
+        console.info(`[Model Arena] Best-of-${arenaProviders.length}: ${arenaProviders.map((p: any) => p.id).join(", ")} in parallel...`);
+        const arenaResults = await Promise.all(
+          arenaProviders.map((p: any, idx: number) =>
+            runBulletOnlyOptimizer(
+              idReadyResume, jd, intelligenceContext, directiveConfig,
+              [...arenaProviders.filter((_: any, j: number) => j !== idx).map((q: any) => q.id), ...excludeProviderIds],
+              optimizationPolicy, feedback, baselineResume, idx === 0 ? onChunk : undefined,
+            ).catch(e => {
+              console.warn(`[Model Arena] Candidate ${p.id} failed:`, e);
+              return null;
+            })
+          )
+        );
+        const valid = arenaResults.filter(Boolean) as NonNullable<typeof arenaResults[number]>[];
+        if (valid.length > 0) {
           const { scoreATS } = await import("./ats");
-          // Assemble temporary resumes to check ATS scores
-          const pResume = assembleResume(idReadyResume, pRes.output, { matchingStrategy: options?.matchingStrategy }).resume;
-          const sResume = assembleResume(idReadyResume, sRes.output, { matchingStrategy: options?.matchingStrategy }).resume;
-          const pScore = scoreATS(pResume, jd).scores.ats;
-          const sScore = scoreATS(sResume, jd).scores.ats;
-          console.info(`[Model Arena] Primary ATS score: ${pScore}/100. Secondary ATS score: ${sScore}/100.`);
-          if (sScore > pScore) {
-            console.info(`[Model Arena] Winner: Secondary (${sRes.provider})!`);
-            optimizerResult = sRes;
-          } else {
-            console.info(`[Model Arena] Winner: Primary (${pRes.provider})!`);
-            optimizerResult = pRes;
+          // Judge: assemble each candidate and score with the deterministic ATS engine.
+          let best = valid[0];
+          let bestScore = -1;
+          let bestProviderId = "";
+          for (let i = 0; i < arenaResults.length; i++) {
+            const r = arenaResults[i];
+            if (!r) continue;
+            const rResume = assembleResume(idReadyResume, r.output, { matchingStrategy: options?.matchingStrategy }).resume;
+            const rScore = scoreATS(rResume, jd).scores.ats;
+            console.info(`[Model Arena] Candidate ${arenaProviders[i].id} ATS score: ${rScore}/100.`);
+            if (rScore > bestScore) {
+              best = r;
+              bestScore = rScore;
+              bestProviderId = arenaProviders[i].id;
+            }
           }
+          console.info(`[Model Arena] Winner: ${bestProviderId} (score ${bestScore}/100).`);
+          optimizerResult = best;
         } else {
-          optimizerResult = pRes || sRes;
+          optimizerResult = null;
         }
       } else {
         optimizerResult = await runBulletOnlyOptimizer(idReadyResume, jd, intelligenceContext, directiveConfig, excludeProviderIds, optimizationPolicy, feedback, baselineResume, onChunk);
+      }
+      } catch (monolithicErr: any) {
+        // P4 ACTIVATED — progressive section-by-section salvage (bounded: one
+        // pass; per-entry failures keep original bullets; null when nothing
+        // succeeded and the original error propagates).
+        console.warn(`[Locked Pipeline] Monolithic optimizer failed (${monolithicErr?.message ?? monolithicErr}) — running PROGRESSIVE section-by-section salvage…`);
+        globalEventBus.emit({
+          agent: "ProgressiveGenerator",
+          action: "salvage_started",
+          resumeId: sourceResume.id,
+          success: true,
+          metadata: { attempt: attempts, reason: String(monolithicErr?.message ?? monolithicErr).slice(0, 200) },
+        });
+        const salvage = await runProgressiveOptimization(idReadyResume, jd, {
+          excludeProviderIds,
+        });
+        if (salvage) {
+          optimizerResult = salvage;
+          warnings.push("Monolithic optimization failed — recovered via progressive section-by-section generation (failed sections kept original content).");
+        } else {
+          throw monolithicErr;
+        }
       }
 
       if (!optimizerResult) {
         throw new Error("Optimizer failed to return a result.");
       }
       warnings.push(...optimizerResult.warnings);
+      // Node record for the optimizer (salvage visibility: provider reveals
+      // "progressive-sections" when the P4 salvage path produced the output).
+      nodeRuns.push({
+        node: "optimizer", attempt: attempts,
+        status: optimizerResult.provider === "progressive-sections" ? "salvaged" : "completed",
+        durationMs: 0, detail: optimizerResult.provider,
+      });
 
       // ========================================================================
       // Step 2b: OptimizerOutputValidator (directive §11 + §24/§25).
       // A rejected output NEVER reaches the assembler or any downstream agent —
       // the attempt fails and the retry carries corrective feedback.
       // ========================================================================
-      const outputValidation = validateOptimizerOutput(idReadyResume, optimizerResult.output, jd);
+      const outputValidation = await trackNode("output-validator", () =>
+        validateOptimizerOutput(idReadyResume, optimizerResult.output, jd)
+      );
       lastKeywordCoverage = outputValidation.keywordCoverage;
       if (!outputValidation.valid) {
         const actionable = outputValidation.keywordCoverage.total - outputValidation.keywordCoverage.alreadyPresent;
+        // STRUCTURED FAILURE FEEDBACK: the retry prompt carries the canonical
+        // structured block (stage, violations, keyword coverage, missing
+        // keywords) — never a bare "try again".
         attemptFeedback = [
           attemptFeedback,
-          `PREVIOUS ATTEMPT REJECTED by OptimizerOutputValidator: ${outputValidation.violations.join("; ")}`,
-          `Keyword coverage: ${outputValidation.keywordCoverage.integrated}/${actionable} actionable keywords integrated — integrate the missing ones NATURALLY (no stuffing): ${outputValidation.keywordCoverage.stillMissing.slice(0, 8).join(", ")}`,
+          buildStructuredFailureFeedback({
+            stage: `optimizer attempt ${attempts} (rejected by OptimizerOutputValidator)`,
+            violations: outputValidation.violations,
+            keywordCoverage: { integrated: outputValidation.keywordCoverage.integrated, total: actionable },
+            missingKeywords: outputValidation.keywordCoverage.stillMissing,
+          }),
         ].filter(Boolean).join("\n");
         const errObj: any = new Error(`Optimizer output validation failed: ${outputValidation.violations.join("; ")}`);
         errObj.kind = "output-validation";
@@ -336,7 +435,9 @@ export async function runLockedPipeline(
       // ========================================================================
       // Step 3: Assemble Resume (application-owned)
       // ========================================================================
-      const assembleResult = assembleResume(idReadyResume, optimizerResult.output, { matchingStrategy: options?.matchingStrategy });
+      const assembleResult = await trackNode("assembler", () =>
+        assembleResume(idReadyResume, optimizerResult.output, { matchingStrategy: options?.matchingStrategy })
+      );
       warnings.push(...assembleResult.warnings);
       errors.push(...assembleResult.errors);
 
@@ -622,6 +723,7 @@ export async function runLockedPipeline(
       let guardianVerdict: GuardianVerdict | undefined;
       try {
         guardianVerdict = await runGuardianValidation(assembleResult.resume, sourceResume, undefined);
+        nodeRuns.push({ node: "guardian", attempt: attempts, status: "completed", durationMs: 0, detail: `verdict: ${guardianVerdict.status}` });
         if (guardianVerdict.status === "BLOCKED") {
           const criticalFailures = guardianVerdict.checks.filter(c => c.critical && !c.passed).map(c => c.detail);
           const errObj: any = new Error(`Guardian BLOCKED: ${criticalFailures.join("; ")}`);
@@ -685,6 +787,38 @@ export async function runLockedPipeline(
       }
 
       // ========================================================================
+      // DETERMINISTIC A4 LAYOUT GATE (pt-based) + bounded compress repair.
+      // The char-based page balancer runs earlier; THIS gate measures the real
+      // pt height. Overflow here never blocks the pipeline — it triggers up to
+      // TWO deterministic compress rounds and re-measures (non-LLM, instant).
+      // ========================================================================
+      if (layoutDiagnostics?.overflows) {
+        const tGate = Date.now();
+        const pageFillGate = validatePageFill(assembleResult.resume, directiveConfig);
+        for (let gateRound = 0; gateRound < 2 && layoutDiagnostics.overflows; gateRound++) {
+          try {
+            assembleResult.resume = compressResume(assembleResult.resume, {
+              targetChars: pageFillGate.targetChars,
+              maxChars: Math.floor(pageFillGate.targetChars * 1.04),
+              currentChars: pageFillGate.charCount,
+              directiveConfig,
+            });
+            const { simulateLayoutHeight: reSimulate } = await import("./layout-simulator");
+            layoutDiagnostics = reSimulate(assembleResult.resume);
+            warnings.push(`A4 layout gate: compress round ${gateRound + 1} applied — overflow ${layoutDiagnostics.overflows ? "persists" : "resolved"}.`);
+          } catch (gateErr) {
+            console.warn("[Locked Pipeline A4 Gate] Compress round failed (non-fatal):", gateErr);
+            break;
+          }
+        }
+        nodeRuns.push({
+          node: "a4-layout-gate", attempt: attempts, status: "completed",
+          durationMs: Date.now() - tGate,
+          detail: layoutDiagnostics.overflows ? "overflow persists after 2 compress rounds (flagged in diagnostics)" : "overflow resolved",
+        });
+      }
+
+      // ========================================================================
       // Step 9: Return result
       // ========================================================================
       const result: LockedPipelineResult = {
@@ -705,6 +839,7 @@ export async function runLockedPipeline(
         isDegraded: false,
         rationales: optimizerResult.output.rationales,
         layoutDiagnostics,
+        nodeRuns,
         assemblerStats: {
           matchedById: assembleResult.matchedById,
           matchedByFingerprint: assembleResult.matchedByFingerprint,

@@ -1157,7 +1157,8 @@ export async function selectProvider(excludeIds?: string[]): Promise<any> {
 
 export async function selectProviderForAgent(
   agentType: "optimizer" | "supervisor" | "guardian" | "assembler" | "emergency" | "simple" | "reasoning",
-  excludeIds?: string[]
+  excludeIds?: string[],
+  opts?: { tierMax?: number }
 ): Promise<any> {
   const state: any = useApp.getState();
   const settings = state?.providerSettings;
@@ -1195,8 +1196,17 @@ export async function selectProviderForAgent(
       eligible = cheapEligible;
     }
   } else {
-    const maxTier = tierMax[agentType] ?? 3;
-    eligible = eligible.filter((p: any) => getProviderTier(p) <= maxTier);
+    // TWO-TIER ROUTING: the caller may tighten or relax the tier ceiling for
+    // its role (e.g. "fast" draft mode caps the optimizer at tier 1-2 cheap
+    // providers; "high-quality" mode allows the strongest tier for drafts).
+    // Verification agents (supervisor/guardian) keep their stricter defaults.
+    const maxTier = Math.max(1, Math.min(4, opts?.tierMax ?? tierMax[agentType] ?? 3));
+    const tierFiltered = eligible.filter((p: any) => getProviderTier(p) <= maxTier);
+    if (tierFiltered.length > 0) {
+      eligible = tierFiltered;
+    }
+    // Empty after tier filter → fall through with the unfiltered list (better
+    // any provider than none — the caller's budget/healing still protects).
   }
 
   eligible = eligible.sort((a: any, b: any) => (a.priority ?? 50) - (b.priority ?? 50));

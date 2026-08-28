@@ -23,7 +23,9 @@
 import type { ResumeData, ResumeExperience, ResumeEducation, JobDescription, OptimizerDirectiveConfig } from "../types";
 import type { JobIntelligence } from "../job-intelligence";
 import { analyzeJobIntelligence } from "../job-intelligence";
-import { callAI, getOptimizerDirective, extractJSON } from "../ai";
+import { callAI, getOptimizerDirective } from "../ai";
+import { runWithParseRepair, type SchemaSpec } from "./structured-output";
+import { buildStructuredFailureFeedback } from "./failure-feedback";
 import { splitOptimizationDirective } from "../ai-diagnostics";
 import { processAIResponse } from "../ai-response-processor";
 import { validateResumeContent } from "../ai-error-filter";
@@ -1933,30 +1935,48 @@ ${jobMemory.industry}`);
         (qaVerdict && qaVerdict.factualConsistency && !qaVerdict.factualConsistency.passed)
       );
 
+      // CONVERGENCE (agentic loop criterion — item #6): the loop stops EARLY
+      // when further rounds stop paying. Best-variant tracking makes quality
+      // MONOTONIC: a correction round that scores LOWER is rolled back.
+      const PLATEAU_TARGET = 85;  // score band where plateau-stopping applies
+      const PLATEAU_EPSILON = 1;  // <1 point improvement = stalled round
+      let prevScore: number | null = result.afterATS ? result.afterATS.scores.ats : null;
+      let stallRounds = 0;
+      let best = {
+        resume: result.optimizedResume,
+        qa: result.qa,
+        after: result.afterATS,
+        score: result.afterATS ? result.afterATS.scores.ats : -1,
+      };
+
       while (needsCorrection && healingAttempt < maxHealingAttempts) {
         healingAttempt++;
         console.log(`[Self-Healing] Starting self-correction round ${healingAttempt}/${maxHealingAttempts}...`);
         log("Quality Assurance", `[Self-Healing] QA score (${qaVerdict.confidence}/100) or factual integrity needs improvement. Initiating self-correction round ${healingAttempt}/${maxHealingAttempts}...`);
         emitProgress(4, `Self-correction round ${healingAttempt}/${maxHealingAttempts}...`);
 
-        // Compile feedback critique from QA failed checks and factual issues
-        const failedChecks = qaVerdict.checks.filter(c => !c.passed).map(c => `- ${c.name}: ${c.details || "failed validation"}`);
+        // STRUCTURED FAILURE FEEDBACK (item #3): the retry critique carries
+        // the canonical structured block — failed checks, factual issues,
+        // ATS diagnosis — never a bare "try again".
+        const failedChecks = qaVerdict.checks.filter(c => !c.passed).map(c => `${c.name}: ${c.details || "failed validation"}`);
         const factualIssues = qaVerdict.factualConsistency 
           ? [
-              ...qaVerdict.factualConsistency.fabricatedEmployers.map(x => `- Fabricated Employer detected: ${x}`),
-              ...qaVerdict.factualConsistency.fabricatedEducation.map(x => `- Fabricated Education detected: ${x}`),
-              ...qaVerdict.factualConsistency.fabricatedCertifications.map(x => `- Fabricated Certification detected: ${x}`),
-            ]
+              `Fabricated Employer detected: ${qaVerdict.factualConsistency.fabricatedEmployers.join(", ")}`,
+              `Fabricated Education detected: ${qaVerdict.factualConsistency.fabricatedEducation.join(", ")}`,
+              `Fabricated Certification detected: ${qaVerdict.factualConsistency.fabricatedCertifications.join(", ")}`,
+            ].filter((s) => !s.endsWith(": ") && !s.endsWith(", "))
           : [];
-        
-        const critique = [
-          "Your previous optimization attempt had the following quality and factual consistency issues.",
-          "You MUST fix these issues in this correction round. Do NOT fabricate any experiences or omit required items.",
-          "FAILED CHECKS:",
-          ...failedChecks,
-          "FACTUAL ISSUES:",
-          ...factualIssues
-        ].join("\n");
+        const atsDiagnosis = result.afterATS
+          ? [`Current ATS score ${result.afterATS.scores.ats}/100 (formatting ${result.afterATS.scores.formatting}, keywords ${result.afterATS.scores.keywordMatch}, content ${result.afterATS.scores.content}).`]
+          : [];
+
+        const critique = buildStructuredFailureFeedback({
+          stage: `self-correction round ${healingAttempt} (QA-driven)`,
+          violations: [],
+          failedChecks,
+          factualIssues,
+          layoutIssues: atsDiagnosis,
+        });
 
         console.info(`[Self-Healing] Re-optimizing with critique:\n`, critique);
 
@@ -2010,12 +2030,44 @@ ${jobMemory.industry}`);
             log("Quality Assurance", newQALog);
             emitProgress(4, newQALog);
 
+            // BEST-VARIANT TRACKING (monotonic quality): keep whichever round
+            // scored highest; a REGRESSED round is rolled back immediately.
+            const newScore = result.afterATS ? result.afterATS.scores.ats : -1;
+            if (newScore >= best.score) {
+              best = { resume: result.optimizedResume, qa: newQA, after: result.afterATS, score: newScore };
+            } else {
+              log("Quality Assurance", `[Self-Healing] Round ${healingAttempt} REGRESSED the ATS score (${newScore} < ${best.score}) — rolling back to the best variant and stopping.`);
+              result.optimizedResume = best.resume;
+              result.qa = best.qa;
+              result.afterATS = best.after;
+              qaVerdict = best.qa;
+              needsCorrection = false;
+              break;
+            }
+
             // Re-evaluate if correction is still needed
             needsCorrection = Boolean(
               newQA.confidence < 95 || 
               (result.afterATS && result.afterATS.scores.ats < 95) ||
               (newQA.factualConsistency && !newQA.factualConsistency.passed)
             );
+
+            // PLATEAU CONVERGENCE: once the score is in the good band and a
+            // round adds < PLATEAU_EPSILON points, further rounds are churn —
+            // stop early (saves provider quota; the hard cap still applies).
+            if (needsCorrection && prevScore !== null) {
+              const delta = newScore - prevScore;
+              if (delta < PLATEAU_EPSILON && newScore >= PLATEAU_TARGET) {
+                stallRounds++;
+                if (stallRounds >= 2) {
+                  needsCorrection = false;
+                  log("Quality Assurance", `[Self-Healing] Score plateau detected (${newScore}/100, +${delta} this round) — convergence reached, stopping self-correction.`);
+                }
+              } else {
+                stallRounds = 0;
+              }
+            }
+            prevScore = newScore;
           } else {
             break;
           }
@@ -3444,30 +3496,51 @@ Return ONLY valid JSON:
 }`;
 
   try {
-    const result = await callAI({
-      systemPrompt: "You are a Reflection Agent that reviews AI-optimized resumes for quality. Always return ONLY valid JSON — no markdown fences, no prose.",
-      userPrompt: prompt,
-      maxTokens: 1500,
-      temperature: 0.3,
-      taskCategory: "document",
-      // SUPERVISED pipeline agent: inherits the job AI configuration lock +
-      // supervised recovery; Agent Configuration Center contributes defaults.
-      isOptimizerCall: true,
-      pipelineAgent: "reflection",
-      // Free-tier models can take 40-80s on this prompt.
-      timeoutMs: PIPELINE_STEP_CALL_TIMEOUT_MS,
-      // Reflection inherits the Arena-selected provider for consistency.
-      providerId,
-    });
+    // STRUCTURED OUTPUT + bounded parse-repair: the reflection verdict is
+    // parsed through the robust cascade; on failure the model is re-asked ONCE
+    // with the exact parse error. Previously a single parse failure permanently
+    // degraded the run to "Manual review recommended" (confidence 50).
+    const REFLECTION_RESULT_SCHEMA: SchemaSpec = {
+      type: "object",
+      required: ["issues", "suggestions"],
+      properties: {
+        issues: { type: "array", items: { type: "string" } },
+        suggestions: { type: "array", items: { type: "string" } },
+        confidence: { type: "number" },
+      },
+      label: "reflection verdict",
+    };
 
     let data: { issues?: string[]; suggestions?: string[]; confidence?: number };
     try {
-      data = extractJSON(result.text);
+      const { data: parsed } = await runWithParseRepair<Record<string, unknown>>(
+        async (repairFeedback) => {
+          const result = await callAI({
+            systemPrompt: "You are a Reflection Agent that reviews AI-optimized resumes for quality. Always return ONLY valid JSON — no markdown fences, no prose.",
+            userPrompt: repairFeedback ? `${prompt}\n\n${repairFeedback}` : prompt,
+            maxTokens: 1500,
+            temperature: 0.3,
+            taskCategory: "document",
+            // SUPERVISED pipeline agent: inherits the job AI configuration lock +
+            // supervised recovery; Agent Configuration Center contributes defaults.
+            isOptimizerCall: true,
+            pipelineAgent: "reflection",
+            // Free-tier models can take 40-80s on this prompt.
+            timeoutMs: PIPELINE_STEP_CALL_TIMEOUT_MS,
+            // Reflection inherits the Arena-selected provider for consistency.
+            providerId,
+          });
+          return result.text ?? "";
+        },
+        REFLECTION_RESULT_SCHEMA,
+        { label: "Reflection Agent", maxRepairRounds: 1 }
+      );
+      data = parsed as { issues?: string[]; suggestions?: string[]; confidence?: number };
     } catch {
       return {
         triggered: true,
         reason,
-        notes: "Reflection Agent could not parse its own output. Manual review recommended.",
+        notes: "Reflection Agent could not parse its own output after one repair round. Manual review recommended.",
         issues: [],
         suggestions: ["Manually review the optimized resume for quality."],
         confidence: 50,

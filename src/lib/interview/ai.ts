@@ -16,6 +16,7 @@ import { detectIndustry, INDUSTRY_PROFILES } from "@/lib/industry-ats";
 import { analyzeCompanyIntelligence, type CompanyIntelligence } from "@/lib/agents/company-skill-agents";
 import { analyzeJobIntelligence, type JobIntelligence } from "@/lib/job-intelligence";
 import { uid } from "@/lib/store";
+import { runWithParseRepair } from "@/lib/agents/structured-output";
 import {
   INTERVIEW_PERSONAS,
   PERSONAS_BY_ID,
@@ -441,9 +442,41 @@ Return JSON:
 
   let data: any;
   try {
-    data = extractJSON<any>(result.text);
+    // STRUCTURED OUTPUT: robust cascade + ONE bounded parse-error repair
+    // round before surfacing an error to the user (previously a single parse
+    // failure — prose wrap, truncation, trailing comma — threw immediately).
+    const { data: parsed } = await runWithParseRepair<any>(
+      async (repairFeedback) => {
+        const retry = repairFeedback
+          ? await recordAI(
+              {
+                systemPrompt,
+                userPrompt: `${userPrompt}\n\n${repairFeedback}`,
+                maxTokens: 6000,
+                temperature: 0.5,
+                taskCategory: "document",
+              },
+              {
+                resumeId: resume.id,
+                jdId: jd?.id,
+                company: jd?.company ?? profile?.companyName,
+                scope: "interview",
+              }
+            )
+          : result;
+        return retry.text ?? "";
+      },
+      {
+        type: "object",
+        required: ["questions"],
+        properties: { questions: { type: "array", minLength: 1 } },
+        label: "interview package",
+      },
+      { label: "Interview package", maxRepairRounds: 1 }
+    );
+    data = parsed;
   } catch {
-    throw new Error("Failed to parse AI response. Please try again.");
+    throw new Error("Failed to parse AI response after one repair round. Please try again.");
   }
 
   const questions: GeneratedQuestion[] = (data.questions ?? []).map((q: any) => ({

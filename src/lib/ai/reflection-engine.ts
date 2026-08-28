@@ -25,6 +25,7 @@ import { ContextBuilder } from "./context-builder";
 import { recordAI, hashString } from "./flight-recorder";
 import { uid } from "@/lib/store";
 import type { AICallOptions } from "@/lib/ai";
+import type { SchemaSpec } from "@/lib/agents/structured-output";
 
 export const REFLECTION_PROMPT_VERSION = "8.1.3.3";
 
@@ -252,20 +253,59 @@ export async function reflect(args: {
     signal: args.signal ?? args.opts?.signal,
   };
 
-  try {
-    const res = await recordAI(callOpts, {
-      scope: "future-agents",
-      feature: "Reflection Engine",
-      module: "src/lib/ai/reflection-engine.ts",
-      reflectionEnabled: false, // prevent recursive reflection
-    });
+  const REFLECTION_VERDICT_SCHEMA: SchemaSpec = {
+    type: "object",
+    required: ["overallScore"],
+    properties: {
+      overallScore: { type: "number" },
+      confidence: { type: "number" },
+      summary: { type: "string" },
+      strengths: { type: "array", items: { type: "string" } },
+      weaknesses: { type: "array", items: { type: "string" } },
+    },
+    label: "reflection verdict",
+  };
 
-    let parsed: any = null;
-    try {
-      parsed = JSON.parse((res.text || "").replace(/```json/gi, "").replace(/```/g, "").trim());
-    } catch {
-      parsed = null;
-    }
+  try {
+    // STRUCTURED OUTPUT (directive: agents never free-parse): robust cascade
+    // + ONE bounded parse-error repair round — the parse failure itself is fed
+    // back into the prompt. Previously a bare JSON.parse dropped the ENTIRE
+    // verdict on prose-wrapped/truncated output ("reflection parse failure").
+    // NOTE: lazily imported — see qa-engine.ts for the cycle rationale.
+    const { runWithParseRepair } = await import("@/lib/agents/structured-output");
+    let lastProvider = "";
+    let lastLatencyMs = 0;
+    let lastTokensEstimate = 0;
+    let invokeError = "";
+    let invokeThrew = false;
+    const { data: parsed } = await runWithParseRepair<any>(
+      async (repairFeedback) => {
+        let res: any;
+        try {
+          res = (await recordAI(
+          repairFeedback
+            ? { ...callOpts, userPrompt: `${callOpts.userPrompt ?? ""}\n\n${repairFeedback}` }
+            : callOpts,
+          {
+            scope: "future-agents",
+            feature: "Reflection Engine",
+            module: "src/lib/ai/reflection-engine.ts",
+            reflectionEnabled: false, // prevent recursive reflection
+          }
+        )) ?? null;
+        } catch (e: any) {
+          invokeThrew = true;
+          invokeError = String(e?.message ?? e);
+          throw e; // propagate — counts as a failed attempt in the repair loop
+        }
+        lastProvider = res?.provider ?? "";
+        lastLatencyMs = res?.latencyMs ?? 0;
+        lastTokensEstimate = res?.tokensEstimate ?? 0;
+        return res?.text ?? "";
+      },
+      REFLECTION_VERDICT_SCHEMA,
+      { label: "Reflection Engine", maxRepairRounds: 1 }
+    ).catch(() => ({ data: null as any, repairRounds: 0, repairs: [] }));
 
     if (!parsed || typeof parsed !== "object") {
       return {
@@ -278,11 +318,11 @@ export async function reflect(args: {
         status: "error",
         metadata: {
           ...baseMeta,
-          provider: res.provider,
-          model: res.provider,
+          provider: lastProvider,
+          model: lastProvider,
           durationMs: Date.now() - t0,
-          latencyMs: res.latencyMs,
-          error: "invalid reflection JSON",
+          latencyMs: lastLatencyMs,
+          error: invokeThrew ? invokeError : "invalid reflection JSON",
         },
       };
     }
@@ -315,11 +355,11 @@ export async function reflect(args: {
       status: retryRecommended ? "retry" : "ok",
       metadata: {
         ...baseMeta,
-        provider: res.provider,
-        model: res.provider,
+        provider: lastProvider,
+        model: lastProvider,
         durationMs: Date.now() - t0,
-        latencyMs: res.latencyMs,
-        tokens: res.tokensEstimate,
+        latencyMs: lastLatencyMs,
+        tokens: lastTokensEstimate,
       },
     };
   } catch (e: any) {

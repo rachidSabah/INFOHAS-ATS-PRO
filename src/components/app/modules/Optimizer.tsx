@@ -43,6 +43,11 @@ const PipelineDashboardLazy = lazy(() =>
   import("@/components/optimizer/PipelineDashboard").then((m) => ({ default: m.PipelineDashboard })),
 );
 
+// Lazy-load the per-node trajectory panel (agentic observability)
+const PipelineTrajectoryPanelLazy = lazy(() =>
+  import("@/components/optimizer/PipelineTrajectoryPanel").then((m) => ({ default: m.PipelineTrajectoryPanel })),
+);
+
 type Step = "upload" | "jd" | "analyze" | "optimize" | "done";
 
 function renderFormattedText(text: string | null | undefined): React.ReactNode {
@@ -1336,13 +1341,13 @@ Guidelines:
 
     const newVariants: Record<string, AgentPipelineResult> = {};
     let firstSuccess: AgentPipelineResult | null = null;
+    let bestScore = -1;
 
     for (const s of settled) {
       if (s.status === "fulfilled") {
         const { pid, result, error } = s.value as any;
         if (result && result.status !== "failed") {
           newVariants[pid] = result;
-          if (!firstSuccess) firstSuccess = result;
           setAiLog((l) => [
             ...l,
             `✓ ${allProviders.find((p) => p.id === pid)?.name ?? pid}: ATS ${result.afterATS?.scores.ats ?? "?"}`,
@@ -1353,6 +1358,18 @@ Guidelines:
             `✗ ${allProviders.find((p) => p.id === pid)?.name ?? pid}: ${error ?? result?.error ?? "failed"}`,
           ]);
         }
+      }
+    }
+
+    // DETERMINISTIC JUDGE: the arena winner is the variant with the HIGHEST
+    // ATS score (from the pipeline's own afterATS) — not merely the first to
+    // succeed. Ties resolve to the earlier provider in the list.
+    for (const pid of arenaProviderIds) {
+      const v = newVariants[pid];
+      const score = v?.afterATS?.scores?.ats ?? -1;
+      if (v && score > bestScore) {
+        bestScore = score;
+        firstSuccess = v;
       }
     }
 
@@ -1373,7 +1390,7 @@ Guidelines:
       }
       incUsage("resumesGenerated");
       setStep("done");
-      toast.success(`Arena complete — ${Object.keys(newVariants).length} variants ready!`);
+      toast.success(`Arena complete — best variant selected (ATS ${bestScore}/100 of ${Object.keys(newVariants).length}).`);
     } else {
       setPipelineError("All Arena providers failed. Please check your API keys and try again.");
       toast.error("Arena: all providers failed.");
@@ -2333,6 +2350,13 @@ Guidelines:
             {pipelineResult && (
               <Suspense fallback={null}>
                 <PipelineDashboardLazy />
+              </Suspense>
+            )}
+
+            {/* === Per-node trajectory (agentic observability) — live during runs and after completion === */}
+            {(aiThinking || pipelineResult) && (
+              <Suspense fallback={null}>
+                <PipelineTrajectoryPanelLazy />
               </Suspense>
             )}
 

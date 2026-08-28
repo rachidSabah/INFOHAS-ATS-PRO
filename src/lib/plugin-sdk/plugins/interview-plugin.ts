@@ -12,6 +12,7 @@ import type { ServiceContainer } from "../service-container";
 import type { PluginManifest, HealthStatus } from "../types";
 import type { PipelineContext } from "../types";
 import { callAI } from "../../ai";
+import { runWithParseRepair, type SchemaSpec } from "@/lib/agents/structured-output";
 
 export class InterviewPlugin implements AgentPlugin {
   readonly id = "agent.interview";
@@ -74,12 +75,56 @@ JSON Output structure:
       taskCategory: "document",
     });
 
+    const INTERVIEW_QUESTIONS_SCHEMA: SchemaSpec = {
+      type: "array",
+      minLength: 1,
+      items: {
+        type: "object",
+        required: ["question", "category"],
+        properties: {
+          question: { type: "string" },
+          category: { type: "string" },
+          purpose: { type: "string" },
+          modelAnswer: { type: "string" },
+        },
+      },
+      label: "interview questions",
+    };
+
+    // STRUCTURED OUTPUT: robust cascade + ONE bounded parse-error repair
+    // round. Previously a bare JSON.parse — any prose wrap, fence or trailing
+    // comma silently produced ZERO questions and cascaded the whole interview
+    // package to the static fallback.
     if (result && result.text) {
       try {
-        const parsed = JSON.parse(result.text);
-        ctx.metadata.interviewQuestions = parsed;
+        const { data: parsed, repairRounds } = await runWithParseRepair<unknown[]>(
+          async (repairFeedback) => {
+            if (!repairFeedback) return result.text;
+            const retry = await recordAI({
+              systemPrompt: `You are an expert interview coach. Return ONLY valid JSON — no markdown fences, no prose. ${repairFeedback}`,
+              userPrompt: `Generate exactly 9 interview questions for the candidate against the target role. JSON structure: [{"question": "...", "category": "behavioral|technical|situational|company-fit", "purpose": "...", "modelAnswer": "..."}]
+
+CANDIDATE: ${candidateSummary}
+EXPERIENCE: ${experienceSummary}
+KEY SKILLS: ${skillsSummary}
+TARGET ROLE: ${jobTitle} at ${company}
+JOB REQUIREMENTS: ${jobSummary}`,
+              maxTokens: 1500,
+              taskCategory: "document",
+            });
+            return retry.text ?? "";
+          },
+          INTERVIEW_QUESTIONS_SCHEMA,
+          { label: "InterviewPlugin", maxRepairRounds: 1 }
+        );
+        if (Array.isArray(parsed)) {
+          ctx.metadata.interviewQuestions = parsed;
+          if (repairRounds > 0) {
+            console.info(`[InterviewPlugin] JSON recovered after ${repairRounds} repair round(s).`);
+          }
+        }
       } catch (err) {
-        console.warn("[InterviewPlugin] AI did not return JSON. Trying fallback parse:", err);
+        console.warn("[InterviewPlugin] structured parse failed after repair round:", err);
       }
     }
     return ctx;
