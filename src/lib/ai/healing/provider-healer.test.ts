@@ -58,6 +58,9 @@ beforeEach(() => {
   updateProvider.mockReset();
   providers.length = 0;
   providers.push(makeProvider());
+  // Clear the healer's static pending-retest timers + failure counters —
+  // they persist across tests and would otherwise leak counts (DEEP 1 → DEEP 2).
+  ProviderHealer.resetRetestState();
 });
 
 describe("ProviderHealer", () => {
@@ -100,6 +103,103 @@ describe("ProviderHealer", () => {
       "hy3-free"
     );
     expect(picked).toBe("deepseek-v4-flash-free");
+  });
+
+  it("DEEP 1 — post-cooldown retest failure with a MODEL error runs a heal round instead of dead-ending", async () => {
+    vi.useFakeTimers();
+    try {
+      providers[0] = makeProvider({ modelName: "old-model", enabledModels: [] });
+      // 1st ping = post-cooldown retest probe (fails, model retired);
+      // 2nd ping = heal-round validation (succeeds with the replacement).
+      const ping = vi.fn()
+        .mockResolvedValueOnce({ ok: false, latencyMs: 10, error: "The model `old-model` does not exist" })
+        .mockResolvedValueOnce({ ok: true, latencyMs: 40, reply: "READY" });
+      const fetchCatalog = vi.fn().mockResolvedValue({ ok: true, models: ["llama-3.1-8b-instant"] });
+
+      ProviderHealer.scheduleCooldownRetest("p_groq", 1000, { ping, fetchCatalog });
+      await vi.advanceTimersByTimeAsync(1000);
+
+      expect(ping).toHaveBeenCalledTimes(2);
+      const modelPatch = updateProvider.mock.calls.map((c) => c[1]).find((p: any) => p.modelName);
+      expect(modelPatch?.modelName).toBe("llama-3.1-8b-instant");
+      const healthPatch = updateProvider.mock.calls.map((c) => c[1]).find((p: any) => p.health?.healState === "recovered");
+      expect(healthPatch).toBeTruthy();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("DEEP 2 — post-cooldown retest failure with a rate limit re-schedules a bounded retest", async () => {
+    vi.useFakeTimers();
+    try {
+      const ping = vi.fn().mockResolvedValue({ ok: false, latencyMs: 5, error: "HTTP 429: rate limit exceeded" });
+
+      ProviderHealer.scheduleCooldownRetest("p_groq", 1000, { ping });
+      await vi.advanceTimersByTimeAsync(1000); // 1st probe fails → re-schedule ~60s
+      expect(ping).toHaveBeenCalledTimes(1);
+      await vi.advanceTimersByTimeAsync(60_000); // 2nd probe runs
+      expect(ping).toHaveBeenCalledTimes(2);
+
+      const healthPatch = updateProvider.mock.calls.map((c) => c[1]).find((p: any) => p.health?.lastDiagnosis)?.health;
+      expect(healthPatch?.healState).toBe("cooldown");
+      expect(healthPatch?.lastDiagnosis).toMatch(/re-test 1\/3/);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("DEEP 3 — model replacement validated against a rate limit keeps the new model (cooldown, not manual)", async () => {
+    providers[0] = makeProvider({ modelName: "hy3-free", enabledModels: [] });
+    const ping = vi.fn().mockResolvedValue({ ok: false, latencyMs: 20, error: "HTTP 429: rate limit exceeded" });
+    const fetchCatalog = vi.fn().mockResolvedValue({ ok: true, models: ["llama-3.1-8b-instant"] });
+
+    const report = await ProviderHealer.healProvider("p_groq", "auto", "The model `hy3-free` does not exist", { ping, fetchCatalog });
+
+    expect(report.result).toBe("cooldown");
+    expect(report.newModel).toBe("llama-3.1-8b-instant");
+    expect(report.action).toMatch(/rate limit/i);
+    // The new mapping STAYS — the rate limit says nothing against the model.
+    const modelPatch = updateProvider.mock.calls.map((c) => c[1]).find((p: any) => p.modelName);
+    expect(modelPatch?.modelName).toBe("llama-3.1-8b-instant");
+  });
+
+  it("DEEP 4 — STALE endpoint error re-validates first: fresh pass recovers without touching config", async () => {
+    providers[0] = makeProvider({
+      baseUrl: "https://api.groq.com/openai/v1",
+      health: {
+        consecutiveFailures: 1, consecutiveSuccesses: 0,
+        lastError: "HTTP 404: 404 page not found",
+        lastFailureAt: new Date(Date.now() - 10 * 60 * 1000).toISOString(), // 10 min old
+      },
+    });
+    const ping = vi.fn().mockResolvedValue({ ok: true, latencyMs: 55, reply: "READY" });
+
+    const report = await ProviderHealer.healProvider("p_groq", "manual", undefined, { ping, fetchCatalog: vi.fn() });
+
+    expect(report.result).toBe("recovered");
+    expect(ping).toHaveBeenCalledTimes(1); // only the fresh validation — no repair pings
+    const wroteUrl = updateProvider.mock.calls.some((c) => "baseUrl" in (c[1] ?? {}));
+    expect(wroteUrl).toBe(false); // configuration untouched
+    expect(report.diagnosis).toMatch(/stale/i);
+  });
+
+  it("DEEP 5 — healAllProviders isolates a throwing provider and continues the sweep", async () => {
+    providers.length = 0;
+    providers.push(
+      makeProvider({ id: "p_a", name: "A", health: { consecutiveFailures: 1, consecutiveSuccesses: 0, lastError: "Invalid model: boom-a" } }),
+      makeProvider({ id: "p_b", name: "B", health: { consecutiveFailures: 1, consecutiveSuccesses: 0, lastError: "Invalid model: boom-b" } }),
+    );
+    const ping = vi.fn()
+      .mockRejectedValueOnce(new Error("validation socket exploded")) // provider A's heal round crashes
+      .mockResolvedValue({ ok: true, latencyMs: 30, reply: "READY" });
+    const fetchCatalog = vi.fn().mockResolvedValue({ ok: true, models: ["fix-model"] });
+
+    const reports = await ProviderHealer.healAllProviders("manual", { ping, fetchCatalog });
+
+    expect(reports).toHaveLength(2);
+    expect(reports[0].result).toBe("failed");
+    expect(reports[0].problem).toBe("Heal round crashed");
+    expect(reports[1].result).toBe("recovered");
   });
 
   it("TEST 3 — cooldown: no configuration change, cooldown result, re-test scheduled", async () => {

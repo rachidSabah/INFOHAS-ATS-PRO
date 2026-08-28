@@ -216,6 +216,10 @@ export async function runProviderAwareBenchmark(opts: {
         lastError: pingError?.slice(0, 400),
         lastFailureKind: cls.kind,
         lastDiagnosis: cls.humanMessage,
+        // BUG FIX (state honesty): a rate-limit result IS a cooldown — reflect
+        // it in healState so the card matches the COOLDOWN row instead of
+        // showing a stale CONFIGURATION ERROR from a previous cycle.
+        ...(cls.kind === "rate_limited" ? { healState: "cooldown" as const } : {}),
       },
     });
 

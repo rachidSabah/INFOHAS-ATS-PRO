@@ -149,10 +149,27 @@ function patchHealth(provider: AIProvider, patch: NonNullable<AIProvider["health
 
 export class ProviderHealer {
   private static pendingRetests = new Map<string, ReturnType<typeof setTimeout>>();
+  /** Consecutive FAILED post-cooldown re-tests per provider (bounded auto-retry). */
+  private static retestFailures = new Map<string, number>();
+  /** Max consecutive failed re-tests before automatic recovery stops. */
+  private static readonly MAX_CONSECUTIVE_RETEST_FAILURES = 3;
+  /** A stored error older than this is stale — re-validate before repairing. */
+  private static readonly STALE_ERROR_MS = 60_000;
 
   /** AUTO-HEAL toggle (settings.autoHealProviders, default ON). */
   static autoHealEnabled(): boolean {
     return useApp.getState().providerSettings?.autoHealProviders !== false;
+  }
+
+  /**
+   * Clear pending retest timers + consecutive-failure counters.
+   * Test isolation / hot-reload helper — production code never needs it
+   * (timers are deduplicated per provider and counters reset on success).
+   */
+  static resetRetestState(): void {
+    for (const t of this.pendingRetests.values()) clearTimeout(t);
+    this.pendingRetests.clear();
+    this.retestFailures.clear();
   }
 
   /**
@@ -286,6 +303,35 @@ export class ProviderHealer {
 
         // Replacement ALSO failed — classify the new failure honestly.
         const vCls = classifyProviderFailure(validate.error ?? "", { providerType: provider.type });
+
+        // === RATE-LIMITED VALIDATION (bug fix): a 429 means the endpoint AND
+        // key were ACCEPTED — the replacement may be perfectly valid. Keep the
+        // new mapping, enter cooldown, and let a bounded automatic re-test
+        // confirm it (previously this demanded Manual Heal and often reverted
+        // a good repair — the Groq "validation still failed (rate_limited)"
+        // dead-end).
+        if (vCls.kind === "rate_limited") {
+          patchHealth(provider, {
+            healState: "cooldown",
+            lastDiagnosis: `Model mapping updated (${previousModel} → ${replacement}); provider temporarily rate-limited during validation. Automatic re-test scheduled.`,
+            lastFailureKind: "rate_limited",
+            lastFailureAt: new Date().toISOString(),
+            lastError: validate.error,
+            autoHealAttempts: (provider.health?.autoHealAttempts ?? 0) + 1,
+            lastHealAt: new Date().toISOString(),
+          });
+          recordHealthFailure(provider.id, validate.error ?? "rate limited during validation", true);
+          this.scheduleCooldownRetest(provider.id, 60 * 1000, deps, { bump: true });
+          const entry: HealReportEntry = {
+            ...base, problem: `Invalid model id: ${previousModel || "(empty)"}`, failureKind: cls.kind,
+            diagnosis: cls.humanMessage,
+            action: `Model mapping updated (${previousModel} → ${replacement}), but validation hit a temporary rate limit. Cooldown applied — an automatic re-test will confirm the new model.`,
+            previousModel, newModel: replacement, result: "cooldown", latencyMs: validate.latencyMs, technical: validate.error ?? rawError,
+          };
+          recordHealEvent(entry);
+          return entry;
+        }
+
         patchHealth(provider, {
           healState: vCls.kind === "auth_error" ? "auth_error" : vCls.kind === "endpoint_error" ? "endpoint_error" : "configuration_error",
           lastDiagnosis: vCls.humanMessage,
@@ -307,6 +353,38 @@ export class ProviderHealer {
 
       case "endpoint_error": {
         const previousEndpoint = provider.baseUrl || provider.apiUrl;
+        // === STALE-ERROR GATE (bug fix): the stored error may be hours old.
+        // Transient SSL 525 / proxy failures froze providers as
+        // "CONFIGURATION ERROR" cards with no fresh validation. If the only
+        // error we have is stale, run ONE fresh ping first: a pass recovers
+        // the provider without touching its configuration; a different fresh
+        // failure is re-routed to its own repair branch.
+        if (!trigger && provider.health?.lastFailureAt) {
+          const age = Date.now() - new Date(provider.health.lastFailureAt).getTime();
+          if (age > this.STALE_ERROR_MS) {
+            const fresh = await d.ping(provider);
+            if (fresh.ok) {
+              await this.markRecovered(provider, fresh.latencyMs, "Fresh validation ping succeeded — the stored endpoint error was stale.");
+              const entry: HealReportEntry = {
+                ...base, problem: "API endpoint returned 404", failureKind: cls.kind,
+                diagnosis: "The stored endpoint error was stale — a fresh validation request succeeded.",
+                action: "No configuration change. Provider recovered via fresh validation.",
+                previousEndpoint, result: "recovered", latencyMs: fresh.latencyMs,
+              };
+              recordHealEvent(entry);
+              return entry;
+            }
+            const freshCls = classifyProviderFailure(fresh.error ?? "", { providerType: provider.type });
+            if (freshCls.kind !== "endpoint_error") {
+              // Re-route once to the correct branch with the FRESH error (the
+              // trigger guarantees no second fresh ping — bounded depth).
+              return this.healProvider(provider, mode, fresh.error ?? "", deps);
+            }
+            rawError = fresh.error ?? rawError;
+            cls = freshCls;
+          }
+        }
+
         const catalogEntry = getProviderCatalogEntry(provider.type);
         const knownGood = catalogEntry.defaultUrl;
         // Safe repair ONLY when the type is a known catalog type AND the
@@ -444,7 +522,22 @@ export class ProviderHealer {
     const reports: HealReportEntry[] = [];
     for (const p of needsHeal) {
       // Sequential — avoids hammering providers in parallel during recovery.
-      reports.push(await ProviderHealer.healProvider(p, mode, undefined, deps));
+      // Per-provider isolation: one throwing provider must never abort the
+      // whole sweep (it would leave every later provider unhealed).
+      try {
+        reports.push(await ProviderHealer.healProvider(p, mode, undefined, deps));
+      } catch (e: any) {
+        const entry: HealReportEntry = {
+          providerId: p.id, providerName: p.name, mode,
+          problem: "Heal round crashed",
+          failureKind: "unknown",
+          diagnosis: `The heal round for this provider threw an unexpected error: ${e?.message ?? "unknown"}.`,
+          action: "The sweep continued with the remaining providers. Manual Heal required for this one.",
+          result: "failed", technical: String(e?.stack ?? e).slice(0, 400),
+        };
+        recordHealEvent(entry);
+        reports.push(entry);
+      }
     }
     return reports;
   }
@@ -453,11 +546,26 @@ export class ProviderHealer {
    * Schedule an automatic post-cooldown re-test (directive #6): when the
    * cooldown expires the provider is validated with a real ping and returns
    * to HEALTHY without a page reload. Deduplicated per provider.
+   *
+   * BUG FIX (no more dead-end): a failed re-test is now CLASSIFIED instead of
+   * freezing the provider as "Post-cooldown re-test failed — provider still
+   * not healthy":
+   *   - healable (model/endpoint) → ONE bounded auto-heal round
+   *   - temporary / rate_limited  → bounded re-schedule (max 3 consecutive)
+   *   - otherwise                 → honest degraded state (unchanged)
    */
-  static scheduleCooldownRetest(providerId: string, remainingMs: number, deps: HealerDeps = {}): void {
+  static scheduleCooldownRetest(
+    providerId: string,
+    remainingMs: number,
+    deps: HealerDeps = {},
+    opts: { bump?: boolean } = {}
+  ): void {
     const existing = this.pendingRetests.get(providerId);
     if (existing) clearTimeout(existing);
     const wait = Math.min(Math.max(remainingMs, 1000), 5 * 60 * 1000);
+    if (opts.bump) {
+      this.retestFailures.set(providerId, (this.retestFailures.get(providerId) ?? 0) + 1);
+    }
     const t = setTimeout(async () => {
       this.pendingRetests.delete(providerId);
       const provider = useApp.getState().providers.find((p) => p.id === providerId);
@@ -465,6 +573,7 @@ export class ProviderHealer {
       const d = { ...defaultDeps(), ...deps };
       const probe = await d.ping(provider);
       if (probe.ok) {
+        this.retestFailures.delete(providerId);
         resetCircuitBreaker(providerId);
         await this.markRecovered(provider, probe.latencyMs, "Post-cooldown re-test succeeded");
         recordHealEvent({
@@ -472,13 +581,75 @@ export class ProviderHealer {
           diagnosis: "Cooldown expired.", action: "Automatic post-cooldown re-test passed.",
           result: "recovered", latencyMs: probe.latencyMs, mode: "auto",
         });
-      } else {
-        patchHealth(provider, {
-          healState: "degraded",
-          lastDiagnosis: "Post-cooldown re-test failed — provider still not healthy.",
-          lastError: probe.error?.slice(0, 300),
-        });
+        return;
       }
+
+      // === CLASSIFY the re-test failure — never dead-end in "degraded" ===
+      const cls = classifyProviderFailure(probe.error ?? "", { providerType: provider.type });
+      const consecutive = (this.retestFailures.get(providerId) ?? 0) + 1;
+      this.retestFailures.set(providerId, consecutive);
+
+      if (cls.healable && consecutive <= this.MAX_CONSECUTIVE_RETEST_FAILURES) {
+        // The re-test surfaced a REPAIRABLE failure (e.g. a retired model id
+        // surfaced only after the rate-limit window). One bounded heal round:
+        // classify → repair → validate → record. healProvider re-checks the
+        // cooldown gate itself, so this is safe to call directly.
+        recordHealEvent({
+          providerId, providerName: provider.name, failureKind: cls.kind,
+          diagnosis: "Post-cooldown re-test failed with a repairable failure.",
+          action: "Automatic heal round started from the failed re-test.",
+          result: "failed", latencyMs: probe.latencyMs, mode: "auto",
+          technical: probe.error?.slice(0, 300),
+        });
+        try {
+          await this.healProvider(provider, "auto", probe.error, deps);
+        } catch (e: any) {
+          patchHealth(provider, {
+            healState: "configuration_error",
+            lastDiagnosis: `Post-cooldown heal round errored: ${e?.message ?? "unknown"}. Manual Heal required.`,
+            lastError: String(e?.message ?? e).slice(0, 300),
+            lastFailureAt: new Date().toISOString(),
+            lastFailureKind: cls.kind,
+          });
+        }
+        return;
+      }
+
+      if ((cls.temporary || cls.kind === "rate_limited") && consecutive <= this.MAX_CONSECUTIVE_RETEST_FAILURES) {
+        // Transient again (proxy/TLS/5xx or still rate-limited) — re-schedule
+        // with a bounded number of consecutive attempts, then stop honestly.
+        patchHealth(provider, {
+          healState: cls.kind === "rate_limited" ? "cooldown" : "unavailable",
+          lastDiagnosis: `${cls.humanMessage} Automatic re-test ${consecutive}/${this.MAX_CONSECUTIVE_RETEST_FAILURES} scheduled.`,
+          lastError: probe.error?.slice(0, 300),
+          lastFailureAt: new Date().toISOString(),
+          lastFailureKind: cls.kind,
+        });
+        const backoff = cls.kind === "rate_limited" ? 60_000 : 90_000;
+        this.scheduleCooldownRetest(providerId, backoff, deps, { bump: false }); // counter already bumped above
+        return;
+      }
+
+      // Non-repairable (auth, invalid request, unclassified) or attempts
+      // exhausted — honest terminal state, Manual Heal required.
+      patchHealth(provider, {
+        healState: cls.kind === "auth_error" ? "auth_error" : "configuration_error",
+        lastDiagnosis: consecutive > this.MAX_CONSECUTIVE_RETEST_FAILURES
+          ? `Post-cooldown re-test failed ${consecutive} consecutive times — automatic re-tests stopped. Manual Heal required.`
+          : `Post-cooldown re-test failed — ${cls.humanMessage}`,
+        lastError: probe.error?.slice(0, 300),
+        lastFailureAt: new Date().toISOString(),
+        lastFailureKind: cls.kind,
+      });
+      recordHealEvent({
+        providerId, providerName: provider.name, failureKind: cls.kind,
+        diagnosis: "Post-cooldown re-test failed.",
+        action: consecutive > this.MAX_CONSECUTIVE_RETEST_FAILURES
+          ? `Automatic re-tests stopped after ${consecutive} consecutive failures — Manual Heal required.`
+          : "No safe automatic repair for this failure kind — Manual Heal required.",
+        result: "failed", latencyMs: probe.latencyMs, mode: "auto",
+        technical: probe.error?.slice(0, 300),
+      });
     }, wait);
     this.pendingRetests.set(providerId, t);
   }
