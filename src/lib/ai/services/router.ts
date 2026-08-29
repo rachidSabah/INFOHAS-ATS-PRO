@@ -25,6 +25,7 @@ import {
   markProvider429Cooldown,
   markProvider401Cooldown,
   markProviderTimeoutCooldown,
+  recordTrafficCooldownFromError,
   isTimeoutError,
 } from "../../provider-cooldown";
 import { getPromptCache, setPromptCache, buildPromptHash } from "../../prompt-cache";
@@ -221,15 +222,20 @@ export class ProviderRouter {
         errors.push(`${provider.name}: ${eMsg}`);
         console.warn(`[AI] Provider ${provider.name} failed: ${eMsg}`);
 
-        // Record cooldowns
-        if (e?.statusCode === 429 || /429/.test(eMsg) || /rate.?limit/i.test(eMsg) || /FreeUsageLimitError/i.test(eMsg)) {
-          rateLimitTracker.record429(provider.id, provider.modelName ?? "default");
-          markProvider429Cooldown(cooldownId);
-        } else if (e?.statusCode === 401 || /401/.test(eMsg) || /CreditsError/i.test(eMsg)) {
-          markProvider401Cooldown(cooldownId);
-        } else if (isTimeoutError(e)) {
-          markProviderTimeoutCooldown(cooldownId);
-        }
+        // Record cooldowns — REAL traffic only. Probe requests (requestType
+        // "test": preflight / benchmark / heal pings) record health evidence
+        // via the benchmark/heal machinery but NEVER arm router cooldowns —
+        // otherwise free-tier providers 429 the probe and get stuck in a
+        // perpetual "cooldown without usage" cycle (see provider-cooldown.ts).
+        recordTrafficCooldownFromError({
+          cooldownId,
+          providerId: provider.id,
+          modelName: provider.modelName,
+          error: e,
+          statusCode: e?.statusCode,
+          isTimeout: isTimeoutError(e),
+          requestType: opts.requestType,
+        });
       }
     }
 
@@ -367,14 +373,16 @@ export class ProviderRouter {
         const eMsg = e?.message ?? String(e);
         errors.push(`${provider.name}: ${eMsg}`);
         console.warn(`[AI Stream] Provider ${provider.name} failed: ${eMsg}`);
-        if (e?.statusCode === 429 || /429/.test(eMsg) || /rate.?limit/i.test(eMsg) || /FreeUsageLimitError/i.test(eMsg)) {
-          rateLimitTracker.record429(provider.id, provider.modelName ?? "default");
-          markProvider429Cooldown(cooldownId);
-        } else if (e?.statusCode === 401 || /401/.test(eMsg) || /CreditsError/i.test(eMsg)) {
-          markProvider401Cooldown(cooldownId);
-        } else if (isTimeoutError(e)) {
-          markProviderTimeoutCooldown(cooldownId);
-        }
+        // Same traffic-vs-probe rule as chat(): probes never arm cooldowns.
+        recordTrafficCooldownFromError({
+          cooldownId,
+          providerId: provider.id,
+          modelName: provider.modelName,
+          error: e,
+          statusCode: e?.statusCode,
+          isTimeout: isTimeoutError(e),
+          requestType: opts.requestType,
+        });
 
         // === Rotation fallbacks (same as chat) ===
         // A broken stream cannot be resumed, so a rotated retry is delivered
@@ -882,13 +890,16 @@ export class ProviderRouter {
           throw new Error("Aborted by race winner");
         }
         const errMsg = err?.message || String(err);
-        if (err?.statusCode === 429 || /429/.test(errMsg) || /rate.?limit/i.test(errMsg) || /FreeUsageLimitError/i.test(errMsg)) {
-          markProvider429Cooldown(provId);
-        } else if (err?.statusCode === 401 || /401/.test(errMsg) || /billing/i.test(errMsg) || /payment/i.test(errMsg) || /CreditsError/i.test(errMsg)) {
-          markProvider401Cooldown(provId);
-        } else if (isTimeoutError(err)) {
-          markProviderTimeoutCooldown(provId);
-        }
+        recordTrafficCooldownFromError({
+          cooldownId: provId,
+          providerId: provId,
+          error: err,
+          statusCode: err?.statusCode,
+          isTimeout: isTimeoutError(err),
+          requestType: opts.requestType,
+          // The race historically also matched billing/payment wording.
+          authExtra: /billing|payment/i,
+        });
         throw err;
       }
     });

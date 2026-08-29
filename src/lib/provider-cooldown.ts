@@ -22,6 +22,7 @@ export const PROVIDER_429_COOLDOWN_MS = 3 * 60 * 1000;  // 3 minutes for rate li
 export const PROVIDER_401_COOLDOWN_MS = 30 * 60 * 1000; // 30 minutes for billing failures (don't retry billing issues)
 // NOTE: PROVIDER_TIMEOUT_COOLDOWN_MS is imported from pipeline-watchdog.ts (90s)
 import { PROVIDER_TIMEOUT_COOLDOWN_MS } from "./pipeline-watchdog";
+import { rateLimitTracker } from "./rate-limit-tracker";
 
 /** Returns true if a named provider is in cooldown. */
 export function isProviderInCooldown(providerId: string): boolean {
@@ -128,6 +129,64 @@ export function markPuterCooldown(): void {
     window.localStorage?.setItem(PUTER_COOLDOWN_KEY, String(Date.now() + PUTER_COOLDOWN_MS));
   } catch {
     // ignore — localStorage may be unavailable
+  }
+}
+
+// ============================================================================
+// TRAFFIC-vs-PROBE cooldown authority (bug fix — "cooldown even though the
+// API was never used")
+//
+// The router previously armed provider cooldowns (sessionStorage 180s /
+// 30min / 90s + the in-memory rate-limit tracker window) on EVERY failed
+// request. But the app's own health probes — readiness-gate preflight pings,
+// benchmark pings, heal diagnosis/retest pings — travel through the SAME
+// router path with requestType "test". Free-tier models (e.g. ZenCode
+// "hy3-free") rate-limit those probes constantly, so every probe re-armed a
+// fresh 180s cooldown: providers sat in a perpetual "Temporary cooldown —
+// 180s remaining" cycle with ZERO real user traffic.
+//
+// Rule now enforced in ONE place:
+//   - PROBE failure  ("test") → honest health evidence only. The
+//     benchmark/healer machinery records consecutiveFailures / lastError /
+//     healState and schedules a BOUNDED retest. No traffic-blocking cooldown.
+//   - REAL traffic failure → cooldown armed as before, so failover moves to
+//     the next provider and the failed one is re-tested after the window.
+// ============================================================================
+
+/** Record (or intentionally skip) router-level cooldowns for a failed AI call. */
+export function recordTrafficCooldownFromError(opts: {
+  /** Provider identity used for the sessionStorage cooldown key. */
+  cooldownId: string;
+  /** Provider id used for the in-memory rate-limit tracker key. */
+  providerId: string;
+  /** Configured model (tracker key part). */
+  modelName?: string;
+  /** Raw error object/message from the failed call. */
+  error: any;
+  /** HTTP status code when available. */
+  statusCode?: number;
+  /** Pre-computed timeout classification (router's isTimeoutError). */
+  isTimeout: boolean;
+  /** Router requestType — "test" = probe (preflight / benchmark / heal ping). */
+  requestType?: string;
+  /** Extra auth-failure patterns (the speculative race additionally matched
+   *  /billing/|/payment/ before unification — preserved per call site). */
+  authExtra?: RegExp;
+}): void {
+  // PROBES NEVER ARM TRAFFIC COOLDOWNS. A probe 429 is evidence ("this
+  // provider is rate-limited right now"), not usage — blocking real traffic
+  // for it punished providers the user never actually used.
+  if (opts.requestType === "test") return;
+
+  const msg = opts.error?.message ?? String(opts.error ?? "");
+  const status = opts.statusCode ?? opts.error?.statusCode;
+  if (status === 429 || /429/.test(msg) || /rate.?limit/i.test(msg) || /FreeUsageLimitError/i.test(msg)) {
+    rateLimitTracker.record429(opts.providerId, opts.modelName ?? "default");
+    markProvider429Cooldown(opts.cooldownId);
+  } else if (status === 401 || /401/.test(msg) || /CreditsError/i.test(msg) || (opts.authExtra?.test(msg) ?? false)) {
+    markProvider401Cooldown(opts.cooldownId);
+  } else if (opts.isTimeout) {
+    markProviderTimeoutCooldown(opts.cooldownId);
   }
 }
 

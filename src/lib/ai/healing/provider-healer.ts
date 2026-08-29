@@ -353,7 +353,12 @@ export class ProviderHealer {
             autoHealAttempts: (provider.health?.autoHealAttempts ?? 0) + 1,
             lastHealAt: new Date().toISOString(),
           });
-          recordHealthFailure(provider.id, validate.error ?? "rate limited during validation", true);
+          // PHANTOM-COOLDOWN FIX: the validation ping is a PROBE, not user
+          // traffic. Record the failure evidence but do NOT write the
+          // traffic-blocking rateLimitedUntil window — a 429 here says the
+          // endpoint/key were accepted, and real-traffic 429s already arm
+          // the router-level cooldowns (tracker + sessionStorage).
+          recordHealthFailure(provider.id, validate.error ?? "rate limited during validation", false);
           this.scheduleCooldownRetest(provider.id, 60 * 1000, deps, { bump: true });
           const entry: HealReportEntry = {
             ...base, problem: `Invalid model id: ${previousModel || "(empty)"}`, failureKind: cls.kind,
@@ -459,7 +464,13 @@ export class ProviderHealer {
           lastDiagnosis: cls.humanMessage,
           lastFailureKind: "rate_limited",
         });
-        recordHealthFailure(provider.id, rawError.slice(0, 300), true);
+        // PHANTOM-COOLDOWN FIX: record the rate-limit as HEALTH EVIDENCE only
+        // (isRateLimit=false → no rateLimitedUntil write). The trigger here is
+        // typically a probe (benchmark/heal ping); arming a traffic-blocking
+        // window from probe evidence put never-used providers into a
+        // perpetual cooldown cycle. Real-traffic 429s still arm the
+        // router-level cooldowns inside the router itself.
+        recordHealthFailure(provider.id, rawError.slice(0, 300), false);
         this.scheduleCooldownRetest(provider.id, remaining * 1000);
         const entry: HealReportEntry = {
           ...base, problem: "Rate limit / quota", failureKind: cls.kind,

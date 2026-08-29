@@ -352,4 +352,39 @@ describe("ProviderHealer", () => {
     expect(report.result).toBe("recovered");
     expect(updateProvider).not.toHaveBeenCalledWith("p_groq", expect.objectContaining({ modelName: expect.anything() }));
   });
+
+  // ==========================================================================
+  // PHANTOM-COOLDOWN FIX — a rate-limited heal (typically triggered by a
+  // PROBE: benchmark / heal ping on a free-tier model such as hy3-free) must
+  // record honest HEALTH EVIDENCE but must NOT arm a traffic-blocking
+  // rateLimitedUntil window. Real-traffic 429s are already cooled down by
+  // the router itself (tracker + sessionStorage); the healer adding a window
+  // from probe evidence caused the "cooldown even though the API was never
+  // used" bug. (isRateLimit flag must be false in the recordFailure call.)
+  // ==========================================================================
+  it("rate-limited heal records evidence WITHOUT arming rateLimitedUntil (probe evidence, not traffic)", async () => {
+    providers[0] = makeProvider({
+      health: { consecutiveFailures: 1, consecutiveSuccesses: 0, lastError: "" },
+    });
+    const ping = vi.fn().mockResolvedValue({ ok: false, latencyMs: 10, error: "HTTP 429: rate limit exceeded" });
+
+    const report = await ProviderHealer.healProvider("p_groq", "auto", undefined, { ping, fetchCatalog: vi.fn() });
+
+    // Honest evidence: cooldown classification + bounded retest still happen.
+    expect(report.result).toBe("cooldown");
+    expect(report.failureKind).toBe("rate_limited");
+    const healthPatch = updateProvider.mock.calls.map((c) => c[1]).find((p: any) => p.health?.healState === "cooldown");
+    expect(healthPatch?.health?.lastFailureKind).toBe("rate_limited");
+
+    // THE FIX: recordFailure must be called with isRateLimit=false — no
+    // traffic-blocking window written from probe evidence.
+    const { recordFailure } = await import("../../provider-health");
+    expect(recordFailure).toHaveBeenCalledWith("p_groq", expect.stringMatching(/429|rate limit/i), false);
+    // ...and no health patch may carry a NEW rateLimitedUntil stamp.
+    const wroteWindow = updateProvider.mock.calls.some((c) => {
+      const h = (c[1] as any)?.health;
+      return h?.rateLimitedUntil && !(providers[0].health as any)?.rateLimitedUntil;
+    });
+    expect(wroteWindow).toBe(false);
+  });
 });

@@ -57,6 +57,7 @@ vi.mock("../../provider-cooldown", () => ({
   markProvider429Cooldown: vi.fn(),
   markProvider401Cooldown: vi.fn(),
   markProviderTimeoutCooldown: vi.fn(),
+  recordTrafficCooldownFromError: vi.fn(), // traffic-vs-probe cooldown authority
   isTimeoutError: () => false,
   clearAllProviderCooldowns: vi.fn(),
 }));
