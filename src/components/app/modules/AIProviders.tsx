@@ -14,6 +14,7 @@ import { toast } from "sonner";
 import type { AIProvider } from "@/lib/types";
 import { isOpenCodeZenFree } from "@/lib/provider-capabilities";
 import { getProviderConcurrencySnapshot, resetProviderAdaptiveCap, ADAPTIVE_CAP_RECOVER_THRESHOLD } from "@/lib/provider-concurrency";
+import { getProviderCooldownSnapshot, formatCooldownRemaining, clearProviderCooldownOnSuccess, type ProviderCooldownClass } from "@/lib/provider-cooldown";
 import { ProviderEditor } from "./AIProviderEditor";
 import { ProviderAnalytics } from "./ProviderAnalytics";
 import { ProviderLogsTable } from "./ProviderLogsTable";
@@ -119,6 +120,13 @@ export function AIProviders() {
     const existed = resetProviderAdaptiveCap(p.id);
     if (existed) toast.success(`${p.name}: adaptive cap reset — running at the configured ceiling.`);
     else toast.info(`${p.name}: no adaptive tightening to reset.`);
+  };
+
+  /** Manual clear of a cooldown window (Task 22): evidence-based early-clear,
+   * same path a successful call or honest probe takes. */
+  const handleClearCooldown = (p: AIProvider) => {
+    clearProviderCooldownOnSuccess(p.id);
+    toast.success(`${p.name}: cooldown cleared — eligible for traffic again.`);
   };
 
   const importRef = useRef<HTMLInputElement>(null);
@@ -329,7 +337,7 @@ export function AIProviders() {
                     <th className="px-4 py-2 font-semibold">Model</th>
                     <th className="px-4 py-2 font-semibold">Status</th>
                     <th className="px-4 py-2 font-semibold">Priority</th>
-                    <th className="px-4 py-2 font-semibold" title="Live concurrency limiter: effective cap / your configured ceiling. AUTO = the adaptive layer self-tightened after 429 evidence (halves on hits, +1 per 5 clean successes).">Concurrency</th>
+                    <th className="px-4 py-2 font-semibold" title="Live traffic control: effective cap / your configured ceiling (AUTO = the adaptive layer self-tightened after 429 evidence), plus any active cooldown window (quota / rate-limit / auth / timeout) with its remaining time.">Concurrency</th>
                     <th className="px-4 py-2 font-semibold">Requests</th>
                     <th className="px-4 py-2 font-semibold">Last used</th>
                     <th className="px-4 py-2 font-semibold text-right">Actions</th>
@@ -371,31 +379,58 @@ export function AIProviders() {
                         <td className="px-4 py-3">
                           {(() => {
                             const snap = getProviderConcurrencySnapshot(p.id, p.concurrencyCap);
+                            const cd = getProviderCooldownSnapshot(p.id);
+                            const cdLabel: Record<ProviderCooldownClass, string> = {
+                              quota: "QUOTA", "429": "RATE-LIMIT", "401": "AUTH", timeout: "TIMEOUT", unknown: "COOLDOWN",
+                            };
+                            const cdLong = cd.class === "quota" || cd.class === "401";
                             return (
-                              <div className="flex items-center gap-1.5">
-                                <span
-                                  className={`font-mono text-xs ${snap.tightened ? "font-semibold text-amber-600 dark:text-amber-400" : "text-muted-foreground"}`}
-                                  title={snap.tightened
-                                    ? `Auto-tightened to ${snap.effectiveCap} of your ceiling ${snap.configuredCap} after rate-limit evidence. Recovers +1 per ${ADAPTIVE_CAP_RECOVER_THRESHOLD} clean successes (now ${snap.consecutiveSuccesses}/${ADAPTIVE_CAP_RECOVER_THRESHOLD}).`
-                                    : `Cap ${snap.configuredCap} — as configured.${snap.inFlight > 0 ? ` ${snap.inFlight} in flight.` : ""}`}
-                                >
-                                  {snap.effectiveCap}/{snap.configuredCap}
-                                </span>
-                                {snap.tightened && (
-                                  <Badge variant="warning" className="text-[9px]">AUTO</Badge>
-                                )}
-                                {snap.tightened && (
-                                  <button
-                                    onClick={() => handleResetAdaptiveCap(p)}
-                                    title="Reset adaptive cap to the configured ceiling"
-                                    aria-label="Reset adaptive cap"
-                                    className="w-5 h-5 rounded hover:bg-secondary flex items-center justify-center text-muted-foreground hover:text-foreground transition"
+                              <div className="space-y-1">
+                                <div className="flex items-center gap-1.5">
+                                  <span
+                                    className={`font-mono text-xs ${snap.tightened ? "font-semibold text-amber-600 dark:text-amber-400" : "text-muted-foreground"}`}
+                                    title={snap.tightened
+                                      ? `Auto-tightened to ${snap.effectiveCap} of your ceiling ${snap.configuredCap} after rate-limit evidence. Recovers +1 per ${ADAPTIVE_CAP_RECOVER_THRESHOLD} clean successes (now ${snap.consecutiveSuccesses}/${ADAPTIVE_CAP_RECOVER_THRESHOLD}).`
+                                      : `Cap ${snap.configuredCap} — as configured.${snap.inFlight > 0 ? ` ${snap.inFlight} in flight.` : ""}`}
                                   >
-                                    <Icon name="RotateCcw" className="w-3 h-3" />
-                                  </button>
-                                )}
-                                {snap.inFlight > 0 && (
-                                  <span className="text-[10px] text-muted-foreground whitespace-nowrap">· {snap.inFlight} in flight</span>
+                                    {snap.effectiveCap}/{snap.configuredCap}
+                                  </span>
+                                  {snap.tightened && (
+                                    <Badge variant="warning" className="text-[9px]">AUTO</Badge>
+                                  )}
+                                  {snap.tightened && (
+                                    <button
+                                      onClick={() => handleResetAdaptiveCap(p)}
+                                      title="Reset adaptive cap to the configured ceiling"
+                                      aria-label="Reset adaptive cap"
+                                      className="w-5 h-5 rounded hover:bg-secondary flex items-center justify-center text-muted-foreground hover:text-foreground transition"
+                                    >
+                                      <Icon name="RotateCcw" className="w-3 h-3" />
+                                    </button>
+                                  )}
+                                  {snap.inFlight > 0 && (
+                                    <span className="text-[10px] text-muted-foreground whitespace-nowrap">· {snap.inFlight} in flight</span>
+                                  )}
+                                </div>
+                                {cd.inCooldown && (
+                                  <div className="flex items-center gap-1.5">
+                                    <span
+                                      className={`inline-flex items-center gap-1 text-[10px] font-semibold ${cdLong ? "text-amber-600 dark:text-amber-400" : "text-sky-600 dark:text-sky-400"}`}
+                                      title={`${cdLabel[cd.class ?? "unknown"]} cooldown — ${formatCooldownRemaining(cd.remainingMs)} remaining${cd.persisted ? " (persisted: survives a page reload / tab close)" : ""}. The router skips this provider until the window ends, a successful probe clears it, or you clear it manually.`}
+                                    >
+                                      <Icon name="Timer" className="w-3 h-3" />
+                                      {cdLabel[cd.class ?? "unknown"]} {formatCooldownRemaining(cd.remainingMs)}
+                                      {cd.persisted && <span className="font-normal opacity-70">· saved</span>}
+                                    </span>
+                                    <button
+                                      onClick={() => handleClearCooldown(p)}
+                                      title="Clear cooldown — make this provider eligible for traffic now"
+                                      aria-label="Clear cooldown"
+                                      className="w-5 h-5 rounded hover:bg-secondary flex items-center justify-center text-muted-foreground hover:text-foreground transition"
+                                    >
+                                      <Icon name="X" className="w-3 h-3" />
+                                    </button>
+                                  </div>
                                 )}
                               </div>
                             );

@@ -24,6 +24,8 @@ import { runProviderAwareBenchmark, type BenchmarkReport, type BenchmarkRow } fr
 import { ProviderHealer, providerInCooldown, cooldownRemainingSeconds, type HealReportEntry } from "@/lib/ai/healing/provider-healer";
 import { getHealHistory, clearHealHistory, type HealEvent } from "@/lib/ai/healing/heal-history";
 import { classifyProviderFailure } from "@/lib/ai/healing/error-classifier";
+import { getProviderCooldownSnapshot, formatCooldownRemaining, type ProviderCooldownClass } from "@/lib/provider-cooldown";
+import { getProviderConcurrencySnapshot, ADAPTIVE_CAP_RECOVER_THRESHOLD } from "@/lib/provider-concurrency";
 
 export function ProviderHealthPanel() {
   const providers = useApp((s) => s.providers);
@@ -38,6 +40,15 @@ export function ProviderHealthPanel() {
   const [healReports, setHealReports] = useState<HealReportEntry[] | null>(null);
   const [healHistory, setHealHistory] = useState<HealEvent[]>([]);
   const [showHistory, setShowHistory] = useState(false);
+
+  // Task 22 — live traffic-control countdowns: cooldown windows and the
+  // adaptive cap live outside the store (sessionStorage/localStorage + module
+  // state), so tick lightly to keep the strip's chips current.
+  const [, setTrafficTick] = useState(0);
+  useEffect(() => {
+    const t = setInterval(() => setTrafficTick((n) => n + 1), 2000);
+    return () => clearInterval(t);
+  }, []);
 
   // Refresh heal history on mount + after operations
   useEffect(() => { setHealHistory(getHealHistory()); }, [benchReport, healReports]);
@@ -168,6 +179,8 @@ export function ProviderHealthPanel() {
           {stripProviders.map((p) => {
             const inCd = providerInCooldown(p);
             const cdSecs = inCd ? cooldownRemainingSeconds(p) : 0;
+            const cdSnap = getProviderCooldownSnapshot(p.id || p.name || p.type);
+            const capSnap = getProviderConcurrencySnapshot(p.id, p.concurrencyCap);
             const cls = p.health?.lastError ? classifyProviderFailure(p.health.lastError, { providerType: p.type }) : null;
             const chip: string = inCd
               ? "COOLDOWN"
@@ -182,11 +195,31 @@ export function ProviderHealthPanel() {
               : chip === "MODEL ERROR" || chip === "ENDPOINT ERROR" || chip === "AUTH ERROR" || chip === "CONFIGURATION ERROR" ? "bg-orange-500/10 text-orange-600 border-orange-500/30"
               : chip === "HEALING" ? "bg-sky-500/10 text-sky-600 border-sky-500/30"
               : "bg-red-500/10 text-red-600 border-red-500/30";
+            // Task 22 — class-aware cooldown detail: the WHY (quota vs 429 vs
+            // auth vs timeout), a human-readable window, and whether the S1
+            // localStorage mirror backs it (survives tab close).
+            const cdClassLabel: Record<ProviderCooldownClass, string> = {
+              quota: "QUOTA", "429": "RATE-LIMIT", "401": "AUTH", timeout: "TIMEOUT", unknown: "COOLDOWN",
+            };
+            const cdDetail = inCd
+              ? `${cdSnap.class ? ` · ${cdClassLabel[cdSnap.class]}` : ""} ${formatCooldownRemaining(cdSecs * 1000)}${cdSnap.persisted ? " · saved" : ""}`
+              : "";
             return (
               <div key={p.id} className="flex items-center gap-2 px-2.5 py-1.5">
-                <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full border text-[10px] font-semibold ${chipCls}`}>
-                  <span className="w-1.5 h-1.5 rounded-full bg-current" /> {chip}{inCd ? ` ${cdSecs}s` : ""}
+                <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full border text-[10px] font-semibold ${chipCls}`}
+                  title={inCd && cdSnap.class
+                    ? `${cdClassLabel[cdSnap.class]} cooldown — ${formatCooldownRemaining(cdSecs * 1000)} remaining${cdSnap.persisted ? " (persisted: survives a page reload / tab close)" : ""}. Traffic skips this provider until the window ends or evidence clears it.`
+                    : undefined}
+                >
+                  <span className="w-1.5 h-1.5 rounded-full bg-current" /> {chip}{cdDetail}
                 </span>
+                {capSnap.tightened && (
+                  <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full border text-[10px] font-semibold bg-amber-500/10 text-amber-600 border-amber-500/30"
+                    title={`Adaptive concurrency cap self-tightened to ${capSnap.effectiveCap} of the configured ceiling ${capSnap.configuredCap} after rate-limit evidence. Recovers +1 per ${ADAPTIVE_CAP_RECOVER_THRESHOLD} clean successes (now ${capSnap.consecutiveSuccesses}/${ADAPTIVE_CAP_RECOVER_THRESHOLD}). Reset it on the Providers table.`}
+                  >
+                    <Icon name="Gauge" className="w-3 h-3" /> CAP {capSnap.effectiveCap}/{capSnap.configuredCap} AUTO
+                  </span>
+                )}
                 <span className="font-medium truncate max-w-[140px]">{p.name}</span>
                 <span className="font-mono text-[10px] text-muted-foreground truncate max-w-[160px]">{p.modelName || "—"}</span>
                 {p.health?.lastDiagnosis && <span className="text-[10px] text-muted-foreground truncate flex-1 hidden sm:inline">{p.health.lastDiagnosis}</span>}

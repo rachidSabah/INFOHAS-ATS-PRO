@@ -172,6 +172,63 @@ export function getProviderCooldownClass(providerId: string): ProviderCooldownCl
   return null;
 }
 
+// ---------------------------------------------------------------------------
+// Task 22 — QUOTA-WINDOW VISIBILITY: snapshot + display formatting.
+//
+// Same observability treatment the adaptive cap got in Task 21: traffic
+// control that the router enforces must be visible where the user manages
+// providers. getProviderCooldownSnapshot mirrors the session→local lookup
+// order of the read helpers above and reports WHERE the active window lives
+// (persisted = the S1 localStorage mirror — it survives a tab close).
+// formatCooldownRemaining is the shared human display for chips/tooltips.
+// ---------------------------------------------------------------------------
+
+export interface ProviderCooldownSnapshot {
+  providerId: string;
+  inCooldown: boolean;
+  /** ms remaining in the active window (0 when none). */
+  remainingMs: number;
+  /** The recorded class (null when none) — quota / 429 / 401 / timeout. */
+  class: ProviderCooldownClass | null;
+  /** Epoch ms when the window ends (null when none). */
+  until: number | null;
+  /** A live S1 localStorage mirror backs this window (it survives a tab close). */
+  persisted: boolean;
+}
+
+/** Full per-provider cooldown picture for observability surfaces.
+ * `persisted` = a LIVE S1 mirror backs this window (it survives a tab close) —
+ * regardless of which store served the read, since mark* writes session and
+ * mirror together. */
+export function getProviderCooldownSnapshot(providerId: string): ProviderCooldownSnapshot {
+  if (typeof window === "undefined") {
+    return { providerId, inCooldown: false, remainingMs: 0, class: null, until: null, persisted: false };
+  }
+  const l = readLocal(providerId);
+  const persisted = !!(l && Date.now() < l.until);
+  const s = readSession(providerId);
+  if (s && Date.now() < s.until) {
+    return { providerId, inCooldown: true, remainingMs: s.until - Date.now(), class: s.class, until: s.until, persisted };
+  }
+  if (persisted) {
+    return { providerId, inCooldown: true, remainingMs: l!.until - Date.now(), class: l!.class, until: l!.until, persisted };
+  }
+  return { providerId, inCooldown: false, remainingMs: 0, class: null, until: null, persisted: false };
+}
+
+/** Human display for a remaining window: "30m 00s", "2m 05s", "45s", "1h 05m".
+ * Rounds UP so a live window never displays as already-expired. */
+export function formatCooldownRemaining(ms: number): string {
+  if (!Number.isFinite(ms) || ms <= 0) return "0s";
+  const totalSecs = Math.ceil(ms / 1000);
+  const h = Math.floor(totalSecs / 3600);
+  const m = Math.floor((totalSecs % 3600) / 60);
+  const s = totalSecs % 60;
+  if (h > 0) return `${h}h ${String(m).padStart(2, "0")}m`;
+  if (m > 0) return `${m}m ${String(s).padStart(2, "0")}s`;
+  return `${s}s`;
+}
+
 /** Marks a provider as rate-limited (429) for PROVIDER_429_COOLDOWN_MS. */
 export function markProvider429Cooldown(providerId: string): void {
   if (typeof window === "undefined") return;
