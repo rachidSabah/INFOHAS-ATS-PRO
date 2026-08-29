@@ -26,6 +26,7 @@ import { AIRLINE_ATS_PROFILES, AIRLINE_OPTIONS, DEFAULT_APP_SETTINGS, type AppSe
 import { INDUSTRY_PROFILES, INDUSTRY_OPTIONS, type IndustryAtsProfile, detectATSFromCompany, type AtsDetails } from "@/lib/industry-ats";
 import { mapToIndustryMode } from "@/lib/industry-mapper";
 import { runOptimizationPipeline, type PipelineResult as AgentPipelineResult, type PipelineProgress } from "@/lib/agents";
+import { buildCheckpointFromResult, isCheckpointUsable, type PipelineCheckpoint } from "@/lib/agents/pipeline-checkpoint";
 import { clearAllProviderCooldowns } from "@/lib/ai";
 import { PipelineProgressView } from "@/components/optimizer/PipelineProgressView";
 import { PipelineResults } from "@/components/optimizer/PipelineResults";
@@ -116,6 +117,9 @@ export function Optimizer() {
   // Pipeline state — the orchestrator's real-time progress + final result
   const [pipelineProgress, setPipelineProgress] = useState<PipelineProgress | null>(null);
   const [pipelineResult, setPipelineResult] = useState<AgentPipelineResult | null>(null);
+  // S4 — checkpoint from the last RECOVERABLE run: completed AI intelligence
+  // artifacts preserved so the retry resumes instead of re-calling them.
+  const [pipelineCheckpoint, setPipelineCheckpoint] = useState<PipelineCheckpoint | null>(null);
   // Interview prep mode — shows when user clicks "Prepare for Interview"
   const [showInterviewPrep, setShowInterviewPrep] = useState(false);
   const [deepAgenticMode, setDeepAgenticMode] = useState(false);
@@ -1084,6 +1088,13 @@ Guidelines:
       // Interview, CareerCoach) in parallel after optimization completes.
       // The Supervisor also caches results + manages the shared context. ===
       const { handleOptimizationRequested } = await import("@/lib/agents/supervisor");
+      // S4 — pass a usable checkpoint (same JD, < 24h old) once, then clear:
+      // if this run also ends recoverable, the handler captures a fresh one.
+      const checkpointToPass = isCheckpointUsable(pipelineCheckpoint, jdParsed) ? pipelineCheckpoint : undefined;
+      if (pipelineCheckpoint) setPipelineCheckpoint(null);
+      if (checkpointToPass) {
+        setAiLog((l) => [...l, "↻ Checkpoint resume — previously completed analyses (Job/Company Intelligence, Skill Gap) will be restored, only the failed optimizer re-runs."]);
+      }
       const result = await handleOptimizationRequested({
         resume,
         jd: jdParsed,
@@ -1093,6 +1104,7 @@ Guidelines:
           : undefined,
         enableReflection: true,
         deepAgenticMode,
+        checkpoint: checkpointToPass ?? undefined,
         onProgress: (progress) => {
           if (controller.signal.aborted) return;
           setPipelineProgress(progress);
@@ -1178,6 +1190,10 @@ Guidelines:
       // credit, no fake resume — and keep the job retryable in place.
       if (result.status === "recoverable_error") {
         const cov = result.keywordCoverage;
+        // S4 — capture the completed intelligence artifacts so the retry
+        // RESUMES (skips Job/Company Intelligence + Skill Gap AI calls).
+        const cp = buildCheckpointFromResult(result, jdParsed);
+        if (cp) setPipelineCheckpoint(cp);
         setPipelineError(
           "Optimization INCOMPLETE (recoverable): every validated AI attempt failed after retries, auto-heal and fallbacks. " +
           "Your completed analyses and snapshots are preserved and the original resume was NOT substituted as a result. " +
@@ -1285,7 +1301,7 @@ Guidelines:
       // Job ended — release the AI configuration lock.
       import("@/lib/ai/readiness/config-lock").then(({ clearJobAILock }) => clearJobAILock()).catch(() => {});
     }
-  }, [resume, jdParsed, beforeReport, industryMode, industryId, industrySettings, addResume, addATS, incUsage, log]);
+  }, [resume, jdParsed, beforeReport, industryMode, industryId, industrySettings, addResume, addATS, incUsage, log, pipelineCheckpoint]);
 
   // Legacy alias — the "Optimize" button still calls optimize().
   // Now it delegates to runPipeline().

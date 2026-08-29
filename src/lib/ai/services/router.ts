@@ -22,13 +22,23 @@ import { rateLimitTracker } from "../../rate-limit-tracker";
 import { localGenerate } from "../../local-engine";
 import {
   isProviderInCooldown,
+  getProviderCooldownRemainingMs,
+  getProviderCooldownClass,
   markProvider429Cooldown,
   markProvider401Cooldown,
   markProviderTimeoutCooldown,
   recordTrafficCooldownFromError,
   clearProviderCooldownOnSuccess,
   isTimeoutError,
+  type ProviderCooldownClass,
 } from "../../provider-cooldown";
+import { globalEventBus } from "../../agent-event-bus";
+import {
+  acquireProviderSlot,
+  releaseProviderSlot,
+  getProviderInFlight,
+  getProviderConcurrencyOpts,
+} from "../../provider-concurrency";
 import { getPromptCache, setPromptCache, buildPromptHash } from "../../prompt-cache";
 import { tryRotateProviderToken, isRotatableAuthError } from "../../token-rotation";
 import { withTimeout, OptimizationProviderExhaustedError, AI_CALL_TIMEOUT_MS } from "../../pipeline-watchdog";
@@ -186,12 +196,39 @@ export class ProviderRouter {
       // with an unclassifiable "in cooldown (Xs remaining)" error and meant a
       // cooled provider could never be re-tested (or early-cleared) again.
       const isProbe = opts.requestType === "test";
-      if (!isProbe && (rateLimitTracker.isRateLimited(provider.id) || isProviderInCooldown(cooldownId))) {
-        const remainingSec = rateLimitTracker.isRateLimited(provider.id)
-          ? Math.ceil(rateLimitTracker.getCooldownRemainingMs(provider.id) / 1000)
-          : 60; // default to 60s for other cooldowns
-        errors.push(`${provider.name}: in cooldown (${remainingSec}s remaining)`);
-        continue;
+      if (!isProbe) {
+        const trackerLimited = rateLimitTracker.isRateLimited(provider.id);
+        const sessionCool = isProviderInCooldown(cooldownId);
+        if (trackerLimited || sessionCool) {
+          // S2 — structured, ACCURATE skip reason (the old code guessed a
+          // hardcoded "60s" for the session layer). Feeds the trajectory
+          // panel: WHY was this provider skipped, and until when.
+          const layer: "tracker" | "session" = trackerLimited ? "tracker" : "session";
+          const remainingMs = trackerLimited
+            ? rateLimitTracker.getCooldownRemainingMs(provider.id)
+            : getProviderCooldownRemainingMs(cooldownId);
+          const cls: ProviderCooldownClass | "tracker-backoff" = trackerLimited
+            ? "tracker-backoff"
+            : (getProviderCooldownClass(cooldownId) ?? "unknown");
+          try {
+            globalEventBus.emit({
+              agent: "ProviderRouter",
+              action: "skip_provider",
+              resumeId: provider.name,
+              provider: provider.name,
+              success: false,
+              metadata: {
+                reason: "cooldown",
+                layer,
+                class: cls,
+                remainingMs,
+                requestType: opts.requestType ?? "chat",
+              },
+            });
+          } catch { /* event bus must never break routing */ }
+          errors.push(`${provider.name}: in cooldown (${Math.max(1, Math.ceil(remainingMs / 1000))}s remaining)`);
+          continue;
+        }
       }
 
       // Check budget constraint: if total elapsed time exceeds the callTimeout budget,
@@ -200,6 +237,33 @@ export class ProviderRouter {
       if (elapsedMs >= callTimeoutMs) {
         console.warn(`[AI] Budget exhausted (${elapsedMs}ms ≥ ${callTimeoutMs}ms). Skipping remaining chain.`);
         break;
+      }
+
+      // S3 — per-provider concurrency cap. Parallel pipeline agents (the
+      // intelligence stage, the locked pipeline's optimizer stage) can fire
+      // several requests at ONE provider simultaneously — on free tiers that
+      // self-inflicts 429s indistinguishable from quota exhaustion. Traffic
+      // waits up to maxWaitMs for a slot, then falls through; probes bypass.
+      const slotAcquired = await acquireProviderSlot(cooldownId, { probe: isProbe });
+      if (!slotAcquired) {
+        const inFlight = getProviderInFlight(cooldownId);
+        try {
+          globalEventBus.emit({
+            agent: "ProviderRouter",
+            action: "skip_provider",
+            resumeId: provider.name,
+            provider: provider.name,
+            success: false,
+            metadata: {
+              reason: "provider_busy",
+              inFlight,
+              waitedMs: getProviderConcurrencyOpts().maxWaitMs,
+              requestType: opts.requestType ?? "chat",
+            },
+          });
+        } catch { /* event bus must never break routing */ }
+        errors.push(`${provider.name}: provider busy (${inFlight} in-flight, concurrency cap)`);
+        continue;
       }
 
       try {
@@ -244,6 +308,11 @@ export class ProviderRouter {
           isTimeout: isTimeoutError(e),
           requestType: opts.requestType,
         });
+      } finally {
+        // S3 — the slot covers exactly one provider attempt (rotations are
+        // sequential inside tryProviderWithRotations, so this only throttles
+        // DIFFERENT pipeline agents racing for the same provider).
+        releaseProviderSlot(cooldownId);
       }
     }
 
@@ -321,18 +390,66 @@ export class ProviderRouter {
       // Same probe-vs-traffic rule as chat(): cooldowns gate traffic, not
       // evidence — probes must reach cooled-down providers.
       const isProbe = opts.requestType === "test";
-      if (!isProbe && (rateLimitTracker.isRateLimited(provider.id) || isProviderInCooldown(cooldownId))) {
-        const remainingSec = rateLimitTracker.isRateLimited(provider.id)
-          ? Math.ceil(rateLimitTracker.getCooldownRemainingMs(provider.id) / 1000)
-          : 60;
-        errors.push(`${provider.name}: in cooldown (${remainingSec}s remaining)`);
-        continue;
+      if (!isProbe) {
+        const trackerLimited = rateLimitTracker.isRateLimited(provider.id);
+        const sessionCool = isProviderInCooldown(cooldownId);
+        if (trackerLimited || sessionCool) {
+          // S2 — structured, accurate skip reason (chat-path parity).
+          const layer: "tracker" | "session" = trackerLimited ? "tracker" : "session";
+          const remainingMs = trackerLimited
+            ? rateLimitTracker.getCooldownRemainingMs(provider.id)
+            : getProviderCooldownRemainingMs(cooldownId);
+          const cls: ProviderCooldownClass | "tracker-backoff" = trackerLimited
+            ? "tracker-backoff"
+            : (getProviderCooldownClass(cooldownId) ?? "unknown");
+          try {
+            globalEventBus.emit({
+              agent: "ProviderRouter",
+              action: "skip_provider",
+              resumeId: provider.name,
+              provider: provider.name,
+              success: false,
+              metadata: {
+                reason: "cooldown",
+                layer,
+                class: cls,
+                remainingMs,
+                requestType: opts.requestType ?? "chat",
+              },
+            });
+          } catch { /* event bus must never break routing */ }
+          errors.push(`${provider.name}: in cooldown (${Math.max(1, Math.ceil(remainingMs / 1000))}s remaining)`);
+          continue;
+        }
       }
 
       const elapsedMs = Math.round(performance.now() - t0);
       if (elapsedMs >= callTimeoutMs) {
         console.warn(`[AI Stream] Budget exhausted (${elapsedMs}ms ≥ ${callTimeoutMs}ms). Skipping remaining chain.`);
         break;
+      }
+
+      // S3 — per-provider concurrency cap (chat-path parity). Probes bypass.
+      const slotAcquired = await acquireProviderSlot(cooldownId, { probe: isProbe });
+      if (!slotAcquired) {
+        const inFlight = getProviderInFlight(cooldownId);
+        try {
+          globalEventBus.emit({
+            agent: "ProviderRouter",
+            action: "skip_provider",
+            resumeId: provider.name,
+            provider: provider.name,
+            success: false,
+            metadata: {
+              reason: "provider_busy",
+              inFlight,
+              waitedMs: getProviderConcurrencyOpts().maxWaitMs,
+              requestType: opts.requestType ?? "chat",
+            },
+          });
+        } catch { /* event bus must never break routing */ }
+        errors.push(`${provider.name}: provider busy (${inFlight} in-flight, concurrency cap)`);
+        continue;
       }
 
       // Per-provider rotation state — same dedup semantics as chat().
@@ -424,6 +541,10 @@ export class ProviderRouter {
             console.warn(`[AI Stream] Rotation fallbacks failed for ${provider.name}: ${rotErr?.message || rotErr}`);
           }
         }
+      } finally {
+        // S3 — the slot covers exactly one provider attempt (rotation
+        // fallbacks above are sequential and part of the same attempt).
+        releaseProviderSlot(cooldownId);
       }
     }
 

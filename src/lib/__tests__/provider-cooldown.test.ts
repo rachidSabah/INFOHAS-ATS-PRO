@@ -42,6 +42,15 @@ const store = new Map<string, string>();
 
 const keyFor = (id: string) => PROVIDER_COOLDOWN_PREFIX + id;
 
+// S1: cooldown entries are now JSON ({until, class}) — parse accordingly.
+const readUntil = (id: string): number => {
+  const raw = store.get(keyFor(id)) ?? "";
+  if (raw.startsWith("{")) {
+    try { return JSON.parse(raw).until as number; } catch { return NaN; }
+  }
+  return Number(raw);
+};
+
 // Unique provider ids per test — the rate-limit tracker is a process-level
 // singleton with no reset, so tests must not share keys.
 let seq = 0;
@@ -105,7 +114,7 @@ describe("recordTrafficCooldownFromError — real traffic still arms cooldowns",
     expect(isProviderInCooldown(id)).toBe(true);
     expect(rateLimitTracker.isRateLimited(id)).toBe(true);
     // sessionStorage key carries the 429 window
-    const until = Number(store.get(keyFor(id)));
+    const until = readUntil(id);
     expect(until - Date.now()).toBeGreaterThan(PROVIDER_429_COOLDOWN_MS - 5000);
   });
 
@@ -119,7 +128,7 @@ describe("recordTrafficCooldownFromError — real traffic still arms cooldowns",
       requestType: "chat",
     });
     expect(isProviderInCooldown(id)).toBe(true);
-    const until = Number(store.get(keyFor(id)));
+    const until = readUntil(id);
     expect(until - Date.now()).toBeGreaterThan(PROVIDER_401_COOLDOWN_MS - 5000);
   });
 
@@ -195,7 +204,7 @@ describe("recordTrafficCooldownFromError — quota-class cooldown (P1)", () => {
       isTimeout: false,
       requestType: "chat",
     });
-    const until = Number(store.get(keyFor(id)));
+    const until = readUntil(id);
     expect(until - Date.now()).toBeGreaterThan(PROVIDER_QUOTA_COOLDOWN_MS - 5000);
   });
 
@@ -209,7 +218,7 @@ describe("recordTrafficCooldownFromError — quota-class cooldown (P1)", () => {
       isTimeout: false,
       requestType: "chat",
     });
-    const until = Number(store.get(keyFor(id)));
+    const until = readUntil(id);
     expect(until - Date.now()).toBeGreaterThan(PROVIDER_QUOTA_COOLDOWN_MS - 5000);
   });
 
@@ -223,7 +232,7 @@ describe("recordTrafficCooldownFromError — quota-class cooldown (P1)", () => {
       isTimeout: false,
       requestType: "chat",
     });
-    const until = Number(store.get(keyFor(id)));
+    const until = readUntil(id);
     expect(until - Date.now()).toBeGreaterThan(PROVIDER_429_COOLDOWN_MS - 5000);
     expect(until - Date.now()).toBeLessThan(PROVIDER_QUOTA_COOLDOWN_MS - 60_000);
   });
@@ -231,7 +240,7 @@ describe("recordTrafficCooldownFromError — quota-class cooldown (P1)", () => {
   it("markProviderQuotaCooldown arms the long window directly", () => {
     const id = nextId();
     markProviderQuotaCooldown(id);
-    const until = Number(store.get(keyFor(id)));
+    const until = readUntil(id);
     expect(until - Date.now()).toBeGreaterThan(PROVIDER_QUOTA_COOLDOWN_MS - 5000);
   });
 });
@@ -253,7 +262,7 @@ describe("recordTrafficCooldownFromError — Retry-After honored (P2)", () => {
       isTimeout: false,
       requestType: "chat",
     });
-    const until = Number(store.get(keyFor(id)));
+    const until = readUntil(id);
     const windowMs = until - Date.now();
     expect(windowMs).toBeGreaterThan(110_000);
     expect(windowMs).toBeLessThanOrEqual(126_000);
@@ -271,7 +280,7 @@ describe("recordTrafficCooldownFromError — Retry-After honored (P2)", () => {
       isTimeout: false,
       requestType: "chat",
     });
-    const until = Number(store.get(keyFor(id)));
+    const until = readUntil(id);
     const windowMs = until - Date.now();
     expect(windowMs).toBeGreaterThan(85_000);
     expect(windowMs).toBeLessThanOrEqual(96_000);
@@ -290,7 +299,7 @@ describe("recordTrafficCooldownFromError — Retry-After honored (P2)", () => {
       isTimeout: false,
       requestType: "chat",
     });
-    const until = Number(store.get(keyFor(id)));
+    const until = readUntil(id);
     const windowMs = until - Date.now();
     expect(windowMs).toBeGreaterThan(55_000);
     expect(windowMs).toBeLessThanOrEqual(66_000);
@@ -306,7 +315,7 @@ describe("recordTrafficCooldownFromError — Retry-After honored (P2)", () => {
       isTimeout: false,
       requestType: "chat",
     });
-    const until = Number(store.get(keyFor(id)));
+    const until = readUntil(id);
     expect(until - Date.now()).toBeLessThanOrEqual(PROVIDER_QUOTA_COOLDOWN_MS + 5000);
   });
 
@@ -320,7 +329,7 @@ describe("recordTrafficCooldownFromError — Retry-After honored (P2)", () => {
       isTimeout: false,
       requestType: "chat",
     });
-    const until = Number(store.get(keyFor(id)));
+    const until = readUntil(id);
     expect(until - Date.now()).toBeGreaterThan(PROVIDER_401_COOLDOWN_MS - 5000);
   });
 });

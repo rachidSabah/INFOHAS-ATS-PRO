@@ -51,6 +51,10 @@ import { analyzeCompanyIntelligence, analyzeSkillGap, type CompanyIntelligence, 
 import { uid, useApp } from "../store";
 import type { ResumeSkill } from "../types";
 import type { PipelineProfile } from "../pipeline-orchestration-types";
+import {
+  isCheckpointUsable,
+  type PipelineCheckpoint,
+} from "./pipeline-checkpoint";
 import { resolveProfileRuntime, getSelectedProfile, describeProfileRuntime, type ProfileRuntimeConfig } from "./profile-resolution";
 // Phase 11: Live JD Fetch Integration — additive, zero-touch existing pipeline
 import { prepareLiveJD, verifyOptimizationHonesty, checkCandidateEligibility } from "../jd-fetch-integration";
@@ -494,6 +498,14 @@ export interface PipelineInput {
    * fallback applies (locked pipeline ON, 4 attempts).
    */
   profile?: PipelineProfile;
+  /**
+   * Optional: checkpoint from a previous RECOVERABLE run (S4). When usable
+   * (same JD fingerprint, < 24h old), the already-completed AI intelligence
+   * artifacts (Job Intelligence / Company Intelligence / Skill Gap) are
+   * restored instead of re-called — the retry only re-runs what actually
+   * failed (the optimizer). See pipeline-checkpoint.ts.
+   */
+  checkpoint?: PipelineCheckpoint;
 }
 
 export interface PipelineProgress {
@@ -898,64 +910,123 @@ async function _runOptimizationPipelineInner(input: PipelineInput, watchdog: Opt
   step1.status = "running";
   step1.startedAt = new Date().toISOString();
 
-  log("Job Intelligence", "Analyzing job description for skills, keywords, and industry context in parallel…");
-  log("Company + Skill Gap (parallel)", "Generating company intelligence in parallel with job analysis…");
-  emitProgress(0, "Analyzing job description & company in parallel…");
+  // S4 — checkpoint resume: a usable checkpoint from a previous RECOVERABLE
+  // run restores the completed intelligence artifacts instead of re-paying
+  // for their AI calls. The restore is identity-preserving (same objects).
+  const cpUsable = isCheckpointUsable(input.checkpoint, jd);
+  const cpJI = cpUsable ? (input.checkpoint!.jobIntelligence as JobIntelligence | undefined) : undefined;
+  const cpCI = cpUsable ? (input.checkpoint!.companyIntelligence as CompanyIntelligence | undefined) : undefined;
+  const cpSG = cpUsable ? (input.checkpoint!.skillGap as SkillGapIntelligence | undefined) : undefined;
+  if (cpUsable) {
+    log("Supervisor", "Checkpoint found — restoring completed intelligence agents from the previous recoverable run (Job Intelligence, Company Intelligence, Skill Gap). Only the failed optimizer will re-run.");
+  }
 
   const watchdogHandle = watchdog.startStep("Parallel Intelligence Phase");
 
-  try {
-    const [jiRes, ciRes] = await Promise.allSettled([
-      analyzeJobIntelligence(jd),
-      analyzeCompanyIntelligence(jd, null),
-    ]);
-
-    watchdogHandle.complete();
-
-    // Process Job Intelligence result
-    if (jiRes.status === "fulfilled") {
-      result.jobIntelligence = jiRes.value;
+  if (cpJI || cpCI) {
+    // ===== RESTORED PATH — no AI calls for the restored artifacts =====
+    if (cpJI) {
+      result.jobIntelligence = cpJI;
       step0.completedAt = new Date().toISOString();
-      step0.durationMs = Date.now() - new Date(step0.startedAt).getTime();
+      step0.durationMs = 0;
       step0.status = "completed";
-      const jiLog = `Extracted ${result.jobIntelligence.priorityKeywords.length} priority keywords, ${result.jobIntelligence.requiredSkills.length} required skills. Industry: ${result.jobIntelligence.industry ?? "unknown"}.`;
+      const jiLog = "Job Intelligence restored from checkpoint (previously completed).";
+      step0.log = jiLog;
       log("Job Intelligence", jiLog);
       emitProgress(0, jiLog);
     } else {
-      step0.status = "failed";
-      step0.error = jiRes.reason?.message ?? "Job Intelligence failed";
-      log("Job Intelligence", `⚠ Job Intelligence failed: ${step0.error}. Continuing without JI.`);
-      emitProgress(0, `Job Intelligence failed. Continuing…`);
+      // Job Intelligence itself was not preserved — re-run it alone.
+      try {
+        result.jobIntelligence = await analyzeJobIntelligence(jd);
+        step0.completedAt = new Date().toISOString();
+        step0.durationMs = Date.now() - new Date(step0.startedAt).getTime();
+        step0.status = "completed";
+      } catch (e: any) {
+        step0.status = "failed";
+        step0.error = e?.message ?? "Job Intelligence failed";
+        log("Job Intelligence", `⚠ Restored-run Job Intelligence re-call failed: ${step0.error}. Continuing without JI.`);
+      }
     }
-
-    // Process Company Intelligence result
-    if (ciRes.status === "fulfilled" && ciRes.value) {
-      result.companyIntelligence = ciRes.value;
-      const ciLog = `Company: ${result.companyIntelligence.companyName} · ${result.companyIntelligence.valuedCompetencies.length} valued competencies · ATS: ${result.companyIntelligence.likelyAtsSystem}`;
-      log("Company + Skill Gap (parallel)", `Company Intel: ${ciLog}`);
+    if (cpCI) {
+      result.companyIntelligence = cpCI;
+      const ciLog = "Company Intelligence restored from checkpoint (previously completed).";
+      step1.log = ciLog;
+      log("Company + Skill Gap (parallel)", ciLog);
     } else {
-      const errReason = ciRes.status === "rejected" ? ciRes.reason?.message : "returned null";
-      log("Company + Skill Gap (parallel)", `Company Intel bypassed: ${errReason}. Continuing without it.`);
+      try {
+        const ci = await analyzeCompanyIntelligence(jd, null);
+        if (ci) result.companyIntelligence = ci;
+      } catch (e: any) {
+        log("Company + Skill Gap (parallel)", `⚠ Restored-run Company Intel re-call failed: ${e?.message}. Continuing without it.`);
+      }
     }
-  } catch (err: any) {
-    watchdogHandle.fail(err);
-    log("Job Intelligence", `⚠ Parallel intelligence failed: ${err.message}.`);
+    watchdogHandle.complete();
+  } else {
+    log("Job Intelligence", "Analyzing job description for skills, keywords, and industry context in parallel…");
+    log("Company + Skill Gap (parallel)", "Generating company intelligence in parallel with job analysis…");
+    emitProgress(0, "Analyzing job description & company in parallel…");
+
+    try {
+      const [jiRes, ciRes] = await Promise.allSettled([
+        analyzeJobIntelligence(jd),
+        analyzeCompanyIntelligence(jd, null),
+      ]);
+
+      watchdogHandle.complete();
+
+      // Process Job Intelligence result
+      if (jiRes.status === "fulfilled") {
+        result.jobIntelligence = jiRes.value;
+        step0.completedAt = new Date().toISOString();
+        step0.durationMs = Date.now() - new Date(step0.startedAt).getTime();
+        step0.status = "completed";
+        const jiLog = `Extracted ${result.jobIntelligence.priorityKeywords.length} priority keywords, ${result.jobIntelligence.requiredSkills.length} required skills. Industry: ${result.jobIntelligence.industry ?? "unknown"}.`;
+        log("Job Intelligence", jiLog);
+        emitProgress(0, jiLog);
+      } else {
+        step0.status = "failed";
+        step0.error = jiRes.reason?.message ?? "Job Intelligence failed";
+        log("Job Intelligence", `⚠ Job Intelligence failed: ${step0.error}. Continuing without JI.`);
+        emitProgress(0, `Job Intelligence failed. Continuing…`);
+      }
+
+      // Process Company Intelligence result
+      if (ciRes.status === "fulfilled" && ciRes.value) {
+        result.companyIntelligence = ciRes.value;
+        const ciLog = `Company: ${result.companyIntelligence.companyName} · ${result.companyIntelligence.valuedCompetencies.length} valued competencies · ATS: ${result.companyIntelligence.likelyAtsSystem}`;
+        log("Company + Skill Gap (parallel)", `Company Intel: ${ciLog}`);
+      } else {
+        const errReason = ciRes.status === "rejected" ? ciRes.reason?.message : "returned null";
+        log("Company + Skill Gap (parallel)", `Company Intel bypassed: ${errReason}. Continuing without it.`);
+      }
+    } catch (err: any) {
+      watchdogHandle.fail(err);
+      log("Job Intelligence", `⚠ Parallel intelligence failed: ${err.message}.`);
+    }
   }
 
   // ========================================================================
   // Step 2b: Skill Gap Analysis (Requires Job Intelligence to proceed)
   // ========================================================================
   if (result.jobIntelligence) {
-    try {
-      emitProgress(1, "Analyzing skill gaps…");
-      result.skillGap = await analyzeSkillGap(resume, jd, result.jobIntelligence, result.companyIntelligence);
-      const sgLog = result.skillGap
-        ? `Skill Gap: ${result.skillGap.overallMatch}% overall match · ${result.skillGap.missingSkills.critical.length} critical / ${result.skillGap.missingSkills.important.length} important gaps`
-        : "Skill Gap analysis unavailable.";
+    if (cpSG) {
+      // S4 — restored from checkpoint.
+      result.skillGap = cpSG;
+      const sgLog = "Skill Gap restored from checkpoint (previously completed).";
       log("Company + Skill Gap (parallel)", `Skill Gap: ${sgLog}`);
-      emitProgress(1, result.skillGap ? `Skill match: ${result.skillGap.overallMatch}%. Bridging ${result.skillGap.missingSkills.critical.length} critical gaps.` : "Skill gap analysis done.");
-    } catch (e: any) {
-      log("Company + Skill Gap (parallel)", `⚠ Skill Gap failed: ${e?.message}. Continuing without it.`);
+      emitProgress(1, sgLog);
+    } else {
+      try {
+        emitProgress(1, "Analyzing skill gaps…");
+        result.skillGap = await analyzeSkillGap(resume, jd, result.jobIntelligence, result.companyIntelligence);
+        const sgLog = result.skillGap
+          ? `Skill Gap: ${result.skillGap.overallMatch}% overall match · ${result.skillGap.missingSkills.critical.length} critical / ${result.skillGap.missingSkills.important.length} important gaps`
+          : "Skill Gap analysis unavailable.";
+        log("Company + Skill Gap (parallel)", `Skill Gap: ${sgLog}`);
+        emitProgress(1, result.skillGap ? `Skill match: ${result.skillGap.overallMatch}%. Bridging ${result.skillGap.missingSkills.critical.length} critical gaps.` : "Skill gap analysis done.");
+      } catch (e: any) {
+        log("Company + Skill Gap (parallel)", `⚠ Skill Gap failed: ${e?.message}. Continuing without it.`);
+      }
     }
   } else {
     log("Company + Skill Gap (parallel)", "Bypassed Skill Gap analysis (Job Intelligence was not available).");

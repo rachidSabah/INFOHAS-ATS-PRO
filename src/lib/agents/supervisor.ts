@@ -28,6 +28,7 @@ setFlightScope({ scope: "future-agents", feature: "Supervisor Agent", module: "s
 import type { ResumeData, JobDescription } from "../types";
 import { useApp } from "../store";
 import { runOptimizationPipeline, type PipelineResult, type PipelineProgress } from "./orchestrator";
+import type { PipelineCheckpoint } from "./pipeline-checkpoint";
 import { getSelectedProfile, resolveProfileRuntime, describeProfileRuntime } from "./profile-resolution";
 import { agentConfigSignature } from "./agent-ai-config";
 import { createPlan } from "./pipeline-planner";
@@ -882,9 +883,11 @@ export async function handleOptimizationRequested(
     enableReflection?: boolean;
     deepAgenticMode?: boolean;
     onProgress?: (progress: PipelineProgress) => void;
+    /** S4 — checkpoint from a previous RECOVERABLE run (resume support). */
+    checkpoint?: PipelineCheckpoint;
   },
 ): Promise<PipelineResult | null> {
-  const { resume, jd, userDirectives, aviationMode, enableReflection = true, deepAgenticMode = false, onProgress } = inputs;
+  const { resume, jd, userDirectives, aviationMode, enableReflection = true, deepAgenticMode = false, onProgress, checkpoint } = inputs;
 
   // === CONCURRENT EXECUTION GUARD ===
   // Prevent double-clicks or rapid re-submissions from running two
@@ -997,6 +1000,9 @@ export async function handleOptimizationRequested(
       // Task 7 — Pipeline Profiles are LIVE: the Supervisor loads the selected
       // profile at the start of each run and passes it to the pipeline.
       profile: selectedProfile ?? undefined,
+      // S4 — checkpoint resume: restores completed intelligence artifacts
+      // from a previous recoverable run instead of re-calling those agents.
+      checkpoint,
     });
 
     // === SYNC CORE AGENT STATUSES FROM THE V2 PIPELINE RESULT ===

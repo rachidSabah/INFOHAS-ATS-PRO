@@ -33,36 +33,151 @@ import { rateLimitTracker, RATE_LIMIT_BACKOFF_CAP_MS } from "./rate-limit-tracke
 // tracker's backoff cap, so both cooldown layers stay aligned.
 export const PROVIDER_QUOTA_COOLDOWN_MS = RATE_LIMIT_BACKOFF_CAP_MS; // 30 minutes
 
+// ============================================================================
+// S1 — CROSS-SESSION PERSISTENCE FOR LONG COOLDOWNS.
+//
+// sessionStorage survives a page RELOAD but dies with the TAB. A 30-minute
+// quota window stored only there evaporates when the user closes and reopens
+// the app — the first request of the fresh session re-hits the quota-dead
+// provider (wasted request + latency before the window re-arms). Long windows
+// (>= QUOTA_PERSIST_MIN_MS: quota 30m, 401 30m) are therefore MIRRORED into
+// localStorage (timestamped, self-expiring, cleaned up on read). Short
+// windows (429 3m, timeout 90s) stay session-only by design — a fresh tab
+// always starts with a clean tactical slate.
+// ============================================================================
+export const PROVIDER_QUOTA_PERSIST_PREFIX = "resumeai-provider-quota-cooldown-";
+export const QUOTA_PERSIST_MIN_MS = 10 * 60 * 1000; // persist windows >= 10 minutes
+
+/** Cooldown class recorded alongside the window (feeds S2 skip reasons). */
+export type ProviderCooldownClass = "quota" | "429" | "401" | "timeout" | "unknown";
+
+interface StoredCooldown { until: number; class: ProviderCooldownClass }
+
+/** Serialize as JSON ({until, class}); falls back gracefully on quota errors. */
+function serialize(entry: StoredCooldown): string {
+  try {
+    return JSON.stringify(entry);
+  } catch {
+    return String(entry.until);
+  }
+}
+
+/** Parse both the current JSON format and the legacy bare-number format. */
+function deserialize(raw: string): StoredCooldown {
+  if (raw.startsWith("{")) {
+    try {
+      const o = JSON.parse(raw);
+      if (o && typeof o.until === "number") {
+        return { until: o.until, class: (o.class ?? "unknown") as ProviderCooldownClass };
+      }
+    } catch { /* fall through to legacy parse */ }
+  }
+  const until = parseInt(raw, 10);
+  return { until: Number.isNaN(until) ? 0 : until, class: "unknown" };
+}
+
+function sessionKey(id: string): string {
+  return PROVIDER_COOLDOWN_PREFIX + id;
+}
+
+function persistKey(id: string): string {
+  return PROVIDER_QUOTA_PERSIST_PREFIX + id;
+}
+
+function writeSession(id: string, entry: StoredCooldown): void {
+  try {
+    window.sessionStorage?.setItem(sessionKey(id), serialize(entry));
+  } catch { /* ignore */ }
+}
+
+function writeLocalIfLong(id: string, entry: StoredCooldown): void {
+  const duration = entry.until - Date.now();
+  if (duration < QUOTA_PERSIST_MIN_MS) return;
+  try {
+    window.localStorage?.setItem(persistKey(id), serialize(entry));
+  } catch { /* ignore */ }
+}
+
+function readSession(id: string): StoredCooldown | null {
+  try {
+    const raw = window.sessionStorage?.getItem(sessionKey(id));
+    return raw ? deserialize(raw) : null;
+  } catch {
+    return null;
+  }
+}
+
+function readLocal(id: string): StoredCooldown | null {
+  try {
+    const raw = window.localStorage?.getItem(persistKey(id));
+    return raw ? deserialize(raw) : null;
+  } catch {
+    return null;
+  }
+}
+
+function clearSession(id: string): void {
+  try {
+    window.sessionStorage?.removeItem(sessionKey(id));
+  } catch { /* ignore */ }
+}
+
+function clearLocal(id: string): void {
+  try {
+    window.localStorage?.removeItem(persistKey(id));
+  } catch { /* ignore */ }
+}
+
 /** Quota-exhaustion wording inside a 429 body (mirrors the healer's classifier). */
 const QUOTA_EXHAUSTION_RE = /FreeUsageLimitError|usage.?limit|quota|daily|monthly/i;
 
 /** Returns true if a named provider is in cooldown. */
 export function isProviderInCooldown(providerId: string): boolean {
   if (typeof window === "undefined") return false;
-  try {
-    const key = PROVIDER_COOLDOWN_PREFIX + providerId;
-    const v = window.sessionStorage?.getItem(key);
-    if (!v) return false;
-    const until = parseInt(v, 10);
-    if (Number.isNaN(until)) return false;
-    if (Date.now() >= until) {
-      window.sessionStorage.removeItem(key);
-      return false;
-    }
-    return true;
-  } catch {
-    return false;
+  // Session store first (authoritative for the current tab).
+  const s = readSession(providerId);
+  if (s) {
+    if (Date.now() < s.until) return true;
+    clearSession(providerId); // expired — self-clean
+    // Fall through: a localStorage mirror may still hold a long window.
   }
+  // S1 fallback — the long-window mirror (survives tab close).
+  const l = readLocal(providerId);
+  if (l && Date.now() < l.until) {
+    // Re-hydrate the fresh session so both stores agree.
+    writeSession(providerId, l);
+    return true;
+  }
+  if (l) clearLocal(providerId); // expired — self-clean
+  return false;
+}
+
+/** Remaining cooldown in ms (0 when none) — feeds S2 structured skip reasons. */
+export function getProviderCooldownRemainingMs(providerId: string): number {
+  if (typeof window === "undefined") return 0;
+  const s = readSession(providerId);
+  if (s && Date.now() < s.until) return s.until - Date.now();
+  const l = readLocal(providerId);
+  if (l && Date.now() < l.until) return l.until - Date.now();
+  return 0;
+}
+
+/** The recorded cooldown class (null when no window) — feeds S2 skip reasons. */
+export function getProviderCooldownClass(providerId: string): ProviderCooldownClass | null {
+  if (typeof window === "undefined") return null;
+  const s = readSession(providerId);
+  if (s && Date.now() < s.until) return s.class;
+  const l = readLocal(providerId);
+  if (l && Date.now() < l.until) return l.class;
+  return null;
 }
 
 /** Marks a provider as rate-limited (429) for PROVIDER_429_COOLDOWN_MS. */
 export function markProvider429Cooldown(providerId: string): void {
   if (typeof window === "undefined") return;
-  try {
-    const key = PROVIDER_COOLDOWN_PREFIX + providerId;
-    window.sessionStorage?.setItem(key, String(Date.now() + PROVIDER_429_COOLDOWN_MS));
-    console.warn(`[AI] Provider "${providerId}" is rate-limited — entering 3-minute cooldown.`);
-  } catch { /* ignore */ }
+  const entry: StoredCooldown = { until: Date.now() + PROVIDER_429_COOLDOWN_MS, class: "429" };
+  writeSession(providerId, entry);
+  console.warn(`[AI] Provider "${providerId}" is rate-limited — entering 3-minute cooldown.`);
 }
 
 /**
@@ -73,11 +188,10 @@ export function markProvider429Cooldown(providerId: string): void {
 export function markProviderRateLimitCooldown(providerId: string, durationMs: number): void {
   if (typeof window === "undefined") return;
   const clamped = Math.min(Math.max(durationMs, 5_000), PROVIDER_QUOTA_COOLDOWN_MS);
-  try {
-    const key = PROVIDER_COOLDOWN_PREFIX + providerId;
-    window.sessionStorage?.setItem(key, String(Date.now() + clamped));
-    console.warn(`[AI] Provider "${providerId}" rate-limited — cooldown ${Math.round(clamped / 1000)}s.`);
-  } catch { /* ignore */ }
+  const entry: StoredCooldown = { until: Date.now() + clamped, class: "quota" };
+  writeSession(providerId, entry);
+  writeLocalIfLong(providerId, entry); // S1: long windows survive tab close
+  console.warn(`[AI] Provider "${providerId}" rate-limited — cooldown ${Math.round(clamped / 1000)}s.`);
 }
 
 /** Marks a provider as quota-exhausted for PROVIDER_QUOTA_COOLDOWN_MS (30 min). */
@@ -93,19 +207,17 @@ export function markProviderQuotaCooldown(providerId: string): void {
  */
 export function clearProviderCooldownOnSuccess(providerId: string): void {
   if (typeof window === "undefined") return;
-  try {
-    window.sessionStorage?.removeItem(PROVIDER_COOLDOWN_PREFIX + providerId);
-  } catch { /* ignore */ }
+  clearSession(providerId);
+  clearLocal(providerId); // S1: the mirror must die with the session window
 }
 
 /** Marks a provider as billing-failed (401) for PROVIDER_401_COOLDOWN_MS. */
 export function markProvider401Cooldown(providerId: string): void {
   if (typeof window === "undefined") return;
-  try {
-    const key = PROVIDER_COOLDOWN_PREFIX + providerId;
-    window.sessionStorage?.setItem(key, String(Date.now() + PROVIDER_401_COOLDOWN_MS));
-    console.warn(`[AI] Provider "${providerId}" returned 401 (billing/auth failure) — skipping for 30 minutes.`);
-  } catch { /* ignore */ }
+  const entry: StoredCooldown = { until: Date.now() + PROVIDER_401_COOLDOWN_MS, class: "401" };
+  writeSession(providerId, entry);
+  writeLocalIfLong(providerId, entry); // S1: 30m auth windows persist too
+  console.warn(`[AI] Provider "${providerId}" returned 401 (billing/auth failure) — skipping for 30 minutes.`);
 }
 
 /**
@@ -119,11 +231,9 @@ export function markProvider401Cooldown(providerId: string): void {
  */
 export function markProviderTimeoutCooldown(providerId: string): void {
   if (typeof window === "undefined") return;
-  try {
-    const key = PROVIDER_COOLDOWN_PREFIX + providerId;
-    window.sessionStorage?.setItem(key, String(Date.now() + PROVIDER_TIMEOUT_COOLDOWN_MS));
-    console.warn(`[AI] Provider "${providerId}" timed out — skipping for ${PROVIDER_TIMEOUT_COOLDOWN_MS / 1000}s.`);
-  } catch { /* ignore */ }
+  const entry: StoredCooldown = { until: Date.now() + PROVIDER_TIMEOUT_COOLDOWN_MS, class: "timeout" };
+  writeSession(providerId, entry); // short window — session-only by design
+  console.warn(`[AI] Provider "${providerId}" timed out — skipping for ${PROVIDER_TIMEOUT_COOLDOWN_MS / 1000}s.`);
 }
 
 /** Returns true if the error looks like a timeout (AbortError or timeout message). */
@@ -138,12 +248,20 @@ export function isTimeoutError(err: any): boolean {
 export function clearAllProviderCooldowns(): void {
   if (typeof window === "undefined") return;
   try {
-    const keysToRemove: string[] = [];
+    const prefixes = [PROVIDER_COOLDOWN_PREFIX, PROVIDER_QUOTA_PERSIST_PREFIX];
+    const sessionKeysToRemove: string[] = [];
     for (let i = 0; i < window.sessionStorage.length; i++) {
       const k = window.sessionStorage.key(i);
-      if (k && k.startsWith(PROVIDER_COOLDOWN_PREFIX)) keysToRemove.push(k);
+      if (k && k.startsWith(PROVIDER_COOLDOWN_PREFIX)) sessionKeysToRemove.push(k);
     }
-    keysToRemove.forEach((k) => window.sessionStorage.removeItem(k));
+    sessionKeysToRemove.forEach((k) => window.sessionStorage.removeItem(k));
+    // S1: also sweep the localStorage mirror.
+    const localKeysToRemove: string[] = [];
+    for (let i = 0; i < window.localStorage.length; i++) {
+      const k = window.localStorage.key(i);
+      if (k && k.startsWith(PROVIDER_QUOTA_PERSIST_PREFIX)) localKeysToRemove.push(k);
+    }
+    localKeysToRemove.forEach((k) => window.localStorage.removeItem(k));
     console.info("[AI] All provider cooldowns cleared.");
   } catch { /* ignore */ }
 }
