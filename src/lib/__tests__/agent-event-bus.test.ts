@@ -113,3 +113,78 @@ describe("Agent Event Bus", () => {
     expect(received[0].metadata).toEqual({ snapshotId: "snap_123", count: 5 });
   });
 });
+
+// ============================================================================
+// React useSyncExternalStore STORE CONTRACT (regression: the Optimizer crash).
+//
+// useTrajectory() feeds bus.getHistory() straight into useSyncExternalStore.
+// React's documented contract: getSnapshot must return a CACHED value — if it
+// returns a different reference on every call, React detects an infinite
+// update loop and THROWS
+//   "The result of getSnapshot should be cached to avoid an infinite loop"
+// during render. That crash fired the moment the PipelineTrajectoryPanel
+// mounted (aiThinking=true), unmounting the whole Optimizer module mid-run —
+// the user-visible "Optimization failed" regression.
+// These tests pin the store-side half of the contract (the hook half is a
+// thin binding and stays correct as long as the store is contract-compliant).
+// ============================================================================
+describe("Agent Event Bus — useSyncExternalStore snapshot contract", () => {
+  let bus: EventBus;
+
+  beforeEach(() => {
+    bus = createEventBus();
+  });
+
+  it("returns the SAME reference on repeated reads with no mutation (Object.is)", () => {
+    bus.emit({ agent: "A", action: "x", resumeId: "r" });
+
+    // React re-reads getSnapshot on every render and compares with Object.is.
+    const s1 = bus.getHistory();
+    const s2 = bus.getHistory();
+    const s3 = bus.getHistory();
+    expect(Object.is(s1, s2)).toBe(true);
+    expect(Object.is(s2, s3)).toBe(true);
+  });
+
+  it("snapshot stays stable across reads while a subscriber is attached", () => {
+    bus.subscribe(() => {}); // a mounted hook holds an active subscription
+    bus.emit({ agent: "A", action: "x", resumeId: "r" });
+
+    const s1 = bus.getHistory();
+    const s2 = bus.getHistory();
+    expect(Object.is(s1, s2)).toBe(true);
+  });
+
+  it("each mutation publishes a NEW reference (subscribers see updates)", () => {
+    const before = bus.getHistory();
+    bus.emit({ agent: "A", action: "x", resumeId: "r" });
+    const after = bus.getHistory();
+
+    expect(Object.is(before, after)).toBe(false);
+    expect(after.length).toBe(1);
+    // …and the new reference is stable on subsequent reads:
+    expect(Object.is(after, bus.getHistory())).toBe(true);
+  });
+
+  it("clearHistory publishes a fresh STABLE empty snapshot", () => {
+    bus.emit({ agent: "A", action: "x", resumeId: "r" });
+    bus.clearHistory();
+
+    const s1 = bus.getHistory();
+    const s2 = bus.getHistory();
+    expect(s1.length).toBe(0);
+    expect(Object.is(s1, s2)).toBe(true);
+  });
+
+  it("mutating a returned snapshot never corrupts the bus (copy semantics)", () => {
+    bus.emit({ agent: "A", action: "x", resumeId: "r" });
+    const snapshot = bus.getHistory();
+    snapshot.push({ agent: "Evil", action: "inject", resumeId: "r" });
+    snapshot.pop();
+
+    expect(bus.getHistory().length).toBe(1);
+    bus.emit({ agent: "B", action: "y", resumeId: "r" });
+    expect(bus.getHistory().length).toBe(2);
+    expect(bus.getHistory().map((e) => e.agent)).toEqual(["A", "B"]);
+  });
+});

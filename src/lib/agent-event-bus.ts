@@ -52,6 +52,15 @@ const MAX_HISTORY = 1000;
 type Subscriber = (event: AgentEvent) => void;
 
 /**
+ * REACT CONTRACT NOTE (regression fix — the "Optimization failed" crash):
+ * getHistory() is consumed by useTrajectory() → React's useSyncExternalStore,
+ * whose getSnapshot MUST return a cached value — a fresh reference per call
+ * makes React throw "The result of getSnapshot should be cached to avoid an
+ * infinite loop" during render. The snapshot below is therefore refreshed
+ * ONLY when the history mutates (emit / clearHistory), never on read.
+ */
+
+/**
  * Create a new event bus instance.
  * Each bus is isolated — events emitted on one do not reach subscribers of another.
  */
@@ -68,11 +77,13 @@ export function createEventBus(): EventBus {
       ...event,
     };
 
-    // Add to history with cap
+    // Add to history with cap, then publish a fresh immutable-in-practice
+    // snapshot reference (stable until the next mutation).
     history.push(fullEvent);
     if (history.length > MAX_HISTORY) {
       history.shift();
     }
+    refreshSnapshot();
 
     // Notify all subscribers
     subscribers.forEach((sub) => {
@@ -89,10 +100,18 @@ export function createEventBus(): EventBus {
     return () => { subscribers.delete(handler); };
   };
 
-  const getHistory = (): AgentEvent[] => [...history];
+  // Cached snapshot for React's useSyncExternalStore (see contract note above):
+  // replaced on mutation, never rebuilt on read.
+  let historySnapshot: AgentEvent[] = [];
+  const refreshSnapshot = (): void => {
+    historySnapshot = [...history];
+  };
+
+  const getHistory = (): AgentEvent[] => historySnapshot;
 
   const clearHistory = (): void => {
     history.length = 0;
+    refreshSnapshot();
   };
 
   const getStats = (): EventBusStats => {
