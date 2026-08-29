@@ -27,6 +27,7 @@ import { useTrajectory, useClearTrajectory } from "@/hooks/useTrajectory";
 import {
   filterTrajectory,
   isSkipEvent,
+  isCapEvent,
   summarizeSkips,
   describeSkipReason,
   type TrajectoryFilter,
@@ -40,6 +41,7 @@ const CHIP_SKIP = "bg-amber-500/10 text-amber-600 border-amber-500/30";
 
 function chipForEvent(e: AgentEvent): { label: string; cls: string } {
   if (isSkipEvent(e)) return { label: "SKIPPED", cls: CHIP_SKIP };
+  if (isCapEvent(e)) return { label: "CAP", cls: CHIP_NEUTRAL };
   if (e.success === false) return { label: "FAILED", cls: CHIP_FAILURE };
   const a = e.action || "";
   if (a.includes("failed")) return { label: "FAILED", cls: CHIP_FAILURE };

@@ -316,7 +316,11 @@ export function markPuterCooldown(): void {
 //     the next provider and the failed one is re-tested after the window.
 // ============================================================================
 
-/** Record (or intentionally skip) router-level cooldowns for a failed AI call. */
+/** Record (or intentionally skip) router-level cooldowns for a failed AI call.
+ * Returns the evidence class it reacted to — "429" | "401" | "timeout" — or
+ * null when nothing was armed (probes never arm; unclassified errors fall
+ * through). Task 20: the router keys the ADAPTIVE concurrency cap off this
+ * return value, so the classification travels with the evidence. */
 export function recordTrafficCooldownFromError(opts: {
   /** Provider identity used for the sessionStorage cooldown key. */
   cooldownId: string;
@@ -335,11 +339,11 @@ export function recordTrafficCooldownFromError(opts: {
   /** Extra auth-failure patterns (the speculative race additionally matched
    *  /billing/|/payment/ before unification — preserved per call site). */
   authExtra?: RegExp;
-}): void {
+}): ProviderCooldownClass | null {
   // PROBES NEVER ARM TRAFFIC COOLDOWNS. A probe 429 is evidence ("this
   // provider is rate-limited right now"), not usage — blocking real traffic
   // for it punished providers the user never actually used.
-  if (opts.requestType === "test") return;
+  if (opts.requestType === "test") return null;
 
   const msg = opts.error?.message ?? String(opts.error ?? "");
   const status = opts.statusCode ?? opts.error?.statusCode;
@@ -359,11 +363,15 @@ export function recordTrafficCooldownFromError(opts: {
     } else {
       markProvider429Cooldown(opts.cooldownId);
     }
+    return "429"; // 429-family: burst, quota or Retry-After — all congestion evidence
   } else if (status === 401 || /401/.test(msg) || /CreditsError/i.test(msg) || (opts.authExtra?.test(msg) ?? false)) {
     markProvider401Cooldown(opts.cooldownId);
+    return "401";
   } else if (opts.isTimeout) {
     markProviderTimeoutCooldown(opts.cooldownId);
+    return "timeout";
   }
+  return null;
 }
 
 /**

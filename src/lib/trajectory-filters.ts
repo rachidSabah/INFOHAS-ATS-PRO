@@ -30,6 +30,13 @@ export function isSkipEvent(e: AgentEvent): boolean {
   return typeof e.action === "string" && e.action.startsWith("skip_");
 }
 
+/** Adaptive-cap lifecycle events (Task 20): cap_tighten (429 evidence halved
+ * the cap) and cap_recover (successes stepped it back up). Informational —
+ * neither skips nor failures. */
+export function isCapEvent(e: AgentEvent): boolean {
+  return typeof e.action === "string" && e.action.startsWith("cap_");
+}
+
 /** Real failures: success === false MINUS skip events. A provider being
  * skipped is the router working as designed, not work failing. */
 export function isFailureEvent(e: AgentEvent): boolean {

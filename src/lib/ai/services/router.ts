@@ -39,6 +39,9 @@ import {
   getProviderInFlight,
   getProviderConcurrencyOpts,
   getEffectiveProviderCap,
+  getConfiguredProviderCap,
+  recordProviderRateLimitHit,
+  recordProviderTrafficSuccess,
 } from "../../provider-concurrency";
 import { getPromptCache, setPromptCache, buildPromptHash } from "../../prompt-cache";
 import { tryRotateProviderToken, isRotatableAuthError } from "../../token-rotation";
@@ -283,6 +286,21 @@ export class ProviderRouter {
 
         // Success path — evidence of recovery clears any stale cooldown.
         clearProviderCooldownOnSuccess(cooldownId);
+        // Task 20 — adaptive cap: consecutive real-traffic successes step the
+        // cap back up toward the configured ceiling (AIMD additive increase).
+        try {
+          const capCh = recordProviderTrafficSuccess(cooldownId, getConfiguredProviderCap(cooldownId, provider.concurrencyCap));
+          if (capCh.changed) {
+            globalEventBus.emit({
+              agent: "ProviderRouter",
+              action: "cap_recover",
+              resumeId: provider.name,
+              provider: provider.name,
+              success: true,
+              metadata: { from: capCh.from, to: capCh.to, ceiling: capCh.ceiling, consecutiveSuccesses: capCh.consecutiveSuccesses },
+            });
+          }
+        } catch { /* event bus must never break routing */ }
         if (cacheHash) {
           setPromptCache(cacheHash, {
             text: res.text,
@@ -302,7 +320,10 @@ export class ProviderRouter {
         // via the benchmark/heal machinery but NEVER arm router cooldowns —
         // otherwise free-tier providers 429 the probe and get stuck in a
         // perpetual "cooldown without usage" cycle (see provider-cooldown.ts).
-        recordTrafficCooldownFromError({
+        // Task 20 — adaptive cap: the returned evidence class also tightens
+        // the per-provider concurrency cap on 429-family errors (AIMD
+        // multiplicative decrease). Probes return null → never tighten.
+        const armedClass = recordTrafficCooldownFromError({
           cooldownId,
           providerId: provider.id,
           modelName: provider.modelName,
@@ -311,6 +332,21 @@ export class ProviderRouter {
           isTimeout: isTimeoutError(e),
           requestType: opts.requestType,
         });
+        if (armedClass === "429") {
+          try {
+            const capCh = recordProviderRateLimitHit(cooldownId, getConfiguredProviderCap(cooldownId, provider.concurrencyCap));
+            if (capCh.changed) {
+              globalEventBus.emit({
+                agent: "ProviderRouter",
+                action: "cap_tighten",
+                resumeId: provider.name,
+                provider: provider.name,
+                success: true,
+                metadata: { from: capCh.from, to: capCh.to, ceiling: capCh.ceiling, cause: "429", requestType: opts.requestType ?? "chat" },
+              });
+            }
+          } catch { /* event bus must never break routing */ }
+        }
       } finally {
         // S3 — the slot covers exactly one provider attempt (rotations are
         // sequential inside tryProviderWithRotations, so this only throttles
@@ -503,13 +539,28 @@ export class ProviderRouter {
 
         // Evidence of recovery clears any stale cooldown (stream path).
         clearProviderCooldownOnSuccess(cooldownId);
+        // Task 20 — adaptive cap recovery (chat-path parity).
+        try {
+          const capCh = recordProviderTrafficSuccess(cooldownId, getConfiguredProviderCap(cooldownId, provider.concurrencyCap));
+          if (capCh.changed) {
+            globalEventBus.emit({
+              agent: "ProviderRouter",
+              action: "cap_recover",
+              resumeId: provider.name,
+              provider: provider.name,
+              success: true,
+              metadata: { from: capCh.from, to: capCh.to, ceiling: capCh.ceiling, consecutiveSuccesses: capCh.consecutiveSuccesses },
+            });
+          }
+        } catch { /* event bus must never break routing */ }
         return res;
       } catch (e: any) {
         const eMsg = e?.message ?? String(e);
         errors.push(`${provider.name}: ${eMsg}`);
         console.warn(`[AI Stream] Provider ${provider.name} failed: ${eMsg}`);
         // Same traffic-vs-probe rule as chat(): probes never arm cooldowns.
-        recordTrafficCooldownFromError({
+        // Task 20 — adaptive cap tighten on 429-family evidence (chat-path parity).
+        const armedClass = recordTrafficCooldownFromError({
           cooldownId,
           providerId: provider.id,
           modelName: provider.modelName,
@@ -518,6 +569,21 @@ export class ProviderRouter {
           isTimeout: isTimeoutError(e),
           requestType: opts.requestType,
         });
+        if (armedClass === "429") {
+          try {
+            const capCh = recordProviderRateLimitHit(cooldownId, getConfiguredProviderCap(cooldownId, provider.concurrencyCap));
+            if (capCh.changed) {
+              globalEventBus.emit({
+                agent: "ProviderRouter",
+                action: "cap_tighten",
+                resumeId: provider.name,
+                provider: provider.name,
+                success: true,
+                metadata: { from: capCh.from, to: capCh.to, ceiling: capCh.ceiling, cause: "429", requestType: opts.requestType ?? "chat" },
+              });
+            }
+          } catch { /* event bus must never break routing */ }
+        }
 
         // === Rotation fallbacks (same as chat) ===
         // A broken stream cannot be resumed, so a rotated retry is delivered
@@ -1023,6 +1089,8 @@ export class ProviderRouter {
 
         // Evidence of recovery clears any stale cooldown (race winner).
         clearProviderCooldownOnSuccess(provId);
+        // Task 20 — adaptive cap recovery (race winner is real traffic success).
+        try { recordProviderTrafficSuccess(provId, getConfiguredProviderCap(provId, prov.concurrencyCap)); } catch { /* never break the race */ }
 
         console.log(`[ROUTER] Speculative race won by: ${prov.name} in ${Math.round(performance.now() - t0)}ms`);
         return {
@@ -1038,7 +1106,9 @@ export class ProviderRouter {
           throw new Error("Aborted by race winner");
         }
         const errMsg = err?.message || String(err);
-        recordTrafficCooldownFromError({
+        // Task 20 — adaptive cap tighten on 429-family evidence (race path,
+        // silent — aborted losers throw before reaching this point).
+        const armedClass = recordTrafficCooldownFromError({
           cooldownId: provId,
           providerId: provId,
           error: err,
@@ -1048,6 +1118,9 @@ export class ProviderRouter {
           // The race historically also matched billing/payment wording.
           authExtra: /billing|payment/i,
         });
+        if (armedClass === "429") {
+          try { recordProviderRateLimitHit(provId, getConfiguredProviderCap(provId, prov.concurrencyCap)); } catch { /* never break the race */ }
+        }
         throw err;
       }
     });

@@ -54,13 +54,92 @@ export function clampProviderConcurrencyCap(input: unknown): number {
   return Math.min(MAX_PROVIDER_CONCURRENCY_CAP, Math.max(MIN_PROVIDER_CONCURRENCY_CAP, Math.floor(n)));
 }
 
-/** Effective cap for a provider: its configured cap (clamped) or the global default. */
-export function getEffectiveProviderCap(providerId: string, perProviderCap?: unknown): number {
+/** The user's configured cap for a provider (per-provider ?? global default),
+ * clamped. This is the CEILING the adaptive layer may never exceed. */
+export function getConfiguredProviderCap(providerId: string, perProviderCap?: unknown): number {
+  void providerId;
   if (perProviderCap === undefined || perProviderCap === null || perProviderCap === "") {
-    void providerId; // reserved for future per-provider state (e.g. adaptive caps)
     return opts.cap;
   }
   return clampProviderConcurrencyCap(perProviderCap);
+}
+
+// ---------------------------------------------------------------------------
+// Task 20 — ADAPTIVE cap layer (AIMD)
+//
+// Evidence-driven self-tuning UNDER the configured ceiling:
+//   429 on real traffic → multiplicative decrease (halve, floor 1)
+//   consecutive successes → additive increase (+1 per threshold, ceiling-bound)
+// The user's setting is always the ceiling; this layer only tightens BELOW it.
+// In-memory on purpose — it is self-correcting behavior state (like the
+// rate-limit tracker), re-learned from live traffic within moments of a reload.
+// ---------------------------------------------------------------------------
+
+/** Consecutive successes needed before the cap steps back up by one. */
+export const ADAPTIVE_CAP_RECOVER_THRESHOLD = 5;
+
+interface AdaptiveCapState {
+  current: number;
+  ceiling: number;
+  consecutiveSuccesses: number;
+}
+
+const adaptiveCaps = new Map<string, AdaptiveCapState>();
+
+export interface AdaptiveCapChange {
+  changed: boolean;
+  from: number;
+  to: number;
+  ceiling: number;
+  consecutiveSuccesses: number;
+}
+
+/** Current adaptive cap for a provider (null = never tightened). */
+export function getAdaptiveProviderCap(providerId: string): number | null {
+  return adaptiveCaps.get(providerId)?.current ?? null;
+}
+
+/** Record 429-family evidence on a REAL traffic attempt: halve the adaptive
+ * cap (floor 1). Creates state on first hit, resets the success counter. */
+export function recordProviderRateLimitHit(providerId: string, ceiling: number): AdaptiveCapChange {
+  const st = adaptiveCaps.get(providerId) ?? { current: 0, ceiling: 0, consecutiveSuccesses: 0 };
+  st.ceiling = clampProviderConcurrencyCap(ceiling);
+  if (st.current === 0) st.current = st.ceiling; // first evidence: start from configured
+  const from = st.current;
+  st.consecutiveSuccesses = 0;
+  st.current = Math.max(MIN_PROVIDER_CONCURRENCY_CAP, Math.floor(from / 2));
+  adaptiveCaps.set(providerId, st);
+  return { changed: st.current !== from, from, to: st.current, ceiling: st.ceiling, consecutiveSuccesses: 0 };
+}
+
+/** Record a real-traffic success: after `threshold` consecutive successes the
+ * adaptive cap steps up by one (never above the ceiling). Success on a
+ * never-tightened provider creates NO state. */
+export function recordProviderTrafficSuccess(
+  providerId: string,
+  ceiling: number,
+  threshold: number = ADAPTIVE_CAP_RECOVER_THRESHOLD,
+): AdaptiveCapChange {
+  const st = adaptiveCaps.get(providerId);
+  if (!st) {
+    return { changed: false, from: ceiling, to: ceiling, ceiling, consecutiveSuccesses: 0 };
+  }
+  st.ceiling = clampProviderConcurrencyCap(ceiling);
+  const from = st.current;
+  st.consecutiveSuccesses += 1;
+  if (st.consecutiveSuccesses >= threshold && st.current < st.ceiling) {
+    st.current += 1;
+    st.consecutiveSuccesses = 0;
+  }
+  return { changed: st.current !== from, from, to: st.current, ceiling: st.ceiling, consecutiveSuccesses: st.consecutiveSuccesses };
+}
+
+/** Effective cap for a provider: min(configured ceiling, adaptive current). */
+export function getEffectiveProviderCap(providerId: string, perProviderCap?: unknown): number {
+  const configured = getConfiguredProviderCap(providerId, perProviderCap);
+  const st = adaptiveCaps.get(providerId);
+  if (!st) return configured;
+  return Math.max(MIN_PROVIDER_CONCURRENCY_CAP, Math.min(configured, st.current));
 }
 
 interface ConcurrencyOpts { cap: number; maxWaitMs: number }
@@ -183,10 +262,11 @@ export async function withProviderSlot<T>(
   }
 }
 
-/** Test isolation helper — clears all counters and waiters. */
+/** Test isolation helper — clears all counters, waiters and adaptive state. */
 export function __resetProviderConcurrencyForTests(): void {
   inFlight.clear();
   for (const q of waiters.values()) q.length = 0;
   waiters.clear();
+  adaptiveCaps.clear();
   opts = { cap: DEFAULT_PROVIDER_CONCURRENCY, maxWaitMs: DEFAULT_PROVIDER_SLOT_WAIT_MS };
 }

@@ -26,8 +26,13 @@ import {
   releaseProviderSlot,
   getProviderInFlight,
   setProviderConcurrencyOpts,
+  getAdaptiveProviderCap,
+  recordProviderRateLimitHit,
+  __resetProviderConcurrencyForTests,
   DEFAULT_PROVIDER_CONCURRENCY,
+  ADAPTIVE_CAP_RECOVER_THRESHOLD,
 } from "../../provider-concurrency";
+import { recordTrafficCooldownFromError } from "../../provider-cooldown";
 
 beforeEach(() => {
   // Reset the module's tables between tests via the public test hook.
@@ -244,5 +249,80 @@ describe("S3 polish — provider-configured cap (router wiring)", () => {
     expect(r1.text).toBe("READY");
     expect(r2.text).toBe("READY");
     expect(fakeAdapter.chat).toHaveBeenCalledTimes(2); // truly concurrent
+  });
+});
+
+// ============================================================================
+// Task 20 — ADAPTIVE cap, router wiring. A 429 from real traffic tightens
+// the provider's effective cap (the router keys off recordTraffic-
+// CooldownFromError's returned classification); consecutive successes
+// recover it. Probe evidence never tightens (requestType "test").
+// ============================================================================
+
+describe("S3 adaptive — 429 evidence tightens, successes recover (router wiring)", () => {
+  beforeEach(() => {
+    __resetProviderConcurrencyForTests();
+    globalEventBus.clearHistory();
+    fakeAdapter.chat.mockReset();
+    setProviderConcurrencyOpts({ cap: 2, maxWaitMs: 60 });
+    delete (PROVIDERS[0] as any).concurrencyCap;
+    (recordTrafficCooldownFromError as any).mockReturnValue(undefined);
+  });
+
+  it("a 429 from real traffic tightens the cap and emits cap_tighten", async () => {
+    (recordTrafficCooldownFromError as any).mockReturnValue("429");
+    fakeAdapter.chat.mockRejectedValue(Object.assign(new Error("rate limited"), { statusCode: 429 }));
+    await expect(ProviderRouter.chat(REQ, OPTS)).rejects.toThrow(/All AI providers failed/i);
+    expect(getAdaptiveProviderCap("p_busy")).toBe(1); // 2 → 1 (halved)
+    const evt = globalEventBus.getHistory().find((e) => e.action === "cap_tighten");
+    expect(evt).toBeDefined();
+    expect(evt!.metadata!.from).toBe(2);
+    expect(evt!.metadata!.to).toBe(1);
+    expect(evt!.metadata!.cause).toBe("429");
+  });
+
+  it("a probe 429 does NOT tighten the cap (probe/cooldown separation)", async () => {
+    // Faithful to the real contract: probe evidence returns null, not "429".
+    (recordTrafficCooldownFromError as any).mockImplementation((o: any) =>
+      o?.requestType === "test" ? null : "429"
+    );
+    fakeAdapter.chat.mockRejectedValue(Object.assign(new Error("rate limited"), { statusCode: 429 }));
+    await ProviderRouter.chat(REQ, { ...OPTS, requestType: "test" }).catch(() => undefined);
+    expect(getAdaptiveProviderCap("p_busy")).toBeNull();
+  });
+
+  it("after tightening, parallel chats gate at the adaptive cap (one busy-skips)", async () => {
+    (recordTrafficCooldownFromError as any).mockReturnValue("429");
+    fakeAdapter.chat.mockRejectedValueOnce(Object.assign(new Error("rate limited"), { statusCode: 429 }));
+    await ProviderRouter.chat(REQ, OPTS).catch(() => undefined); // tightens 2 → 1
+    fakeAdapter.chat.mockImplementation(async () => {
+      await new Promise((r) => setTimeout(r, 150));
+      return { text: "READY", model: "m-free", latencyMs: 150 };
+    });
+    const first = ProviderRouter.chat(REQ, OPTS);
+    const second = ProviderRouter.chat(REQ, OPTS).catch((e: any) => e);
+    const [r1, r2] = await Promise.all([first, second]);
+    expect(r1.text).toBe("READY");
+    expect(String(r2.message)).toMatch(/All AI providers failed/i);
+    expect(fakeAdapter.chat).toHaveBeenCalledTimes(2); // 1 fail + 1 win, never pounded
+    const evt = globalEventBus
+      .getHistory()
+      .filter((e) => e.action === "skip_provider" && e.metadata?.reason === "provider_busy")
+      .pop();
+    expect(evt).toBeDefined();
+    expect(evt!.metadata!.cap).toBe(1); // busy event reports the ADAPTIVE cap
+  });
+
+  it(`consecutive successes recover the cap and emit cap_recover`, async () => {
+    recordProviderRateLimitHit("p_busy", 2); // 2 → 1
+    fakeAdapter.chat.mockResolvedValue({ text: "READY", model: "m-free", latencyMs: 5 });
+    for (let i = 0; i < ADAPTIVE_CAP_RECOVER_THRESHOLD; i++) {
+      await ProviderRouter.chat(REQ, OPTS);
+    }
+    expect(getAdaptiveProviderCap("p_busy")).toBe(2); // recovered to configured
+    const evt = globalEventBus.getHistory().find((e) => e.action === "cap_recover");
+    expect(evt).toBeDefined();
+    expect(evt!.metadata!.from).toBe(1);
+    expect(evt!.metadata!.to).toBe(2);
   });
 });

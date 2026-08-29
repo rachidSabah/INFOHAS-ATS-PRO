@@ -16,6 +16,7 @@ import { describe, it, expect } from "vitest";
 import type { AgentEvent } from "../agent-event-bus";
 import {
   isSkipEvent,
+  isCapEvent,
   isFailureEvent,
   filterTrajectory,
   summarizeSkips,
@@ -91,6 +92,50 @@ describe("isSkipEvent / isFailureEvent", () => {
   it("failed agent events are failures; successful ones are not", () => {
     expect(isFailureEvent(failure)).toBe(true);
     expect(isFailureEvent(ok)).toBe(false);
+  });
+});
+
+describe("isCapEvent — adaptive-cap lifecycle events (Task 20)", () => {
+  const capTighten: AgentEvent = {
+    agent: "ProviderRouter",
+    action: "cap_tighten",
+    resumeId: "OpenCode Zen",
+    provider: "OpenCode Zen",
+    success: true,
+    metadata: { from: 2, to: 1, ceiling: 2, cause: "429" },
+  };
+
+  const capRecover: AgentEvent = {
+    agent: "ProviderRouter",
+    action: "cap_recover",
+    resumeId: "OpenCode Zen",
+    provider: "OpenCode Zen",
+    success: true,
+    metadata: { from: 1, to: 2, ceiling: 2, consecutiveSuccesses: 5 },
+  };
+
+  it("cap_* events are CAP events", () => {
+    expect(isCapEvent(capTighten)).toBe(true);
+    expect(isCapEvent(capRecover)).toBe(true);
+  });
+
+  it("CAP events are neither skips nor failures (informational)", () => {
+    expect(isSkipEvent(capTighten)).toBe(false);
+    expect(isFailureEvent(capTighten)).toBe(false);
+    expect(isFailureEvent(capRecover)).toBe(false);
+  });
+
+  it("regular events are not CAP events", () => {
+    expect(isCapEvent(skipCooldown)).toBe(false);
+    expect(isCapEvent(failure)).toBe(false);
+    expect(isCapEvent(ok)).toBe(false);
+  });
+
+  it("CAP events flow through the 'all' view, not the skips/failures views", () => {
+    const events = [ok, capTighten, failure, capRecover, skipCooldown];
+    expect(filterTrajectory(events, "all")).toEqual(events);
+    expect(filterTrajectory(events, "skips")).toEqual([skipCooldown]);
+    expect(filterTrajectory(events, "failures")).toEqual([failure]);
   });
 });
 
