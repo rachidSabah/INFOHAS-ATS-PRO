@@ -196,3 +196,53 @@ describe("S3 — router integration", () => {
     releaseProviderSlot("p_busy");
   });
 });
+
+// ============================================================================
+// Task 19 — the limiter reads the cap from the ROUTED provider object
+// (AIProvider.concurrencyCap). Free tiers keep it tight; paid endpoints can
+// raise it above the global default so parallel agents actually overlap.
+// ============================================================================
+
+describe("S3 polish — provider-configured cap (router wiring)", () => {
+  beforeEach(() => {
+    globalEventBus.clearHistory();
+    fakeAdapter.chat.mockReset();
+    // Hold the slot long enough that a capped-out call's maxWaitMs elapses
+    // while the first attempt is STILL in flight (a fast adapter would free
+    // the slot in time and the waiter would legitimately succeed).
+    fakeAdapter.chat.mockImplementation(async () => {
+      await new Promise((r) => setTimeout(r, 150));
+      return { text: "READY", model: "m-free", latencyMs: 150 };
+    });
+    setProviderConcurrencyOpts({ cap: 2, maxWaitMs: 60 });
+    delete (PROVIDERS[0] as any).concurrencyCap;
+  });
+
+  it("provider cap 1 < global 2: parallel chats → one runs, one busy-skips", async () => {
+    (PROVIDERS[0] as any).concurrencyCap = 1;
+    const first = ProviderRouter.chat(REQ, OPTS);
+    const second = ProviderRouter.chat(REQ, OPTS).catch((e: any) => e);
+    const [r1, r2] = await Promise.all([first, second]);
+    expect(r1.text).toBe("READY");
+    expect(String(r2.message)).toMatch(/All AI providers failed/i);
+    expect(fakeAdapter.chat).toHaveBeenCalledTimes(1); // never pounded
+    const evt = globalEventBus
+      .getHistory()
+      .find((e) => e.action === "skip_provider" && e.provider === "BusyProv");
+    expect(evt).toBeDefined();
+    expect(evt!.metadata!.reason).toBe("provider_busy");
+    expect(evt!.metadata!.cap).toBe(1); // busy event reports the effective cap
+  });
+
+  it("provider cap 4 > global 1: parallel chats BOTH run (paid headroom)", async () => {
+    setProviderConcurrencyOpts({ cap: 1, maxWaitMs: 60 });
+    (PROVIDERS[0] as any).concurrencyCap = 4;
+    const [r1, r2] = await Promise.all([
+      ProviderRouter.chat(REQ, OPTS),
+      ProviderRouter.chat(REQ, OPTS),
+    ]);
+    expect(r1.text).toBe("READY");
+    expect(r2.text).toBe("READY");
+    expect(fakeAdapter.chat).toHaveBeenCalledTimes(2); // truly concurrent
+  });
+});

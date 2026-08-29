@@ -11,6 +11,7 @@ import { ProviderManager } from "@/lib/ai/services";
 import { toast } from "sonner";
 import type { AIProvider, AIProviderType } from "@/lib/types";
 import { PROVIDER_CATALOG, getProviderCatalogEntry, type ProviderCatalogEntry } from "@/lib/ai/provider-catalog";
+import { clampProviderConcurrencyCap } from "@/lib/provider-concurrency";
 
 // Re-exported as PROVIDER_TYPES for the existing JSX references below.
 // Source of truth is the shared catalog (lib/ai/provider-catalog.ts) so the
@@ -43,6 +44,7 @@ export function ProviderEditor({ provider, onClose, onSave }: {
     timeout: provider?.timeout ?? 30000,
     retryAttempts: provider?.retryAttempts ?? 2,
     rateLimitPerMinute: provider?.rateLimitPerMinute ?? 60,
+    concurrencyCap: provider?.concurrencyCap ?? 2,
     authType: (provider?.authType ?? "bearer") as "bearer" | "header" | "query" | "none",
     supportsFunctionCalling: provider?.supportsFunctionCalling ?? false,
     allowedForRegularUsers: provider?.allowedForRegularUsers ?? false,
@@ -210,6 +212,20 @@ export function ProviderEditor({ provider, onClose, onSave }: {
             <Field label="Timeout (ms)"><Input type="number" value={form.timeout} onChange={(e) => setForm({ ...form, timeout: parseInt(e.target.value) || 30000 })} /></Field>
             <Field label="Retry attempts"><Input type="number" value={form.retryAttempts} onChange={(e) => setForm({ ...form, retryAttempts: parseInt(e.target.value) || 2 })} /></Field>
             <Field label="Rate limit (req/min)"><Input type="number" value={form.rateLimitPerMinute} onChange={(e) => setForm({ ...form, rateLimitPerMinute: parseInt(e.target.value) || 60 })} /></Field>
+            <Field label="Concurrency cap (1–6 parallel requests)">
+              <div>
+                <Input
+                  type="number"
+                  min={1}
+                  max={6}
+                  value={form.concurrencyCap}
+                  onChange={(e) => setForm({ ...form, concurrencyCap: clampProviderConcurrencyCap(e.target.value) })}
+                />
+                <p className="text-[10px] text-muted-foreground mt-1">
+                  Max simultaneous in-flight requests routed here. Keep 1–2 for free tiers that 429 under parallel agent load; raise it for endpoints that tolerate concurrency.
+                </p>
+              </div>
+            </Field>
             <Field label="Cost per 1K input tokens (USD)"><Input type="number" step="0.0001" value={form.costPerInputToken * 1000} onChange={(e) => setForm({ ...form, costPerInputToken: (parseFloat(e.target.value) || 0) / 1000 })} /></Field>
             <Field label="Cost per 1K output tokens (USD)"><Input type="number" step="0.0001" value={form.costPerOutputToken * 1000} onChange={(e) => setForm({ ...form, costPerOutputToken: (parseFloat(e.target.value) || 0) / 1000 })} /></Field>
           </div>

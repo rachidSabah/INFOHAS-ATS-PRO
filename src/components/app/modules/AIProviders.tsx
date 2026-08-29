@@ -119,6 +119,7 @@ export function AIProviders() {
       timeout: p.timeout,
       retryAttempts: p.retryAttempts,
       rateLimitPerMinute: p.rateLimitPerMinute,
+      concurrencyCap: p.concurrencyCap,
       authType: p.authType,
     }));
     const blob = new Blob([JSON.stringify({ version: 1, exportedAt: new Date().toISOString(), providers: config }, null, 2)], { type: "application/json" });
@@ -167,6 +168,7 @@ export function AIProviders() {
           temperature: p.temperature ?? 0.7,
           retryAttempts: p.retryAttempts ?? 2,
           rateLimitPerMinute: p.rateLimitPerMinute ?? 30,
+          concurrencyCap: p.concurrencyCap ?? 2,
           authType: p.authType || "bearer",
           allowedForRegularUsers: p.allowedForRegularUsers ?? true,
           enabledModels: p.enabledModels || [],

@@ -494,6 +494,11 @@ export interface AIProvider {
   topP?: number;
   retryAttempts?: number;
   rateLimitPerMinute?: number;
+  /** Max simultaneous in-flight requests the router sends to this provider
+   * (Task 19 / S3 polish). Clamped 1..6 by provider-concurrency; absent =
+   * global default (2). Lower it for free tiers that 429 under parallel
+   * agent load; raise it for endpoints that tolerate concurrency. */
+  concurrencyCap?: number;
   applicationId?: string;
   clientId?: string;
   redirectUri?: string;

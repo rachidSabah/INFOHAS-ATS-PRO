@@ -28,6 +28,41 @@ export const DEFAULT_PROVIDER_CONCURRENCY = 2;
 /** Default max time a call waits for a slot before being reported busy. */
 export const DEFAULT_PROVIDER_SLOT_WAIT_MS = 10_000;
 
+// ---------------------------------------------------------------------------
+// Task 19 — USER-CONFIGURABLE per-provider cap (S3 polish)
+//
+// The global default (2) is right for free tiers, but a paid endpoint can
+// take more parallel load, and a fragile one less. The cap is therefore
+// stored ON the provider config (AIProvider.concurrencyCap) and resolved at
+// acquire time: effective cap = clamp(provider cap ?? global default).
+//   floor 1 — a cap of 0 would deadlock ALL traffic to the provider
+//   ceiling 6 — beyond that, parallel agents re-create the self-inflicted
+//   429 storm this limiter exists to prevent
+// ---------------------------------------------------------------------------
+
+/** Lowest usable per-provider cap — 0 would deadlock all traffic. */
+export const MIN_PROVIDER_CONCURRENCY_CAP = 1;
+
+/** Highest usable per-provider cap — beyond it parallel agents self-inflict 429s. */
+export const MAX_PROVIDER_CONCURRENCY_CAP = 6;
+
+/** Clamp any user/form/JSON input into the usable cap range.
+ * Non-numeric garbage falls back to the current global default. */
+export function clampProviderConcurrencyCap(input: unknown): number {
+  const n = typeof input === "number" ? input : parseInt(String(input ?? ""), 10);
+  if (!Number.isFinite(n)) return opts.cap;
+  return Math.min(MAX_PROVIDER_CONCURRENCY_CAP, Math.max(MIN_PROVIDER_CONCURRENCY_CAP, Math.floor(n)));
+}
+
+/** Effective cap for a provider: its configured cap (clamped) or the global default. */
+export function getEffectiveProviderCap(providerId: string, perProviderCap?: unknown): number {
+  if (perProviderCap === undefined || perProviderCap === null || perProviderCap === "") {
+    void providerId; // reserved for future per-provider state (e.g. adaptive caps)
+    return opts.cap;
+  }
+  return clampProviderConcurrencyCap(perProviderCap);
+}
+
 interface ConcurrencyOpts { cap: number; maxWaitMs: number }
 
 let opts: ConcurrencyOpts = {
@@ -66,16 +101,19 @@ function notifyNextWaiter(providerId: string): void {
  * Acquire a traffic slot for a provider.
  * Returns false when no slot freed up within maxWaitMs (busy).
  * Probes pass `probe: true` — they bypass the limiter entirely.
+ * `cap` — optional per-provider override (AIProvider.concurrencyCap);
+ * resolved (clamped) at acquire time, falls back to the global default.
  */
 export async function acquireProviderSlot(
   providerId: string,
-  probe?: { probe?: boolean },
+  o?: { probe?: boolean; cap?: unknown },
   maxWaitMsOverride?: number,
 ): Promise<boolean> {
-  if (probe?.probe) return true; // probes are never throttled
+  if (o?.probe) return true; // probes are never throttled
 
+  const cap = getEffectiveProviderCap(providerId, o?.cap);
   const maxWait = maxWaitMsOverride ?? opts.maxWaitMs;
-  const canEnter = (): boolean => (inFlight.get(providerId) ?? 0) < opts.cap;
+  const canEnter = (): boolean => (inFlight.get(providerId) ?? 0) < cap;
 
   if (canEnter()) {
     inFlight.set(providerId, (inFlight.get(providerId) ?? 0) + 1);
@@ -128,12 +166,13 @@ export function releaseProviderSlot(providerId: string): void {
 /**
  * Run `fn` inside a provider slot. Convenience wrapper used by the router:
  *   - probe → runs fn directly (no slot)
+ *   - cap   → per-provider cap override (see acquireProviderSlot)
  *   - busy  → resolves to the `busyValue` sentinel without running fn
  */
 export async function withProviderSlot<T>(
   providerId: string,
   fn: () => Promise<T>,
-  o?: { probe?: boolean; maxWaitMs?: number; busyValue: T },
+  o?: { probe?: boolean; maxWaitMs?: number; cap?: unknown; busyValue: T },
 ): Promise<T> {
   const acquired = await acquireProviderSlot(providerId, o, o?.maxWaitMs);
   if (!acquired) return o!.busyValue;

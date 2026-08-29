@@ -38,6 +38,7 @@ import {
   releaseProviderSlot,
   getProviderInFlight,
   getProviderConcurrencyOpts,
+  getEffectiveProviderCap,
 } from "../../provider-concurrency";
 import { getPromptCache, setPromptCache, buildPromptHash } from "../../prompt-cache";
 import { tryRotateProviderToken, isRotatableAuthError } from "../../token-rotation";
@@ -244,7 +245,8 @@ export class ProviderRouter {
       // several requests at ONE provider simultaneously — on free tiers that
       // self-inflicts 429s indistinguishable from quota exhaustion. Traffic
       // waits up to maxWaitMs for a slot, then falls through; probes bypass.
-      const slotAcquired = await acquireProviderSlot(cooldownId, { probe: isProbe });
+      // Task 19: the cap is per-PROVIDER configurable (AIProvider.concurrencyCap).
+      const slotAcquired = await acquireProviderSlot(cooldownId, { probe: isProbe, cap: provider.concurrencyCap });
       if (!slotAcquired) {
         const inFlight = getProviderInFlight(cooldownId);
         try {
@@ -257,6 +259,7 @@ export class ProviderRouter {
             metadata: {
               reason: "provider_busy",
               inFlight,
+              cap: getEffectiveProviderCap(cooldownId, provider.concurrencyCap),
               waitedMs: getProviderConcurrencyOpts().maxWaitMs,
               requestType: opts.requestType ?? "chat",
             },
@@ -430,7 +433,8 @@ export class ProviderRouter {
       }
 
       // S3 — per-provider concurrency cap (chat-path parity). Probes bypass.
-      const slotAcquired = await acquireProviderSlot(cooldownId, { probe: isProbe });
+      // Task 19: the cap is per-PROVIDER configurable (AIProvider.concurrencyCap).
+      const slotAcquired = await acquireProviderSlot(cooldownId, { probe: isProbe, cap: provider.concurrencyCap });
       if (!slotAcquired) {
         const inFlight = getProviderInFlight(cooldownId);
         try {
@@ -443,6 +447,7 @@ export class ProviderRouter {
             metadata: {
               reason: "provider_busy",
               inFlight,
+              cap: getEffectiveProviderCap(cooldownId, provider.concurrencyCap),
               waitedMs: getProviderConcurrencyOpts().maxWaitMs,
               requestType: opts.requestType ?? "chat",
             },

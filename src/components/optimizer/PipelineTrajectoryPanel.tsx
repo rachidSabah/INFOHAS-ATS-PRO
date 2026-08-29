@@ -8,6 +8,13 @@
 // a4-layout-gate / progressive stages), healing events and agent actions,
 // each with a status chip, duration, and expandable metadata.
 //
+// Task 19 (S2 polish): dedicated SKIP view. Router skip_provider events
+// (Task 18 S2 — structured cooldown / provider_busy reasons) used to render
+// as generic FAILED rows and pollute the failure story. They now get their
+// own filter tab, an amber SKIPPED chip, a one-line WHY (reason · class ·
+// remaining / in-flight · cap · waited), and a per-reason breakdown.
+// Filtering/summary logic lives in lib/trajectory-filters.ts (pure, tested).
+//
 // Visual language mirrors ProviderHealthPanel (chips with colored dots,
 // brand-tinted card, collapsible rows) so the surfaces read as one system.
 // ============================================================================
@@ -17,13 +24,22 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Badge } from "@/components/shared";
 import { Icon } from "@/components/shared";
 import { useTrajectory, useClearTrajectory } from "@/hooks/useTrajectory";
+import {
+  filterTrajectory,
+  isSkipEvent,
+  summarizeSkips,
+  describeSkipReason,
+  type TrajectoryFilter,
+} from "@/lib/trajectory-filters";
 import type { AgentEvent } from "@/lib/agent-event-bus";
 
 const CHIP_SUCCESS = "bg-emerald-500/10 text-emerald-600 border-emerald-500/30";
 const CHIP_FAILURE = "bg-red-500/10 text-red-600 border-red-500/30";
 const CHIP_NEUTRAL = "bg-sky-500/10 text-sky-600 border-sky-500/30";
+const CHIP_SKIP = "bg-amber-500/10 text-amber-600 border-amber-500/30";
 
 function chipForEvent(e: AgentEvent): { label: string; cls: string } {
+  if (isSkipEvent(e)) return { label: "SKIPPED", cls: CHIP_SKIP };
   if (e.success === false) return { label: "FAILED", cls: CHIP_FAILURE };
   const a = e.action || "";
   if (a.includes("failed")) return { label: "FAILED", cls: CHIP_FAILURE };
@@ -38,12 +54,29 @@ function fmtDuration(e: AgentEvent): string {
   return d >= 1000 ? `${(d / 1000).toFixed(1)}s` : `${d}ms`;
 }
 
+const FILTERS: Array<{ id: TrajectoryFilter; label: string }> = [
+  { id: "all", label: "All" },
+  { id: "skips", label: "Skips" },
+  { id: "failures", label: "Failures" },
+];
+
 export function PipelineTrajectoryPanel() {
   const { eventsNewestFirst, stats } = useTrajectory(80);
   const clear = useClearTrajectory();
   const [expanded, setExpanded] = useState<Record<number, boolean>>({});
+  const [filter, setFilter] = useState<TrajectoryFilter>("all");
 
   const failureRate = stats.totalEvents > 0 ? Math.round(((stats.totalEvents - stats.successfulEvents) / stats.totalEvents) * 100) : 0;
+
+  // Filter window = the same 80-event slice being displayed, so counts and
+  // rows always agree.
+  const skipCount = filterTrajectory(eventsNewestFirst, "skips").length;
+  const failureCount = filterTrajectory(eventsNewestFirst, "failures").length;
+  const visible = filterTrajectory(eventsNewestFirst, filter);
+  const skipSummary = summarizeSkips(eventsNewestFirst);
+
+  const countFor = (f: TrajectoryFilter): number =>
+    f === "all" ? eventsNewestFirst.length : f === "skips" ? skipCount : failureCount;
 
   return (
     <Card className="border-brand/20" data-trajectory-panel>
@@ -61,17 +94,63 @@ export function PipelineTrajectoryPanel() {
           <Badge variant="outline" className="text-[10px]">{stats.successfulEvents} ok</Badge>
           <Badge variant="outline" className="text-[10px]">{stats.totalEvents - stats.successfulEvents} failed</Badge>
           <Badge variant="outline" className="text-[10px]">failure rate {failureRate}%</Badge>
+          {skipSummary.total > 0 && (
+            <Badge variant="outline" className="text-[10px] border-amber-500/40 text-amber-600 bg-amber-500/5">
+              {skipSummary.total} routed-around
+            </Badge>
+          )}
           <button className="ml-auto text-[10px] text-muted-foreground underline" onClick={clear}>Clear trace</button>
+        </div>
+
+        {/* Dedicated views — Skips isolates WHY the router routed around a
+            provider (cooldown windows, concurrency caps) without mixing real
+            agent failures into the story. */}
+        <div className="flex flex-wrap items-center gap-1.5">
+          {FILTERS.map((f) => (
+            <button
+              key={f.id}
+              onClick={() => setFilter(f.id)}
+              className={`px-2.5 py-1 rounded-full border text-[10px] font-semibold transition ${
+                filter === f.id
+                  ? f.id === "skips"
+                    ? "bg-amber-500/15 text-amber-700 border-amber-500/40"
+                    : f.id === "failures"
+                      ? "bg-red-500/10 text-red-600 border-red-500/40"
+                      : "bg-brand text-white border-brand"
+                  : "border-border text-muted-foreground hover:text-foreground hover:bg-secondary"
+              }`}
+            >
+              {f.label} ({countFor(f.id)})
+            </button>
+          ))}
+          {filter === "skips" && skipSummary.total > 0 && (
+            <span className="flex flex-wrap items-center gap-1.5 ml-1">
+              {Object.entries(skipSummary.byReason).map(([reason, n]) => (
+                <span key={reason} className="px-1.5 py-0.5 rounded-full bg-amber-500/10 border border-amber-500/30 text-amber-600 text-[10px]">
+                  {reason === "provider_busy" ? "busy" : reason} × {n}
+                </span>
+              ))}
+            </span>
+          )}
         </div>
 
         {eventsNewestFirst.length === 0 ? (
           <div className="rounded-lg border border-border/60 px-2.5 py-2 text-[11px] text-muted-foreground">
             No events yet — run an optimization to see the per-node trajectory here.
           </div>
+        ) : visible.length === 0 ? (
+          <div className="rounded-lg border border-border/60 px-2.5 py-2 text-[11px] text-muted-foreground">
+            {filter === "skips"
+              ? "No provider skips in this window — every attempt went through."
+              : filter === "failures"
+                ? "No failures in this window."
+                : "No events."}
+          </div>
         ) : (
           <div className="rounded-lg border border-border/60 divide-y divide-border/60 max-h-72 overflow-y-auto">
-            {eventsNewestFirst.map((e, i) => {
+            {visible.map((e, i) => {
               const chip = chipForEvent(e);
+              const skip = isSkipEvent(e);
               const meta = e.metadata && Object.keys(e.metadata).length > 0 ? e.metadata : null;
               return (
                 <div key={`${e.timestamp}-${i}`} className="px-2.5 py-1.5 space-y-1">
@@ -81,6 +160,11 @@ export function PipelineTrajectoryPanel() {
                     </span>
                     <span className="font-semibold">{e.agent}</span>
                     <span className="font-mono text-[10px] text-muted-foreground">{e.action}</span>
+                    {skip && (
+                      <span className="text-[10px] text-amber-600 dark:text-amber-400 font-medium">
+                        {describeSkipReason(e)}
+                      </span>
+                    )}
                     <span className="text-[10px] text-muted-foreground">{fmtDuration(e)}</span>
                     <span className="text-[10px] text-muted-foreground ml-auto">{e.timestamp ? new Date(e.timestamp).toLocaleTimeString() : ""}</span>
                   </div>
