@@ -3,7 +3,31 @@
 //
 // In-memory tracking of provider quotas, cooldowns, and health.
 // Auto-failover: when a model hits rate limit, rank alternatives and continue.
+//
+// P3 — BOUNDED EXPONENTIAL BACKOFF (regression-hardening):
+// Previously record429 opened a flat 3-minute window and isRateLimited had a
+// "sticky after 3 consecutive 429s" branch with NO time bound — an in-memory
+// block that only a success (unroutable while blocked) or a page reload could
+// lift. Quota-dead providers were also re-attempted every 3 minutes all day
+// (the retry treadmill). Now every 429 re-opens a window that doubles with
+// each consecutive failure (60s → 2m → 4m → …) and is CAPPED at
+// RATE_LIMIT_BACKOFF_CAP_MS (30 min — aligned with the quota-class sessionStorage
+// cooldown in provider-cooldown.ts). Every block always expires.
 // ============================================================================
+
+/** Base window for the first 429 of a streak. */
+export const RATE_LIMIT_BACKOFF_BASE_MS = 60_000;
+/** Hard cap for the escalating window — matches PROVIDER_QUOTA_COOLDOWN_MS. */
+export const RATE_LIMIT_BACKOFF_CAP_MS = 30 * 60 * 1000;
+
+/**
+ * Window for the n-th consecutive 429 (1-indexed):
+ * 60s, 120s, 240s, 480s, 960s, then capped at 30 min.
+ */
+export function rateLimitBackoffMs(consecutive429s: number): number {
+  const shifted = Math.max(0, Math.min(consecutive429s - 1, 5));
+  return Math.min(RATE_LIMIT_BACKOFF_BASE_MS * 2 ** shifted, RATE_LIMIT_BACKOFF_CAP_MS);
+}
 
 export interface QuotaEntry {
   providerId: string;
@@ -25,7 +49,7 @@ export interface FailoverDecision {
 class RateLimitTracker {
   private quotas: Map<string, QuotaEntry> = new Map();
 
-  /** Mark a model as receiving a 429 */
+  /** Mark a model as receiving a 429 (re-opens an escalating, always-bounded window) */
   record429(providerId: string, modelName: string): void {
     const key = `${providerId}:${modelName}`;
     const existing = this.quotas.get(key);
@@ -34,12 +58,13 @@ class RateLimitTracker {
       existing.last429At = now;
       existing.consecutive429s++;
       existing.requestsRemaining = 0;
+      existing.resetAt = now + rateLimitBackoffMs(existing.consecutive429s);
     } else {
       this.quotas.set(key, {
         providerId, modelName,
         requestsRemaining: 0,
         tokensRemaining: 0,
-        resetAt: now + 180_000, // 3 min default
+        resetAt: now + rateLimitBackoffMs(1),
         last429At: now,
         consecutive429s: 1,
       });
@@ -66,8 +91,10 @@ class RateLimitTracker {
     for (const key of keys) {
       const entry = this.quotas.get(key);
       if (!entry) continue;
+      // P3: window-bounded only — the old "sticky after 3 consecutive" branch
+      // (no TTL) is gone; escalation above keeps persistent offenders parked
+      // for up to RATE_LIMIT_BACKOFF_CAP_MS at a time.
       if (now < entry.resetAt && entry.consecutive429s > 0) return true;
-      if (entry.consecutive429s >= 3) return true; // sticky after 3 consecutive
       if (entry.requestsRemaining === 0 && now < entry.resetAt) return true;
     }
     return false;

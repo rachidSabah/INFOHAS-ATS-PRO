@@ -26,6 +26,7 @@ import {
   markProvider401Cooldown,
   markProviderTimeoutCooldown,
   recordTrafficCooldownFromError,
+  clearProviderCooldownOnSuccess,
   isTimeoutError,
 } from "../../provider-cooldown";
 import { getPromptCache, setPromptCache, buildPromptHash } from "../../prompt-cache";
@@ -177,9 +178,15 @@ export class ProviderRouter {
 
     for (const provider of chain) {
       const cooldownId = provider.id || provider.name || provider.type;
-      
-      // Skip rate-limited / cooldown providers
-      if (rateLimitTracker.isRateLimited(provider.id) || isProviderInCooldown(cooldownId)) {
+
+      // Skip rate-limited / cooldown providers — REAL TRAFFIC ONLY.
+      // Probes (requestType "test": preflight / benchmark / heal pings) must
+      // reach the provider even while it is cooled down: cooldowns gate
+      // traffic, not evidence. Blocking probes made heal/benchmark pings fail
+      // with an unclassifiable "in cooldown (Xs remaining)" error and meant a
+      // cooled provider could never be re-tested (or early-cleared) again.
+      const isProbe = opts.requestType === "test";
+      if (!isProbe && (rateLimitTracker.isRateLimited(provider.id) || isProviderInCooldown(cooldownId))) {
         const remainingSec = rateLimitTracker.isRateLimited(provider.id)
           ? Math.ceil(rateLimitTracker.getCooldownRemainingMs(provider.id) / 1000)
           : 60; // default to 60s for other cooldowns
@@ -207,7 +214,8 @@ export class ProviderRouter {
           ProviderRouter.modelForProvider(provider, opts, req)
         );
 
-        // Success path
+        // Success path — evidence of recovery clears any stale cooldown.
+        clearProviderCooldownOnSuccess(cooldownId);
         if (cacheHash) {
           setPromptCache(cacheHash, {
             text: res.text,
@@ -310,7 +318,10 @@ export class ProviderRouter {
     for (const provider of chain) {
       const cooldownId = provider.id || provider.name || provider.type;
 
-      if (rateLimitTracker.isRateLimited(provider.id) || isProviderInCooldown(cooldownId)) {
+      // Same probe-vs-traffic rule as chat(): cooldowns gate traffic, not
+      // evidence — probes must reach cooled-down providers.
+      const isProbe = opts.requestType === "test";
+      if (!isProbe && (rateLimitTracker.isRateLimited(provider.id) || isProviderInCooldown(cooldownId))) {
         const remainingSec = rateLimitTracker.isRateLimited(provider.id)
           ? Math.ceil(rateLimitTracker.getCooldownRemainingMs(provider.id) / 1000)
           : 60;
@@ -368,6 +379,8 @@ export class ProviderRouter {
           responsePreview: res.text.slice(0, 200),
         });
 
+        // Evidence of recovery clears any stale cooldown (stream path).
+        clearProviderCooldownOnSuccess(cooldownId);
         return res;
       } catch (e: any) {
         const eMsg = e?.message ?? String(e);
@@ -769,7 +782,9 @@ export class ProviderRouter {
 
         // Record success in rate-limit tracker
         rateLimitTracker.recordSuccess(provider.id, res.model || config.modelName || "default");
-        
+        // Evidence of recovery clears any stale cooldown (P1 early-clear).
+        clearProviderCooldownOnSuccess(provider.id || provider.name || provider.type);
+
         // Log success
         this.log({
           providerId: provider.id,
@@ -793,7 +808,11 @@ export class ProviderRouter {
           const rotated = await this.tryRotationFallbacks(
             provider, req, config, e, timeoutMs, opts, requestType, rotationState, modelForAttempt
           );
-          if (rotated) return rotated;
+          if (rotated) {
+            // Rotation success is still success — clear stale cooldowns.
+            clearProviderCooldownOnSuccess(provider.id || provider.name || provider.type);
+            return rotated;
+          }
         }
 
         // Log the failure
@@ -875,6 +894,9 @@ export class ProviderRouter {
         // Winner! Cancel others
         globalAc.abort();
         clearTimeout(raceTimer);
+
+        // Evidence of recovery clears any stale cooldown (race winner).
+        clearProviderCooldownOnSuccess(provId);
 
         console.log(`[ROUTER] Speculative race won by: ${prov.name} in ${Math.round(performance.now() - t0)}ms`);
         return {

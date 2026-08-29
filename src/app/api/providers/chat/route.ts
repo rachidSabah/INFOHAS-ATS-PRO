@@ -166,9 +166,31 @@ export async function POST(req: NextRequest) {
           : `Invalid API Key. Please verify that your API key is correct and has the necessary permissions. Detail: ${errorMessage}`;
       }
 
+      // P2 — relay the upstream Retry-After hint (exact cooldown evidence).
+      // Providers that send `Retry-After` (delta-seconds or HTTP-date) tell us
+      // EXACTLY when to come back; without relaying it, the client would guess
+      // a window instead. Relay as a structured field AND as a message note
+      // (message survives every error-shaping path, including truncation).
+      let retryAfterSeconds: number | undefined;
+      const retryAfterRaw = res.headers.get("retry-after");
+      if (retryAfterRaw) {
+        const asNum = Number(retryAfterRaw.trim());
+        if (Number.isFinite(asNum) && asNum > 0) {
+          retryAfterSeconds = Math.floor(asNum);
+        } else {
+          const ts = Date.parse(retryAfterRaw);
+          if (!Number.isNaN(ts)) {
+            const s = Math.ceil((ts - Date.now()) / 1000);
+            if (s > 0) retryAfterSeconds = s;
+          }
+        }
+      }
+      const retryNote = retryAfterSeconds !== undefined ? ` (retry-after: ${retryAfterSeconds}s)` : "";
+
       return NextResponse.json({
         ok: false, latencyMs,
-        error: `API returned HTTP ${res.status}: ${cleanMessage}`,
+        error: `API returned HTTP ${res.status}: ${cleanMessage}${retryNote}`,
+        ...(retryAfterSeconds !== undefined ? { retryAfterSeconds } : {}),
       }, { status: res.status });
     }
 

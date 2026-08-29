@@ -75,7 +75,17 @@ export class CustomProvider implements AIProviderAdapter {
       const latencyMs = Math.round(performance.now() - t0);
       if (!proxyRes.ok) {
         const errText = await proxyRes.text().catch(() => "");
-        throw new ProviderError(`Proxy: ${errText.slice(0, 200)}`, proxyRes.status, latencyMs);
+        const err = new ProviderError(`Proxy: ${errText.slice(0, 200)}`, proxyRes.status, latencyMs);
+        // P2 — the proxy relays the upstream Retry-After hint as
+        // `retryAfterSeconds`; attach it so the cooldown layer can honor the
+        // provider's exact window instead of guessing.
+        try {
+          const j = JSON.parse(errText) as any;
+          if (Number.isFinite(j?.retryAfterSeconds) && j.retryAfterSeconds > 0) {
+            (err as any).retryAfterSeconds = Number(j.retryAfterSeconds);
+          }
+        } catch { /* non-JSON body — message note path still works */ }
+        throw err;
       }
       const data = (await proxyRes.json()) as any;
       if (!data.ok) {
