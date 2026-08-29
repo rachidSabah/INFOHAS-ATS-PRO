@@ -99,6 +99,72 @@ export function getAdaptiveProviderCap(providerId: string): number | null {
   return adaptiveCaps.get(providerId)?.current ?? null;
 }
 
+// ---------------------------------------------------------------------------
+// Task 21 — OBSERVABILITY: snapshot + manual reset
+//
+// The adaptive layer tunes itself invisibly; the Providers page (where the
+// user sets the ceiling) had no way to show what is ACTUALLY enforced per
+// provider right now. These read-only helpers expose the full picture, and
+// resetProviderAdaptiveCap is the manual escape hatch (e.g. after fixing a
+// upstream quota, or for support diagnostics). Pure logic — the UI column is
+// thin wiring over these calls.
+// ---------------------------------------------------------------------------
+
+export interface AdaptiveCapSnapshot {
+  current: number;
+  ceiling: number;
+  consecutiveSuccesses: number;
+}
+
+export interface ProviderConcurrencySnapshot {
+  providerId: string;
+  /** The user's configured ceiling for this provider (clamped). */
+  configuredCap: number;
+  /** The adaptive current (null = never tightened this session). */
+  adaptiveCap: number | null;
+  /** What acquireProviderSlot enforces RIGHT NOW (min of configured/adaptive). */
+  effectiveCap: number;
+  /** Live in-flight traffic slots. */
+  inFlight: number;
+  /** effectiveCap < configuredCap — traffic is gated below the user's setting. */
+  tightened: boolean;
+  /** Recovery progress toward the next +1 step (0 when not tightened). */
+  consecutiveSuccesses: number;
+}
+
+/** Raw adaptive state for a provider (null = no evidence recorded yet). */
+export function getAdaptiveCapState(providerId: string): AdaptiveCapSnapshot | null {
+  const st = adaptiveCaps.get(providerId);
+  if (!st) return null;
+  return { current: st.current, ceiling: st.ceiling, consecutiveSuccesses: st.consecutiveSuccesses };
+}
+
+/** Full per-provider concurrency picture for observability surfaces. */
+export function getProviderConcurrencySnapshot(
+  providerId: string,
+  perProviderCap?: unknown,
+): ProviderConcurrencySnapshot {
+  const configuredCap = getConfiguredProviderCap(providerId, perProviderCap);
+  const st = adaptiveCaps.get(providerId);
+  const effectiveCap = getEffectiveProviderCap(providerId, perProviderCap);
+  return {
+    providerId,
+    configuredCap,
+    adaptiveCap: st ? st.current : null,
+    effectiveCap,
+    inFlight: getProviderInFlight(providerId),
+    tightened: effectiveCap < configuredCap,
+    consecutiveSuccesses: st ? st.consecutiveSuccesses : 0,
+  };
+}
+
+/** Manually clear ONE provider's adaptive state (returns whether state existed).
+ * The next acquire runs at the configured ceiling; a later 429 re-tightens
+ * from scratch. Never touches other providers. */
+export function resetProviderAdaptiveCap(providerId: string): boolean {
+  return adaptiveCaps.delete(providerId);
+}
+
 /** Record 429-family evidence on a REAL traffic attempt: halve the adaptive
  * cap (floor 1). Creates state on first hit, resets the success counter. */
 export function recordProviderRateLimitHit(providerId: string, ceiling: number): AdaptiveCapChange {

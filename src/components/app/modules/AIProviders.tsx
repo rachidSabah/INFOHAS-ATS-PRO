@@ -13,6 +13,7 @@ import { ProviderManager } from "@/lib/ai/services";
 import { toast } from "sonner";
 import type { AIProvider } from "@/lib/types";
 import { isOpenCodeZenFree } from "@/lib/provider-capabilities";
+import { getProviderConcurrencySnapshot, resetProviderAdaptiveCap, ADAPTIVE_CAP_RECOVER_THRESHOLD } from "@/lib/provider-concurrency";
 import { ProviderEditor } from "./AIProviderEditor";
 import { ProviderAnalytics } from "./ProviderAnalytics";
 import { ProviderLogsTable } from "./ProviderLogsTable";
@@ -54,6 +55,16 @@ export function AIProviders() {
   const [testing, setTesting] = useState<AIProvider | null>(null);
   const [healingId, setHealingId] = useState<string | null>(null);
   const [q, setQ] = useState("");
+
+  // Live concurrency snapshot re-render tick — the limiter/adaptive-cap state
+  // lives outside the Zustand store (module state in provider-concurrency),
+  // so poll it lightly while the providers table is visible.
+  const [, setConcurrencyTick] = useState(0);
+  useEffect(() => {
+    if (tab !== "providers") return;
+    const t = setInterval(() => setConcurrencyTick((n) => n + 1), 2000);
+    return () => clearInterval(t);
+  }, [tab]);
 
   // Refresh auth status from providers
   const refreshAuthStatus = useCallback(() => {
@@ -100,6 +111,14 @@ export function AIProviders() {
     } finally {
       setHealingId(null);
     }
+  };
+
+  /** Manual escape hatch for the adaptive cap (Task 21): clear ONE provider's
+   * self-tightened state so traffic runs at the configured ceiling again. */
+  const handleResetAdaptiveCap = (p: AIProvider) => {
+    const existed = resetProviderAdaptiveCap(p.id);
+    if (existed) toast.success(`${p.name}: adaptive cap reset — running at the configured ceiling.`);
+    else toast.info(`${p.name}: no adaptive tightening to reset.`);
   };
 
   const importRef = useRef<HTMLInputElement>(null);
@@ -310,6 +329,7 @@ export function AIProviders() {
                     <th className="px-4 py-2 font-semibold">Model</th>
                     <th className="px-4 py-2 font-semibold">Status</th>
                     <th className="px-4 py-2 font-semibold">Priority</th>
+                    <th className="px-4 py-2 font-semibold" title="Live concurrency limiter: effective cap / your configured ceiling. AUTO = the adaptive layer self-tightened after 429 evidence (halves on hits, +1 per 5 clean successes).">Concurrency</th>
                     <th className="px-4 py-2 font-semibold">Requests</th>
                     <th className="px-4 py-2 font-semibold">Last used</th>
                     <th className="px-4 py-2 font-semibold text-right">Actions</th>
@@ -348,6 +368,39 @@ export function AIProviders() {
                         <td className="px-4 py-3 text-xs font-mono">{p.modelName || "—"}</td>
                         <td className="px-4 py-3"><Badge variant={statusColor as any} className="capitalize text-[10px]">{p.status}</Badge></td>
                         <td className="px-4 py-3"><span className="font-mono text-xs">#{p.priority}</span></td>
+                        <td className="px-4 py-3">
+                          {(() => {
+                            const snap = getProviderConcurrencySnapshot(p.id, p.concurrencyCap);
+                            return (
+                              <div className="flex items-center gap-1.5">
+                                <span
+                                  className={`font-mono text-xs ${snap.tightened ? "font-semibold text-amber-600 dark:text-amber-400" : "text-muted-foreground"}`}
+                                  title={snap.tightened
+                                    ? `Auto-tightened to ${snap.effectiveCap} of your ceiling ${snap.configuredCap} after rate-limit evidence. Recovers +1 per ${ADAPTIVE_CAP_RECOVER_THRESHOLD} clean successes (now ${snap.consecutiveSuccesses}/${ADAPTIVE_CAP_RECOVER_THRESHOLD}).`
+                                    : `Cap ${snap.configuredCap} — as configured.${snap.inFlight > 0 ? ` ${snap.inFlight} in flight.` : ""}`}
+                                >
+                                  {snap.effectiveCap}/{snap.configuredCap}
+                                </span>
+                                {snap.tightened && (
+                                  <Badge variant="warning" className="text-[9px]">AUTO</Badge>
+                                )}
+                                {snap.tightened && (
+                                  <button
+                                    onClick={() => handleResetAdaptiveCap(p)}
+                                    title="Reset adaptive cap to the configured ceiling"
+                                    aria-label="Reset adaptive cap"
+                                    className="w-5 h-5 rounded hover:bg-secondary flex items-center justify-center text-muted-foreground hover:text-foreground transition"
+                                  >
+                                    <Icon name="RotateCcw" className="w-3 h-3" />
+                                  </button>
+                                )}
+                                {snap.inFlight > 0 && (
+                                  <span className="text-[10px] text-muted-foreground whitespace-nowrap">· {snap.inFlight} in flight</span>
+                                )}
+                              </div>
+                            );
+                          })()}
+                        </td>
                         <td className="px-4 py-3 text-xs">{p.usage.requests.toLocaleString()}</td>
                         <td className="px-4 py-3 text-xs text-muted-foreground">{p.lastUsedAt ? new Date(p.lastUsedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "—"}</td>
                         <td className="px-4 py-3">
@@ -364,7 +417,7 @@ export function AIProviders() {
                     );
                   })}
                   {filtered.length === 0 && (
-                    <tr><td colSpan={9} className="text-center py-12 text-muted-foreground">No providers match "{q}".</td></tr>
+                    <tr><td colSpan={10} className="text-center py-12 text-muted-foreground">No providers match "{q}".</td></tr>
                   )}
                 </tbody>
               </table>
