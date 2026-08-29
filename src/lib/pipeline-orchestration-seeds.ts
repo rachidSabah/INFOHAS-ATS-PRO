@@ -178,6 +178,90 @@ export const SEED_PIPELINE_PROFILES: PipelineProfile[] = [
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
   },
+  {
+    id: "profile-agentic-turbo",
+    name: "Agentic Turbo",
+    description:
+      "Agentic fast lane — locked pipeline + V3 agents + surgical targeted regeneration on a lean 2-attempt budget. Flash-tier turnaround for quick iterations; factual integrity (95) is never relaxed.",
+    type: "agentic-turbo",
+    enabledAgents: [
+      "entity-lock", "job-intelligence", "company-intelligence", "skill-gap", "ats-analysis",
+      "summary-optimizer", "skills-optimizer", "experience-optimizer",
+      "resume-assembler", "structure-guardian", "factual-consistency", "quality-assurance", "reflection",
+    ],
+    parallelGroups: [
+      ["entity-lock"],
+      ["job-intelligence", "company-intelligence", "skill-gap", "ats-analysis"],
+      ["summary-optimizer", "skills-optimizer", "experience-optimizer"],
+      ["resume-assembler"],
+      ["structure-guardian", "factual-consistency"],
+      ["quality-assurance", "reflection"],
+    ],
+    enableV3PostOptimization: true,
+    useLockedPipeline: true,
+    enableTargetedRegeneration: true,
+    matchingStrategy: "hybrid",
+    hybridMatchingThreshold: 70, // slightly lenient → less match churn → fewer wasted cycles
+    maxRetries: 2,
+    validationThresholds: {
+      minAtsScore: 65,
+      minFactualConsistency: 95, // NEVER relaxed — directive §2
+      minKeywordCoverage: 60,
+      minHtmlValidation: 85,
+      minGrammarScore: 85,
+      minRecruiterReadability: 85,
+      minSemanticSimilarity: 75,
+      minConfidenceScore: 75,
+      minQualityScore: 80,
+      enforceOnePage: true,
+    },
+    isBuiltIn: true,
+    isDefault: false,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  },
+  {
+    id: "profile-agentic-sentinel",
+    name: "Agentic Sentinel",
+    description:
+      "Agentic deep mode — locked pipeline + V3 agents + targeted regeneration with the maximum 6-attempt budget and the strictest validation gates. The pipeline keeps self-correcting section-by-section until every gate passes or the budget is exhausted.",
+    type: "agentic-sentinel",
+    enabledAgents: [
+      "entity-lock", "job-intelligence", "company-intelligence", "skill-gap", "ats-analysis",
+      "summary-optimizer", "skills-optimizer", "experience-optimizer",
+      "resume-assembler", "structure-guardian", "factual-consistency", "quality-assurance", "reflection",
+    ],
+    parallelGroups: [
+      ["entity-lock"],
+      ["job-intelligence", "company-intelligence", "skill-gap", "ats-analysis"],
+      ["summary-optimizer", "skills-optimizer", "experience-optimizer"],
+      ["resume-assembler"],
+      ["structure-guardian", "factual-consistency"],
+      ["quality-assurance", "reflection"],
+    ],
+    enableV3PostOptimization: true,
+    useLockedPipeline: true,
+    enableTargetedRegeneration: true,
+    matchingStrategy: "hybrid",
+    hybridMatchingThreshold: 85, // tight matching for maximum integrity
+    maxRetries: 6,
+    validationThresholds: {
+      minAtsScore: 75,
+      minFactualConsistency: 95, // NEVER relaxed — directive §2
+      minKeywordCoverage: 75,
+      minHtmlValidation: 90,
+      minGrammarScore: 90,
+      minRecruiterReadability: 90,
+      minSemanticSimilarity: 85,
+      minConfidenceScore: 85,
+      minQualityScore: 90,
+      enforceOnePage: true,
+    },
+    isBuiltIn: true,
+    isDefault: false,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  },
 ];
 
 // ============================================================================

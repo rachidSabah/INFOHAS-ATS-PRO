@@ -17,11 +17,13 @@
 // ============================================================================
 
 export type PipelineProfileType =
-  | "legacy-v2"      // Old V2 pipeline (standard optimizer only)
-  | "legacy-v3"      // V2 + V3 post-optimization agents
-  | "locked"         // Locked pipeline (bullet-only optimizer + assembler)
-  | "hybrid"         // Locked pipeline + V3 agents + targeted regeneration (recommended)
-  | "custom";        // Full manual configuration
+  | "legacy-v2"       // Old V2 pipeline (standard optimizer only)
+  | "legacy-v3"       // V2 + V3 post-optimization agents
+  | "locked"          // Locked pipeline (bullet-only optimizer + assembler)
+  | "hybrid"          // Locked pipeline + V3 agents + targeted regeneration (recommended)
+  | "agentic-turbo"   // Agentic fast lane — lean attempt budget, surgical regeneration
+  | "agentic-sentinel" // Agentic deep mode — max attempt budget, strictest gates
+  | "custom";         // Full manual configuration
 
 export interface PipelineProfile {
   id: string;

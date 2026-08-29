@@ -80,6 +80,8 @@ export function PipelineProfiles() {
     "legacy-v3": "#0EA5E9",
     "locked": "#10B981",
     "hybrid": "#6366F1",
+    "agentic-turbo": "#F97316",
+    "agentic-sentinel": "#8B5CF6",
     "custom": "#F59E0B",
   };
 
@@ -310,7 +312,7 @@ export function PipelineProfiles() {
         <CardContent className="space-y-2 text-sm text-muted-foreground">
           <p>1. The Supervisor Agent loads the selected profile at the start of each pipeline run.</p>
           <p>2. The profile is LIVE — it decides the locked pipeline, optimizer retry attempts, V3 post-optimization agents, targeted regeneration, assembler matching strategy, and the QA reflection threshold.</p>
-          <p>3. Built-in profiles (Legacy V2, Legacy V3, Locked, Hybrid) are read-only but can be cloned to create custom profiles.</p>
+          <p>3. Built-in profiles (Legacy V2, Legacy V3, Locked, Hybrid, Agentic Turbo, Agentic Sentinel) are read-only but can be cloned to create custom profiles.</p>
           <p>4. Custom profiles are fully editable and persisted to D1.</p>
           <p>5. Changes take effect immediately — no restart required. The profile (and its updatedAt) is part of the Supervisor's result-cache key, so edits always apply to the next run.</p>
           <p>6. Per-agent configuration (provider, model, temperature, prompts, retry, fallback) is available in the Agent Configuration Center.</p>
