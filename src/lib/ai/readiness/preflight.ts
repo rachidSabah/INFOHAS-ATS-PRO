@@ -63,6 +63,37 @@ export interface ReadinessGateResult {
 const GATE_SYSTEM = "Respond in exactly one word: 'READY'. Do not write anything else.";
 const GATE_USER = "status check";
 
+// ---------------------------------------------------------------------------
+// PREFLIGHT MODEL ROTATION (Zen free-model regression, 2026-08-30).
+//
+// Live evidence: the Zen free-usage limiter is keyed to the REQUESTER'S IP,
+// not the API key — FreeUsageLimitError fires even with a brand-new key, and
+// per-model upstream routes churn independently (one sibling 429s while
+// another answers 200 from the same IP). The gate previously gave up on a
+// provider whose CONFIGURED model was quota-limited, blocking the optimizer
+// even though sibling free models answered fine.
+//
+// Fix: when the configured model's ping fails with a quota/model-class error,
+// retry the ping through the provider's enabledModels siblings (bounded, same
+// semantics as the router's model rotation) and report the WORKING model as
+// candidate.model — so the job lock pins the model that actually answers.
+// Auth errors NEVER rotate (another model on the same dead credential cannot
+// help — router parity).
+// ---------------------------------------------------------------------------
+
+/** Max sibling-model pings after the configured model fails (router parity). */
+export const PREFLIGHT_MODEL_ROTATION_CAP = 3;
+
+const PING_AUTH_ERROR = /(^|\D)(401|402|403)(\D|$)|unauthorized|forbidden|invalid.?(api.?)?key|billing|credits?/i;
+const PING_MODEL_ROTATION = /429|rate.?limit|too.?many.?requests|FreeUsageLimitError|quota|usage.?limit|invalid.?model|decommissioned|model[s]?[\s`"'/.\w-]{0,60}?(?:not.?found|does.?not.?exist|is.?not.?supported|unsupported|unavailable\b)/i;
+
+/** Quota/model-class failures warrant trying sibling models; auth never does. */
+export function errorWarrantsModelRotation(error?: string): boolean {
+  if (!error) return false;
+  if (PING_AUTH_ERROR.test(error)) return false;
+  return PING_MODEL_ROTATION.test(error);
+}
+
 /** Weighted READINESS SCORE (directive #28) — NOT a blind average. */
 export function computeReadinessScore(
   provider: AIProvider,
@@ -171,11 +202,32 @@ export async function runReadinessPreflight(opts: {
       continue;
     }
 
-    const ping = await pingCandidate(provider, model, opts.timeoutMs ?? Math.min(15000, provider.timeout || 15000), opts.deps);
+    const pingTimeout = opts.timeoutMs ?? Math.min(15000, provider.timeout || 15000);
+    let ping = await pingCandidate(provider, model, pingTimeout, opts.deps);
+    let usedModel = model;
+    if (!ping.ok && errorWarrantsModelRotation(ping.error)) {
+      // Gate parity with the router's model rotation: try sibling free models
+      // (bounded) before declaring the provider not-ready. The 429 free limiter
+      // is per-IP/per-model — a sibling frequently answers when the configured
+      // model's pool is exhausted.
+      const siblings = ((provider.enabledModels as string[] | undefined) ?? [])
+        .filter((m) => typeof m === "string" && m.trim() !== "" && m !== model);
+      let tried = 0;
+      for (const alt of siblings) {
+        if (tried >= PREFLIGHT_MODEL_ROTATION_CAP) break;
+        tried++;
+        const altPing = await pingCandidate(provider, alt, pingTimeout, opts.deps);
+        if (altPing.ok) {
+          ping = altPing;
+          usedModel = alt;
+          break;
+        }
+      }
+    }
     const cls = ping.ok ? undefined : classifyProviderFailure(ping.error ?? "", { providerType: provider.type });
     const { score, breakdown } = computeReadinessScore(provider, ping.ok, ping.latencyMs, cls);
     candidates.push({
-      providerId: provider.id, providerName: provider.name, model, modelSource: source,
+      providerId: provider.id, providerName: provider.name, model: usedModel, modelSource: source,
       ok: ping.ok, latencyMs: ping.latencyMs, readinessScore: score, scoreBreakdown: breakdown,
       classification: cls, reply: ping.reply, error: ping.error,
     });

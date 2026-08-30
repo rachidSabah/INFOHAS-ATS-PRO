@@ -14,6 +14,12 @@ describe("classifyProviderFailure", () => {
     expect(c.healable).toBe(false);
   });
 
+  it("quota-exhaustion message documents the per-IP free limiter (fresh key will not help)", () => {
+    const c = classifyProviderFailure("API returned HTTP 429 Too Many Requests: FreeUsageLimitError: Rate limit exceeded. Please try again later.");
+    expect(c.humanMessage).toMatch(/per[- ]IP|per server/i);
+    expect(c.humanMessage).toMatch(/fresh key|new key/i);
+  });
+
   it("classifies auth failures as manual-only", () => {
     const c = classifyProviderFailure("API returned HTTP 401 Unauthorized: Invalid API Key");
     expect(c.kind).toBe("auth_error");

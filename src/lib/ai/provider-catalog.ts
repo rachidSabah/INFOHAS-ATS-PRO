@@ -26,10 +26,10 @@ export const PROVIDER_CATALOG: ProviderCatalogEntry[] = [
   // Antigravity providers always froze at CONFIGURATION ERROR.
   { type: "antigravity", label: "Antigravity CLI (Token)", icon: "Terminal", defaultUrl: "https://cloudcode-pa.googleapis.com", defaultModel: "claude-sonnet-4", authType: "bearer" },
   { type: "puter", label: "Puter.js (Free)", icon: "Sparkles", defaultUrl: "https://api.puter.com", defaultModel: "claude-sonnet-4", authType: "none" },
-  { type: "opencode", label: "OpenCode Zen (Free models)", icon: "Gift", defaultUrl: "https://opencode.ai/zen/v1", defaultModel: "deepseek-v4-flash-free", authType: "bearer" },
-  { type: "opencode-zen", label: "OpenCode Zen (Free)", icon: "Gift", defaultUrl: "https://opencode.ai/zen/v1", defaultModel: "deepseek-v4-flash-free", authType: "bearer" },
+  { type: "opencode", label: "OpenCode Zen (Free models)", icon: "Gift", defaultUrl: "https://opencode.ai/zen/v1", defaultModel: "nemotron-3-ultra-free", authType: "bearer" },
+  { type: "opencode-zen", label: "OpenCode Zen (Free)", icon: "Gift", defaultUrl: "https://opencode.ai/zen/v1", defaultModel: "nemotron-3-ultra-free", authType: "bearer" },
   { type: "nvidia", label: "NVIDIA NIM (Free)", icon: "Bot", defaultUrl: "https://integrate.api.nvidia.com/v1", defaultModel: "nvidia/nemotron-3-super-120b-a12b", authType: "bearer" },
-  { type: "zencode", label: "ZenCode API", icon: "Zap", defaultUrl: "https://opencode.ai/zen/v1", defaultModel: "deepseek-v4-flash-free", authType: "bearer" },
+  { type: "zencode", label: "ZenCode API", icon: "Zap", defaultUrl: "https://opencode.ai/zen/v1", defaultModel: "nemotron-3-ultra-free", authType: "bearer" },
   { type: "openai", label: "OpenAI", icon: "Bot", defaultUrl: "https://api.openai.com/v1", defaultModel: "gpt-4o-mini", authType: "bearer" },
   { type: "github", label: "GitHub Models", icon: "Github", defaultUrl: "https://models.inference.ai.azure.com", defaultModel: "gpt-4o", authType: "bearer" },
   { type: "claude", label: "Anthropic Claude", icon: "Bot", defaultUrl: "https://api.anthropic.com/v1", defaultModel: "claude-3-5-sonnet-20241022", authType: "header" },

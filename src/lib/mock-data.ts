@@ -84,19 +84,23 @@ export const SEED_PROVIDERS: AIProvider[] = [
     temperature: 0.7,
     retryAttempts: 1,
     rateLimitPerMinute: 20,
-    modelName: "mimo-v2.5-free",
+    modelName: "nemotron-3-ultra-free",
     enabledModels: [
-      // Verified live free models on https://opencode.ai/zen/v1 (as of 2026-08-27).
-      // Stale names (north-mini-code-free, minimax-m2.5-free, nemotron-3-super-free,
-      // hy3-free-stealth, big-pickle, qwen3-30b-a3b-free, llama-4-*, gemma-3-27b-free)
-      // were removed — the endpoint now returns 401 "Model not supported" for them.
-      "mimo-v2.5-free",
-      "hy3-free",
+      // Verified live on https://opencode.ai/zen/v1 (2026-08-30) — see
+      // lib/ai/zen-free-models.ts for the registry + rationale. Order matters:
+      // verified-ANSWERING models first (the preflight gate and the router
+      // rotate through this list on quota/model errors — the Zen free-usage
+      // limiter is keyed to the requester's IP and per-model upstream routes
+      // fail independently). hy3-free is dead (removed upstream);
+      // muse-spark-1.2-contributor-free is region-locked and served only on
+      // the /responses endpoint family, so it must never ship here.
       "nemotron-3-ultra-free",
       "nemotron-3.5-lightning-free",
       "laguna-s-2.1-free",
-      "muse-spark-1.2-contributor-free",
-      "deepseek-v4-flash-free"
+      "big-pickle",
+      "mimo-v2.5-free",
+      "deepseek-v4-flash-free",
+      "ling-3.0-flash-fin-free",
     ],
     streamingEnabled: true,
     authType: "bearer",

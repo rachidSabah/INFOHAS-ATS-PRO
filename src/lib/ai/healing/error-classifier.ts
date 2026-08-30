@@ -88,7 +88,7 @@ export function classifyProviderFailure(
   if (RATE_LIMIT.test(text) || status === 429) {
     return mk("rate_limited", true, false,
       QUOTA_EXHAUSTION.test(text)
-        ? "Provider is reachable and the key was accepted, but this account/model has exhausted its usage quota. Wait for the quota window to reset, switch model, or top up. No configuration change is needed."
+        ? "Provider is reachable and the key was accepted, but this account/model has exhausted its usage quota. Wait for the quota window to reset, switch model, or top up. No configuration change is needed. Note: free-tier limits (e.g. OpenCode Zen FreeUsageLimitError) are enforced per IP/server — a fresh key or new account will NOT lift them; switch to a sibling free model instead."
         : "Temporary rate limit — the provider is reachable and the key was accepted. The router applies cooldown + automatic retry/failover.");
   }
 
