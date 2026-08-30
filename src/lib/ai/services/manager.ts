@@ -158,6 +158,7 @@ export class ProviderManager {
       // try direct client-side probe (which uses user's residential IP rather than Cloudflare's flagged server IP)
       if (data?.rateLimited && typeof window !== "undefined" && provider.baseUrl && !provider.baseUrl.includes("localhost")) {
         try {
+          const directStartTime = performance.now();
           const directUrl = `${provider.baseUrl.replace(/\/$/, "")}/chat/completions`;
           const directHeaders: Record<string, string> = { "Content-Type": "application/json" };
           if (provider.apiKey) directHeaders["Authorization"] = `Bearer ${provider.apiKey}`;
@@ -172,11 +173,11 @@ export class ProviderManager {
             signal: AbortSignal.timeout(10000),
           });
           if (directRes.ok) {
-            const directJson = await directRes.json();
+            const directJson = (await directRes.json()) as any;
             const text = directJson?.choices?.[0]?.message?.content || "OK";
             data = {
               ok: true,
-              latencyMs: Math.round(performance.now() - t0),
+              latencyMs: Math.round(performance.now() - directStartTime),
               message: `OK (via Direct Client IP) — ${provider.modelName}`,
               response: text,
               rateLimited: false,
