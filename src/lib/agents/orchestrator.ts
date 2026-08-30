@@ -1073,6 +1073,20 @@ async function _runOptimizationPipelineInner(input: PipelineInput, watchdog: Opt
     step.startedAt = new Date().toISOString();
     emitProgress(3, aviationMode ? `Optimizing for ${aviationMode.airlineProfile}…` : "Optimizing resume with full intelligence context…");
 
+    // AI READINESS GATE — SOURCE RESUME VARIANT (ABSOLUTE RULE).
+    // An experience-less source resume is structurally doomed: the AI is
+    // instructed to never invent entries, so it mirrors the empty section;
+    // both entity-restore layers short-circuit when the source has nothing
+    // to restore; the Structure Guardian then vetoes "Experience section is
+    // empty" on EVERY attempt. Never start a job destined to fail — fail
+    // fast with a truthful, actionable diagnosis instead of burning
+    // maxOptimizeAttempts × provider calls.
+    const { diagnoseSourceResumeGap } = await import("../parser");
+    const sourceGapDiagnosis = diagnoseSourceResumeGap(resume);
+    if (sourceGapDiagnosis) {
+      throw new Error(sourceGapDiagnosis);
+    }
+
     let optimizeAttempt = 0;
     const maxOptimizeAttempts = profileCfg.maxOptimizeAttempts; // from the selected Pipeline Profile (1 initial + retries)
     let success = false;
@@ -1883,7 +1897,11 @@ ${jobMemory.industry}`);
     steps[3].status = "recoverable_error";
     steps[3].error = msg;
     log("Resume Optimizer", `↻ Optimization could not complete: ${msg}. Pipeline state preserved — completed analyses kept, original resume NOT substituted. Retry when AI providers recover.`);
-    emitProgress(3, "Recoverable: AI provider unavailable — optimization state preserved.");
+    // Report the REAL reason in the progress banner — the previous fixed
+    // string ("AI provider unavailable") also showed for Guardian/parser
+    // failures and misled users into thinking their quota was exhausted.
+    const bannerMsg = msg.length > 160 ? `${msg.slice(0, 160)}…` : msg;
+    emitProgress(3, `Recoverable: ${bannerMsg} — optimization state preserved.`);
     result.optimizedResume = null; // RESULT ≠ SOURCE — never substitute (§48)
     result.status = "recoverable_error";
     result.error = msg;

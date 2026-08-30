@@ -219,7 +219,16 @@ export function runStructureGuardian(
   // 3. EXPERIENCE VALIDATION
   // ========================================================================
   if (!resume.experience || resume.experience.length === 0) {
-    criticalIssues.push("Experience section is empty");
+    // SOURCE-AWARE DIAGNOSIS: when the SOURCE resume also has no parsed
+    // experience, this is a PARSER failure (the optimizer correctly mirrors
+    // its input — the AI never invents entries), not AI corruption. Say so,
+    // so the user fixes the upload instead of blaming the optimization.
+    const sourceHasExperience = Array.isArray(sourceResume?.experience) && sourceResume.experience.length > 0;
+    criticalIssues.push(
+      sourceHasExperience
+        ? "Experience section is empty"
+        : "Experience section is empty (source resume has no parsed experience entries — the parser could not extract experience from the uploaded file; check the uploaded resume or paste its text)",
+    );
   } else {
     // Check experience count matches source
     if (resume.experience.length < sourceResume.experience.length) {

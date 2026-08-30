@@ -63,14 +63,14 @@ export function secondaryParser(text: string, fileName: string): ResumeData {
   const normalizedText = text.replace(/\r/g, "");
   
   // Section regexes using line-start markers and word boundaries to avoid false matching
-  const headerLookahead = `(?=(?:(?:^|\\n)\\s*(?:PROFESSIONAL EXPERIENCE|WORK EXPERIENCE|\\bEXPERIENCE\\b|EDUCATION|LANGUAGES|LANGUAGE|SKILLS|CORE COMPETENCIES|COMPETENCIES|CERTIFICATIONS|PROJECTS|REFERENCES|SUMMARY|PROFESSIONAL SUMMARY|CAREER OBJECTIVE|CAREER PROFILE|PROFESSIONAL PROFILE|ABOUT ME|PERSONAL INFORMATIONS|PERSONAL INFORMATION|PERSONAL INFO|PERSONAL DETAILS|INTERESTS|HOBBIES|NATIONALITY)\\b\\s*:?\\s*(?:\\n|$)))`;
+  const headerLookahead = `(?=(?:(?:^|\\n)\\s*(?:PROFESSIONAL EXPERIENCE|WORK EXPERIENCE|\\bEXPERIENCE\\b|EDUCATION|LANGUAGES|LANGUAGE|SKILLS|CORE COMPETENCIES|COMPETENCIES|CERTIFICATIONS|PROJECTS|REFERENCES|SUMMARY|PROFESSIONAL SUMMARY|CAREER OBJECTIVE|CAREER PROFILE|PROFESSIONAL PROFILE|ABOUT ME|PERSONAL INFORMATIONS|PERSONAL INFORMATION|PERSONAL INFO|PERSONAL DETAILS|INTERESTS|HOBBIES|NATIONALITY|CAREER HISTORY|PROFESSIONAL BACKGROUND|EMPLOYMENT HISTORY|PARCOURS PROFESSIONNEL|EXP[ÉE]RIENCES?(?:\\s+PROFESSIONNELLES?)?|EMPLOI|FORMATION|[ÉE]TUDES|COMP[ÉE]TENCES|LANGUES|PROFIL)\\b\\s*:?\\s*(?:\\n|$)))`;
 
-  const expRegex = new RegExp('(?:^|\\n)\\s*(?:PROFESSIONAL EXPERIENCE|WORK EXPERIENCE|\\bEXPERIENCE\\b|\\bEXPERIENCES\\b|EMPLOYMENT HISTORY|HISTORY)\\b\\s*:?\\s*\\n([\\s\\S]*?)' + headerLookahead, 'i');
-  const eduRegex = new RegExp('(?:^|\\n)\\s*(?:EDUCATION|ACADEMIC BACKGROUND|ACADEMIC)\\b\\s*:?\\s*\\n([\\s\\S]*?)' + headerLookahead, 'i');
-  const langRegex = new RegExp('(?:^|\\n)\\s*(?:LANGUAGES|LANGUAGE)\\b\\s*:?\\s*\\n([\\s\\S]*?)' + headerLookahead, 'i');
+  const expRegex = new RegExp('(?:^|\\n)\\s*(?:PROFESSIONAL EXPERIENCE|WORK EXPERIENCE|\\bEXPERIENCE\\b|\\bEXPERIENCES\\b|EMPLOYMENT HISTORY|HISTORY|CAREER HISTORY|PROFESSIONAL BACKGROUND|PARCOURS PROFESSIONNEL|EXP[ÉE]RIENCES?(?:\\s+PROFESSIONNELLES?)?|EMPLOI)\\b\\s*:?\\s*\\n([\\s\\S]*?)' + headerLookahead, 'i');
+  const eduRegex = new RegExp('(?:^|\\n)\\s*(?:EDUCATION|ACADEMIC BACKGROUND|ACADEMIC|FORMATION|[ÉE]TUDES|PARCOURS ACAD[ÉE]MIQUE)\\b\\s*:?\\s*\\n([\\s\\S]*?)' + headerLookahead, 'i');
+  const langRegex = new RegExp('(?:^|\\n)\\s*(?:LANGUAGES|LANGUAGE|LANGUES?(?:\\s+[ÉE]TRANG[ÈE]RES)?)\\b\\s*:?\\s*\\n([\\s\\S]*?)' + headerLookahead, 'i');
   // Also try inline format: "Languages: English, French, Arabic" (all on one line, no newline after colon)
   const langInlineRegex = /(?:^|\n)\s*(?:LANGUAGES|LANGUAGE)\s*:\s*([^\n]+)/i;
-  const skillsRegex = new RegExp('(?:^|\\n)\\s*(?:SKILLS|TECHNICAL SKILLS|CORE SKILLS|CORE COMPETENCIES|CORE COMPETENCIES & SKILLS|COMPETENCIES)\\b\\s*:?\\s*\\n([\\s\\S]*?)' + headerLookahead, 'i');
+  const skillsRegex = new RegExp('(?:^|\\n)\\s*(?:SKILLS|TECHNICAL SKILLS|CORE SKILLS|CORE COMPETENCIES|CORE COMPETENCIES & SKILLS|COMPETENCIES|COMP[ÉE]TENCES?(?:\\s+(?:TECHNIQUES|CL[ÉE]S))?)\\b\\s*:?\\s*\\n([\\s\\S]*?)' + headerLookahead, 'i');
   const certsRegex = new RegExp('(?:^|\\n)\\s*(?:CERTIFICATIONS|CERTIFICATES|LICENSES)\\b\\s*:?\\s*\\n([\\s\\S]*?)' + headerLookahead, 'i');
   const projRegex = new RegExp('(?:^|\\n)\\s*(?:PROJECTS|PERSONAL PROJECTS|SIDE PROJECTS)\\b\\s*:?\\s*\\n([\\s\\S]*?)' + headerLookahead, 'i');
   const summaryRegex = new RegExp('(?:^|\\n)\\s*(?:SUMMARY|PROFESSIONAL SUMMARY|PROFILE|OBJECTIVE|CAREER OBJECTIVE|CAREER PROFILE|PROFESSIONAL PROFILE|ABOUT ME)\\b\\s*:?\\s*\\n([\\s\\S]*?)' + headerLookahead, 'i');
@@ -277,19 +277,20 @@ export function heuristicParser(text: string, fileName: string): ResumeData {
   };
 
   for (const line of lines) {
-    if (/^\s*(?:summary|profile|objective|career\s+objective|career\s+profile|professional\s+profile|about\s+me)s?\s*:?$/i.test(line)) {
+    if (/^\s*(?:(?:summary|profile|objective|career\s+objective|career\s+profile|professional\s+profile|about\s+me)s?|profil(?:\s+professionnel)?|objectif\s+de\s+carri[èe]re|[àa]\s+propos(?:\s+de\s+moi)?)\s*:?$/i.test(line)) {
       currentSection = "summary";
       continue;
-    } else if (/^\s*(?:professional\s+)?experience[s]?|work\s+experience|employment\s+history|history\s*:?$/i.test(line)) {
+    } else if (/^\s*(?:professional\s+)?experience[s]?|work\s+experience|employment\s+history|history\s*:?$/i.test(line) ||
+               /^\s*(?:career\s+history|professional\s+background|parcours\s+professionnel|exp[ée]riences?(?:\s+professionnelles?)?|emplois?)\s*:?$/i.test(line)) {
       currentSection = "experience";
       continue;
-    } else if (/^\s*(?:education|academic(?:\s+background)?)\s*:?$/i.test(line)) {
+    } else if (/^\s*(?:education|academic(?:\s+background)?|academic\s+history|formation(?:s)?|[ée]tudes?|parcours\s+acad[ée]mique)\s*:?$/i.test(line)) {
       currentSection = "education";
       continue;
-    } else if (/^\s*(?:languages|language)\s*:?$/i.test(line)) {
+    } else if (/^\s*(?:languages|language|langues?(?:\s+[ée]trang[èe]res)?)\s*:?$/i.test(line)) {
       currentSection = "languages";
       continue;
-    } else if (/^\s*(?:skills|core\s+competencies|competencies|technical\s+skills)\s*:?$/i.test(line)) {
+    } else if (/^\s*(?:skills|core\s+competencies|competencies|technical\s+skills|comp[ée]tences?(?:\s+(?:techniques|cl[ée]s))?)\s*:?$/i.test(line)) {
       currentSection = "skills";
       continue;
     } else if (/^\s*(?:certifications|certificates)\s*:?$/i.test(line)) {
@@ -425,6 +426,20 @@ export async function parseResumeFile(file: File): Promise<ResumeData> {
       console.log("[parser] Attempting AI parsing...");
       const aiParsed = await extractResumeWithAI(rawText, file.name);
       if (aiParsed && (aiParsed.experience.length > 0 || aiParsed.education.length > 0)) {
+        // EXPERIENCE GAP GUARD: the AI parse is accepted when education OR
+        // experience is present, but a resume without experience entries can
+        // NEVER pass the downstream Structure Guardian ("Experience section
+        // is empty" veto) — the optimizer would burn all its attempts on a
+        // doomed job. If the AI missed the experience section, try the
+        // heuristic parser and merge what it found (AI sections win when
+        // non-empty).
+        if (aiParsed.experience.length === 0) {
+          const heuristic = safeCall(extractResumeFromText, [rawText, file.name], null as any);
+          if (heuristic && heuristic.experience.length > 0) {
+            console.warn(`[parser] AI parse missed the experience section — merging ${heuristic.experience.length} heuristic experience entry(ies)`);
+            return mergeAiParsedWithHeuristics(aiParsed, heuristic);
+          }
+        }
         console.log("[parser] AI parsing successful");
         return aiParsed;
       }
@@ -482,6 +497,14 @@ export async function parseResumeText(text: string): Promise<ResumeData> {
       console.log("[parser] Attempting AI parsing for pasted text...");
       const aiParsed = await extractResumeWithAI(text, "Pasted Resume");
       if (aiParsed && (aiParsed.experience.length > 0 || aiParsed.education.length > 0)) {
+        // EXPERIENCE GAP GUARD — same rationale as parseResumeFile above.
+        if (aiParsed.experience.length === 0) {
+          const heuristic = safeCall(extractResumeFromText, [text, "Pasted Resume"], null as any);
+          if (heuristic && heuristic.experience.length > 0) {
+            console.warn(`[parser] AI parse missed the experience section (pasted text) — merging ${heuristic.experience.length} heuristic experience entry(ies)`);
+            return mergeAiParsedWithHeuristics(aiParsed, heuristic);
+          }
+        }
         console.log("[parser] AI parsing successful for pasted text");
         return aiParsed;
       }
@@ -690,23 +713,54 @@ const KNOWN_LANGUAGES = new Set([
   "myanmar", "burmese", "amharic", "somali", "yoruba", "igbo", "zulu", "xhosa", "afrikaans"
 ]);
 
+// French/Arabic-transliterated language names → canonical English names.
+// The product's core market (Morocco) writes resumes with French section
+// content: "Français: courant", "Arabe: langue maternelle", etc. Without this
+// mapping detectLanguage() returns null and the languages section is lost.
+const FRENCH_LANGUAGE_NAME_MAP: Record<string, string> = {
+  arabe: "arabic",
+  francais: "french",
+  anglais: "english",
+  espagnol: "spanish",
+  allemand: "german",
+  italien: "italian",
+  neerlandais: "dutch",
+  portugais: "portuguese",
+  turc: "turkish",
+  russe: "russian",
+  chinois: "chinese",
+  japonais: "japanese",
+  perse: "persian",
+  hindi: "hindi",
+  amazigh: "amazigh",
+  berbere: "berber",
+  tachelhit: "tachelhit",
+  darija: "darija",
+};
+
 export function detectLanguage(s: string): { name: string; proficiency: "basic" | "conversational" | "fluent" | "native" } | null {
   const clean = s.trim();
   if (!clean) return null;
 
-  const words = clean.toLowerCase().split(/[^a-z]+/);
-  const foundLang = words.find(w => KNOWN_LANGUAGES.has(w));
+  const lower = clean.toLowerCase();
+  // Accent-aware split: [^a-z] used to treat é/è/ç as separators, shredding
+  // "français" into ["fran", "ais"] and losing the language entirely.
+  const words = lower.split(/[^a-zà-ÿ]+/);
+  let foundLang = words.find(w => KNOWN_LANGUAGES.has(w));
+  if (!foundLang) {
+    // Map French-language names onto the canonical English set
+    foundLang = words.map(w => FRENCH_LANGUAGE_NAME_MAP[w]).find(Boolean);
+  }
   if (!foundLang) {
     return null;
   }
 
   let proficiency: "basic" | "conversational" | "fluent" | "native" = "fluent";
-  const lower = clean.toLowerCase();
-  if (lower.includes("native") || lower.includes("bilingual")) {
+  if (lower.includes("native") || lower.includes("bilingual") || lower.includes("bilingue") || lower.includes("langue maternelle")) {
     proficiency = "native";
-  } else if (lower.includes("conversational") || lower.includes("intermediate") || lower.includes("good")) {
+  } else if (lower.includes("conversational") || lower.includes("intermediate") || lower.includes("good") || lower.includes("courant") || lower.includes("scolaire")) {
     proficiency = "conversational";
-  } else if (lower.includes("basic") || lower.includes("elementary") || lower.includes("beginner")) {
+  } else if (lower.includes("basic") || lower.includes("elementary") || lower.includes("beginner") || lower.includes("notions")) {
     proficiency = "basic";
   }
 
@@ -810,14 +864,14 @@ export function extractResumeFromText(text: string, fileName: string): ResumeDat
 
   // Sections — match common headers
   const KNOWN_LABELS = {
-    experience: ["experience", "work experience", "professional experience", "employment"],
-    education: ["education", "academic background"],
-    skills: ["skills", "technical skills", "core skills", "core competencies", "key competencies", "competencies"],
+    experience: ["experience", "experiences", "work experience", "professional experience", "employment", "employment history", "career history", "professional background", "parcours professionnel", "expérience", "expériences", "expérience professionnelle", "expériences professionnelles", "emploi"],
+    education: ["education", "academic background", "academic history", "formation", "études", "études et formation", "formation académique", "parcours académique"],
+    skills: ["skills", "technical skills", "core skills", "core competencies", "key competencies", "competencies", "compétences", "compétences techniques", "compétences clés"],
     projects: ["projects", "side projects", "personal projects"],
     certifications: ["certifications", "certificates", "licenses"],
-    languages: ["languages", "language skills", "linguistic skills"],
+    languages: ["languages", "language skills", "linguistic skills", "langues", "langues étrangères"],
     achievements: ["achievements", "key achievements", "awards", "honors", "awards & honors"],
-    summary: ["summary", "professional summary", "profile", "objective", "career objective", "career profile", "professional profile", "about me"],
+    summary: ["summary", "professional summary", "profile", "objective", "career objective", "career profile", "professional profile", "about me", "profil", "profil professionnel", "objectif de carrière", "à propos de moi"],
     personal: ["personal informations", "personal information", "personal info", "personal details", "nationality"]
   };
 
@@ -1056,7 +1110,7 @@ export function extractResumeFromText(text: string, fileName: string): ResumeDat
 // "2020 - 2022", "Jan 2020 – Dec 2022", "2020–Present", "2020 to Present"
 // "09/2020 - 06/2022", "2020 - Present", "Jan 2020 - Present"
 // "2020-2022", "2020–2022", "September 2020 – June 2022"
-const DATE_RANGE_RE = new RegExp("(?:(?:\\d{1,2}[\\/\\.]\\d{4})|(?:\\d{4})|(?:[A-Za-z]{3,9}\\.?\\s+\\d{4}))\\s*(?:[\\-–—]|\\bto\\b|–)\\s*(?:present|current|(?:\\d{1,2}[\\/\\.]\\d{4})|(?:\\d{4})|(?:[A-Za-z]{3,9}\\.?\\s+\\d{4}))", "i");
+const DATE_RANGE_RE = new RegExp("(?:(?:\\d{1,2}[\\/\\.]\\d{4})|(?:\\d{4})|(?:[A-Za-zÀ-ÿ]{3,9}\\.?\\s+\\d{4}))\\s*(?:[\\-–—]|\\bto\\b|–)\\s*(?:pr[ée]sente?|current|actuel(?:le)?|(?:\\d{1,2}[\\/\\.]\\d{4})|(?:\\d{4})|(?:[A-Za-zÀ-ÿ]{3,9}\\.?\\s+\\d{4}))", "i");
 
 /**
  * Common title-ending keywords. When the left side of "Title Company | Location"
@@ -1830,6 +1884,64 @@ function parseProjects(lines: string[]): ResumeData["projects"] {
 /**
  * Create a blank resume from a template.
  */
+/**
+ * FILL AI-PARSE SECTION GAPS from the heuristic parse.
+ *
+ * Rule: AI sections WIN when non-empty (they are semantically richer —
+ * bullet-splitting, contact normalization); heuristic content is only used
+ * to fill sections the AI missed or returned empty. This prevents the
+ * "education-only AI parse" acceptance path from shipping an experience-less
+ * resume into the optimizer (which the Structure Guardian would veto 4/4).
+ */
+export function mergeAiParsedWithHeuristics(aiParsed: ResumeData, heuristic: ResumeData): ResumeData {
+  const merged: ResumeData = JSON.parse(JSON.stringify(aiParsed));
+
+  const take = (aiArr: unknown[] | undefined, heurArr: unknown[] | undefined): unknown[] | undefined =>
+    aiArr && aiArr.length > 0 ? aiArr : heurArr && heurArr.length > 0 ? heurArr : aiArr;
+
+  merged.experience = (take(aiParsed.experience, heuristic.experience) ?? []) as ResumeData["experience"];
+  merged.education = (take(aiParsed.education, heuristic.education) ?? []) as ResumeData["education"];
+  merged.skills = (take(aiParsed.skills, heuristic.skills) ?? []) as ResumeData["skills"];
+  merged.languages = (take(aiParsed.languages, heuristic.languages) ?? []) as ResumeData["languages"];
+  merged.certifications = (take(aiParsed.certifications, heuristic.certifications) ?? []) as ResumeData["certifications"];
+  merged.projects = (take(aiParsed.projects, heuristic.projects) ?? []) as ResumeData["projects"];
+
+  if (!merged.summary && heuristic.summary) merged.summary = heuristic.summary;
+  if (!merged.headline && heuristic.headline) merged.headline = heuristic.headline;
+
+  return merged;
+}
+
+/**
+ * FAIL-FAST DIAGNOSIS — called by the optimizer orchestrator BEFORE burning
+ * any AI attempts. An experience-less source resume is structurally doomed:
+ * the AI mirrors the empty section (it is instructed never to invent entries),
+ * both entity-restore layers short-circuit when the source has nothing to
+ * restore, and the Structure Guardian vetoes with "Experience section is
+ * empty" on every attempt. Per the AI Readiness Gate ABSOLUTE RULE, such a
+ * job must be refused at the gate with a truthful, actionable message.
+ *
+ * Returns null when the source resume has experience entries (normal path).
+ */
+export function diagnoseSourceResumeGap(resume: ResumeData): string | null {
+  if (resume.experience && resume.experience.length > 0) {
+    return null;
+  }
+  const sectionsFound = [
+    resume.summary ? "summary" : null,
+    resume.education && resume.education.length > 0 ? "education" : null,
+    resume.skills && resume.skills.length > 0 ? "skills" : null,
+    resume.languages && resume.languages.length > 0 ? "languages" : null,
+    resume.certifications && resume.certifications.length > 0 ? "certifications" : null,
+  ].filter(Boolean).join(", ") || "none";
+  return (
+    "Source resume has no detectable work-experience entries — the parser could not extract an Experience section from this file " +
+    `(sections successfully parsed: ${sectionsFound}). ` +
+    "Optimization was NOT started: every attempt would fail the Guardian 'Experience section is empty' integrity check. " +
+    "Please re-upload a text-based PDF/DOCX (not a scanned image), or paste your resume text directly."
+  );
+}
+
 export function blankResume(name = "Untitled Resume"): ResumeData {
   const now = new Date().toISOString();
   return {

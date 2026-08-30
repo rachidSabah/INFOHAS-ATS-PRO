@@ -34,6 +34,8 @@ const KNOWN_LANGUAGE_WORDS = [
   "polish", "hebrew", "indonesian", "malay", "norwegian", "danish", "finnish",
   "cantonese", "mandarin", "urdu", "bengali", "punjabi", "tamil", "telugu",
   "tagalog", "filipino", "swahili", "afrikaans", "kabyle", "berber", "amazigh",
+  // French language names (Morocco market: "FRANÇAIS : COURANT")
+  "français", "anglais", "arabe", "espagnol", "allemand", "italien", "amazigh",
 ];
 
 // ============================================================================
@@ -82,6 +84,10 @@ const SECTION_SYNONYMS: Record<string, SectionType> = {
   "career profile": "summary",
   "about me": "summary",
   "career summary": "summary",
+  "profil": "summary",
+  "profil professionnel": "summary",
+  "objectif de carrière": "summary",
+  "à propos de moi": "summary",
 
   // Experience
   "experience": "experience",
@@ -91,6 +97,13 @@ const SECTION_SYNONYMS: Record<string, SectionType> = {
   "employment history": "experience",
   "work history": "experience",
   "experiences": "experience",
+  "career history": "experience",
+  "professional background": "experience",
+  "parcours professionnel": "experience",
+  "expérience": "experience",
+  "expérience professionnelle": "experience",
+  "expériences professionnelles": "experience",
+  "emploi": "experience",
 
   // Education
   "education": "education",
@@ -101,6 +114,11 @@ const SECTION_SYNONYMS: Record<string, SectionType> = {
   "education & professional development": "education",
   "education and professional development": "education",
   "professional development": "education",
+  "formation": "education",
+  "études": "education",
+  "études et formation": "education",
+  "formation académique": "education",
+  "parcours académique": "education",
 
   // Skills
   "skills": "skills",
@@ -112,6 +130,10 @@ const SECTION_SYNONYMS: Record<string, SectionType> = {
   "key competencies": "skills",
   "key skills": "skills",
   "digital skills": "skills",
+  // French (Morocco market)
+  "compétences": "skills",
+  "compétences techniques": "skills",
+  "compétences clés": "skills",
 
   // Languages
   "languages": "languages",
@@ -120,6 +142,8 @@ const SECTION_SYNONYMS: Record<string, SectionType> = {
   "linguistic skills": "languages",
   "languages & additional information": "languages",
   "languages and additional information": "languages",
+  "langues": "languages",
+  "langues étrangères": "languages",
 
   // Certifications
   "certifications": "certifications",
@@ -186,7 +210,7 @@ export function detectSectionBoundaries(lines: string[]): SectionBoundary[] {
     // BUT exclude lines that look like content (start with bullet, date, or have lowercase words)
     // Also exclude lines that contain known language names (e.g., "ENGLISH (ORAL/WRITTEN) :")
     // or proficiency words (e.g., "FLUENT", "NATIVE", "CONVERSATIONAL")
-    const LANG_PROFICIENCY_WORDS = ["fluent", "native", "conversational", "basic", "intermediate", "beginner", "elementary", "bilingual"];
+    const LANG_PROFICIENCY_WORDS = ["fluent", "native", "conversational", "basic", "intermediate", "beginner", "elementary", "bilingual", "courant", "maternelle", "notions", "scolaire", "bilingue"];
     const lowerLine = line.toLowerCase();
     const looksLikeLanguageContent = KNOWN_LANGUAGE_WORDS.some(lang => lowerLine.includes(lang)) ||
       LANG_PROFICIENCY_WORDS.some(prof => lowerLine === prof);
