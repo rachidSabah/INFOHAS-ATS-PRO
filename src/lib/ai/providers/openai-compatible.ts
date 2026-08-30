@@ -1,6 +1,7 @@
 // OpenAI-compatible provider adapter.
 // Also used by: DeepSeek, Groq, OpenRouter, Together AI, HuggingFace (all use the OpenAI schema).
 import type { AIProviderAdapter, ChatRequest, ChatResponse, ProviderConfig } from "./interface";
+import { resolveTestTimeoutMs } from "../test-timeout";
 
 export class OpenAICompatibleProvider implements AIProviderAdapter {
   constructor(public readonly type: string = "openai") {}
@@ -129,7 +130,10 @@ export class OpenAICompatibleProvider implements AIProviderAdapter {
     try {
       const res = await this.chat(
         { messages: [{ role: "user", content: "Reply with exactly: OK" }], maxTokens: 10 },
-        { ...config, timeout: Math.min(config.timeout, 10000) }
+        // Task 24① — reasoning-aware: fast models keep the 10s cap; a
+        // reasoning-route default model gets ≥30s (floor) up to 60s, since
+        // verified-working Zen reasoning models answer in 8-33s.
+        { ...config, timeout: resolveTestTimeoutMs({ modelName: config.modelName, providerTimeoutMs: config.timeout, fastCapMs: 10000 }) }
       );
       return { ok: true, latencyMs: res.latencyMs, message: `OK — ${res.model}`, response: res.text };
     } catch (e: any) {

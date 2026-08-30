@@ -1,6 +1,7 @@
 // CORS proxy for testing AI provider connections
 // The browser can't call provider APIs directly due to CORS — this route proxies the request
 import { NextRequest, NextResponse } from "next/server";
+import { resolveTestTimeoutMs } from "../../../../lib/ai/test-timeout";
 
 export const runtime = "edge";
 
@@ -203,7 +204,11 @@ export async function POST(req: NextRequest) {
     }
 
     const controller = new AbortController();
-    const timeoutMs = Math.min(timeout || 15000, 15000);
+    // Task 24① — reasoning-aware cap: fast models keep the 15s cap; a
+    // reasoning-route model (e.g. nemotron-3-ultra-free, answers in 8-33s)
+    // gets the requested/provider timeout up to 60s. Pure relative import —
+    // no "@/" aliases on the Edge runtime.
+    const timeoutMs = resolveTestTimeoutMs({ modelName: model, providerTimeoutMs: Number(timeout) || null });
     const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
     const t0 = performance.now();

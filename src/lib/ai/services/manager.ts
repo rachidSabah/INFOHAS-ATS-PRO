@@ -4,6 +4,7 @@
 "use client";
 
 import { useApp, uid } from "../../store";
+import { resolveTestTimeoutMs } from "../test-timeout";
 import { ProviderRouter } from "./router";
 import { ProviderFactory } from "./factory";
 import { toProviderConfig } from "./fallback";
@@ -135,7 +136,11 @@ export class ProviderManager {
           headersJson: provider.headersJson,
           model: provider.modelName,
           testPrompt: "Reply with exactly: OK",
-          timeout: Math.min(provider.timeout || 30000, 15000),
+          // Task 24① — reasoning-aware: a reasoning-route default model
+          // (e.g. nemotron-3-ultra-free, answers in 8-33s) gets the provider's
+          // generous timeout instead of the 15s cap that declared
+          // verified-working providers "down".
+          timeout: resolveTestTimeoutMs({ modelName: provider.modelName, providerTimeoutMs: provider.timeout }),
         }),
       });
 
@@ -170,7 +175,10 @@ export class ProviderManager {
               messages: [{ role: "user", content: "Reply with exactly: OK" }],
               max_tokens: 10,
             }),
-            signal: AbortSignal.timeout(10000),
+            signal: AbortSignal.timeout(
+              // Task 24① — reasoning-aware direct probe (was fixed 10s).
+              resolveTestTimeoutMs({ modelName: provider.modelName, providerTimeoutMs: provider.timeout, fastCapMs: 10000 })
+            ),
           });
           if (directRes.ok) {
             const directJson = (await directRes.json()) as any;
