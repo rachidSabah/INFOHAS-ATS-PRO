@@ -44,6 +44,7 @@ import { useApp } from "./store";
 import { getAgentConfig } from "./agents/agent-ai-config";
 import { ProviderHealer } from "./ai/healing/provider-healer";
 import { validateOptimizerOutput, type KeywordCoverageReport } from "./agents/optimizer-output-validator";
+import { describeSalvageStageFailures, type ProgressiveStageResult } from "./agents/progressive-generator";
 import { runProgressiveOptimization } from "./agents/progressive-generator";
 import { buildStructuredFailureFeedback } from "./agents/failure-feedback";
 import type { MatchingStrategy } from "./agents/profile-resolution";
@@ -259,6 +260,11 @@ export async function runLockedPipeline(
   let attempts = 0;
   const attemptErrors: string[] = [];
   let lastKeywordCoverage: KeywordCoverageReport | undefined;
+  // TRUTHFUL DIAGNOSIS: when the P4 salvage path produced the output and the
+  // validator rejects it, the per-stage failure reasons (timeout / 429 / parse)
+  // are the REAL cause behind the "incomplete coverage" symptom — capture them
+  // per attempt and append to the validation error.
+  let salvageStages: ProgressiveStageResult[] | null = null;
   // Directive §6/§23 — the Supervisor's retry policy governs the optimizer.
   // NEVER silently 1 attempt when a retry policy is configured: the orchestrator
   // passes the profile-derived budget; the legacy enableProviderSwitch toggle
@@ -296,6 +302,7 @@ export async function runLockedPipeline(
 
   while (attempts < maxAttempts) {
     attempts++;
+    salvageStages = null;
     try {
       // ========================================================================
       // Step 2: Run Bullet-Only Optimizer (supports excludeProviderIds)
@@ -384,6 +391,7 @@ export async function runLockedPipeline(
         });
         if (salvage) {
           optimizerResult = salvage;
+          salvageStages = salvage.salvageStages ?? null;
           warnings.push("Monolithic optimization failed — recovered via progressive section-by-section generation (failed sections kept original content).");
         } else {
           throw monolithicErr;
@@ -425,7 +433,16 @@ export async function runLockedPipeline(
             missingKeywords: outputValidation.keywordCoverage.stillMissing,
           }),
         ].filter(Boolean).join("\n");
-        const errObj: any = new Error(`Optimizer output validation failed: ${outputValidation.violations.join("; ")}`);
+        // TRUTHFUL DIAGNOSIS: when the rejected output came from the P4
+        // salvage path, append WHY its stages failed (timeout / 429 / parse)
+        // — the validator's "incomplete coverage" is only the symptom; the
+        // stage failures are the disease, and they must reach attemptErrors.
+        let validationErrMsg = `Optimizer output validation failed: ${outputValidation.violations.join("; ")}`;
+        const stageFailureSummary = describeSalvageStageFailures(salvageStages ?? []);
+        if (stageFailureSummary) {
+          validationErrMsg += ` (salvage stage failures — ${stageFailureSummary})`;
+        }
+        const errObj: any = new Error(validationErrMsg);
         errObj.kind = "output-validation";
         throw errObj;
       }

@@ -5,7 +5,7 @@
 // ============================================================================
 
 import { describe, it, expect } from "vitest";
-import { ProgressiveGenerator, runProgressiveOptimization } from "./progressive-generator";
+import { ProgressiveGenerator, runProgressiveOptimization, describeSalvageStageFailures } from "./progressive-generator";
 import type { ResumeData, JobDescription } from "../types";
 
 function makeResume(): ResumeData {
@@ -68,7 +68,7 @@ describe("ProgressiveGenerator", () => {
     expect(patch.experiences![0].bullets).toEqual(["Only one rewritten bullet", "Built dashboards"]);
   });
 
-  it("preserves ORIGINAL bullets for an entry whose generation fails after the repair round", async () => {
+  it("preserves ORIGINAL bullets IN THE PATCH for an entry whose generation fails after the repair round", async () => {
     const gen = new ProgressiveGenerator(makeResume(), jd, "", async ({ systemPrompt }) => {
       if (systemPrompt.includes("professional summary")) return "A good optimized summary that is long enough to pass validation checks.";
       return "garbage not json at all"; // fails parse + repair round
@@ -78,7 +78,18 @@ describe("ProgressiveGenerator", () => {
 
     const failed = gen.getStageResults().filter((s) => s.stage.startsWith("experience[") && !s.success);
     expect(failed.length).toBe(2);
-    expect(gen.composePatch().experiences).toBeUndefined(); // nothing accepted for experiences
+    // REGRESSION (production trace ec799db diagnosis): the patch must include
+    // EVERY source experience entry — rewritten when the stage succeeded,
+    // ORIGINAL bullets when it failed. The previous contract omitted failed
+    // entries entirely, so a salvage with all bullet stages failing produced
+    // `{ summary }` and the OptimizerOutputValidator rejected it with
+    // "0 experience rewrites for N source entries — incomplete coverage",
+    // dooming every retry. "Failed stage keeps original content" must hold at
+    // the PATCH level, not only at assembly.
+    expect(gen.composePatch().experiences).toEqual([
+      { id: "exp_1", bullets: ["Did analysis", "Built dashboards"] },
+      { id: "exp_2", bullets: ["Supported team"] },
+    ]);
     expect(gen.hasAnySuccess()).toBe(true); // summary survived
   });
 
@@ -141,7 +152,48 @@ describe("runProgressiveOptimization", () => {
     expect(result).not.toBeNull();
     expect(result!.warnings.length).toBe(1); // only the failed stage
     expect(result!.warnings[0]).toMatch(/experience\[0\]/);
-    expect(result!.output.experiences!.length).toBe(1); // only exp_2 accepted
-    expect(result!.output.experiences![0].id).toBe("exp_2");
+    // REGRESSION: partial salvage keeps FULL entry coverage — failed exp_1
+    // ships its original bullets, successful exp_2 ships the rewrite.
+    expect(result!.output.experiences!.length).toBe(2);
+    expect(result!.output.experiences![0]).toEqual({ id: "exp_1", bullets: ["Did analysis", "Built dashboards"] });
+    expect(result!.output.experiences![1]).toEqual({ id: "exp_2", bullets: ["Rewritten bullet A"] });
+  });
+
+  it("exposes salvageStages so the pipeline can explain WHY stages failed", async () => {
+    const result = await runProgressiveOptimization(makeResume(), jd, {
+      callAI: async ({ systemPrompt }) => {
+        if (systemPrompt.includes("professional summary")) return "Salvaged summary for the senior data analyst target role with keywords.";
+        throw new Error("429 quota window — all providers limited");
+      },
+    });
+    expect(result).not.toBeNull();
+    expect(result!.salvageStages!.length).toBe(3); // summary + 2 experiences
+    const failedStages = result!.salvageStages!.filter((s) => !s.success);
+    expect(failedStages.length).toBe(2);
+    expect(failedStages[0].error).toMatch(/429 quota window/);
+  });
+});
+
+describe("describeSalvageStageFailures", () => {
+  it("renders a compact per-stage failure summary for the validation error", async () => {
+    const { describeSalvageStageFailures } = await import("./progressive-generator");
+    const result = await runProgressiveOptimization(makeResume(), jd, {
+      callAI: async ({ systemPrompt }) => {
+        if (systemPrompt.includes("professional summary")) return "Salvaged summary for the senior data analyst target role with keywords.";
+        throw new Error("AI call timed out after 60000ms");
+      },
+    });
+    const summary = describeSalvageStageFailures(result!.salvageStages!);
+    expect(summary).toContain("experience[0]");
+    expect(summary).toContain("timed out");
+    expect(summary).toContain("experience[1]");
+    expect(summary).not.toContain("summary"); // succeeded stage is not listed
+  });
+
+  it("returns an empty string when every stage succeeded", () => {
+    expect(describeSalvageStageFailures([
+      { stage: "summary", success: true, provider: "progressive" },
+      { stage: "experience[0]", success: true, provider: "progressive" },
+    ])).toBe("");
   });
 });

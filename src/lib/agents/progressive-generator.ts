@@ -195,8 +195,19 @@ Return ONLY a JSON array of strings. Example: ["Rewrote bullet 1...", "Rewrote b
   }
 
   /**
-   * Compose the OptimizerPatch from the accepted parts ONLY — any stage that
-   * failed simply contributes nothing (source content survives assembly).
+   * Compose the OptimizerPatch — REGRESSION FIX (production trace, ec799db
+   * diagnosis): the patch must include EVERY source experience entry, not
+   * only the stages that succeeded. The previous contract omitted failed
+   * entries entirely, so a salvage whose per-experience calls all failed
+   * (429 window / timeouts / parse errors) while the small summary call
+   * slipped through produced `{ summary }` — which the OptimizerOutput
+   * Validator then rejected with "0 experience rewrites for N source
+   * entries — incomplete coverage", dooming every bounded retry.
+   *
+   * Contract: a failed stage contributes its ORIGINAL content (same promise
+   * assembly always honored — now visible to the validator too); a succeeded
+   * stage contributes its rewrite. Zero successful stages still yields an
+   * empty patch and `runProgressiveOptimization` returns null (unchanged).
    */
   composePatch(): OptimizerOutput {
     const patch: OptimizerOutput = {};
@@ -204,11 +215,13 @@ Return ONLY a JSON array of strings. Example: ["Rewrote bullet 1...", "Rewrote b
       patch.summary = this.optimizedSummary;
     }
     const experiences: NonNullable<OptimizerOutput["experiences"]> = [];
-    for (const [expIndex, bullets] of this.optimizedBullets) {
-      const exp = this.originalResume.experience[expIndex];
-      if (exp?.id) {
-        experiences.push({ id: exp.id, bullets });
-      }
+    for (let i = 0; i < this.originalResume.experience.length; i++) {
+      const exp = this.originalResume.experience[i];
+      if (!exp?.id) continue;
+      // Rewritten bullets when the stage succeeded; ORIGINAL bullets when it
+      // failed ("failed stage keeps original content" — at patch level).
+      const bullets = this.optimizedBullets.get(i) ?? exp.bullets;
+      experiences.push({ id: exp.id, bullets });
     }
     if (experiences.length > 0) {
       patch.experiences = experiences;
@@ -244,6 +257,20 @@ Return ONLY a JSON array of strings. Example: ["Rewrote bullet 1...", "Rewrote b
 }
 
 /**
+ * Compact, human-readable summary of FAILED salvage stages — appended to the
+ * locked pipeline's output-validation error so attemptErrors carry the REAL
+ * per-stage reason (timeout / 429 / parse failure) instead of a bare
+ * "incomplete coverage" symptom. Returns "" when nothing failed.
+ */
+export function describeSalvageStageFailures(stages: ProgressiveStageResult[]): string {
+  if (!Array.isArray(stages)) return "";
+  return stages
+    .filter((s) => !s.success)
+    .map((s) => `${s.stage}: ${String(s.error ?? "unknown").slice(0, 140)}`)
+    .join("; ");
+}
+
+/**
  * Run the progressive section-by-section optimization and return a result
  * shaped exactly like BulletOnlyOptimizerResult, so the locked pipeline can
  * use it as a drop-in salvage path (same validation + assembly downstream).
@@ -260,7 +287,7 @@ export async function runProgressiveOptimization(
     callAI?: ProgressiveCallAI;
     providerLabel?: string;
   } = {}
-): Promise<{ output: OptimizerOutput; provider: string; rawResponse: string; warnings: string[] } | null> {
+): Promise<{ output: OptimizerOutput; provider: string; rawResponse: string; warnings: string[]; salvageStages: ProgressiveStageResult[] } | null> {
   const defaultCallAI: ProgressiveCallAI = async (call) => {
     const { callAI: realCallAI } = await import("../ai");
     const res = await realCallAI({
@@ -308,5 +335,6 @@ export async function runProgressiveOptimization(
     provider: "progressive-sections",
     rawResponse: JSON.stringify(stages),
     warnings,
+    salvageStages: stages,
   };
 }
