@@ -44,6 +44,7 @@ import {
 import { aviationOptimize, type AviationOptimizeResult } from "../ats-directives";
 import type { AppSettings } from "../ats-directives";
 import { analyzeATS, type ATSAnalysisResult } from "./ats-analysis";
+import { composeOptimizerFailureReport } from "./optimizer-failure-report";
 import { INDUSTRY_PROFILES } from "../industry-ats";
 import { runQA, type QAResult } from "./qa-agent";
 import { buildOptimizationPolicy, formatPolicyForPrompt, type OptimizationPolicy } from "../directive-policy";
@@ -1104,6 +1105,14 @@ async function _runOptimizationPipelineInner(input: PipelineInput, watchdog: Opt
     // modify the prompt strategy on the next retry (instead of blindly retrying
     // with the exact same prompt — which would fail the same way).
     let lastFailureReason: string | null = null;
+    // TRUTHFUL DIAGNOSIS: the locked pipeline throws OptimizerUnrecoverableError
+    // carrying attemptErrors[] — one real diagnosis per inner attempt (Guardian
+    // blocks, output-validation failures, provider classes…). The previous code
+    // stored only e.message (the generic "3 validated attempt(s)" wrapper), so
+    // the UI showed a useless nested message and the real cause was lost.
+    // Capture the inner diagnoses here (latest outer attempt wins) and surface
+    // them via composeOptimizerFailureReport when all attempts are exhausted.
+    let lastInnerAttemptErrors: string[] = [];
 
     // Load the directive config (for font size, margins, line height)
     let directiveConfig: OptimizerDirectiveConfig | null = null;
@@ -1482,6 +1491,12 @@ ${jobMemory.industry}`);
         optimizeError = e?.message || "Unknown error";
         // P2 FIX: Record the failure reason so the next retry can adapt
         lastFailureReason = optimizeError;
+        // TRUTHFUL DIAGNOSIS: capture the locked pipeline's per-attempt
+        // diagnoses when present (latest outer attempt's list wins — those are
+        // the most recent provider/Guardian states).
+        if (e?.name === "OptimizerUnrecoverableError" && Array.isArray(e?.attemptErrors) && e.attemptErrors.length > 0) {
+          lastInnerAttemptErrors = e.attemptErrors.map((s: unknown) => String(s ?? "")).filter((s: string) => s.trim().length > 0);
+        }
         console.warn(`[Pipeline] Resume Optimizer attempt ${optimizeAttempt}/${maxOptimizeAttempts} failed: ${optimizeError}`);
         log("Resume Optimizer", `Attempt ${optimizeAttempt} failed: ${optimizeError}`);
         // DIRECTIVE §7/§28 — provider exhaustion is a RECOVERY EVENT, not an
@@ -1840,12 +1855,23 @@ ${jobMemory.industry}`);
       // intelligence, and snapshots preserved) and the user sees an honest
       // RECOVERABLE state — never a false completion.
       // ========================================================================
-      const lastErr = optimizeError || lastFailureReason || "unknown error";
-      log("Resume Optimizer", `✗ All ${maxOptimizeAttempts} validated attempts failed (auto-heal ran between attempts). Optimization is INCOMPLETE — original resume NOT substituted. Last error: ${lastErr}`);
-      emitProgress(3, "Optimization incomplete — AI providers unavailable. State preserved for recovery.");
-      const errObj: any = new Error(
-        `Optimization could not be completed after ${maxOptimizeAttempts} validated attempts (auto-heal + strategy feedback between attempts). Original resume NOT substituted. Last error: ${lastErr}`
-      );
+      // TRUTHFUL DIAGNOSIS — compose the final report from every available
+      // source. The previous code reported only the generic inner wrapper
+      // message ("…after 3 validated attempt(s)…"), hiding the real cause;
+      // and the fixed progress string ("AI providers unavailable") also showed
+      // for Guardian/parser failures, misleading users about their quota.
+      const failureReport = composeOptimizerFailureReport({
+        maxOptimizeAttempts,
+        optimizeError,
+        lastFailureReason,
+        innerAttemptErrors: lastInnerAttemptErrors,
+      });
+      if (lastInnerAttemptErrors.length > 0) {
+        console.error("[Pipeline] Inner attempt diagnoses (most recent last):", lastInnerAttemptErrors);
+      }
+      log("Resume Optimizer", `✗ All ${maxOptimizeAttempts} validated attempts failed (auto-heal ran between attempts). Optimization is INCOMPLETE — original resume NOT substituted. Last error: ${failureReport.lastErr}`);
+      emitProgress(3, failureReport.progress);
+      const errObj: any = new Error(failureReport.message);
       errObj.name = "OptimizerUnrecoverableError";
       errObj.recoverable = true;
       throw errObj;
