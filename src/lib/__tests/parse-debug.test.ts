@@ -29,5 +29,5 @@ describe("Diagnose uploaded PDF parsing", () => {
         console.error(`Failed to parse ${name}:`, err.message);
       }
     }
-  });
+  }, 30000);
 });

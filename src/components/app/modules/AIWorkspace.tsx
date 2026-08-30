@@ -2087,7 +2087,6 @@ function SettingsTab() {
     };
     run();
     return () => { cancelled = true; };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [draft.providerId]);
 
   // === Manual prefetch button: re-detect models for the selected provider ===
