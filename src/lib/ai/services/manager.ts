@@ -154,6 +154,39 @@ export class ProviderManager {
         };
       }
 
+      // If server proxy returned 429 rate limit and we are in a browser,
+      // try direct client-side probe (which uses user's residential IP rather than Cloudflare's flagged server IP)
+      if (data?.rateLimited && typeof window !== "undefined" && provider.baseUrl && !provider.baseUrl.includes("localhost")) {
+        try {
+          const directUrl = `${provider.baseUrl.replace(/\/$/, "")}/chat/completions`;
+          const directHeaders: Record<string, string> = { "Content-Type": "application/json" };
+          if (provider.apiKey) directHeaders["Authorization"] = `Bearer ${provider.apiKey}`;
+          const directRes = await fetch(directUrl, {
+            method: "POST",
+            headers: directHeaders,
+            body: JSON.stringify({
+              model: provider.modelName,
+              messages: [{ role: "user", content: "Reply with exactly: OK" }],
+              max_tokens: 10,
+            }),
+            signal: AbortSignal.timeout(10000),
+          });
+          if (directRes.ok) {
+            const directJson = await directRes.json();
+            const text = directJson?.choices?.[0]?.message?.content || "OK";
+            data = {
+              ok: true,
+              latencyMs: Math.round(performance.now() - t0),
+              message: `OK (via Direct Client IP) — ${provider.modelName}`,
+              response: text,
+              rateLimited: false,
+            };
+          }
+        } catch {
+          // Direct fetch failed (CORS or network) — preserve the proxy's diagnostic response
+        }
+      }
+
       // Log the test
       useApp.getState().addProviderLog({
         id: uid("pl"),

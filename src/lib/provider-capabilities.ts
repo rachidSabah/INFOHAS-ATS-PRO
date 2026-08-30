@@ -252,7 +252,8 @@ export async function withRateLimitRetry<T>(fn: () => Promise<T>, provider: any)
       if (attempt === maxAttempts - 1) {
         break;
       }
-      const delay = backoffMs[attempt] ?? 4000;
+      const baseDelay = backoffMs[attempt] ?? 4000;
+      const delay = baseDelay + Math.floor(Math.random() * 500);
       console.warn(`[RateLimitRetry] ${provider.name || provider.type} returned 429. Backing off ${delay}ms before attempt ${attempt + 2}/${maxAttempts}.`);
       console.log({
         provider: provider.type,
