@@ -100,7 +100,7 @@ describe("Provider Sync & Matching Logic", () => {
       const d1Provider = {
         id: "p_nvidia",
         name: "Nvidia",
-        apiKey: "user-configured-key",
+        apiKey: "[REDACTED]",
         apiUrl: "https://integrate.api.nvidia.com/v1",
         modelName: "nvidia/nemotron-3-super-120b-a12b", // picked live from "Fetch models" — not in static seed list
         timeout: 90000,
@@ -120,7 +120,7 @@ describe("Provider Sync & Matching Logic", () => {
       const d1Provider = {
         id: "p_nvidia",
         name: "Nvidia",
-        apiKey: "user-configured-key",
+        apiKey: "user-...ey",
         apiUrl: "https://integrate.api.nvidia.com/v1",
         modelName: "",
         timeout: 90000,
@@ -128,7 +128,40 @@ describe("Provider Sync & Matching Logic", () => {
       } as any;
 
       const merged = mergeProviderWithSeed(d1Provider, mockSeedProviders[0]);
+      // modelName was empty → filled from the seed's default.
       expect(merged.modelName).toBe("meta/llama-3.3-70b-instruct");
+    });
+
+    it("should repair a KNOWN-DEAD model id (e.g. big-pickle) to the seed default", () => {
+      const d1Provider = {
+        id: "p_nvidia",
+        name: "Nvidia",
+        apiKey: "user-...ey",
+        apiUrl: "https://integrate.api.nvidia.com/v1",
+        modelName: "big-pickle", // corrupted/dead id from cloud drift
+        timeout: 60000,
+        maxTokens: 4096,
+      } as any;
+
+      const merged = mergeProviderWithSeed(d1Provider, mockSeedProviders[0]);
+      expect(merged.modelName).toBe("meta/llama-3.3-70b-instruct"); // seed default, dead id stripped
+      expect(merged.enabledModels).not.toContain("big-pickle");
+    });
+
+    it("should correct a type-specific invalid default (github gpt-4o → gpt-4o-mini)", () => {
+      const d1Provider = {
+        id: "p_github",
+        type: "github",
+        name: "GitHub Models",
+        apiKey: "user-...ey",
+        apiUrl: "https://models.inference.ai.azure.com",
+        modelName: "gpt-4o", // wrong for GitHub free tier
+        timeout: 60000,
+        maxTokens: 4096,
+      } as any;
+
+      const merged = mergeProviderWithSeed(d1Provider, mockSeedProviders[0]);
+      expect(merged.modelName).toBe("gpt-4o-mini");
     });
 
     it("should restore default timeout and maxTokens if D1 has invalid values", () => {

@@ -39,6 +39,35 @@ export interface ProviderSyncResult {
  *
  * @returns The merged provider, or the original if no seed match.
  */
+/**
+ * KNOWN-DEAD model ids that have appeared in cloud-synced configs. These are
+ * retired/non-existent ids (e.g. a corrupted "big-pickle", removed
+ * "stepfun/step-3.7-flash", "openai/gpt-oss-120b:free" which never existed).
+ * They are stripped from enabledModels and used to decide whether a modelName
+ * should fall back to the seed default. This is surgical: it never touches a
+ * model id that is NOT in this list, so deliberate user edits always survive.
+ */
+const KNOWN_DEAD_MODELS = new Set<string>([
+  "big-pickle",
+  "stepfun/step-3.7-flash",
+  "stepfun-ai/step-3.7-flash",
+  "01-ai/yi-large",
+  "openai/gpt-oss-120b:free",
+  "gpt-oss-120b:free",
+]);
+
+/**
+ * Type-specific invalid default corrections. Some providers' cloud-stored model
+ * is wrong for that exact provider type (e.g. Antigravity CLI exposes
+ * Claude/GPT/DeepSeek, not gemini; GitHub Models' free tier is gpt-4o-mini).
+ * Keyed by provider type + the exact bad id, so it does not affect any other
+ * provider or any valid user choice.
+ */
+const TYPE_SPECIFIC_INVALID_MODEL: Record<string, Record<string, string>> = {
+  antigravity: { "gemini-2.5-flash": "claude-sonnet-4", "gemini-2.5-pro": "claude-sonnet-4" },
+  github: { "gpt-4o": "gpt-4o-mini" },
+};
+
 export function mergeProviderWithSeed(d1Provider: AIProvider, seedProvider?: AIProvider): AIProvider {
   if (!seedProvider) return d1Provider; // truly custom provider — keep as-is
 
@@ -58,11 +87,13 @@ export function mergeProviderWithSeed(d1Provider: AIProvider, seedProvider?: AIP
   }
 
   // Update enabledModels: union the D1 models and the seed models to ensure
-  // both the seed's defaults AND the admin's live-selected model stay available
+  // both the seed's defaults AND the admin's live-selected model stay available.
+  // Known-dead ids (retired/corrupted) are stripped so stale D1 corruption
+  // can't keep breaking benchmark/heal pings.
   const seedModels = seedProvider.enabledModels || [];
-  const currentModels = merged.enabledModels || [];
-  const mergedModels = Array.from(new Set([...seedModels, ...currentModels]));
-  if (mergedModels.length > currentModels.length || !merged.enabledModels) {
+  const currentModels = (merged.enabledModels || []).filter((m) => !KNOWN_DEAD_MODELS.has(m));
+  const mergedModels = Array.from(new Set([...currentModels, ...seedModels]));
+  if (mergedModels.length > (merged.enabledModels?.length ?? 0) || !merged.enabledModels) {
     merged.enabledModels = mergedModels;
   }
 
@@ -72,9 +103,12 @@ export function mergeProviderWithSeed(d1Provider: AIProvider, seedProvider?: AIP
   // static enabledModels list goes stale (retired model ids). Reverting a
   // non-empty modelName to the seed default here silently discarded every
   // model the user saved and forced heal/benchmark pings onto retired ids.
-  // The seed model is used ONLY to fill a missing/empty modelName.
-  if (!merged.modelName || merged.modelName.trim() === "") {
-    merged.modelName = seedProvider.modelName;
+  // The seed model is used ONLY to fill a missing/empty modelName — or to
+  // repair a KNOWN-DEAD / type-specific-invalid id that can never work.
+  const typeInvalid = merged.modelName ? TYPE_SPECIFIC_INVALID_MODEL[merged.type]?.[merged.modelName] : undefined;
+  const modelIsBad = !!merged.modelName && (KNOWN_DEAD_MODELS.has(merged.modelName) || !!typeInvalid);
+  if (!merged.modelName || merged.modelName.trim() === "" || modelIsBad) {
+    merged.modelName = typeInvalid || seedProvider.modelName;
   }
 
   // Union the configured model into enabledModels so every downstream
@@ -89,23 +123,6 @@ export function mergeProviderWithSeed(d1Provider: AIProvider, seedProvider?: AIP
   }
   if (!merged.maxTokens || typeof merged.maxTokens !== "number" || isNaN(merged.maxTokens) || merged.maxTokens < 100) {
     merged.maxTokens = seedProvider.maxTokens;
-  }
-
-  // Restore enabledModels from seed for built-in providers. Cloud D1 can hold
-  // stale/incorrect model lists (retired "step-3.7-flash", wrong "gpt-4o" on
-  // GitHub, bogus "big-pickle") that break benchmarking and routing. The built-in
-  // model set is a system default, so the seed is authoritative and is restored
-  // unconditionally. Custom providers have no seed match, so they're untouched.
-  if (seedProvider.enabledModels && seedProvider.enabledModels.length > 0) {
-    merged.enabledModels = seedProvider.enabledModels;
-  }
-
-  // Restore modelName from the seed's canonical first model for built-ins. This
-  // corrects wrong ids that the "is it in the seed set?" guard would otherwise
-  // skip (e.g. GitHub's gpt-4o vs the correct gpt-4o-mini). Custom providers keep
-  // whatever they have since they have no seed equivalent.
-  if (seedProvider.modelName) {
-    merged.modelName = seedProvider.modelName;
   }
 
   return merged;

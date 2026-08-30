@@ -88,15 +88,26 @@ describe("runReadinessPreflight", () => {
     expect(result.candidates[1].classification?.kind).toBe("model_error");
   });
 
-  it("cooldown providers are reported without a real ping", async () => {
+  it("cooldown providers are still PINGED (the gate is the validation)", async () => {
     providers[0] = makeProvider({
       health: { consecutiveFailures: 1, consecutiveSuccesses: 0, rateLimitedUntil: new Date(Date.now() + 60000).toISOString() },
     });
     const ping = vi.fn().mockResolvedValue({ ok: true, latencyMs: 50, reply: "READY" });
     const result = await runReadinessPreflight({ deps: { ping } });
-    expect(ping).toHaveBeenCalledTimes(1); // only p_b pinged — p_a skipped
+    expect(ping).toHaveBeenCalledTimes(2); // both providers pinged — cooldown no longer skips
+    expect(result.candidates[0].ok).toBe(true);
+    expect(result.candidates[0].readinessScore).toBeGreaterThan(0);
+  });
+
+  it("cooldown provider is still PINGED even when the ping fails", async () => {
+    providers[0] = makeProvider({
+      health: { consecutiveFailures: 1, consecutiveSuccesses: 0, rateLimitedUntil: new Date(Date.now() + 60000).toISOString() },
+    });
+    const ping = vi.fn().mockResolvedValue({ ok: false, latencyMs: 30, error: "HTTP 429 rate limit" });
+    const result = await runReadinessPreflight({ deps: { ping } });
+    expect(ping).toHaveBeenCalledTimes(2); // still pinged (no longer skipped)
     expect(result.candidates[0].ok).toBe(false);
-    expect(result.candidates[0].error).toMatch(/cooldown/i);
+    expect(result.candidates[0].error).toMatch(/429/);
   });
 });
 

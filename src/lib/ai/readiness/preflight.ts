@@ -169,9 +169,15 @@ export async function runReadinessPreflight(opts: {
   const isSuperAdmin = state.user?.role === "super_admin";
 
   let eligible = (state.providers || []).filter((p) => {
-    if (!p.isActive || p.type === "puter") return false;
+    if (p.type === "puter") return false;
     if (opts.providerIds) return opts.providerIds.includes(p.id);
-    return isSuperAdmin || p.allowedForRegularUsers === true;
+    // Super-admins may run the optimizer on any reachable provider — they own
+    // the instance and explicitly activate providers in the UI. Blocking on
+    // isActive here would wrongly abort when the cloud sync hasn't reflected an
+    // activation, or when a provider is merely "untested".
+    if (isSuperAdmin) return p.status !== "down" && p.health?.healState !== "configuration_error";
+    // Regular users: the provider must be active + user-accessible.
+    return p.isActive && p.allowedForRegularUsers === true;
   });
 
   // Order: default provider first, then by priority — cap for speed.
@@ -192,14 +198,17 @@ export async function runReadinessPreflight(opts: {
       });
       continue;
     }
-    if (providerInCooldown(provider)) {
-      candidates.push({
-        providerId: provider.id, providerName: provider.name, model, modelSource: source,
-        ok: false, latencyMs: 0, readinessScore: 0,
-        classification: classifyProviderFailure("rate limit cooldown 429", { providerType: provider.type }),
-        error: `In cooldown — ${Math.ceil((provider.health?.rateLimitedUntil ? new Date(provider.health.rateLimitedUntil).getTime() - Date.now() : 60000) / 1000)}s remaining`,
-      });
-      continue;
+    const coolerMs = provider.health?.rateLimitedUntil
+      ? new Date(provider.health.rateLimitedUntil).getTime() - Date.now()
+      : 0;
+    if (coolerMs > 0) {
+      // Still run the REAL preflight ping below — the gate IS the validation,
+      // and a cooldown is often already expired or provider-specific. A transient
+      // rate-limit must never produce a false "no validated AI engine" abort;
+      // the actual ping result decides readiness. (Cooldown only lowers the
+      // readiness score in computeReadinessScore — no separate candidate is
+      // pushed here, so the single real-ping result is what's recorded.)
+      // Fall through to the real ping.
     }
 
     const pingTimeout = opts.timeoutMs ?? Math.min(15000, provider.timeout || 15000);
