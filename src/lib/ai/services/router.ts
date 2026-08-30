@@ -14,6 +14,7 @@ import type { AIProvider, AIProviderSettings, AIProviderLog } from "../../types"
 import type { ChatRequest, ChatResponse, ProviderConfig } from "../providers/interface";
 import { ProviderFactory, ProviderError } from "./factory";
 import { FallbackManager, toProviderConfig } from "./fallback";
+import { upstreamDomainOf, buildUpstreamBlockMap, UPSTREAM_QUOTA_DIVERT_REASON } from "../upstream-domain";
 import { useApp, uid } from "../../store";
 import { modelRegistry } from "../../model-registry";
 import { rateLimitTracker } from "../../rate-limit-tracker";
@@ -190,6 +191,19 @@ export class ProviderRouter {
     const errors: string[] = [];
     const callTimeoutMs = opts.timeoutMs ?? AI_CALL_TIMEOUT_MS;
 
+    // Task 24 — upstream failure-domain diversion. Aliased providers
+    // (p_opencode + p_zencode → opencode.ai) share ONE IP-keyed limiter;
+    // when a sibling is in a 429/quota window the alias must divert to the
+    // next DISTINCT engine instead of burning a request on the same pool.
+    // Probes bypass (cooldowns gate traffic, not evidence).
+    const isProbeChat = opts.requestType === "test";
+    const blockedUpstreams = isProbeChat
+      ? new Map<string, string>()
+      : buildUpstreamBlockMap(chain, (id) => {
+          const cls = getProviderCooldownClass(id);
+          return cls === "429" || cls === "quota";
+        });
+
     for (const provider of chain) {
       const cooldownId = provider.id || provider.name || provider.type;
 
@@ -231,6 +245,39 @@ export class ProviderRouter {
             });
           } catch { /* event bus must never break routing */ }
           errors.push(`${provider.name}: in cooldown (${Math.max(1, Math.ceil(remainingMs / 1000))}s remaining)`);
+          continue;
+        }
+      }
+
+      // Task 24 — upstream diversion: a same-domain sibling of a provider
+      // already in a 429/quota window (or one that just 429'd live this call)
+      // is skipped BEFORE attempting — the shared IP-keyed limiter would
+      // reject it too. Checked AFTER the own-cooldown gate so the blocked
+      // provider itself keeps its accurate "cooldown" skip reason.
+      if (!isProbeChat) {
+        const domain = upstreamDomainOf(provider);
+        const blockedBy = blockedUpstreams.get(domain);
+        if (blockedBy && blockedBy !== cooldownId) {
+          const divertRemainingMs = getProviderCooldownRemainingMs(blockedBy);
+          try {
+            globalEventBus.emit({
+              agent: "ProviderRouter",
+              action: "skip_provider",
+              resumeId: provider.name,
+              provider: provider.name,
+              success: false,
+              metadata: {
+                reason: UPSTREAM_QUOTA_DIVERT_REASON,
+                class: "429",
+                layer: "upstream",
+                domain,
+                blockedBy,
+                remainingMs: divertRemainingMs,
+                requestType: opts.requestType ?? "chat",
+              },
+            });
+          } catch { /* event bus must never break routing */ }
+          errors.push(`${provider.name}: diverted — upstream ${domain} in 429 quota window (sibling ${blockedBy})`);
           continue;
         }
       }
@@ -333,6 +380,9 @@ export class ProviderRouter {
           requestType: opts.requestType,
         });
         if (armedClass === "429") {
+          // Task 24 — arm the upstream domain block so later same-host
+          // siblings divert instead of hitting the same IP-keyed limiter.
+          blockedUpstreams.set(upstreamDomainOf(provider), cooldownId);
           try {
             const capCh = recordProviderRateLimitHit(cooldownId, getConfiguredProviderCap(cooldownId, provider.concurrencyCap));
             if (capCh.changed) {
@@ -423,6 +473,15 @@ export class ProviderRouter {
     const errors: string[] = [];
     const callTimeoutMs = opts.timeoutMs ?? AI_CALL_TIMEOUT_MS;
 
+    // Task 24 — upstream failure-domain diversion (chat-path parity).
+    const isProbeStream = opts.requestType === "test";
+    const blockedUpstreams = isProbeStream
+      ? new Map<string, string>()
+      : buildUpstreamBlockMap(chain, (id) => {
+          const cls = getProviderCooldownClass(id);
+          return cls === "429" || cls === "quota";
+        });
+
     for (const provider of chain) {
       const cooldownId = provider.id || provider.name || provider.type;
 
@@ -458,6 +517,36 @@ export class ProviderRouter {
             });
           } catch { /* event bus must never break routing */ }
           errors.push(`${provider.name}: in cooldown (${Math.max(1, Math.ceil(remainingMs / 1000))}s remaining)`);
+          continue;
+        }
+      }
+
+      // Task 24 — upstream diversion (chat-path parity): skip same-domain
+      // siblings of a 429/quota-blocked provider BEFORE attempting.
+      if (!isProbeStream) {
+        const domain = upstreamDomainOf(provider);
+        const blockedBy = blockedUpstreams.get(domain);
+        if (blockedBy && blockedBy !== cooldownId) {
+          const divertRemainingMs = getProviderCooldownRemainingMs(blockedBy);
+          try {
+            globalEventBus.emit({
+              agent: "ProviderRouter",
+              action: "skip_provider",
+              resumeId: provider.name,
+              provider: provider.name,
+              success: false,
+              metadata: {
+                reason: UPSTREAM_QUOTA_DIVERT_REASON,
+                class: "429",
+                layer: "upstream",
+                domain,
+                blockedBy,
+                remainingMs: divertRemainingMs,
+                requestType: opts.requestType ?? "chat",
+              },
+            });
+          } catch { /* event bus must never break routing */ }
+          errors.push(`${provider.name}: diverted — upstream ${domain} in 429 quota window (sibling ${blockedBy})`);
           continue;
         }
       }
@@ -570,6 +659,8 @@ export class ProviderRouter {
           requestType: opts.requestType,
         });
         if (armedClass === "429") {
+          // Task 24 — arm the upstream domain block (chat-path parity).
+          blockedUpstreams.set(upstreamDomainOf(provider), cooldownId);
           try {
             const capCh = recordProviderRateLimitHit(cooldownId, getConfiguredProviderCap(cooldownId, provider.concurrencyCap));
             if (capCh.changed) {

@@ -968,10 +968,18 @@ export const SEED_FALLBACK_CHAIN: FallbackChainConfig = {
   includeLocalEngineLastResort: true,
   respectPrimarySelection: true,
   entries: [
+    // Task 24 — distinct upstreams only, verified live 2026-08-30.
+    // p_zencode was REMOVED: it is an alias of p_opencode (both opencode.ai),
+    // so listing both double-books the same IP-keyed limiter. The runtime
+    // diversion (lib/ai/upstream-domain.ts) skips same-upstream siblings on
+    // 429/quota windows anyway — this seed now never relies on that safety
+    // net. deepseek-v4-flash-free is dead upstream (400 "Model is
+    // unavailable"); the Zen entry uses nemotron-3.5-lightning-free, the only
+    // free model both answering AND fast (1.2s) in live probes.
     {
       id: "fb_001",
-      providerId: "p_zencode",
-      model: "deepseek-v4-flash-free",
+      providerId: "p_opencode",
+      model: "nemotron-3.5-lightning-free",
       enabled: true,
       temperature: 0.15,
       maxTokens: 8000,
@@ -979,17 +987,17 @@ export const SEED_FALLBACK_CHAIN: FallbackChainConfig = {
     },
     {
       id: "fb_002",
-      providerId: "p_opencode",
-      model: "deepseek-v4-flash-free",
+      providerId: "p_nvidia",
+      model: "nvidia/nemotron-3-super-120b-a12b",
       enabled: true,
       temperature: 0.15,
-      maxTokens: 8000,
-      timeoutMs: 120000,
+      maxTokens: 8192,
+      timeoutMs: 90000,
     },
     {
       id: "fb_003",
-      providerId: "p_nvidia",
-      model: "nvidia/nemotron-3-super-120b-a12b",
+      providerId: "p_mistral",
+      model: "mistral-small-latest",
       enabled: true,
       temperature: 0.15,
       maxTokens: 8192,
@@ -1006,15 +1014,6 @@ export const SEED_FALLBACK_CHAIN: FallbackChainConfig = {
     },
     {
       id: "fb_005",
-      providerId: "p_mistral",
-      model: "mistral-small-latest",
-      enabled: true,
-      temperature: 0.15,
-      maxTokens: 8192,
-      timeoutMs: 90000,
-    },
-    {
-      id: "fb_006",
       providerId: "p_openrouter",
       model: "openai/gpt-oss-120b:free",
       enabled: true,

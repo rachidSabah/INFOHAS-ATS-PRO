@@ -33,6 +33,8 @@ vi.mock("../../store", () => ({
 
 vi.mock("../../provider-cooldown", () => ({
   isProviderInCooldown: () => false,
+  getProviderCooldownRemainingMs: () => 0,
+  getProviderCooldownClass: () => null,
 }));
 vi.mock("../../circuit-breaker", () => ({
   getCooldownRemaining: () => 0,

@@ -58,6 +58,8 @@ vi.mock("./factory", () => ({
 
 vi.mock("../../provider-cooldown", () => ({
   isProviderInCooldown: () => gate.sessionCooldown, // the whole provider chain is "in cooldown"
+  getProviderCooldownRemainingMs: () => (gate.sessionCooldown ? 1_500_000 : 0),
+  getProviderCooldownClass: () => (gate.sessionCooldown ? "quota" : null),
   markProvider429Cooldown: vi.fn(),
   markProvider401Cooldown: vi.fn(),
   markProviderTimeoutCooldown: vi.fn(),

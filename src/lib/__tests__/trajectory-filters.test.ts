@@ -201,6 +201,40 @@ describe("describeSkipReason", () => {
     expect(d).toContain("10.0s");
   });
 
+  it("upstream_quota_divert: upstream domain, blocked sibling and remaining window", () => {
+    const d = describeSkipReason({
+      agent: "ProviderRouter",
+      action: "skip_provider",
+      resumeId: "ZenCode",
+      provider: "ZenCode",
+      success: false,
+      metadata: {
+        reason: "upstream_quota_divert",
+        class: "429",
+        layer: "upstream",
+        domain: "opencode.ai",
+        blockedBy: "p_opencode",
+        remainingMs: 1_500_000,
+        requestType: "chat",
+      },
+    } as AgentEvent);
+    expect(d).toContain("upstream 429 — diverted");
+    expect(d).toContain("opencode.ai");
+    expect(d).toContain("sibling p_opencode");
+    expect(d).toContain("1500s remaining");
+  });
+
+  it("upstream_quota_divert with minimal metadata degrades gracefully", () => {
+    const d = describeSkipReason({
+      agent: "ProviderRouter",
+      action: "skip_provider",
+      resumeId: "x",
+      success: false,
+      metadata: { reason: "upstream_quota_divert" },
+    } as AgentEvent);
+    expect(d).toBe("upstream 429 — diverted");
+  });
+
   it("cooldown with minimal metadata degrades gracefully", () => {
     const d = describeSkipReason({
       agent: "ProviderRouter",

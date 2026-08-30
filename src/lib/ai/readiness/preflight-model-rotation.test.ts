@@ -56,7 +56,7 @@ vi.mock("../../store", () => ({
   },
 }));
 
-vi.mock("../../provider-cooldown", () => ({ isProviderInCooldown: () => false }));
+vi.mock("../../provider-cooldown", () => ({ isProviderInCooldown: () => false, getProviderCooldownRemainingMs: () => 0, getProviderCooldownClass: () => null }));
 vi.mock("../../circuit-breaker", () => ({ getCooldownRemaining: () => 0, resetCircuitBreaker: vi.fn() }));
 vi.mock("../../rate-limit-tracker", () => ({
   rateLimitTracker: { isRateLimited: () => false, getCooldownRemainingMs: () => 0, recordSuccess: vi.fn() },

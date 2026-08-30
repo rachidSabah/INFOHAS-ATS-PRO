@@ -112,6 +112,18 @@ export function describeSkipReason(e: AgentEvent): string {
     return parts.join(" · ");
   }
 
+  // Task 24 — upstream failure-domain diversion: a same-upstream sibling of a
+  // 429/quota-blocked provider was skipped before attempting (shared IP-keyed
+  // limiter would reject it too). WHY = which upstream, which sibling, how long.
+  if (reason === "upstream_quota_divert") {
+    const parts: string[] = ["upstream 429 — diverted"];
+    if (typeof meta.domain === "string" && meta.domain) parts.push(meta.domain);
+    if (typeof meta.blockedBy === "string" && meta.blockedBy) parts.push(`sibling ${meta.blockedBy}`);
+    const rem = fmtRemaining(meta.remainingMs);
+    if (rem) parts.push(rem);
+    return parts.join(" · ");
+  }
+
   if (reason) return `skipped (${reason})`;
   return "skipped";
 }
