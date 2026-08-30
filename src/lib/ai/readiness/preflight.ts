@@ -169,7 +169,7 @@ export async function runReadinessPreflight(opts: {
   const isSuperAdmin = state.user?.role === "super_admin";
 
   let eligible = (state.providers || []).filter((p) => {
-    if (p.type === "puter") return false;
+    if (p.type === "puter" && typeof window === "undefined" && !opts.deps?.ping) return false;
     if (opts.providerIds) return opts.providerIds.includes(p.id);
     // Super-admins may run the optimizer on any reachable provider — they own
     // the instance and explicitly activate providers in the UI. Blocking on
