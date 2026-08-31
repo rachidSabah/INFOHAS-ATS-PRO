@@ -4,6 +4,7 @@
 "use client";
 
 import { useApp, uid } from "../../store";
+import { isCliIntegration } from "../../provider-sync";
 import { resolveTestTimeoutMs } from "../test-timeout";
 import { ProviderRouter } from "./router";
 import { ProviderFactory } from "./factory";
@@ -239,6 +240,32 @@ export class ProviderManager {
           "gpt-4o",
           "o1-mini",
         ],
+      };
+    }
+
+    // === CLI INTEGRATIONS (Task 29b): model discovery is a CLI-runtime
+    // concern, NOT a REST {baseUrl}/models proxy call. A CLI provider
+    // legitimately has NO Base URL ("N/A" per Task 29) — the generic proxy
+    // rejects the request with "baseUrl is required". Ownership rule: models
+    // discovered here belong to the CLI provider (provider_id antigravity),
+    // never to the Google Gemini API provider, regardless of model-id family.
+    if (isCliIntegration(provider)) {
+      try {
+        const adapter = ProviderFactory.get(provider.type);
+        const models = await adapter.listModels?.(toProviderConfig(provider));
+        if (models && models.length > 0) return { ok: true, models };
+      } catch {
+        // Not connected (or discovery failed) — fall through to the synced catalog.
+      }
+      const stored = (provider.enabledModels || []).filter(
+        (m) => typeof m === "string" && m.trim() !== "",
+      );
+      if (stored.length > 0) return { ok: true, models: [...stored] };
+      return {
+        ok: false,
+        models: [],
+        error:
+          "Antigravity CLI is not connected and has no synced models yet. Connect via Google sign-in or paste a CLI token, then run Sync Models. (CLI integration — no Base URL is used.)",
       };
     }
 
