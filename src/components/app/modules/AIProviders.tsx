@@ -26,6 +26,7 @@ import { ConnectAntigravityDialog } from "./ConnectAntigravityDialog";
 import { getPuterProvider } from "@/lib/providers";
 import type { ProviderAuthStatus } from "@/lib/providers/interface";
 import { PROVIDER_CATALOG, type ProviderCatalogEntry } from "@/lib/ai/provider-catalog";
+import { PROVIDER_TABLE_COLUMNS } from "./provider-table-layout";
 import {
   AreaChart, Area, BarChart, Bar, PieChart, Pie, Cell,
   XAxis, YAxis, Tooltip, ResponsiveContainer, Legend,
@@ -328,19 +329,21 @@ export function AIProviders() {
               </div>
             </div>
             <div className="overflow-x-auto">
-              <table className="w-full text-sm">
+              {/* Task 27: table-fixed + breakpoint column disclosure — the table
+                  always fits the card frame (no horizontal scrolling); long
+                  values truncate with tooltips instead of pushing width. */}
+              <table className="w-full text-sm table-fixed">
                 <thead className="border-b border-border bg-secondary/40">
                   <tr className="text-left text-xs uppercase tracking-wide text-muted-foreground">
-                    <th className="px-4 py-2 font-semibold">Provider</th>
-                    <th className="px-4 py-2 font-semibold">Type</th>
-                    <th className="px-4 py-2 font-semibold">Base URL</th>
-                    <th className="px-4 py-2 font-semibold">Model</th>
-                    <th className="px-4 py-2 font-semibold">Status</th>
-                    <th className="px-4 py-2 font-semibold">Priority</th>
-                    <th className="px-4 py-2 font-semibold" title="Live traffic control: effective cap / your configured ceiling (AUTO = the adaptive layer self-tightened after 429 evidence), plus any active cooldown window (quota / rate-limit / auth / timeout) with its remaining time.">Concurrency</th>
-                    <th className="px-4 py-2 font-semibold">Requests</th>
-                    <th className="px-4 py-2 font-semibold">Last used</th>
-                    <th className="px-4 py-2 font-semibold text-right">Actions</th>
+                    {PROVIDER_TABLE_COLUMNS.map((col) => (
+                      <th
+                        key={col.key}
+                        className={`px-3 py-2 font-semibold ${col.thVisibilityClass} ${col.widthClass}${col.key === "actions" ? " text-right" : ""}`}
+                        title={col.key === "concurrency" ? CONCURRENCY_TH_TITLE : undefined}
+                      >
+                        {col.label}
+                      </th>
+                    ))}
                   </tr>
                 </thead>
                 <tbody>
@@ -349,20 +352,19 @@ export function AIProviders() {
                     const statusColor = p.status === "healthy" ? "success" : p.status === "degraded" ? "warning" : p.status === "untested" ? "outline" : "danger";
                     return (
                       <tr key={p.id} className="border-b border-border hover:bg-secondary/30">
-                        <td className="px-4 py-3">
-                          <div className="flex items-center gap-2">
+                        <td className="px-3 py-3">
+                          <div className="flex items-start gap-2">
                             <div className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0" style={{ background: `${p.type === "puter" ? "#F59E0B" : "#94A3B8"}15`, color: p.type === "puter" ? "#F59E0B" : "#475569" }}>
                               <Icon name={cfg?.icon ?? "Cpu"} className="w-4 h-4" />
                             </div>
                             <div className="min-w-0">
-                              <div className="font-medium truncate flex items-center gap-1.5">
-                                {p.name}
+                              <div className="flex flex-wrap items-center gap-x-1.5 gap-y-1">
+                                <span className="font-medium truncate" title={p.name}>{p.name}</span>
                                 {p.isDefault && <Badge variant="gold" className="text-[9px]">DEFAULT</Badge>}
                                 {p.isFallback && <Badge variant="brand" className="text-[9px]">FALLBACK</Badge>}
                                 {p.allowedForRegularUsers && <Badge variant="success" className="text-[9px]">USER ACCESS</Badge>}
                                 {p.isBuiltIn && <Badge variant="outline" className="text-[9px]">BUILT-IN</Badge>}
                               </div>
-                              <div className="text-xs text-muted-foreground truncate">{p.name}</div>
                               {isOpenCodeZenFree(p) && (
                                 <div className="text-[10px] text-amber-600 dark:text-amber-400 font-medium mt-0.5">
                                   ⚠ Free model – third-party rate limits may apply.
@@ -371,12 +373,12 @@ export function AIProviders() {
                             </div>
                           </div>
                         </td>
-                        <td className="px-4 py-3"><Badge variant="outline" className="text-[10px] capitalize">{p.type.replace("-", " ")}</Badge></td>
-                        <td className="px-4 py-3 text-xs text-muted-foreground font-mono truncate max-w-[180px]">{p.baseUrl || p.apiUrl || "—"}</td>
-                        <td className="px-4 py-3 text-xs font-mono">{p.modelName || "—"}</td>
-                        <td className="px-4 py-3"><Badge variant={statusColor as any} className="capitalize text-[10px]">{p.status}</Badge></td>
-                        <td className="px-4 py-3"><span className="font-mono text-xs">#{p.priority}</span></td>
-                        <td className="px-4 py-3">
+                        <td className={`px-3 py-3 ${TD_VIS.type}`}><Badge variant="outline" className="text-[10px] capitalize">{p.type.replace("-", " ")}</Badge></td>
+                        <td className={`px-3 py-3 text-xs text-muted-foreground font-mono truncate ${TD_VIS.baseUrl}`} title={p.baseUrl || p.apiUrl || ""}>{p.baseUrl || p.apiUrl || "—"}</td>
+                        <td className="px-3 py-3 text-xs font-mono truncate" title={p.modelName || "—"}>{p.modelName || "—"}</td>
+                        <td className="px-3 py-3"><Badge variant={statusColor as any} className="capitalize text-[10px]">{p.status}</Badge></td>
+                        <td className={`px-3 py-3 ${TD_VIS.priority}`}><span className="font-mono text-xs" title={`Priority #${p.priority} — lower numbers are tried first in the routing chain.`}>#{p.priority}</span></td>
+                        <td className="px-3 py-3">
                           {(() => {
                             const snap = getProviderConcurrencySnapshot(p.id, p.concurrencyCap);
                             const cd = getProviderCooldownSnapshot(p.id);
@@ -386,7 +388,7 @@ export function AIProviders() {
                             const cdLong = cd.class === "quota" || cd.class === "401";
                             return (
                               <div className="space-y-1">
-                                <div className="flex items-center gap-1.5">
+                                <div className="flex flex-wrap items-center gap-x-1.5 gap-y-1">
                                   <span
                                     className={`font-mono text-xs ${snap.tightened ? "font-semibold text-amber-600 dark:text-amber-400" : "text-muted-foreground"}`}
                                     title={snap.tightened
@@ -413,7 +415,7 @@ export function AIProviders() {
                                   )}
                                 </div>
                                 {cd.inCooldown && (
-                                  <div className="flex items-center gap-1.5">
+                                  <div className="flex flex-wrap items-center gap-x-1.5 gap-y-1">
                                     <span
                                       className={`inline-flex items-center gap-1 text-[10px] font-semibold ${cdLong ? "text-amber-600 dark:text-amber-400" : "text-sky-600 dark:text-sky-400"}`}
                                       title={`${cdLabel[cd.class ?? "unknown"]} cooldown — ${formatCooldownRemaining(cd.remainingMs)} remaining${cd.persisted ? " (persisted: survives a page reload / tab close)" : ""}. The router skips this provider until the window ends, a successful probe clears it, or you clear it manually.`}
@@ -436,9 +438,9 @@ export function AIProviders() {
                             );
                           })()}
                         </td>
-                        <td className="px-4 py-3 text-xs">{p.usage.requests.toLocaleString()}</td>
-                        <td className="px-4 py-3 text-xs text-muted-foreground">{p.lastUsedAt ? new Date(p.lastUsedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "—"}</td>
-                        <td className="px-4 py-3">
+                        <td className={`px-3 py-3 text-xs ${TD_VIS.requests}`}>{p.usage.requests.toLocaleString()}</td>
+                        <td className={`px-3 py-3 text-xs text-muted-foreground ${TD_VIS.lastUsed}`}>{p.lastUsedAt ? new Date(p.lastUsedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "—"}</td>
+                        <td className="px-3 py-3">
                           <div className="flex gap-0.5 justify-end">
                             <IconBtn icon="Pencil" label="Edit" onClick={() => { setEditing(p); setShowAdd(true); }} />
                             <IconBtn icon="Zap" label="Test connection" onClick={() => handleTest(p)} color="#F59E2B" />
@@ -541,13 +543,21 @@ export function AIProviders() {
   );
 }
 
+// Task 27 — per-cell visibility classes must mirror the <th> disclosure gates
+// (hidden xl:table-cell / hidden 2xl:table-cell) so columns disappear together.
+const TD_VIS = Object.fromEntries(
+  PROVIDER_TABLE_COLUMNS.map((c) => [c.key, c.tdVisibilityClass])
+) as Record<string, string>;
+
+const CONCURRENCY_TH_TITLE = "Live traffic control: effective cap / your configured ceiling (AUTO = the adaptive layer self-tightened after 429 evidence), plus any active cooldown window (quota / rate-limit / auth / timeout) with its remaining time.";
+
 function IconBtn({ icon, label, onClick, color }: { icon: string; label: string; onClick: () => void; color?: string }) {
   return (
     <button
       onClick={onClick}
       title={label}
       aria-label={label}
-      className="w-7 h-7 rounded-md hover:bg-secondary flex items-center justify-center text-muted-foreground hover:text-foreground transition"
+      className="w-6 h-6 rounded-md hover:bg-secondary flex items-center justify-center text-muted-foreground hover:text-foreground transition shrink-0"
       style={color ? { color } : undefined}
     >
       <Icon name={icon} className="w-3.5 h-3.5" />
