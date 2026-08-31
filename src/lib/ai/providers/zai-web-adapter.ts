@@ -51,6 +51,9 @@ export const ZAI_WEB_CHAT_CONTRACT: ZaiWebContract & { chatPath: string } = {
   chatPath: "/api/chat/completions",
 };
 
+/** Same-origin ATS Pro endpoint that imports + validates the web session. */
+export const ZAI_WEB_IMPORT_PATH = "/api/providers/zai-web/session-import";
+
 function resolveSessionToken(config: ProviderConfig): string | null {
   // 1. Runtime session (browser bridge import) — the canonical source.
   const live = recallZaiWebSession();
@@ -59,6 +62,82 @@ function resolveSessionToken(config: ProviderConfig): string | null {
   //    token in server contexts — it is never a Z.ai API key).
   if (config.apiKey && config.apiKey.trim() !== "") return config.apiKey;
   return null;
+}
+
+function isBrowserRuntime(): boolean {
+  return typeof window !== "undefined";
+}
+
+/** Shape of the session-import route's JSON response (POST import / GET validate). */
+interface ImportRouteResponse {
+  ok?: boolean;
+  stored?: "server" | "not-stored";
+  validated?: boolean;
+  state?: string;
+  models?: string[];
+  message?: string;
+}
+
+async function readImportResponse(res: Response): Promise<ImportRouteResponse | null> {
+  return (await res.json().catch(() => null)) as ImportRouteResponse | null;
+}
+
+function importOutcomeMessage(data: ImportRouteResponse | null, resStatus: number): string {
+  if (!data) {
+    return `ATS Pro validation endpoint returned an unreadable response (HTTP ${resStatus}). The session was not marked connected.`;
+  }
+  const message = String(data.message ?? "").trim();
+  return message || `Validation state: ${data.state ?? "unknown"} (HTTP ${resStatus}).`;
+}
+
+/**
+ * Browser validation path (Task 30b fix for the "always failing" Test
+ * Connection): the bridge import stores the session SERVER-side only, so
+ * the browser asks the same-origin import route to validate — POST when a
+ * memory token exists (validates + persists it), GET to validate the
+ * encrypted D1 copy otherwise. Direct cross-origin calls to chat.z.ai are
+ * NOT attempted from the browser here.
+ */
+async function validateViaImportRoute(
+  fetchLike: typeof fetch,
+  memoryToken: string | null,
+): Promise<{ ok: boolean; latencyMs: number; message: string; state: string; models: string[] }> {
+  const t0 = performance.now();
+  try {
+    const res = memoryToken
+      ? await fetchLike(ZAI_WEB_IMPORT_PATH, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            provider_id: "zai-web",
+            credential_type: "zai_web_session",
+            token: memoryToken,
+            source: "test-connection",
+          }),
+        })
+      : await fetchLike(ZAI_WEB_IMPORT_PATH, { method: "GET" });
+    const latencyMs = Math.round(performance.now() - t0);
+    const data = await readImportResponse(res as Response);
+    const message = importOutcomeMessage(data, res.status);
+    return {
+      ok: data?.validated === true && data?.state === "connected",
+      latencyMs,
+      message: redactZaiSecrets(message),
+      state: String(data?.state ?? "network_error"),
+      models: Array.isArray(data?.models) ? data.models : [],
+    };
+  } catch (e: unknown) {
+    const message = e instanceof Error ? e.message : String(e);
+    return {
+      ok: false,
+      latencyMs: Math.round(performance.now() - t0),
+      message: redactZaiSecrets(
+        `ATS Pro validation endpoint unreachable (${message.slice(0, 120)}). The session was not marked connected.`,
+      ),
+      state: "network_error",
+      models: [],
+    };
+  }
 }
 
 export class ZaiWebSessionAdapter implements AIProviderAdapter {
@@ -140,6 +219,12 @@ export class ZaiWebSessionAdapter implements AIProviderAdapter {
   /**
    * Health semantics: the provider is healthy ONLY after a REAL validation
    * request passes. Token presence alone is never "connected".
+   *
+   * Browser runtime: validation goes through the same-origin ATS Pro import
+   * route (POST with the memory token, or GET validating the encrypted
+   * server copy) — the bridge flow leaves the browser memory store empty,
+   * so a direct browser-to-chat.z.ai check would always fail.
+   * Server/test runtime: direct Z.ai validation as before.
    */
   async testConnection(config: ProviderConfig): Promise<{
     ok: boolean;
@@ -147,6 +232,13 @@ export class ZaiWebSessionAdapter implements AIProviderAdapter {
     message: string;
     response?: string;
   }> {
+    if (isBrowserRuntime()) {
+      const outcome = await validateViaImportRoute(
+        this.fetchLike,
+        resolveSessionToken(config),
+      );
+      return { ok: outcome.ok, latencyMs: outcome.latencyMs, message: outcome.message };
+    }
     const token = resolveSessionToken(config);
     const validation = await validateZaiWebSession(
       token ? { token } : null,
@@ -161,6 +253,20 @@ export class ZaiWebSessionAdapter implements AIProviderAdapter {
   }
 
   async listModels(config: ProviderConfig): Promise<string[]> {
+    if (isBrowserRuntime()) {
+      const outcome = await validateViaImportRoute(
+        this.fetchLike,
+        resolveSessionToken(config),
+      );
+      if (outcome.ok && outcome.models.length > 0) return outcome.models;
+      const stored = (config.enabledModels || []).filter(
+        (m) => typeof m === "string" && m.trim() !== "",
+      );
+      if (stored.length > 0) return stored;
+      throw new Error(
+        `[Z.ai Web] ${outcome.state}: no web model catalog available. ${outcome.message}`.slice(0, 300),
+      );
+    }
     const token = resolveSessionToken(config);
     const validation = await validateZaiWebSession(
       token ? { token } : null,

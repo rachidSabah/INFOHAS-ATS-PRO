@@ -1,7 +1,7 @@
 /**
  * Task 30 — ZaiWebSessionAdapter + provider-sync isolation tests.
  */
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("../../providers/antigravity-provider", () => ({
   getAntigravityProvider: () => ({ listModels: vi.fn(async () => []), isAuthenticated: () => false }),
@@ -172,5 +172,121 @@ describe("disconnect isolation", () => {
     await forgetZaiWebSession({ store: async () => ({ ok: true as const }), clear: async () => { cleared.push("zai-web"); } });
     expect(recallZaiWebSession()).toBeNull();
     expect(cleared).toEqual(["zai-web"]);
+  });
+});
+
+// Task 30b — the "always failing" fix: in a BROWSER the bridge import leaves
+// the memory store empty (the token lives encrypted server-side), so the
+// adapter must validate through the same-origin import route instead of
+// calling chat.z.ai cross-origin directly.
+describe("ZaiWebSessionAdapter — browser runtime validates via the import route", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  function routeFetch(handler: (url: string, init?: RequestInit) => Response | Promise<Response>): ReturnType<typeof vi.fn> {
+    return vi.fn((...args: unknown[]) => {
+      const [url, init] = args as [string, RequestInit?];
+      return Promise.resolve(handler(url, init)) as unknown;
+    });
+  }
+  const asFetch = (fn: ReturnType<typeof vi.fn>) => fn as unknown as typeof fetch;
+
+  it("with an empty memory store it asks the server to validate the stored session (GET, never chat.z.ai cross-origin)", async () => {
+    vi.stubGlobal("window", {});
+    const fetchStub = routeFetch((url, init) => {
+      expect(String(url)).toBe("/api/providers/zai-web/session-import");
+      expect(init?.method ?? "GET").toBe("GET");
+      return jsonResponse(200, {
+        ok: true,
+        stored: "server",
+        validated: true,
+        state: "connected",
+        models: ["glm-4.6"],
+        message: "Z.ai web session validated against the live web contract.",
+      });
+    });
+    const adapter = new ZaiWebSessionAdapter(ZAI_WEB_CHAT_CONTRACT, asFetch(fetchStub));
+    const res = await adapter.testConnection({ id: "p_zai_web", type: "zai-web" } as any);
+    expect(res.ok).toBe(true);
+    expect(String(fetchStub.mock.calls[0][0])).not.toContain("chat.z.ai");
+  });
+
+  it("with a memory token it POSTs it for validate-before-store (source=test-connection)", async () => {
+    vi.stubGlobal("window", {});
+    rememberZaiWebSession({ authenticated: true, token: TOKEN, source: "localStorage" });
+    let seenBody: any = null;
+    const fetchStub = routeFetch((_url, init) => {
+      expect(init?.method).toBe("POST");
+      seenBody = JSON.parse(String(init?.body));
+      return jsonResponse(200, { ok: true, validated: true, state: "connected", models: [], message: "validated and stored encrypted." });
+    });
+    const adapter = new ZaiWebSessionAdapter(ZAI_WEB_CHAT_CONTRACT, asFetch(fetchStub));
+    const res = await adapter.testConnection({ id: "p_zai_web", type: "zai-web" } as any);
+    expect(res.ok).toBe(true);
+    expect(seenBody.credential_type).toBe("zai_web_session");
+    expect(seenBody.token).toBe(TOKEN);
+    expect(seenBody.source).toBe("test-connection");
+  });
+
+  it("reports the honest failure state when nothing is stored server-side", async () => {
+    vi.stubGlobal("window", {});
+    const fetchStub = routeFetch(() =>
+      jsonResponse(200, {
+        ok: true,
+        validated: false,
+        state: "authentication_required",
+        models: [],
+        message: "No server-stored Z.ai web session yet. Open Z.ai, sign in with Google, run the Z.ai → ATS Pro bridge on chat.z.ai, then Test Connection again.",
+      }),
+    );
+    const adapter = new ZaiWebSessionAdapter(ZAI_WEB_CHAT_CONTRACT, asFetch(fetchStub));
+    const res = await adapter.testConnection({ id: "p_zai_web", type: "zai-web" } as any);
+    expect(res.ok).toBe(false);
+    expect(res.message).toMatch(/no server-stored z\.ai web session/i);
+  });
+
+  it("fails closed when the secure sink is unavailable (HTTP 501)", async () => {
+    vi.stubGlobal("window", {});
+    const fetchStub = routeFetch(() =>
+      jsonResponse(501, {
+        ok: false,
+        validated: false,
+        state: "network_error",
+        models: [],
+        message: "ATS Pro secure storage is unavailable (no D1 binding), so the server-stored session cannot be validated. Re-run the bridge import — it validates before storing.",
+      }),
+    );
+    const adapter = new ZaiWebSessionAdapter(ZAI_WEB_CHAT_CONTRACT, asFetch(fetchStub));
+    const res = await adapter.testConnection({ id: "p_zai_web", type: "zai-web" } as any);
+    expect(res.ok).toBe(false);
+    expect(res.message).toMatch(/secure storage is unavailable/i);
+  });
+
+  it("an unreachable validation endpoint is an explicit network_error, never a fabricated success", async () => {
+    vi.stubGlobal("window", {});
+    const fetchStub = routeFetch(() => {
+      throw new TypeError("Failed to fetch");
+    });
+    const adapter = new ZaiWebSessionAdapter(ZAI_WEB_CHAT_CONTRACT, asFetch(fetchStub));
+    const res = await adapter.testConnection({ id: "p_zai_web", type: "zai-web" } as any);
+    expect(res.ok).toBe(false);
+    expect(res.message).toMatch(/validation endpoint unreachable/i);
+  });
+
+  it("listModels uses the server-validated catalog, then the stored one, then fails truthfully", async () => {
+    vi.stubGlobal("window", {});
+    const okFetch = routeFetch(() =>
+      jsonResponse(200, { ok: true, validated: true, state: "connected", models: ["glm-4.6", "glm-4.5-air"], message: "ok" }),
+    );
+    const adapter = new ZaiWebSessionAdapter(ZAI_WEB_CHAT_CONTRACT, asFetch(okFetch));
+    await expect(adapter.listModels({ type: "zai-web" } as any)).resolves.toEqual(["glm-4.6", "glm-4.5-air"]);
+
+    const degradedFetch = routeFetch(() =>
+      jsonResponse(200, { ok: true, validated: false, state: "session_expired", models: [], message: "expired" }),
+    );
+    const adapter2 = new ZaiWebSessionAdapter(ZAI_WEB_CHAT_CONTRACT, asFetch(degradedFetch));
+    await expect(adapter2.listModels({ type: "zai-web", enabledModels: ["glm-4.6"] } as any)).resolves.toEqual(["glm-4.6"]);
+    await expect(adapter2.listModels({ type: "zai-web" } as any)).rejects.toThrow(/session_expired/i);
   });
 });

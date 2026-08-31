@@ -178,3 +178,82 @@ describe("Z.ai Web browser bridge", () => {
     expect(js).toContain("chat.z.ai");
   });
 });
+
+// ============================================================================
+// Task 30b — server-side validation of the D1-stored session (Test
+// Connection fix): validates the encrypted server copy, never echoes the
+// token, maps every terminal condition to an honest state.
+// ============================================================================
+import { encrypt } from "../antigravity-routes";
+import { validateStoredZaiWebSession } from "./server-validate";
+
+function fakeDb(row: { access_token?: string } | null) {
+  const runs: { sql: string; values: unknown[] }[] = [];
+  const db = {
+    prepare: (sql: string) => ({
+      bind: (...values: unknown[]) => ({
+        first: async <T,>() => (sql.includes("SELECT") ? ((row ?? null) as T) : null),
+        run: async () => {
+          runs.push({ sql, values });
+          return { meta: { changes: 1 } };
+        },
+      }),
+      first: async <T,>() => (sql.includes("SELECT") ? ((row ?? null) as T) : null),
+      run: async () => ({ meta: { changes: 1 } }),
+    }),
+  };
+  return { db, runs };
+}
+
+describe("validateStoredZaiWebSession — server-side Test Connection", () => {
+  it("validates the decrypted server copy and returns models WITHOUT ever echoing the token", async () => {
+    const { db, runs } = fakeDb({ access_token: await encrypt(TOKEN) });
+    const fetchLike = vi.fn(async (url: unknown) =>
+      new Response(JSON.stringify({ data: [{ id: "glm-4.6" }] }), { status: 200 }),
+    ) as unknown as typeof fetch;
+    const result = await validateStoredZaiWebSession(db as any, undefined, fetchLike);
+    expect(result.status).toBe(200);
+    expect(result.body.validated).toBe(true);
+    expect(result.body.state).toBe("connected");
+    expect(result.body.models).toEqual(["glm-4.6"]);
+    // Token secrecy: neither request URL nor response body carries it.
+    expect(String(fetchLike)).not.toContain(TOKEN);
+    expect(JSON.stringify(result.body)).not.toContain(TOKEN);
+    // Observed state is persisted (best-effort UPDATE).
+    expect(runs.length).toBe(1);
+    expect(runs[0].sql).toContain("UPDATE provider_tokens");
+  });
+
+  it("fails closed with 501 when the secure sink is unbound", async () => {
+    const result = await validateStoredZaiWebSession(undefined, undefined);
+    expect(result.status).toBe(501);
+    expect(result.body.validated).toBe(false);
+    expect(result.body.message).toMatch(/secure storage is unavailable/i);
+  });
+
+  it("reports authentication_required when nothing is stored server-side", async () => {
+    const { db } = fakeDb(null);
+    const result = await validateStoredZaiWebSession(db as any, undefined);
+    expect(result.status).toBe(200);
+    expect(result.body.state).toBe("authentication_required");
+    expect(result.body.validated).toBe(false);
+  });
+
+  it("maps an undecryptable stored session to session_invalid (honest, actionable)", async () => {
+    const { db } = fakeDb({ access_token: "not-a-valid-ciphertext-hex!!" });
+    const result = await validateStoredZaiWebSession(db as any, undefined);
+    expect(result.body.state).toBe("session_invalid");
+    expect(result.body.validated).toBe(false);
+    expect(result.body.message).toMatch(/could not be decrypted/i);
+  });
+
+  it("forwards the real Z.ai rejection state (401 expired session)", async () => {
+    const { db } = fakeDb({ access_token: await encrypt(TOKEN) });
+    const fetchLike = vi.fn(async () =>
+      new Response(JSON.stringify({ detail: "token expired, login required" }), { status: 401 }),
+    ) as unknown as typeof fetch;
+    const result = await validateStoredZaiWebSession(db as any, undefined, fetchLike);
+    expect(result.body.state).toBe("session_expired");
+    expect(result.body.validated).toBe(false);
+  });
+});

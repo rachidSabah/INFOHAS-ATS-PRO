@@ -43,6 +43,24 @@ export async function OPTIONS() {
   return new Response(null, { status: 204, headers: CORS_HEADERS });
 }
 
+// Task 30b — Validate the SERVER-STORED zai-web session (Test Connection).
+// The browser bridge import never populates the ATS Pro page's memory store
+// (the bookmarklet runs on chat.z.ai), so a browser-side Test Connection
+// must ask the server to validate the encrypted D1 copy. The token is
+// decrypted only inside the edge runtime and is never echoed back.
+export async function GET(req: NextRequest) {
+  const env = (req as unknown as { env?: Env }).env ?? {};
+  const { validateStoredZaiWebSession } = await import(
+    "@/lib/providers/zai-web/server-validate"
+  );
+  const result = await validateStoredZaiWebSession(
+    env.DB,
+    env.ANTIGRAVITY_ENCRYPTION_KEY,
+  );
+  // Same-origin call from the ATS Pro app — no CORS headers granted here.
+  return NextResponse.json(result.body, { status: result.status });
+}
+
 // Task 30 — Disconnect: remove ONLY the zai-web session credential.
 // Other providers (Z.ai API fallback, Antigravity, Google Gemini, ...) are
 // never touched.
