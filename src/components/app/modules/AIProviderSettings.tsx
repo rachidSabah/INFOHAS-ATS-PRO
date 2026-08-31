@@ -10,6 +10,7 @@ import { Badge, Icon } from "@/components/shared";
 import { useApp } from "@/lib/store";
 import { ProviderManager } from "@/lib/ai/services";
 import { toast } from "sonner";
+import { chainLinkDisplay, type ChainLinkTestResult } from "./routing-chain-diagnostics";
 
 export function AIProviderSettings() {
   const settings = useApp((s) => s.providerSettings);
@@ -33,9 +34,11 @@ export function AIProviderSettings() {
   const [fetchingModels, setFetchingModels] = useState(false);
   const [liveModels, setLiveModels] = useState<string[]>([]);
 
-  // Chain diagnostics state
+  // Chain diagnostics state — Task 28: full per-link result is preserved
+  // (failure latency + rateLimited flag + provider message), no more zeroed
+  // latency / hover-only reasons.
   const [testingChain, setTestingChain] = useState(false);
-  const [chainResults, setChainResults] = useState<Record<string, { ok: boolean; latencyMs: number; error?: string }>>({});
+  const [chainResults, setChainResults] = useState<Record<string, ChainLinkTestResult>>({});
 
   // === FAILOVER SIMULATOR STATES ===
   const [simulatingFailover, setSimulatingFailover] = useState(false);
@@ -148,17 +151,25 @@ export function AIProviderSettings() {
     ].filter(Boolean) as typeof providers;
 
     for (const p of providersToTest) {
-      setChainResults(prev => ({ ...prev, [p.id]: { ok: true, latencyMs: 0, error: "Testing..." } as any }));
+      setChainResults(prev => ({ ...prev, [p.id]: { ok: false, latencyMs: 0, phase: "testing" } }));
       try {
         const res = await ProviderManager.testConnection(p as any);
         setChainResults(prev => ({
           ...prev,
-          [p.id]: { ok: res.ok, latencyMs: res.ok ? res.latencyMs : 0, error: res.ok ? undefined : res.message }
+          // Task 28 — keep the REAL diagnosis: failure latency, rateLimited
+          // flag (429 = reachable, key accepted) and the provider message.
+          [p.id]: {
+            ok: res.ok,
+            latencyMs: res.latencyMs ?? 0,
+            message: res.ok ? undefined : res.message,
+            rateLimited: (res as any)?.rateLimited === true,
+            phase: "done",
+          },
         }));
       } catch (err: any) {
         setChainResults(prev => ({
           ...prev,
-          [p.id]: { ok: false, latencyMs: 0, error: err?.message || "Connection error" }
+          [p.id]: { ok: false, latencyMs: 0, message: err?.message || "Connection error", phase: "done" },
         }));
       }
     }
@@ -314,19 +325,9 @@ export function AIProviderSettings() {
                 <span className="font-semibold">{defaultProvider.name}</span>
                 <span className="text-muted-foreground font-mono">({form.defaultModel || "no model"})</span>
               </div>
-              <div>
+              <div className="flex flex-col items-end gap-0.5">
                 {chainResults[defaultProvider.id] ? (
-                  chainResults[defaultProvider.id].error === "Testing..." ? (
-                    <span className="text-amber-500 animate-pulse font-medium">Checking...</span>
-                  ) : chainResults[defaultProvider.id].ok ? (
-                    <span className="text-emerald-500 font-bold flex items-center gap-1">
-                      <Icon name="Check" className="w-3.5 h-3.5" /> Healthy ({chainResults[defaultProvider.id].latencyMs}ms)
-                    </span>
-                  ) : (
-                    <span className="text-red-500 font-bold flex items-center gap-1" title={chainResults[defaultProvider.id].error}>
-                      <Icon name="X" className="w-3.5 h-3.5" /> Unhealthy
-                    </span>
-                  )
+                  <ChainLinkStatus result={chainResults[defaultProvider.id]} />
                 ) : (
                   <span className="text-muted-foreground">Not tested</span>
                 )}
@@ -340,19 +341,9 @@ export function AIProviderSettings() {
                 <span className="font-semibold">{p.name}</span>
                 <span className="text-muted-foreground font-mono">({p.modelName || "no model"})</span>
               </div>
-              <div>
+              <div className="flex flex-col items-end gap-0.5">
                 {chainResults[p.id] ? (
-                  chainResults[p.id].error === "Testing..." ? (
-                    <span className="text-amber-500 animate-pulse font-medium">Checking...</span>
-                  ) : chainResults[p.id].ok ? (
-                    <span className="text-emerald-500 font-bold flex items-center gap-1">
-                      <Icon name="Check" className="w-3.5 h-3.5" /> Healthy ({chainResults[p.id].latencyMs}ms)
-                    </span>
-                  ) : (
-                    <span className="text-red-500 font-bold flex items-center gap-1" title={chainResults[p.id].error}>
-                      <Icon name="X" className="w-3.5 h-3.5" /> Unhealthy
-                    </span>
-                  )
+                  <ChainLinkStatus result={chainResults[p.id]} />
                 ) : (
                   <span className="text-muted-foreground">Not tested</span>
                 )}
@@ -566,6 +557,39 @@ function ToggleRow({ label, desc, checked, onChange }: { label: string; desc: st
         <div className="text-xs text-muted-foreground">{desc}</div>
       </div>
       <Switch checked={checked} onCheckedChange={onChange} />
+    </div>
+  );
+}
+
+/**
+ * Task 28 — shared renderer for one Routing Chain Diagnostics link.
+ * Replaces the old bare "Unhealthy" ternary: every failure now shows an
+ * inline actionable diagnosis (HTTP status · latency · class hint · message
+ * excerpt) with the full provider message on hover / to screen readers.
+ * HTTP 429 renders as amber "Rate-limited" (provider reachable, key accepted).
+ */
+function ChainLinkStatus({ result }: { result: ChainLinkTestResult }) {
+  const d = chainLinkDisplay(result);
+  if (d.state === "testing") {
+    return <span className={d.toneClass}>{d.headline}</span>;
+  }
+  if (d.state === "healthy") {
+    return (
+      <span className={`flex items-center gap-1 ${d.toneClass}`}>
+        <Icon name="Check" className="w-3.5 h-3.5" /> {d.headline} ({d.latencyMs}ms)
+      </span>
+    );
+  }
+  return (
+    <div className="flex flex-col items-end gap-0.5 text-right">
+      <span className={`flex items-center gap-1 ${d.toneClass}`} title={d.fullMessage}>
+        <Icon name={d.state === "rate-limited" ? "Clock" : "X"} className="w-3.5 h-3.5" />
+        {d.headline}
+        {d.latencyMs > 0 ? ` (${d.latencyMs}ms)` : ""}
+      </span>
+      <span className="text-[10px] leading-snug text-muted-foreground max-w-[420px]" title={d.fullMessage}>
+        {d.detailLine}
+      </span>
     </div>
   );
 }
