@@ -83,11 +83,38 @@ export function isCliIntegration(p: Partial<AIProvider> | undefined | null): boo
   return p.type === "antigravity";
 }
 
+/**
+ * Task 30 — web-session classifier. A web-session integration (Z.ai Web)
+ * authenticates through the user's authenticated chat.z.ai BROWSER SESSION
+ * (credential_type = zai_web_session) — never an API key, never a REST Base
+ * URL of its own. It must be kept strictly separate from the official Z.ai
+ * API integration (z-ai-fallback) and from every other provider.
+ */
+export function isWebSessionIntegration(p: Partial<AIProvider> | undefined | null): boolean {
+  if (!p) return false;
+  if (p.integrationType === "web-session") return true;
+  // Legacy records predate integrationType — the zai-web type IS the
+  // web-session integration.
+  return p.type === "zai-web";
+}
+
+/**
+ * Non-REST integrations (CLI / web-session): they legitimately have NO
+ * REST Base URL and own their synced model catalogs. Shared guard used by
+ * mergeProviderWithSeed and findSeedProvider.
+ */
+export function isNonRestIntegration(p: Partial<AIProvider> | undefined | null): boolean {
+  return isCliIntegration(p) || isWebSessionIntegration(p);
+}
+
 export function mergeProviderWithSeed(d1Provider: AIProvider, seedProvider?: AIProvider): AIProvider {
   if (!seedProvider) return d1Provider; // truly custom provider — keep as-is
 
   const merged = { ...d1Provider };
   const cli = isCliIntegration(merged);
+  // Task 30 — web-session integrations get the same protections as CLI:
+  // no REST URL force-restore, authoritative synced catalogs.
+  const nonRest = cli || isWebSessionIntegration(merged);
 
   // Restore API key from seed if D1 has empty/missing key
   if (!merged.apiKey || merged.apiKey.trim() === "" || merged.apiKey === "undefined" || merged.apiKey === "null") {
@@ -98,7 +125,7 @@ export function mergeProviderWithSeed(d1Provider: AIProvider, seedProvider?: AIP
   // Task 29 — CLI integrations legitimately have NO Base URL ("N/A" per
   // spec); forcing the seed's REST endpoint onto them would create a false
   // API configuration. Only API integrations get URL restoration.
-  if (!cli) {
+  if (!nonRest) {
     if (!merged.apiUrl || merged.apiUrl.trim() === "") {
       merged.apiUrl = seedProvider.apiUrl || seedProvider.baseUrl || "";
     }
@@ -117,7 +144,8 @@ export function mergeProviderWithSeed(d1Provider: AIProvider, seedProvider?: AIP
   // stripped. Model ownership stays with the integration that synced them.
   const seedModels = seedProvider.enabledModels || [];
   const currentModels = (merged.enabledModels || []).filter((m) => !KNOWN_DEAD_MODELS.has(m));
-  const mergedModels = cli ? currentModels : Array.from(new Set([...currentModels, ...seedModels]));
+  // Task 30 — web-session catalogs are authoritative exactly like CLI ones.
+  const mergedModels = nonRest ? currentModels : Array.from(new Set([...currentModels, ...seedModels]));
   if (mergedModels.length > (merged.enabledModels?.length ?? 0) || !merged.enabledModels) {
     merged.enabledModels = mergedModels;
   }
@@ -169,7 +197,7 @@ export function findSeedProvider(d1Provider: AIProvider, seedProviders: AIProvid
   // Antigravity CLI record (or vice versa) merely because a synced model or
   // a display name contains "gemini"/"google". Provider identity is the
   // integration a model is callable through — never a name.
-  if (isCliIntegration(d1Provider)) return undefined;
+  if (isCliIntegration(d1Provider) || isWebSessionIntegration(d1Provider)) return undefined;
 
   // Try exact name match (case-insensitive, trimmed)
   const d1Name = (d1Provider.name || "").trim().toLowerCase();

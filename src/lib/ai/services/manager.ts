@@ -4,7 +4,7 @@
 "use client";
 
 import { useApp, uid } from "../../store";
-import { isCliIntegration } from "../../provider-sync";
+import { isCliIntegration, isNonRestIntegration, isWebSessionIntegration } from "../../provider-sync";
 import { resolveTestTimeoutMs } from "../test-timeout";
 import { ProviderRouter } from "./router";
 import { ProviderFactory } from "./factory";
@@ -243,13 +243,15 @@ export class ProviderManager {
       };
     }
 
-    // === CLI INTEGRATIONS (Task 29b): model discovery is a CLI-runtime
-    // concern, NOT a REST {baseUrl}/models proxy call. A CLI provider
-    // legitimately has NO Base URL ("N/A" per Task 29) — the generic proxy
-    // rejects the request with "baseUrl is required". Ownership rule: models
-    // discovered here belong to the CLI provider (provider_id antigravity),
-    // never to the Google Gemini API provider, regardless of model-id family.
-    if (isCliIntegration(provider)) {
+    // === NON-REST INTEGRATIONS (Task 29b CLI + Task 30 web-session): model
+    // discovery is an integration-runtime concern, NOT a REST
+    // {baseUrl}/models proxy call. CLI providers (Antigravity) and
+    // web-session providers (Z.ai Web) legitimately have NO Base URL
+    // ("N/A") — the generic proxy rejects the request with "baseUrl is
+    // required". Ownership rule: models discovered here belong to the
+    // integration that synced them (provider_id antigravity / zai-web),
+    // never to any same-name-family API provider.
+    if (isNonRestIntegration(provider)) {
       try {
         const adapter = ProviderFactory.get(provider.type);
         const models = await adapter.listModels?.(toProviderConfig(provider));
@@ -261,12 +263,12 @@ export class ProviderManager {
         (m) => typeof m === "string" && m.trim() !== "",
       );
       if (stored.length > 0) return { ok: true, models: [...stored] };
-      return {
-        ok: false,
-        models: [],
-        error:
-          "Antigravity CLI is not connected and has no synced models yet. Connect via Google sign-in or paste a CLI token, then run Sync Models. (CLI integration — no Base URL is used.)",
-      };
+      // Integration-aware guidance (Task 30): the message must name the
+      // integration the user is actually connecting — never a wrong one.
+      const connectHint = isWebSessionIntegration(provider)
+        ? "Z.ai Web is not connected and has no synced models yet. Open Z.ai, sign in with Google, run the Z.ai → ATS Pro bridge, then Sync Models. (Web-session integration — no Base URL is used.)"
+        : "Antigravity CLI is not connected and has no synced models yet. Connect via Google sign-in or paste a CLI token, then run Sync Models. (CLI integration — no Base URL is used.)";
+      return { ok: false, models: [], error: connectHint };
     }
 
     // === ANTIGRAVITY: add common models to fallback list if API fetch fails ===

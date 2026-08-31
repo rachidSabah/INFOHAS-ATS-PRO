@@ -1,0 +1,176 @@
+/**
+ * Task 30 — ZaiWebSessionAdapter + provider-sync isolation tests.
+ */
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+vi.mock("../../providers/antigravity-provider", () => ({
+  getAntigravityProvider: () => ({ listModels: vi.fn(async () => []), isAuthenticated: () => false }),
+}));
+
+import { ProviderFactory } from "./factory";
+import { ZAI_WEB_CHAT_CONTRACT, ZaiWebSessionAdapter } from "../providers/zai-web-adapter";
+import {
+  forgetZaiWebSession,
+  recallZaiWebSession,
+  rememberZaiWebSession,
+} from "../../providers/zai-web/credential-store";
+import { findSeedProvider, isWebSessionIntegration, mergeProviderWithSeed } from "../../provider-sync";
+import { SEED_PROVIDERS } from "../../mock-data";
+import type { AIProvider } from "../../types";
+
+const TOKEN = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJ6YWkifQ.signature-part-000000";
+
+function zaiWebProvider(over: Partial<AIProvider> = {}): AIProvider {
+  return {
+    id: "p_zai_web",
+    name: "Z.ai Web",
+    type: "zai-web",
+    integrationType: "web-session",
+    baseUrl: "",
+    enabledModels: [],
+    modelName: "",
+    timeout: 60000,
+    apiKey: "",
+    ...over,
+  } as unknown as AIProvider;
+}
+
+function jsonResponse(status: number, body: unknown): Response {
+  return new Response(JSON.stringify(body), { status });
+}
+
+beforeEach(async () => {
+  // Clear the module-level memory session between tests.
+  await forgetZaiWebSession({ store: async () => ({ ok: true as const }), clear: async () => {} });
+});
+
+describe("ZaiWebSessionAdapter — factory registration", () => {
+  it("routes provider type zai-web to the dedicated web-session adapter (never z-ai-fallback/custom)", () => {
+    const adapter = ProviderFactory.get("zai-web");
+    expect(adapter.type).toBe("zai-web");
+    expect(adapter).not.toBe(ProviderFactory.get("custom"));
+    expect(adapter).not.toBe(ProviderFactory.get("z-ai-fallback"));
+  });
+});
+
+describe("ZaiWebSessionAdapter — auth semantics", () => {
+  it("chat fails fast with an auth error when no session exists (never an OpenAI-shaped REST call)", async () => {
+    const fetchSpy = vi.fn();
+    const adapter = new ZaiWebSessionAdapter(ZAI_WEB_CHAT_CONTRACT, fetchSpy as unknown as typeof fetch);
+    await expect(
+      adapter.chat({ messages: [{ role: "user", content: "hi" }] } as any, {
+        id: "p_zai_web", name: "Z.ai Web", type: "zai-web", modelName: "glm-4.6",
+      } as any),
+    ).rejects.toThrow(/not connected/i);
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it("testConnection is a REAL validation request — a token alone is not 'connected'", async () => {
+    rememberZaiWebSession({ authenticated: true, token: TOKEN, source: "localStorage" });
+    const fetchSpy = vi.fn(async (..._a: unknown[]) => jsonResponse(401, { detail: "token expired, login required" }));
+    const adapter = new ZaiWebSessionAdapter(ZAI_WEB_CHAT_CONTRACT, fetchSpy as unknown as typeof fetch);
+    const res = await adapter.testConnection({ id: "p_zai_web", type: "zai-web" } as any);
+    expect(res.ok).toBe(false);
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    expect(String(fetchSpy.mock.calls[0][0])).toContain("chat.z.ai");
+  });
+
+  it("testConnection passes only when the live validation succeeds", async () => {
+    rememberZaiWebSession({ authenticated: true, token: TOKEN, source: "localStorage" });
+    const fetchSpy = vi.fn(async () => jsonResponse(200, { data: [{ id: "glm-4.6" }] }));
+    const adapter = new ZaiWebSessionAdapter(ZAI_WEB_CHAT_CONTRACT, fetchSpy as unknown as typeof fetch);
+    const res = await adapter.testConnection({ id: "p_zai_web", type: "zai-web" } as any);
+    expect(res.ok).toBe(true);
+  });
+});
+
+describe("ZaiWebSessionAdapter — chat + normalization", () => {
+  it("normalizes an OpenAI-shaped web response into the ChatResponse contract", async () => {
+    rememberZaiWebSession({ authenticated: true, token: TOKEN, source: "localStorage" });
+    const fetchSpy = vi.fn(async (..._a: unknown[]) =>
+      jsonResponse(200, {
+        choices: [{ message: { content: "Optimized resume text" } }],
+        usage: { prompt_tokens: 120, completion_tokens: 80 },
+        model: "glm-4.6",
+      }),
+    );
+    const adapter = new ZaiWebSessionAdapter(ZAI_WEB_CHAT_CONTRACT, fetchSpy as unknown as typeof fetch);
+    const res = await adapter.chat(
+      { messages: [{ role: "user", content: "optimize" }] } as any,
+      { id: "p_zai_web", type: "zai-web", modelName: "glm-4.6", timeout: 5000 } as any,
+    );
+    expect(res.provider).toBe("zai-web");
+    expect(res.model).toBe("glm-4.6");
+    expect(res.text).toBe("Optimized resume text");
+    expect(res.inputTokens).toBe(120);
+    expect(res.outputTokens).toBe(80);
+    const body = JSON.parse((fetchSpy.mock.calls[0]?.[1] as RequestInit).body as string);
+    expect(body.model).toBe("glm-4.6");
+    expect(String(fetchSpy.mock.calls[0]?.[0])).toContain("/api/chat/completions");
+  });
+
+  it("maps 401 chat failures to a session_expired auth error (failover-able, never a fake success)", async () => {
+    rememberZaiWebSession({ authenticated: true, token: TOKEN, source: "localStorage" });
+    const fetchSpy = vi.fn(async () => jsonResponse(401, { detail: "unauthorized" }));
+    const adapter = new ZaiWebSessionAdapter(ZAI_WEB_CHAT_CONTRACT, fetchSpy as unknown as typeof fetch);
+    await expect(
+      adapter.chat({ messages: [{ role: "user", content: "hi" }] } as any, { type: "zai-web", modelName: "glm-4.6" } as any),
+    ).rejects.toThrow(/session expired|DEGRADED/i);
+  });
+
+  it("gracefully fails when the web contract shape changes (no fabricated content)", async () => {
+    rememberZaiWebSession({ authenticated: true, token: TOKEN, source: "localStorage" });
+    const fetchSpy = vi.fn(async () => jsonResponse(200, { totally: "different-shape" }));
+    const adapter = new ZaiWebSessionAdapter(ZAI_WEB_CHAT_CONTRACT, fetchSpy as unknown as typeof fetch);
+    await expect(
+      adapter.chat({ messages: [{ role: "user", content: "hi" }] } as any, { type: "zai-web" } as any),
+    ).rejects.toThrow(/session_invalid|shape/i);
+  });
+
+  it("listModels returns validated web models, else the stored catalog, else a truthful error", async () => {
+    rememberZaiWebSession({ authenticated: true, token: TOKEN, source: "localStorage" });
+    const okFetch = vi.fn(async () => jsonResponse(200, { data: [{ id: "glm-4.6" }, { id: "glm-4.5-air" }] }));
+    const adapter = new ZaiWebSessionAdapter(ZAI_WEB_CHAT_CONTRACT, okFetch as unknown as typeof fetch);
+    await expect(adapter.listModels({ type: "zai-web" } as any)).resolves.toEqual(["glm-4.6", "glm-4.5-air"]);
+
+    const deadFetch = vi.fn(async () => jsonResponse(503, {}));
+    const adapter2 = new ZaiWebSessionAdapter(ZAI_WEB_CHAT_CONTRACT, deadFetch as unknown as typeof fetch);
+    await expect(
+      adapter2.listModels({ type: "zai-web", enabledModels: ["glm-4.6"] } as any),
+    ).resolves.toEqual(["glm-4.6"]);
+    await expect(adapter2.listModels({ type: "zai-web" } as any)).rejects.toThrow(/session_invalid/i);
+  });
+});
+
+describe("provider-sync — web-session isolation (Task 29 rules extended)", () => {
+  it("matches the zai-web seed by ID only — never by name/substring", () => {
+    const d1 = zaiWebProvider({ id: "p_custom_abc", name: "Z.ai Web Account", type: "zai-web" });
+    expect(findSeedProvider(d1, SEED_PROVIDERS)).toBeUndefined();
+    expect(findSeedProvider(zaiWebProvider(), SEED_PROVIDERS)?.id).toBe("p_zai_web");
+  });
+
+  it("never force-restores a REST Base URL onto a web-session record and never unions seed models", () => {
+    const d1 = zaiWebProvider({ enabledModels: ["glm-4.6"] });
+    const merged = mergeProviderWithSeed(d1, SEED_PROVIDERS.find((p) => p.id === "p_zai_web"));
+    expect(merged.baseUrl).toBe("");
+    expect(merged.enabledModels).toEqual(["glm-4.6"]);
+  });
+
+  it("classifies legacy zai-web records by type and web-session by integrationType", () => {
+    expect(isWebSessionIntegration({ type: "zai-web" })).toBe(true);
+    expect(isWebSessionIntegration({ integrationType: "web-session", type: "custom" })).toBe(true);
+    expect(isWebSessionIntegration({ type: "custom" })).toBe(false);
+    expect(isWebSessionIntegration({ type: "antigravity" })).toBe(false);
+  });
+});
+
+describe("disconnect isolation", () => {
+  it("forgets only the zai-web session (other providers untouched by design)", async () => {
+    rememberZaiWebSession({ authenticated: true, token: TOKEN, source: "localStorage" });
+    expect(recallZaiWebSession()?.token).toBe(TOKEN);
+    const cleared: string[] = [];
+    await forgetZaiWebSession({ store: async () => ({ ok: true as const }), clear: async () => { cleared.push("zai-web"); } });
+    expect(recallZaiWebSession()).toBeNull();
+    expect(cleared).toEqual(["zai-web"]);
+  });
+});

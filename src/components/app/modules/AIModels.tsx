@@ -13,7 +13,7 @@ import { useApp } from "@/lib/store";
 import { ProviderManager } from "@/lib/ai/services";
 import { toast } from "sonner";
 import { ProviderHealthPanel } from "./ProviderHealthPanel";
-import { isCliIntegration } from "@/lib/provider-sync";
+import { isCliIntegration, isWebSessionIntegration } from "@/lib/provider-sync";
 
 // Common models per provider type — used to populate the model picker
 const MODEL_CATALOG: Record<string, { name: string; contextWindow: string; inputCost?: number; outputCost?: number; tags?: string[] }[]> = {
@@ -354,6 +354,10 @@ export function AIModels() {
                       {isCliIntegration(selected) ? (
                         <span title="CLI integration — models here belong to the CLI integration (provider_id = antigravity), even when ids look like Google models.">
                           <Badge variant="outline" className="text-[10px] font-semibold">CLI</Badge>
+                        </span>
+                      ) : isWebSessionIntegration(selected) ? (
+                        <span title="Web-session integration — models here belong to the Z.ai Web session (provider_id = zai-web). The same GLM model may exist separately under an official Z.ai API integration.">
+                          <Badge variant="outline" className="text-[10px] font-semibold">WEB SESSION</Badge>
                         </span>
                       ) : (
                         <Badge variant="outline" className="capitalize text-[10px]">{selected.type.replace("-", " ")}</Badge>

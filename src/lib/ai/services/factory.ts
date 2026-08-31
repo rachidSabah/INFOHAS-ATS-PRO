@@ -9,6 +9,7 @@ import { puterProvider } from "../providers/puter";
 import { customProvider } from "../providers/custom";
 import { zaiFallbackProvider } from "../providers/zai-fallback";
 import { antigravityAdapter } from "../providers/antigravity-adapter";
+import { zaiWebSessionAdapter } from "../providers/zai-web-adapter";
 
 // OpenCode Zen uses the OpenAI-compatible API schema
 const opencodeProvider = new OpenAICompatibleProvider("opencode");
@@ -24,6 +25,11 @@ const REGISTRY: Record<string, AIProviderAdapter> = {
   // the custom adapter, disconnecting routing/benchmark/health from the
   // Antigravity integration stack entirely.
   antigravity: antigravityAdapter,
+  // Task 30 — Z.ai Web routes through its DEDICATED web-session adapter.
+  // Entirely separate from z-ai-fallback (the internal server-route API
+  // integration): the web adapter speaks to the authenticated chat.z.ai
+  // web session, never to the official API endpoints.
+  "zai-web": zaiWebSessionAdapter,
   opencode: opencodeProvider,   // OpenCode Zen — OpenAI-compatible, free models
   "opencode-zen": opencodeZenProvider,
   zencode: zencodeProvider,

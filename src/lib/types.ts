@@ -425,6 +425,7 @@ export interface ResumeReviewReport {
 
 export type AIProviderType =
   | "antigravity"
+  | "zai-web"
   | "puter"
   | "openai"
   | "gemini"
@@ -474,8 +475,14 @@ export interface AIProvider {
    * Absent = legacy record; infer "api" except type "puter"/"antigravity".
    * Google sign-in inside a CLI integration is an AUTH MECHANISM, never proof
    * that the provider is the Google Gemini API.
+   *
+   * Task 30 — "web-session": authenticated chat.z.ai BROWSER SESSION
+   * integrations (Z.ai Web). Entirely separate from the official Z.ai API
+   * (key/Bearer + documented endpoints): the session credential is
+   * credential_type = zai_web_session, discovered/validated through the
+   * user-initiated same-origin browser bridge — never an API key.
    */
-  integrationType?: "api" | "cli" | "local" | "browser";
+  integrationType?: "api" | "cli" | "local" | "browser" | "web-session";
 
   // Capabilities (what the provider supports)
   supportsServerSide: boolean;     // can execute from Worker/backend

@@ -870,6 +870,50 @@ const PERPLEXITY_PROVIDER: AIProvider = {
 // Insert NVIDIA + Mistral + Antigravity + new free-tier providers into the providers list
 SEED_PROVIDERS.push(NVIDIA_PROVIDER, MISTRAL_PROVIDER, ANTIGRAVITY_SEED, CEREBRAS_PROVIDER, HUGGINGFACE_PROVIDER, TOGETHER_PROVIDER, SAMBANOVA_PROVIDER, PERPLEXITY_PROVIDER);
 
+// === Task 30 — Z.ai Web (authenticated chat.z.ai browser session) ===
+// A SEPARATE integration from the internal z-ai-fallback (server-route API):
+// credential_type = zai_web_session, discovered via the user-initiated
+// same-origin browser bridge, validated against the live web contract.
+// GLM-family model names discovered here belong to THIS provider — the same
+// model name may exist under an official Z.ai API integration separately.
+const ZAI_WEB_SEED: AIProvider = {
+  id: "p_zai_web",
+  name: "Z.ai Web",
+  type: "zai-web",
+  integrationType: "web-session",
+  providerCategory: "api",
+  supportsServerSide: false,
+  supportsClientSide: true,
+  supportsStreaming: true,
+  supportsFunctionCalling: false,
+  supportsJsonMode: false,
+  requiresBrowserAuth: true,
+  requiresApiKey: false, // web-session credential — never an API key
+  baseUrl: "", // N/A: web-session integration (chat.z.ai origin is internal to the adapter)
+  apiKey: "",
+  priority: 9,
+  isActive: false, // becomes active after a VALIDATED web session import
+  isDefault: false,
+  isBuiltIn: false,
+  allowedForRegularUsers: false,
+  timeout: 60000,
+  maxTokens: 8192,
+  temperature: 0.7,
+  retryAttempts: 2,
+  rateLimitPerMinute: 60,
+  modelName: "",
+  enabledModels: [],
+  streamingEnabled: true,
+  authType: "bearer",
+  costPerInputToken: 0,
+  costPerOutputToken: 0,
+  status: "untested",
+  usage: { requests: 0, tokens: 0, errors: 0, avgLatencyMs: 0, cost: 0 },
+  health: { consecutiveFailures: 0, consecutiveSuccesses: 0 },
+};
+
+SEED_PROVIDERS.push(ZAI_WEB_SEED);
+
 
 export const SEED_PROVIDER_LOGS: AIProviderLog[] = [
   {
