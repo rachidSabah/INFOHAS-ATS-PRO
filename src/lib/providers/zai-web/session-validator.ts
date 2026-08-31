@@ -59,7 +59,8 @@ export interface ValidatorFetchLike {
     | Promise<Response>;
 }
 
-function extractModelIds(data: unknown): string[] | undefined {
+/** Exported for the Task 30c models/base fallback — tolerant id/name extraction. */
+export function extractModelIds(data: unknown): string[] | undefined {
   if (!data || typeof data !== "object") return undefined;
   const obj = data as Record<string, unknown>;
   const list = Array.isArray(obj.data) ? obj.data : Array.isArray(obj.models) ? obj.models : undefined;

@@ -121,6 +121,26 @@ export async function validateStoredZaiWebSession(
     DEFAULT_ZAI_WEB_CONTRACT,
   );
 
+  // Task 30c — model prefetch WITHOUT any API key: when the primary models
+  // probe connects but carries no catalog, try the base catalog endpoint
+  // the official client also uses (GET /api/models/base).
+  let models = validation.models;
+  if (validation.state === "connected" && !(models && models.length > 0)) {
+    try {
+      const baseRes = await fetchLike(`${DEFAULT_ZAI_WEB_CONTRACT.origin}/api/models/base`, {
+        headers: { Authorization: `Bearer ${token}`, Accept: "application/json" },
+      } as RequestInit);
+      if (baseRes.ok) {
+        const { extractModelIds } = await import("./session-validator");
+        const baseData = (await baseRes.json().catch(() => null)) as unknown;
+        const baseModels = extractModelIds(baseData);
+        if (baseModels && baseModels.length > 0) models = baseModels;
+      }
+    } catch {
+      /* base catalog is optional — primary state stands */
+    }
+  }
+
   // ---- Best-effort: persist the observed validation state (never the token).
   try {
     await db
@@ -146,7 +166,7 @@ export async function validateStoredZaiWebSession(
       stored: "server",
       validated: validation.state === "connected",
       state: validation.state,
-      models: validation.models ?? [],
+      models: models ?? [],
       message: validation.message,
     },
   };

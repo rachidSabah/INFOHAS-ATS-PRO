@@ -106,7 +106,11 @@ describe("ZaiWebSessionAdapter — chat + normalization", () => {
     expect(res.outputTokens).toBe(80);
     const body = JSON.parse((fetchSpy.mock.calls[0]?.[1] as RequestInit).body as string);
     expect(body.model).toBe("glm-4.6");
-    expect(String(fetchSpy.mock.calls[0]?.[0])).toContain("/api/chat/completions");
+    expect(String(fetchSpy.mock.calls[0]?.[0])).toContain("/api/v2/chat/completions");
+    expect(String(fetchSpy.mock.calls[0]?.[0])).toContain("signature_timestamp=");
+    const headers = (fetchSpy.mock.calls[0]?.[1] as RequestInit).headers as Record<string, string>;
+    expect(headers["X-Signature"]).toBeTypeOf("string");
+    expect(headers["X-FE-Version"]).toContain("prod-fe");
   });
 
   it("maps 401 chat failures to a session_expired auth error (failover-able, never a fake success)", async () => {
@@ -161,6 +165,56 @@ describe("provider-sync — web-session isolation (Task 29 rules extended)", () 
     expect(isWebSessionIntegration({ integrationType: "web-session", type: "custom" })).toBe(true);
     expect(isWebSessionIntegration({ type: "custom" })).toBe(false);
     expect(isWebSessionIntegration({ type: "antigravity" })).toBe(false);
+  });
+});
+
+describe("ZaiWebSessionAdapter — browser chat via the signed server route (Task 30c)", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("chat posts to the same-origin chat route and returns the parsed answer", async () => {
+    vi.stubGlobal("window", {});
+    rememberZaiWebSession({ authenticated: true, token: TOKEN, source: "localStorage" });
+    const fetchSpy = vi.fn(async (...args: unknown[]) => {
+      const [url, init] = args as [string, RequestInit];
+      expect(url).toBe("/api/providers/zai-web/chat");
+      expect(init.method).toBe("POST");
+      const body = JSON.parse(String(init.body));
+      expect(body.model).toBe("glm-4.6");
+      expect(body.token).toBe(TOKEN);
+      return jsonResponse(200, { ok: true, state: "connected", content: "Web answer", model: "glm-4.6", usage: { prompt_tokens: 7, completion_tokens: 3 } });
+    }) as unknown as typeof fetch;
+    const adapter = new ZaiWebSessionAdapter(ZAI_WEB_CHAT_CONTRACT, fetchSpy);
+    const res = await adapter.chat(
+      { messages: [{ role: "user", content: "hi" }] } as any,
+      { type: "zai-web", modelName: "glm-4.6" } as any,
+    );
+    expect(res.text).toBe("Web answer");
+    expect(res.provider).toBe("zai-web");
+    expect(res.inputTokens).toBe(7);
+  });
+
+  it("chat maps authentication_required to a ProviderAuthenticationError (failover-able)", async () => {
+    vi.stubGlobal("window", {});
+    const fetchSpy = vi.fn(async () =>
+      jsonResponse(200, { ok: false, state: "authentication_required", message: "No Z.ai web session available." }),
+    ) as unknown as typeof fetch;
+    const adapter = new ZaiWebSessionAdapter(ZAI_WEB_CHAT_CONTRACT, fetchSpy);
+    await expect(
+      adapter.chat({ messages: [{ role: "user", content: "hi" }] } as any, { type: "zai-web" } as any),
+    ).rejects.toThrow(/not connected|no z\.ai web session/i);
+  });
+
+  it("browser chat NEVER calls chat.z.ai cross-origin directly", async () => {
+    vi.stubGlobal("window", {});
+    const raw = vi.fn(async () =>
+      jsonResponse(200, { ok: true, state: "connected", content: "x" }),
+    );
+    const fetchSpy = raw as unknown as typeof fetch;
+    const adapter = new ZaiWebSessionAdapter(ZAI_WEB_CHAT_CONTRACT, fetchSpy);
+    await adapter.chat({ messages: [{ role: "user", content: "hi" }] } as any, { type: "zai-web" } as any);
+    expect(String((raw.mock.calls[0] as unknown[])[0])).not.toContain("chat.z.ai");
   });
 });
 

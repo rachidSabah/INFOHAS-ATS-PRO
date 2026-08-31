@@ -30,6 +30,10 @@ import {
   type ZaiWebContract,
 } from "../../providers/zai-web/session-validator";
 import { redactZaiSecrets } from "../../providers/zai-web/session-monitor";
+import {
+  buildZaiWebChatRequest,
+  parseZaiWebChatResponseText,
+} from "../../providers/zai-web/web-contract";
 
 export interface NormalizedAIResponse {
   content: string;
@@ -53,6 +57,9 @@ export const ZAI_WEB_CHAT_CONTRACT: ZaiWebContract & { chatPath: string } = {
 
 /** Same-origin ATS Pro endpoint that imports + validates the web session. */
 export const ZAI_WEB_IMPORT_PATH = "/api/providers/zai-web/session-import";
+
+/** Same-origin ATS Pro endpoint that runs the signed v2 chat server-side. */
+export const ZAI_WEB_CHAT_PATH = "/api/providers/zai-web/chat";
 
 function resolveSessionToken(config: ProviderConfig): string | null {
   // 1. Runtime session (browser bridge import) — the canonical source.
@@ -148,7 +155,63 @@ export class ZaiWebSessionAdapter implements AIProviderAdapter {
     private fetchLike: typeof fetch = fetch,
   ) {}
 
+  /**
+   * Task 30c — chat through the OFFICIALLY-SIGNED v2 web contract so the
+   * web session works as a real API channel:
+   *   - browser runtime → same-origin /api/providers/zai-web/chat edge
+   *     route (token lives server-side after the bridge import);
+   *   - node/edge/test runtime → the signed v2 request built by
+     *     buildZaiWebChatRequest is issued directly via fetchLike.
+   * Failures stay honest: auth errors, rate limits and contract mismatches
+   * map to explicit states — never a fabricated answer.
+   */
   async chat(req: ChatRequest, config: ProviderConfig): Promise<ChatResponse> {
+    const t0 = performance.now();
+    const model = (req.model || config.modelName || "GLM-4.5") as string;
+
+    if (isBrowserRuntime()) {
+      // Same-origin edge route — it signs the v2 request server-side with
+      // the decrypted D1 session (or the passed memory token) and parses
+      // the answer. Never a cross-origin browser call to chat.z.ai.
+      const res = await this.fetchLike(ZAI_WEB_CHAT_PATH, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          model,
+          messages: req.messages,
+          ...(req.maxTokens ? { max_tokens: req.maxTokens } : {}),
+          ...(req.temperature !== undefined ? { temperature: req.temperature } : {}),
+          ...(resolveSessionToken(config) ? { token: resolveSessionToken(config) } : {}),
+        }),
+        signal: req.signal ?? AbortSignal.timeout(config.timeout ?? 60000),
+      } as RequestInit);
+      const latencyMs = Math.round(performance.now() - t0);
+      const data = (await (res as Response).json().catch(() => null)) as
+        | { ok?: boolean; state?: string; message?: string; content?: string; model?: string; usage?: Record<string, number> | null }
+        | null;
+      if (!data) {
+        throw new Error(`[Z.ai Web] session_invalid: unreadable chat route response (HTTP ${res.status}).`);
+      }
+      if (!data.ok || typeof data.content !== "string") {
+        if (data.state === "authentication_required" || data.state === "session_expired") {
+          throw new ProviderAuthenticationError(
+            data.state === "session_expired" ? "session_expired" : "auth_required",
+            redactZaiSecrets(String(data.message ?? "Z.ai Web session is not connected.")),
+            "zai-web",
+          );
+        }
+        throw new Error(`[Z.ai Web] ${data.state ?? "session_invalid"}: ${redactZaiSecrets(String(data.message ?? "chat failed"))}`);
+      }
+      return {
+        text: data.content,
+        provider: "zai-web",
+        model: (data.model || model) as string,
+        latencyMs,
+        ...(data.usage?.prompt_tokens !== undefined ? { inputTokens: Number(data.usage.prompt_tokens) } : {}),
+        ...(data.usage?.completion_tokens !== undefined ? { outputTokens: Number(data.usage.completion_tokens) } : {}),
+      } as ChatResponse;
+    }
+
     const token = resolveSessionToken(config);
     if (!token) {
       throw new ProviderAuthenticationError(
@@ -158,22 +221,23 @@ export class ZaiWebSessionAdapter implements AIProviderAdapter {
       );
     }
 
-    const t0 = performance.now();
+    const promptSource = [...req.messages].reverse().find((m) => m?.role === "user");
+    const prompt = String(promptSource?.content ?? "").trim().slice(0, 8000);
+    const signed = await buildZaiWebChatRequest({
+      token,
+      model,
+      messages: req.messages,
+      prompt,
+      maxTokens: req.maxTokens,
+      temperature: req.temperature,
+    });
+
     let res: Response;
     try {
-      res = await this.fetchLike(`${this.contract.origin}${this.contract.chatPath}`, {
+      res = await this.fetchLike(signed.url, {
         method: "POST",
-        headers: {
-          Authorization: `Bearer ${token}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          model: req.model || config.modelName,
-          messages: req.messages,
-          stream: false,
-          ...(req.maxTokens ? { max_tokens: req.maxTokens } : {}),
-          ...(req.temperature !== undefined ? { temperature: req.temperature } : {}),
-        }),
+        headers: signed.headers,
+        body: signed.body,
         signal: req.signal ?? AbortSignal.timeout(config.timeout ?? 60000),
       } as RequestInit);
     } catch (e: unknown) {
@@ -199,20 +263,19 @@ export class ZaiWebSessionAdapter implements AIProviderAdapter {
       throw new Error(`[Z.ai Web] session_invalid: HTTP ${res.status} from the Z.ai web contract. ${body}`);
     }
 
-    const data = (await res.json().catch(() => null)) as Record<string, unknown> | null;
-    const content = extractContent(data);
-    if (content === null) {
+    const text = await res.text().catch(() => "");
+    const parsed = parseZaiWebChatResponseText(text);
+    if (!parsed || !parsed.content) {
       throw new Error("[Z.ai Web] session_invalid: response does not match the expected web chat shape.");
     }
 
-    const usage = extractUsage(data);
     return {
-      text: content,
+      text: parsed.content,
       provider: "zai-web",
-      model: (req.model || config.modelName || "zai-web") as string,
+      model: (parsed.model || model) as string,
       latencyMs,
-      ...(usage?.inputTokens !== undefined ? { inputTokens: usage.inputTokens } : {}),
-      ...(usage?.outputTokens !== undefined ? { outputTokens: usage.outputTokens } : {}),
+      ...(parsed.usage?.prompt_tokens !== undefined ? { inputTokens: Number(parsed.usage.prompt_tokens) } : {}),
+      ...(parsed.usage?.completion_tokens !== undefined ? { outputTokens: Number(parsed.usage.completion_tokens) } : {}),
     } as ChatResponse;
   }
 
@@ -286,38 +349,5 @@ export class ZaiWebSessionAdapter implements AIProviderAdapter {
   }
 }
 
-function extractContent(data: Record<string, unknown> | null): string | null {
-  if (!data) return null;
-  // OpenAI-shaped web response (candidate contract)
-  const choices = data.choices;
-  if (Array.isArray(choices) && choices.length > 0) {
-    const choice = choices[0] as Record<string, unknown>;
-    const message = choice.message as Record<string, unknown> | undefined;
-    const content = message?.content;
-    if (typeof content === "string") return content;
-    if (typeof choice.text === "string") return choice.text as string;
-  }
-  if (typeof data.content === "string") return data.content;
-  if (typeof data.response === "string") return data.response;
-  return null;
-}
-
-function extractUsage(
-  data: Record<string, unknown> | null,
-): NormalizedAIResponse["usage"] | undefined {
-  if (!data || typeof data.usage !== "object" || data.usage === null) return undefined;
-  const usage = data.usage as Record<string, unknown>;
-  const inputTokens = typeof usage.prompt_tokens === "number" ? usage.prompt_tokens : undefined;
-  const outputTokens = typeof usage.completion_tokens === "number" ? usage.completion_tokens : undefined;
-  if (inputTokens === undefined && outputTokens === undefined) return undefined;
-  return {
-    inputTokens,
-    outputTokens,
-    totalTokens:
-      inputTokens !== undefined || outputTokens !== undefined
-        ? (inputTokens ?? 0) + (outputTokens ?? 0)
-        : undefined,
-  };
-}
 
 export const zaiWebSessionAdapter = new ZaiWebSessionAdapter();
