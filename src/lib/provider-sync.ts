@@ -68,10 +68,26 @@ const TYPE_SPECIFIC_INVALID_MODEL: Record<string, Record<string, string>> = {
   github: { "gpt-4o": "gpt-4o-mini" },
 };
 
+/**
+ * Task 29 — integration-mechanism classifier.
+ * A CLI integration (Antigravity CLI) authenticates via OAuth/token and has
+ * NO REST Base URL. It must never inherit identity from name matching or
+ * seed URL restoration — Google sign-in is an auth mechanism, not proof of
+ * Google Gemini API ownership.
+ */
+export function isCliIntegration(p: Partial<AIProvider> | undefined | null): boolean {
+  if (!p) return false;
+  if (p.integrationType === "cli") return true;
+  // Legacy records predate integrationType — the antigravity type IS the CLI
+  // integration (there is exactly one CLI provider family in the system).
+  return p.type === "antigravity";
+}
+
 export function mergeProviderWithSeed(d1Provider: AIProvider, seedProvider?: AIProvider): AIProvider {
   if (!seedProvider) return d1Provider; // truly custom provider — keep as-is
 
   const merged = { ...d1Provider };
+  const cli = isCliIntegration(merged);
 
   // Restore API key from seed if D1 has empty/missing key
   if (!merged.apiKey || merged.apiKey.trim() === "" || merged.apiKey === "undefined" || merged.apiKey === "null") {
@@ -79,20 +95,29 @@ export function mergeProviderWithSeed(d1Provider: AIProvider, seedProvider?: AIP
   }
 
   // Restore base URL from seed if D1 has empty/missing URL
-  if (!merged.apiUrl || merged.apiUrl.trim() === "") {
-    merged.apiUrl = seedProvider.apiUrl || seedProvider.baseUrl || "";
-  }
-  if (!merged.baseUrl || merged.baseUrl.trim() === "") {
-    merged.baseUrl = seedProvider.baseUrl || seedProvider.apiUrl || "";
+  // Task 29 — CLI integrations legitimately have NO Base URL ("N/A" per
+  // spec); forcing the seed's REST endpoint onto them would create a false
+  // API configuration. Only API integrations get URL restoration.
+  if (!cli) {
+    if (!merged.apiUrl || merged.apiUrl.trim() === "") {
+      merged.apiUrl = seedProvider.apiUrl || seedProvider.baseUrl || "";
+    }
+    if (!merged.baseUrl || merged.baseUrl.trim() === "") {
+      merged.baseUrl = seedProvider.baseUrl || seedProvider.apiUrl || "";
+    }
   }
 
   // Update enabledModels: union the D1 models and the seed models to ensure
   // both the seed's defaults AND the admin's live-selected model stay available.
   // Known-dead ids (retired/corrupted) are stripped so stale D1 corruption
   // can't keep breaking benchmark/heal pings.
+  // Task 29 — CLI integrations are the exception: their enabledModels are the
+  // authoritative result of the CLI model sync ("Models synced: N") and must
+  // not be silently merged with an API seed's static list. Only dead ids are
+  // stripped. Model ownership stays with the integration that synced them.
   const seedModels = seedProvider.enabledModels || [];
   const currentModels = (merged.enabledModels || []).filter((m) => !KNOWN_DEAD_MODELS.has(m));
-  const mergedModels = Array.from(new Set([...currentModels, ...seedModels]));
+  const mergedModels = cli ? currentModels : Array.from(new Set([...currentModels, ...seedModels]));
   if (mergedModels.length > (merged.enabledModels?.length ?? 0) || !merged.enabledModels) {
     merged.enabledModels = mergedModels;
   }
@@ -131,11 +156,20 @@ export function mergeProviderWithSeed(d1Provider: AIProvider, seedProvider?: AIP
 /**
  * Find the seed provider that matches a D1 provider.
  * Matches by ID first, then by name (case-insensitive & flexible substring match).
+ * Task 29: CLI integrations (Antigravity) match by ID ONLY — name matching
+ * would let API-provider identity leak across integration boundaries.
  */
 export function findSeedProvider(d1Provider: AIProvider, seedProviders: AIProvider[] = SEED_PROVIDERS): AIProvider | undefined {
   // Try ID match first
   let seed = seedProviders.find((p) => p.id === d1Provider.id);
   if (seed) return seed;
+
+  // Task 29 — CLI integrations match by ID ONLY. Name-substring matching
+  // could pull Google Gemini API identity (Base URL, seed models) into the
+  // Antigravity CLI record (or vice versa) merely because a synced model or
+  // a display name contains "gemini"/"google". Provider identity is the
+  // integration a model is callable through — never a name.
+  if (isCliIntegration(d1Provider)) return undefined;
 
   // Try exact name match (case-insensitive, trimmed)
   const d1Name = (d1Provider.name || "").trim().toLowerCase();

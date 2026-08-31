@@ -553,6 +553,11 @@ const ANTIGRAVITY_SEED: AIProvider = {
   id: "p_antigravity",
   name: "Antigravity CLI",
   type: "antigravity",
+  // Task 29 — CLI integration identity: authenticated via Google sign-in /
+  // CLI token, NO REST Base URL (Base URL renders as N/A in the UI). This is
+  // NOT the Google Gemini API provider (that is p_gemini / p_google_gemini
+  // with baseUrl generativelanguage.googleapis.com).
+  integrationType: "cli",
   providerCategory: "api",
   supportsServerSide: true,
   supportsClientSide: true,

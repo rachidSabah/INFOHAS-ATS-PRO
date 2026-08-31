@@ -343,8 +343,12 @@ export function ConnectAntigravityDialog() {
           <div className="space-y-3">
             <div className="p-3 rounded-lg bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800/50 flex items-center gap-2">
               <Icon name="CheckCircle2" className="w-4 h-4 text-emerald-600 shrink-0" />
+              {/* Task 29 — truthful integration copy: Google sign-in is the AUTH
+                  MECHANISM of this CLI integration, not evidence that AI features
+                  are using the Google Gemini API provider (a separate REST
+                  integration with its own key and Base URL). */}
               <p className="text-xs text-emerald-700 dark:text-emerald-300">
-                Antigravity CLI is connected. AI features are now using your Google account.
+                Antigravity CLI is connected. Models routed to this provider run through the Antigravity CLI integration (Integration type: CLI · Base URL: not applicable).
               </p>
             </div>
             <div className="flex gap-2">
@@ -352,8 +356,13 @@ export function ConnectAntigravityDialog() {
                 try {
                   const { getAntigravityProvider } = await import("@/lib/providers/antigravity-provider");
                   const models = await getAntigravityProvider().listModels();
+                  // Task 29 — model ownership: synced models are stored on the
+                  // ANTIGRAVITY provider only (provider_id = antigravity). They are
+                  // never written to any Google Gemini API provider, and Google-family
+                  // model ids (gemini-*) remain Antigravity models — ownership is the
+                  // integration a model is callable through, not its name.
                   useApp.getState().updateProvider("p_antigravity", { enabledModels: models });
-                  toast.success(`Models synced: ${models.length} model(s)`);
+                  toast.success(`Models synced: ${models.length} model(s) → provider: Antigravity CLI (CLI integration)`);
                 } catch {
                   toast.error("Model sync failed.");
                 }

@@ -461,6 +461,22 @@ export interface AIProvider {
   // Category B: "browser_auth" — requires browser session (Puter.js)
   providerCategory: "api" | "browser_auth";
 
+  /**
+   * Task 29 — integration mechanism identity (OPTIONAL, additive).
+   * Distinguishes HOW a provider is reached, independent of which vendor's
+   * model names it exposes:
+   *  - "api"     REST/OpenAI-compatible endpoint, Base URL required (Google
+   *              Gemini API, OpenAI, NVIDIA NIM, …)
+   *  - "cli"     CLI/runtime integration authenticated via OAuth or token —
+   *              Base URL is N/A (Antigravity CLI)
+   *  - "local"   local runtime (Ollama)
+   *  - "browser" browser-native SDK (Puter.js)
+   * Absent = legacy record; infer "api" except type "puter"/"antigravity".
+   * Google sign-in inside a CLI integration is an AUTH MECHANISM, never proof
+   * that the provider is the Google Gemini API.
+   */
+  integrationType?: "api" | "cli" | "local" | "browser";
+
   // Capabilities (what the provider supports)
   supportsServerSide: boolean;     // can execute from Worker/backend
   supportsClientSide: boolean;     // can execute from browser

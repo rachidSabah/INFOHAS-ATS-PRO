@@ -8,6 +8,7 @@ import { ollamaProvider } from "../providers/ollama";
 import { puterProvider } from "../providers/puter";
 import { customProvider } from "../providers/custom";
 import { zaiFallbackProvider } from "../providers/zai-fallback";
+import { antigravityAdapter } from "../providers/antigravity-adapter";
 
 // OpenCode Zen uses the OpenAI-compatible API schema
 const opencodeProvider = new OpenAICompatibleProvider("opencode");
@@ -18,6 +19,11 @@ const githubProvider = new OpenAICompatibleProvider("github");
 
 const REGISTRY: Record<string, AIProviderAdapter> = {
   openai: openaiProvider,
+  // Task 29 — Antigravity CLI routes through its DEDICATED adapter (CLI
+  // integration). Before this entry, get("antigravity") silently fell back to
+  // the custom adapter, disconnecting routing/benchmark/health from the
+  // Antigravity integration stack entirely.
+  antigravity: antigravityAdapter,
   opencode: opencodeProvider,   // OpenCode Zen — OpenAI-compatible, free models
   "opencode-zen": opencodeZenProvider,
   zencode: zencodeProvider,

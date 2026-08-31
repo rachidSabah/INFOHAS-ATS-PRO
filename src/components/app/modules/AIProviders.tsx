@@ -12,6 +12,7 @@ import { useApp, uid } from "@/lib/store";
 import { ProviderManager } from "@/lib/ai/services";
 import { toast } from "sonner";
 import type { AIProvider } from "@/lib/types";
+import { isCliIntegration } from "@/lib/provider-sync";
 import { isOpenCodeZenFree } from "@/lib/provider-capabilities";
 import { getProviderConcurrencySnapshot, resetProviderAdaptiveCap, ADAPTIVE_CAP_RECOVER_THRESHOLD } from "@/lib/provider-concurrency";
 import { getProviderCooldownSnapshot, formatCooldownRemaining, clearProviderCooldownOnSuccess, type ProviderCooldownClass } from "@/lib/provider-cooldown";
@@ -373,8 +374,25 @@ export function AIProviders() {
                             </div>
                           </div>
                         </td>
-                        <td className={`px-3 py-3 ${TD_VIS.type}`}><Badge variant="outline" className="text-[10px] capitalize">{p.type.replace("-", " ")}</Badge></td>
-                        <td className={`px-3 py-3 text-xs text-muted-foreground font-mono truncate ${TD_VIS.baseUrl}`} title={p.baseUrl || p.apiUrl || ""}>{p.baseUrl || p.apiUrl || "—"}</td>
+                        {/* Task 29 — integration identity: a CLI integration (Antigravity)
+                            is a different MECHANISM from a REST API provider, even when
+                            it exposes Google-family model names. Type cell shows the
+                            integration, not just the vendor-ish type string. */}
+                        <td className={`px-3 py-3 ${TD_VIS.type}`}>
+                          {isCliIntegration(p) ? (
+                            <span title="CLI integration — authenticated via Google sign-in / CLI token. Google sign-in is an auth mechanism, NOT the Google Gemini API.">
+                              <Badge variant="outline" className="text-[10px] font-semibold">CLI</Badge>
+                            </span>
+                          ) : (
+                            <Badge variant="outline" className="text-[10px] capitalize">{p.type.replace("-", " ")}</Badge>
+                          )}
+                        </td>
+                        {/* Task 29 — CLI integrations have NO Base URL (N/A). Rendering the
+                            internal cloudcode-pa.googleapis.com host here falsely implied a
+                            REST API configuration. */}
+                        <td className={`px-3 py-3 text-xs text-muted-foreground font-mono truncate ${TD_VIS.baseUrl}`} title={isCliIntegration(p) ? "Base URL: not applicable — CLI integration (inference runs through the Antigravity CLI runtime; Google sign-in is only the authentication mechanism)." : (p.baseUrl || p.apiUrl || "")}>
+                          {isCliIntegration(p) ? <span className="italic text-muted-foreground/70" title="Base URL: not applicable — CLI integration">N/A · CLI</span> : (p.baseUrl || p.apiUrl || "—")}
+                        </td>
                         <td className="px-3 py-3 text-xs font-mono truncate" title={p.modelName || "—"}>{p.modelName || "—"}</td>
                         <td className="px-3 py-3"><Badge variant={statusColor as any} className="capitalize text-[10px]">{p.status}</Badge></td>
                         <td className={`px-3 py-3 ${TD_VIS.priority}`}><span className="font-mono text-xs" title={`Priority #${p.priority} — lower numbers are tried first in the routing chain.`}>#{p.priority}</span></td>

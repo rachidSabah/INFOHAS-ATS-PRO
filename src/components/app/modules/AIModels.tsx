@@ -13,6 +13,7 @@ import { useApp } from "@/lib/store";
 import { ProviderManager } from "@/lib/ai/services";
 import { toast } from "sonner";
 import { ProviderHealthPanel } from "./ProviderHealthPanel";
+import { isCliIntegration } from "@/lib/provider-sync";
 
 // Common models per provider type — used to populate the model picker
 const MODEL_CATALOG: Record<string, { name: string; contextWindow: string; inputCost?: number; outputCost?: number; tags?: string[] }[]> = {
@@ -347,7 +348,16 @@ export function AIModels() {
                   <div>
                     <div className="font-semibold flex items-center gap-2">
                       {selected.name}
-                      <Badge variant="outline" className="capitalize text-[10px]">{selected.type.replace("-", " ")}</Badge>
+                      {/* Task 29 — integration identity tag: a CLI integration (Antigravity)
+                          keeps Google-family model ids it synced, but they remain CLI-owned
+                          models — ownership is the integration, never the model name. */}
+                      {isCliIntegration(selected) ? (
+                        <span title="CLI integration — models here belong to the CLI integration (provider_id = antigravity), even when ids look like Google models.">
+                          <Badge variant="outline" className="text-[10px] font-semibold">CLI</Badge>
+                        </span>
+                      ) : (
+                        <Badge variant="outline" className="capitalize text-[10px]">{selected.type.replace("-", " ")}</Badge>
+                      )}
                     </div>
                     <div className="text-xs text-muted-foreground mt-0.5">
                       Default model: <span className="font-mono">{selected.modelName || "—"}</span> · {enabledModels.length} models enabled

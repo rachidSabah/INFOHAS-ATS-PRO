@@ -13,6 +13,7 @@
  *   GET  /api/providers/antigravity/status     → Connection status
  *   POST /api/providers/antigravity/test       → Test connectivity
  */
+import { antigravityModelUpsert } from "./antigravity-model-upsert";
 
 interface Env {
   DB: any; // D1Database — typed loosely for cross-environment compatibility
@@ -115,14 +116,14 @@ export async function handleCallback(req: Request, env: Env): Promise<Response> 
       JSON.stringify({ email: result.email, models: [] }),
     ).run();
 
-    // Auto-discover models
+    // Auto-discover models — Task 29: STABLE-ID upsert (was INSERT OR REPLACE
+    // on a fresh random UUID per sync, which duplicated all rows on every
+    // "Sync Models" click). Ownership: provider_id is ALWAYS 'antigravity'.
     try {
       const models = await discoverAntigravityModels(result.accessToken!);
       for (const modelId of models) {
-        await env.DB.prepare(
-          `INSERT OR REPLACE INTO provider_models (id, provider_id, model_id, model_name, enabled)
-           VALUES (?, 'antigravity', ?, ?, 1)`
-        ).bind(crypto.randomUUID(), modelId, modelId).run();
+        const { sql, params } = antigravityModelUpsert(modelId);
+        await env.DB.prepare(sql).bind(...params).run();
       }
     } catch { /* model discovery non-fatal */ }
 
@@ -208,11 +209,10 @@ export async function handleSyncModels(req: Request, env: Env): Promise<Response
     const { discoverAntigravityModels } = await import("./antigravity-auth");
     const models = await discoverAntigravityModels(accessToken);
 
+    // Task 29: STABLE-ID upsert — repeated syncs are idempotent, never duplicates.
     for (const modelId of models) {
-      await env.DB.prepare(
-        `INSERT OR REPLACE INTO provider_models (id, provider_id, model_id, model_name, enabled)
-         VALUES (?, 'antigravity', ?, ?, 1)`
-      ).bind(crypto.randomUUID(), modelId, modelId).run();
+      const { sql, params } = antigravityModelUpsert(modelId);
+      await env.DB.prepare(sql).bind(...params).run();
     }
 
     return new Response(JSON.stringify({ models, count: models.length }), {
