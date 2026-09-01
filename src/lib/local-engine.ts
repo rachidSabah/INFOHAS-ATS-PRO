@@ -424,21 +424,59 @@ export function localOptimize(prompt: string): string {
   const phone = resume?.contact?.phone || "";
   const location = resume?.contact?.location || "";
 
-  // Build optimized experience — PRESERVE ALL entries, all bullets, all dates
-  const experience = (resume?.experience ?? []).map((e: any) => ({
-    title: (e.title || "").replace(/\|/g, "·"), // Never use pipe chars in titles
-    company: (e.company || "").replace(/\|/g, "·"),
-    location: e.location || "",
-    startDate: e.startDate || "",
-    endDate: e.endDate || "", // PRESERVE original endDate — never use "Present" as default
-    bullets: (e.bullets ?? []).map((b: string) => {
-      // Enhance weak verbs but NEVER add fake metrics
-      return b.replace(/^(Responsible for|Helped with|Worked on|Tasked with|Duties included)\s*/i, "Led ");
-    }),
-  }));
+  // Extract actionable keywords from prompt (e.g. "Actionable Missing Keywords: A, B, C" or JD text)
+  const kwMatches = prompt.match(/actionable(?: missing)? keywords?[:\s]+([^\n]+)/i);
+  let missingKws: string[] = [];
+  if (kwMatches && kwMatches[1]) {
+    missingKws = kwMatches[1].split(/[,|•;]/).map(k => k.trim()).filter(k => k.length > 2);
+  }
+  if (missingKws.length === 0) {
+    // Look for common keywords in the prompt text
+    const found = prompt.match(/\b(Safety Compliance|Passenger Service|Customer Experience|Communication|Operations|Leadership|First Aid|Emergency Procedures|Cabin Crew|Teamwork|Quality Assurance)\b/gi);
+    if (found) missingKws = Array.from(new Set(found.map(s => s.trim())));
+  }
 
-  // Build education from source — PRESERVE ALL entries
-  const education = (resume?.education ?? []).map((ed: any) => ({
+  // Filter out any company names or location names that shouldn't be skills
+  const prohibitedSkillPatterns = [/qatar/i, /airways/i, /doha/i, /emirates/i, /airline/i, /company/i];
+  const safeKws = missingKws.filter(k => !prohibitedSkillPatterns.some(p => p.test(k)));
+
+  const missingKeywordsAdded: string[] = [];
+
+  // Build optimized experience — PRESERVE ALL entries, all bullets, all dates, and keep ID
+  const rawExperience = resume?.experience ?? [];
+  const experiences = rawExperience.map((e: any, idx: number) => {
+    const id = e.id || `exp-${idx + 1}`;
+    let bCount = 0;
+    const bullets = (e.bullets ?? []).map((b: string) => {
+      let updated = b.replace(/^(Responsible for|Helped with|Worked on|Tasked with|Duties included)\s*/i, "Spearheaded ");
+      // Weave a relevant keyword into the first bullet if available and not already present
+      if (bCount === 0 && safeKws.length > 0) {
+        const candidateKw = safeKws[idx % safeKws.length];
+        if (candidateKw && !updated.toLowerCase().includes(candidateKw.toLowerCase())) {
+          updated = `${updated.replace(/\.$/, "")}, ensuring strict ${candidateKw} and operational excellence.`;
+          if (!missingKeywordsAdded.includes(candidateKw)) {
+            missingKeywordsAdded.push(candidateKw);
+          }
+        }
+      }
+      bCount++;
+      return updated;
+    });
+    return {
+      id,
+      title: (e.title || "").replace(/\|/g, "·"),
+      company: (e.company || "").replace(/\|/g, "·"),
+      location: e.location || "",
+      startDate: e.startDate || "",
+      endDate: e.endDate || "",
+      bullets,
+    };
+  });
+
+  // Build education from source — PRESERVE ALL entries with id
+  const rawEducation = resume?.education ?? [];
+  const education = rawEducation.map((ed: any, idx: number) => ({
+    id: ed.id || `edu-${idx + 1}`,
     degree: ed.degree || "",
     institution: ed.institution || "",
     location: ed.location || "",
@@ -446,16 +484,19 @@ export function localOptimize(prompt: string): string {
     endDate: ed.endDate || "",
     field: ed.field || "",
     modules: ed.highlights?.join(", ") || "",
+    highlights: ed.highlights || [],
   }));
 
-  // Build skills from source — NEVER add fake JD keywords
-  const sourceSkills = (resume?.skills ?? []).map((s: any) => s.name).filter(Boolean);
-  const allSkills = Array.from(new Set(sourceSkills));
+  // Build skills from source + safe non-company keywords
+  const sourceSkills = (resume?.skills ?? []).map((s: any) => (typeof s === "string" ? s : s.name)).filter(Boolean);
+  const combinedSkills = Array.from(new Set([...sourceSkills, ...safeKws.slice(0, 3)]));
 
   const skills = [
-    { category: "Core Skills", items: allSkills.slice(0, 6) },
-    { category: "Additional Skills", items: allSkills.slice(6) },
+    { category: "Core Competencies", items: combinedSkills.slice(0, 6) },
+    { category: "Professional Skills", items: combinedSkills.slice(6) },
   ].filter((g) => g.items.length > 0);
+
+  const flatSkills = combinedSkills.map(name => ({ name, category: "Core Competencies" }));
 
   // Build languages from source — PRESERVE ALL
   const languages = (resume?.languages ?? [])
@@ -465,12 +506,18 @@ export function localOptimize(prompt: string): string {
       note: "",
     }));
 
-  // Build summary — PRESERVE original, never add fake sentences
-  const summary = resume?.summary
+  // Build summary — weave top safe keyword if available
+  let summary = resume?.summary
     ? resume.summary.length > 500
       ? resume.summary.slice(0, 480).trim() + "…"
       : resume.summary
     : "";
+  if (safeKws.length > 0 && summary && !summary.toLowerCase().includes(safeKws[0].toLowerCase())) {
+    summary = `${summary.replace(/\.$/, "")} with proven expertise in ${safeKws[0]}.`;
+    if (!missingKeywordsAdded.includes(safeKws[0])) {
+      missingKeywordsAdded.push(safeKws[0]);
+    }
+  }
 
   return JSON.stringify({
     name,
@@ -480,12 +527,13 @@ export function localOptimize(prompt: string): string {
     location,
     dateOfBirth: resume?.dateOfBirth || "",
     summary,
-    skills,
-    experience,
+    skills: flatSkills.length > 0 ? flatSkills : skills,
+    experience: experiences,
+    experiences,
     education,
     languages,
-    missingKeywordsAdded: [],
-    bulletsRewritten: experience.reduce((n: number, e: any) => n + e.bullets.length, 0),
+    missingKeywordsAdded,
+    bulletsRewritten: experiences.reduce((n: number, e: any) => n + e.bullets.length, 0),
     score: 0,
     score_breakdown: { impact: 0, brevity: 0, keywords: 0 },
     summary_critique: "",

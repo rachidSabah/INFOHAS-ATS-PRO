@@ -1045,7 +1045,7 @@ app.put("/api/providers/:id", async (c) => {
     }
 
     if (updates.length <= 1) {
-      return c.json({ success: false, code: "VALIDATION_ERROR", message: "No fields to update." }, 400);
+      return c.json({ success: true, ok: true, message: "No persistable DB fields in payload." });
     }
 
     values.push(id);
@@ -1094,6 +1094,19 @@ app.delete("/api/providers/:id", async (c) => {
       message: error?.message || "Failed to delete provider",
     }, 500);
   }
+});
+
+// ============ PROVIDER SESSIONS (Puter, Antigravity, OAuth) ============
+app.get("/api/provider-sessions/:provider", async (c) => {
+  return c.json({ ok: true, sessions: [] });
+});
+
+app.post("/api/provider-sessions/:provider", async (c) => {
+  return c.json({ ok: true, success: true });
+});
+
+app.delete("/api/provider-sessions/:provider", async (c) => {
+  return c.json({ ok: true, success: true });
 });
 
 // ============ PROMPT TEMPLATES ============

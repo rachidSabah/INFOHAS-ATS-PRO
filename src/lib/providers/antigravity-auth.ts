@@ -228,7 +228,12 @@ export async function discoverAntigravityModels(accessToken: string): Promise<st
     "deepseek-chat",
   ];
 
-  // Try to fetch models from Antigravity's API
+  // In browser, return known models directly to avoid CORS preflight failures
+  if (typeof window !== "undefined" || !accessToken) {
+    return knownModels;
+  }
+
+  // Try to fetch models from Antigravity's API (server-side only)
   try {
     const res = await fetch(`${ANTIGRAVITY_API_BASE}/v1/models`, {
       headers: {
@@ -277,6 +282,35 @@ export async function generateAntigravity(
   messages.push({ role: "user", content: opts.userPrompt });
 
   const model = opts.model === "claude-sonnet-4" ? "gemini-2.5-flash" : opts.model;
+
+  // In browser, route through the server-side CORS proxy /api/providers/chat
+  if (typeof window !== "undefined") {
+    const proxyRes = await fetch("/api/providers/chat", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        baseUrl: ANTIGRAVITY_API_BASE,
+        apiKey: opts.accessToken,
+        authType: "bearer",
+        model,
+        messages,
+        maxTokens: opts.maxTokens ?? 4096,
+        temperature: opts.temperature ?? 0.7,
+      }),
+    });
+    const latencyMs = Math.round(performance.now() - t0);
+    if (!proxyRes.ok) {
+      const errText = await proxyRes.text().catch(() => "");
+      if (proxyRes.status === 429) throw new AntigravityRateLimitError(errText.slice(0, 200));
+      throw new Error(`Antigravity proxy error ${proxyRes.status}: ${errText.slice(0, 200)}`);
+    }
+    const data = (await proxyRes.json()) as any;
+    if (!data.ok) {
+      throw new Error(`Antigravity proxy error: ${data.error || "Unknown error"}`);
+    }
+    return { text: data.text || "", provider: "antigravity", latencyMs };
+  }
+
   const res = await fetch(`${ANTIGRAVITY_API_BASE}/v1/chat/completions`, {
     method: "POST",
     headers: {
