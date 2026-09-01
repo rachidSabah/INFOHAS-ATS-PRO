@@ -843,6 +843,7 @@ async function _runOptimizationPipelineInner(input: PipelineInput, watchdog: Opt
     steps,
     status: "running",
     provider: "unknown",
+    profile: profileCfg.profileName,
     charCount: 0,
     metCharTarget: false,
     rationales: [],
@@ -1304,7 +1305,7 @@ ${jobMemory.industry}`);
               {
                 matchingStrategy: profileCfg.matchingStrategy,
                 hybridMatchingThreshold: profileCfg.hybridMatchingThreshold,
-                maxOptimizerAttempts: Math.min(3, Math.max(2, profileCfg.maxOptimizeAttempts - 1)),
+                maxOptimizerAttempts: profileCfg.maxOptimizeAttempts,
               }
             );
 
@@ -2340,7 +2341,7 @@ ${jobMemory.industry}`);
       qualityErrors.push(`Duplicated education entries: ${duplicatedEdu.map(([inst, count]) => `${inst} (×${count})`).join(", ")}`);
     }
 
-    // Gate 10: Bullet count preservation — every original bullet must be present
+    // Gate 10: Bullet count preservation — check bullet count per experience
     if (diff.bulletsPerEntry.optimized.some((c, i) => c < diff.bulletsPerEntry.original[i])) {
       const missingBullets = diff.bulletsPerEntry.original
         .map((orig, i) => ({ entry: i, original: orig, optimized: diff.bulletsPerEntry.optimized[i] || 0 }))

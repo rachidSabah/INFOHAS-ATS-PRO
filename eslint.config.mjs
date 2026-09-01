@@ -29,6 +29,9 @@ const eslintConfig = [
   ...nextCoreWebVitals,
   ...nextTypescript,
   {
+    linterOptions: {
+      reportUnusedDisableDirectives: "off",
+    },
     rules: {
       // TypeScript rules
       "@typescript-eslint/no-explicit-any": "off",

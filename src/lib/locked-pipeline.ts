@@ -842,7 +842,7 @@ export async function runLockedPipeline(
         resume: assembleResult.resume,
         provider: optimizerResult.provider,
         charCount,
-        keywordsAdded: optimizerResult.output.missingKeywordsAdded?.length ?? 0,
+        keywordsAdded: lastKeywordCoverage?.integrated ?? optimizerResult.output.missingKeywordsAdded?.length ?? 0,
         warnings,
         errors,
         guardianScore: guardianResult.score,
