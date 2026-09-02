@@ -581,7 +581,11 @@ function checkDirectiveCompliance(
  * AND their content is not preserved (i.e. real data loss), not when
  * the LLM rewrote/merged them into fewer-but-richer points.
  */
-function checkBulletsPreserved(optimized: ResumeData, source: ResumeData): GuardianCheck {
+function checkBulletsPreserved(
+  optimized: ResumeData,
+  source: ResumeData,
+  engineBulletCounts?: Map<string, number>,
+): GuardianCheck {
   const failures: string[] = [];
 
   // Tokenize a bullet into a normalized word set for coverage comparison.
@@ -628,10 +632,17 @@ function checkBulletsPreserved(optimized: ResumeData, source: ResumeData): Guard
         );
       }
     } else if (optCount > srcCount) {
-      // More bullets than source is suspicious (hallucination)
-      failures.push(
-        `"${optExp.title} @ ${optExp.company}": ${srcCount} bullets → ${optCount} (${optCount - srcCount} extra — potential hallucination)`
-      );
+      // GATE-ALIGNMENT: distinguish LLM-invented bullets (hallucination → VETO)
+      // from bullets the page balancer / Dynamic Section Engine deterministically
+      // added AFTER assembly to fill the A4 page (allowed). The pipeline passes
+      // the per-entry bullet count as it stood right after assembly; extras
+      // beyond the source are only a violation if the LLM itself produced them.
+      const assembledCount = engineBulletCounts?.get(optExp.id ?? "") ?? optCount;
+      if (assembledCount > srcCount) {
+        failures.push(
+          `"${optExp.title} @ ${optExp.company}": ${srcCount} bullets → ${optCount} (${optCount - srcCount} extra — potential hallucination)`
+        );
+      }
     }
   }
 
@@ -657,7 +668,11 @@ function checkBulletsPreserved(optimized: ResumeData, source: ResumeData): Guard
  * as the corresponding entry in the source resume. This prevents the LLM
  * from dropping or truncating education achievements during optimization.
  */
-function checkEducationHighlightsPreserved(optimized: ResumeData, source: ResumeData): GuardianCheck {
+function checkEducationHighlightsPreserved(
+  optimized: ResumeData,
+  source: ResumeData,
+  engineHighlightCounts?: Map<string, number>,
+): GuardianCheck {
   if (source.education.length === 0) {
     return {
       name: "education_highlights_preserved",
@@ -687,9 +702,15 @@ function checkEducationHighlightsPreserved(optimized: ResumeData, source: Resume
         `"${srcEdu.degree} @ ${srcEdu.institution}": ${srcCount} highlights → ${optCount} (${srcCount - optCount} missing)`
       );
     } else if (srcCount > 0 && optCount > srcCount) {
-      failures.push(
-        `"${srcEdu.degree} @ ${srcEdu.institution}": ${srcCount} highlights → ${optCount} (${optCount - srcCount} extra — potential hallucination)`
-      );
+      // GATE-ALIGNMENT: extras the Dynamic Section Engine / page balancer added
+      // deterministically after assembly are allowed; only LLM-invented extras
+      // (already present at assembly time) are hallucinations → VETO.
+      const assembledCount = engineHighlightCounts?.get(optEdu.id ?? "") ?? optCount;
+      if (assembledCount > srcCount) {
+        failures.push(
+          `"${srcEdu.degree} @ ${srcEdu.institution}": ${srcCount} highlights → ${optCount} (${optCount - srcCount} extra — potential hallucination)`
+        );
+      }
     }
   }
 
@@ -1310,10 +1331,24 @@ function checkSectionOrderPreserved(optimized: ResumeData, source: ResumeData): 
  * @param policy    - Optional OptimizationPolicy for directive compliance check
  * @returns GuardianVerdict with VETO-enforced status
  */
+export interface GuardianValidationOptions {
+  /**
+   * GATE-ALIGNMENT allowlist: per-experience bullet counts as they stood RIGHT
+   * AFTER assembly (before the page balancer / Dynamic Section Engine ran).
+   * Entries whose count grew during deterministic page-fill are exempt from the
+   * "extra bullets = hallucination" veto; extras the LLM itself added are still
+   * vetoed. Omit to keep the strict source-count check (backwards compatible).
+   */
+  engineBulletCounts?: Map<string, number>;
+  /** Same as engineBulletCounts, for education highlights. */
+  engineHighlightCounts?: Map<string, number>;
+}
+
 export async function runGuardianValidation(
   optimized: ResumeData,
   source: ResumeData,
   policy?: OptimizationPolicy,
+  options?: GuardianValidationOptions,
 ): Promise<GuardianVerdict> {
   const checks: GuardianCheck[] = [];
 
@@ -1328,8 +1363,8 @@ export async function runGuardianValidation(
   checks.push(checkLayoutPreserved(optimized, source));
   checks.push(checkNoHallucinations(optimized, source));
   checks.push(checkNoDuplicateSentences(optimized, source));
-  checks.push(checkBulletsPreserved(optimized, source));
-  checks.push(checkEducationHighlightsPreserved(optimized, source));
+  checks.push(checkBulletsPreserved(optimized, source, options?.engineBulletCounts));
+  checks.push(checkEducationHighlightsPreserved(optimized, source, options?.engineHighlightCounts));
   checks.push(checkSkillCategoriesPreserved(optimized, source));
   checks.push(checkPersonalDetailsPreserved(optimized, source));
   checks.push(checkNoProficiencyHallucination(optimized, source));

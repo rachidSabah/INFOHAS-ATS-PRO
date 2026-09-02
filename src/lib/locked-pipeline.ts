@@ -24,7 +24,7 @@
 import type { ResumeData, JobDescription, AgentDirectives, OptimizerDirectiveConfig } from "./types";
 import { runBulletOnlyOptimizer, buildOptimizerInput } from "./bullet-only-optimizer";
 import { assembleResume } from "./resume-assembler";
-import { runStructureGuardian } from "./structure-guardian";
+import { runStructureGuardian, sanitizeSkillsAgainstJd } from "./structure-guardian";
 import { validateExperienceFingerprints } from "./experience-fingerprint";
 import { ensureExperienceIds } from "./entity-lock";
 import { createDebugArtifacts, persistDebugArtifacts } from "./debug-persistence";
@@ -458,6 +458,18 @@ export async function runLockedPipeline(
       warnings.push(...assembleResult.warnings);
       errors.push(...assembleResult.errors);
 
+      // GATE-ALIGNMENT: capture per-entry bullet/highlight counts as they stood
+      // RIGHT AFTER assembly — before the page balancer / Dynamic Section Engine
+      // deterministically add content to fill the A4 page. The Guardian Agent's
+      // hallucination checks use these as the allowlist baseline: extras the
+      // ENGINE added are allowed; extras the LLM itself produced still VETO.
+      const engineBulletCounts = new Map<string, number>(
+        assembleResult.resume.experience.map((e: any) => [e.id ?? "", (e.bullets ?? []).length]),
+      );
+      const engineHighlightCounts = new Map<string, number>(
+        (assembleResult.resume.education ?? []).map((e: any) => [e.id ?? "", (e.highlights ?? []).length]),
+      );
+
       // Emit assembler event
       globalEventBus.emit({
         agent: "ResumeAssembler",
@@ -521,6 +533,25 @@ export async function runLockedPipeline(
       } catch (dseErr) {
         console.warn("[Locked Pipeline Dynamic Section Engine] Failed (non-fatal):", dseErr);
         warnings.push("Dynamic section preservation check encountered an error — continuing with best-effort.");
+      }
+
+      // ========================================================================
+      // Step 4b: JD-entity skill sanitize (GATE-ALIGNMENT with Structure Guardian)
+      // The directive tells the AI to embed missing JD keywords; the AI and the
+      // page balancer can therefore add "Qatar Airways"/"Doha" as skills, which
+      // the Structure Guardian then vetoes as critical — a provable gate-vs-gate
+      // deadlock (6/6 attempts exhausted in production). Removing them HERE with
+      // the Guardian's own predicate (source skills exempt) makes the attempt
+      // satisfy both gates instead of burning retries.
+      // ========================================================================
+      try {
+        const jdSanitize = sanitizeSkillsAgainstJd(assembleResult.resume, sourceResume, jd.rawText);
+        if (jdSanitize.removedSkills.length > 0) {
+          assembleResult.resume = jdSanitize.resume;
+          warnings.push(`Removed ${jdSanitize.removedSkills.length} JD company/location name(s) from skills: ${jdSanitize.removedSkills.join(", ")}`);
+        }
+      } catch (sanErr) {
+        console.warn("[Locked Pipeline] JD skill sanitize failed (non-fatal):", sanErr);
       }
 
       // ========================================================================
@@ -739,7 +770,10 @@ export async function runLockedPipeline(
       // ========================================================================
       let guardianVerdict: GuardianVerdict | undefined;
       try {
-        guardianVerdict = await runGuardianValidation(assembleResult.resume, sourceResume, undefined);
+        guardianVerdict = await runGuardianValidation(assembleResult.resume, sourceResume, undefined, {
+          engineBulletCounts,
+          engineHighlightCounts,
+        });
         nodeRuns.push({ node: "guardian", attempt: attempts, status: "completed", durationMs: 0, detail: `verdict: ${guardianVerdict.status}` });
         if (guardianVerdict.status === "BLOCKED") {
           const criticalFailures = guardianVerdict.checks.filter(c => c.critical && !c.passed).map(c => c.detail);

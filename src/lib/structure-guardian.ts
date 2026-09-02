@@ -137,6 +137,61 @@ function checkHeadlineForContactContamination(headline: string, resume: ResumeDa
   return issues;
 }
 
+export interface JdSkillSanitizeResult {
+  resume: ResumeData;
+  removedSkills: string[];
+}
+
+/**
+ * GATE-ALIGNMENT: remove JD company/location names from the optimized resume's
+ * skills — the SAME predicate the Structure Guardian's skills check uses — so
+ * the two can never contradict each other (the optimizer directive tells the
+ * AI to "embed missing keywords", and the AI/page-balancer dutifully adds
+ * "Qatar Airways"/"Doha" as skills, which the Guardian then vetoes as critical).
+ *
+ * Zero Data Loss: any skill whose name exists in the SOURCE resume is kept
+ * even if it matches a JD entity (it is user-authored, not AI debris).
+ *
+ * Runs BEFORE both Guardians in the locked pipeline; removals are logged and
+ * surfaced as warnings so the flow stays transparent.
+ */
+export function sanitizeSkillsAgainstJd(
+  optimized: ResumeData,
+  source: ResumeData,
+  jdContent?: string,
+): JdSkillSanitizeResult {
+  const dynamicJdEntities = jdContent ? extractJdEntities(jdContent) : [];
+  const allJdEntities = [...new Set([...JD_COMPANY_NAMES, ...dynamicJdEntities])];
+  if (allJdEntities.length === 0 || !optimized.skills || optimized.skills.length === 0) {
+    return { resume: optimized, removedSkills: [] };
+  }
+
+  const sourceNames = new Set(
+    (source.skills || [])
+      .map((s) => (s.name || "").trim().toLowerCase())
+      .filter(Boolean),
+  );
+
+  const removedSkills: string[] = [];
+  const filtered = optimized.skills.filter((skill) => {
+    const nameLower = (skill.name || "").trim().toLowerCase();
+    if (!nameLower) return true;
+    const isJdEntity = allJdEntities.some((n) => nameLower === n || nameLower.includes(n));
+    if (!isJdEntity) return true;
+    if (sourceNames.has(nameLower)) return true; // user-authored in the source — keep
+    removedSkills.push(skill.name);
+    return false;
+  });
+
+  if (removedSkills.length === 0) {
+    return { resume: optimized, removedSkills: [] };
+  }
+  console.info(
+    `[Structure Guardian] sanitizeSkillsAgainstJd removed ${removedSkills.length} JD entity skill(s): ${removedSkills.join(", ")}`,
+  );
+  return { resume: { ...optimized, skills: filtered }, removedSkills };
+}
+
 /**
  * Run the Resume Structure Guardian on the final resume.
  *
