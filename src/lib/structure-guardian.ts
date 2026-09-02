@@ -43,7 +43,9 @@ const CRITICAL_PATTERNS = [
 // Legacy static list — kept as fallback when no JD content is provided.
 // Replaced by dynamic JD content extraction in runStructureGuardian when
 // the jdContent optional parameter is passed.
-const JD_COMPANY_NAMES = [
+// EXPORTED (additive) so the OptimizerOutputValidator can align its keyword
+// accounting with the same entity rule — see the validator's entity filter.
+export const JD_COMPANY_NAMES = [
   "qatar duty free", "qatar airways group", "hamad international airport",
   "doha", "qatar", "dubai", "abu dhabi", "uae",
   "riyadh", "saudi arabia", "kuwait", "bahrain", "oman", "muscat",

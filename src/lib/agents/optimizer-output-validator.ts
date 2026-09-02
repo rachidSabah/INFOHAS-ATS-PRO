@@ -13,6 +13,7 @@
 // ============================================================================
 
 import type { ResumeData, JobDescription } from "../types";
+import { JD_COMPANY_NAMES } from "../structure-guardian";
 
 export interface KeywordCoverageReport {
   /** Priority/missing keywords evaluated for integration. */
@@ -40,6 +41,30 @@ function isJunkKeyword(k: string): boolean {
   return ["go", "basic", "job", "company", "the", "and", "with", "for", "using", "strong", "plus", "etc", "years", "year", "work", "team", "role", "candidate", "experience", "skills", "requirements", "responsibilities", "preferred", "qualifications", "opportunity", "benefits", "salary"].includes(t);
 }
 
+/**
+ * Entity-alignment filter (DEADLOCK FIX, production trace 0256e12b):
+ * The Structure Guardian vetoes any SKILL whose name matches a JD
+ * company/location entity ("Qatar Airways", "Doha"...). Previously the
+ * OptimizerOutputValidator still counted those same tokens as actionable
+ * keywords the optimizer MUST integrate — with a skills-less resume the only
+ * way to satisfy the keyword floor was to add them as skills, which the
+ * Guardian then vetoed. The two gates ping-ponged and every attempt failed
+ * ("Keyword integration floor not met: 0 of 10..." → "Skill 'Qatar Airways'
+ * is a JD company name/location..."), exhausting all retries.
+ *
+ * Tokens matching a Guardian-protected entity are excluded from the
+ * actionable set — they can (and should) still appear naturally in bullets
+ * and summaries, but they can never be REQUIRED. The validator and the
+ * Guardian now enforce a satisfiable contract.
+ */
+function isGuardianProtectedEntity(k: string): boolean {
+  const t = k.trim().toLowerCase();
+  if (!t) return true;
+  return JD_COMPANY_NAMES.some(
+    (name) => t === name || t.includes(name) || name.includes(t)
+  );
+}
+
 function normalizeText(s: string): string {
   return s.toLowerCase().replace(/[^a-z0-9+/ .:-]/g, " ").replace(/\s+/g, " ").trim();
 }
@@ -53,7 +78,13 @@ export function computeKeywordCoverage(
   optimizerOutput: unknown,
   jd: JobDescription,
 ): KeywordCoverageReport {
-  const jdKeywords = (jd.keywords ?? []).filter((k) => typeof k === "string" && !isJunkKeyword(k)).slice(0, 20);
+  // DEADLOCK FIX: exclude both junk tokens AND Guardian-protected JD entities
+  // ("Qatar Airways", "Doha"...) — the Guardian vetoes those as skills, so the
+  // validator must never require them. Both filters apply before the 20-cap so
+  // protected entities don't consume coverage slots.
+  const jdKeywords = (jd.keywords ?? [])
+    .filter((k) => typeof k === "string" && !isJunkKeyword(k) && !isGuardianProtectedEntity(k))
+    .slice(0, 20);
   const sourceText = normalizeText(JSON.stringify(sourceResume));
   const outputText = normalizeText(JSON.stringify(optimizerOutput ?? {}));
 

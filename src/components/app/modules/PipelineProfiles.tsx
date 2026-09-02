@@ -172,6 +172,33 @@ export function PipelineProfiles() {
                     <Icon name="Pencil" className="w-3 h-3 mr-1" /> Edit
                   </Button>
                 )}
+                {/* Clone: built-in profiles are read-only by design, but the info
+                    card promises they "can be cloned to create custom profiles".
+                    This is that entry point — deep-copies the profile as a new
+                    custom one and opens the editor. */}
+                {profile.isBuiltIn && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      const clone: PipelineProfile = JSON.parse(JSON.stringify(profile));
+                      clone.id = `profile-custom-${Date.now()}`;
+                      clone.name = `${profile.name} (Custom)`;
+                      clone.description = `Custom copy of "${profile.name}". Fully editable.`;
+                      clone.isBuiltIn = false;
+                      clone.isDefault = false;
+                      clone.createdAt = new Date().toISOString();
+                      clone.updatedAt = new Date().toISOString();
+                      addProfile(clone);
+                      setEditingProfile(clone);
+                      toast.success(`"${profile.name}" cloned as a custom profile. Edit and save below.`);
+                    }}
+                    className="h-7 text-xs"
+                  >
+                    <Icon name="Copy" className="w-3 h-3 mr-1" /> Clone
+                  </Button>
+                )}
                 {!profile.isBuiltIn && (
                   <Button
                     variant="ghost"

@@ -142,4 +142,54 @@ describe("validateOptimizerOutput", () => {
     expect(res.valid).toBe(false);
     expect(res.violations.some((v) => v.includes("incomplete coverage"))).toBe(true);
   });
+
+  // ==========================================================================
+  // DEADLOCK REGRESSION (production trace 0256e12b):
+  // A skills-less resume + a JD whose keywords are company/location entities
+  // ("Qatar Airways", "Doha") previously produced a contradictory contract:
+  //   - OptimizerOutputValidator: "Keyword integration floor not met: 0 of 10
+  //     actionable JD keywords integrated (Cabin Crew, Qatar Airways, Doha…)"
+  //   - Structure Guardian: vetoes "Skill 'Qatar Airways' is a JD company
+  //     name/location" the moment the optimizer integrated them as skills
+  // Every attempt failed and all retries were exhausted. Guardian-protected
+  // entities must never count toward the keyword floor.
+  // ==========================================================================
+  it("EXCLUDES Guardian-protected JD entities (Qatar Airways/Doha) from the actionable keyword floor", () => {
+    const resume = makeResume();
+    resume.skills = []; // skills-less resume — the exact production scenario
+    const jd: JobDescription = {
+      ...makeJD(),
+      // 10 keywords, of which 2 are Guardian-protected entities
+      keywords: ["Cabin Crew", "Qatar Airways", "Doha", "Flight Attendant", "Safety", "Passenger Service", "Emergency", "In-flight", "Announcements", "First Aid"],
+    };
+    const output = {
+      summary: "Customer experience professional with safety-first passenger service, first aid readiness, and calm in-flight emergency handling across hospitality-driven teams.",
+      experiences: [{ id: "e1", bullets: resume.experience[0].bullets }],
+      skills: [], // cannot hold entities — Guardian vetoes them
+    };
+    const res = validateOptimizerOutput(resume, output, jd);
+    // The 2 protected entities are excluded → 8 actionable remain; the output
+    // integrates 5 of them → no floor violation.
+    expect(res.keywordCoverage.total).toBe(8);
+    expect(res.violations.some((v) => v.includes("Keyword integration floor"))).toBe(false);
+    expect(res.valid).toBe(true);
+  });
+
+  it("STILL fails when non-entity actionable keywords are not integrated", () => {
+    const resume = makeResume();
+    resume.skills = [];
+    const jd: JobDescription = {
+      ...makeJD(),
+      keywords: ["Cabin Crew", "Qatar Airways", "Doha", "Flight Attendant", "Safety", "Passenger Service", "Emergency", "In-flight", "Announcements", "First Aid"],
+    };
+    const output = {
+      summary: "Dedicated professional focused on quality service and teamwork.",
+      experiences: [{ id: "e1", bullets: resume.experience[0].bullets }],
+      skills: [],
+    };
+    const res = validateOptimizerOutput(resume, output, jd);
+    // 8 actionable remain after entity exclusion; 0 integrated → floor violation
+    expect(res.keywordCoverage.total).toBe(8);
+    expect(res.violations.some((v) => v.includes("Keyword integration floor"))).toBe(true);
+  });
 });
