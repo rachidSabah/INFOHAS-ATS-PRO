@@ -199,7 +199,7 @@ export function ProviderHealthPanel() {
             // auth vs timeout), a human-readable window, and whether the S1
             // localStorage mirror backs it (survives tab close).
             const cdClassLabel: Record<ProviderCooldownClass, string> = {
-              quota: "QUOTA", "429": "RATE-LIMIT", "401": "AUTH", timeout: "TIMEOUT", unknown: "COOLDOWN",
+              quota: "QUOTA", "429": "RATE-LIMIT", "401": "AUTH", timeout: "TIMEOUT", endpoint: "ENDPOINT", unknown: "COOLDOWN",
             };
             const cdDetail = inCd
               ? `${cdSnap.class ? ` · ${cdClassLabel[cdSnap.class]}` : ""} ${formatCooldownRemaining(cdSecs * 1000)}${cdSnap.persisted ? " · saved" : ""}`

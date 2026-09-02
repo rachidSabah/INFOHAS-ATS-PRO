@@ -235,11 +235,15 @@ export function AIModels() {
     }
   }, [selectedProviderId, enabledModels.length]);
 
-  const calculateEstimatedCost = () => {
-    if (!selected || !testModel) return 0;
+  const calculateEstimatedCost = (): number | null => {
+    if (!selected || !testModel) return null;
     const cat = MODEL_CATALOG[selected.type] || [];
     const modelInfo = cat.find(m => m.name === testModel);
-    if (!modelInfo) return 0;
+    // HONEST PRICING (directive #20): no catalog entry (or a free-tagged one)
+    // means pricing is UNKNOWN, not $0. Return null so the UI never presents
+    // a fabricated $0.000000 as if the provider had confirmed free usage.
+    if (!modelInfo) return null;
+    if (modelInfo.inputCost === undefined && modelInfo.outputCost === undefined) return null;
     const inputRate = modelInfo.inputCost ?? 0;
     const outputRate = modelInfo.outputCost ?? 0;
     return (estInputTokens * inputRate) + (estOutputTokens * outputRate);
@@ -543,9 +547,15 @@ export function AIModels() {
                     </div>
                     <div className="pt-2 border-t border-border flex justify-between items-center text-xs">
                       <span className="text-muted-foreground">Calculated Cost for {testModel || "selected model"}:</span>
-                      <span className="font-bold text-sm text-brand">
-                        ${calculateEstimatedCost().toFixed(6)}
-                      </span>
+                      {(() => {
+                        // Directive #20: unknown pricing must not display as $0.000000.
+                        const cost = calculateEstimatedCost();
+                        return cost === null ? (
+                          <span className="font-bold text-sm text-muted-foreground">Unknown (no verified pricing)</span>
+                        ) : (
+                          <span className="font-bold text-sm text-brand">${cost.toFixed(6)}</span>
+                        );
+                      })()}
                     </div>
                   </div>
                 </CardContent>

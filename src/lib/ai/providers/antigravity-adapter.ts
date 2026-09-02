@@ -89,9 +89,17 @@ export class AntigravityAdapter implements AIProviderAdapter {
   }
 
   /**
-   * CLI health semantics: the integration is healthy when a token exists.
-   * Inference runs through the CLI runtime — probing cloudcode-pa over REST
-   * from a server always 404s and would falsely declare the provider down.
+   * CLI health semantics — HONEST EDITION (directive #48).
+   *
+   * Previously: a present token returned ok:true with NO network call —
+   * "token presence" was reported as a healthy integration while every real
+   * request 404'd (cloudcode-pa relays HTML 404s in the browser; live logs
+   * 2026-09-02 showed the user dozens of these per optimization run).
+   *
+   * Now: a REAL probe request ("Reply with exactly: OK") must answer before
+   * the provider is declared usable. Auth failures, endpoint 404s and
+   * timeouts all surface verbatim as ok:false — no fabricated ONLINE state.
+   * A 20s race bounds the probe so health checks can never hang.
    */
   async testConnection(config: ProviderConfig): Promise<{
     ok: boolean;
@@ -100,36 +108,64 @@ export class AntigravityAdapter implements AIProviderAdapter {
     response?: string;
   }> {
     const t0 = performance.now();
-    const hasToken = !!(config.apiKey && config.apiKey.trim() !== "");
-    if (!hasToken) {
-      // A stored browser session counts even when the record has no key copy.
+    const { getAntigravityProvider } = await import("../../providers/antigravity-provider");
+    const provider = getAntigravityProvider();
+
+    // Auth: browser session first, then the configured token.
+    let authed = provider.isAuthenticated();
+    if (!authed && config.apiKey && config.apiKey.trim() !== "") {
       try {
-        const { getAntigravityProvider } = await import("../../providers/antigravity-provider");
-        const session = await getAntigravityProvider().restore();
-        if (session?.authenticated) {
-          return {
-            ok: true,
-            latencyMs: Math.round(performance.now() - t0),
-            message: "Antigravity CLI session active (Google sign-in) — CLI integration ready.",
-          };
-        }
+        await provider.login(config.apiKey);
+        authed = provider.isAuthenticated();
       } catch {
-        // ignore — fall through to the failure message
+        // login persistence can fail in non-browser contexts — the probe decides
       }
+    }
+    if (!authed) {
+      try {
+        const session = await provider.restore();
+        authed = !!session?.authenticated;
+      } catch {
+        // ignore — fall through to the honest failure
+      }
+    }
+    if (!authed) {
       return {
         ok: false,
-        latencyMs: 0,
+        latencyMs: Math.round(performance.now() - t0),
         message:
           "Antigravity CLI is not connected. Connect via Google sign-in or paste a CLI token (CLI integration — no Base URL is used).",
       };
     }
-    return {
-      ok: true,
-      latencyMs: Math.round(performance.now() - t0),
-      message:
-        "Antigravity CLI token present — CLI integration ready (Google sign-in is the auth mechanism; inference is handled by the Antigravity CLI runtime, not the Gemini REST API).",
-      response: "OK",
-    };
+
+    // REAL probe — a provider is only ONLINE if it actually answers.
+    const PROBE_TIMEOUT_MS = 20_000;
+    try {
+      const probe = (async () =>
+        provider.generate({
+          userPrompt: "Reply with exactly: OK",
+          maxTokens: 8,
+          temperature: 0,
+        }))();
+      const timeout = new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error(`Antigravity probe timed out after ${PROBE_TIMEOUT_MS / 1000}s`)), PROBE_TIMEOUT_MS),
+      );
+      const result = await Promise.race([probe, timeout]);
+      const latencyMs = Math.round(performance.now() - t0);
+      return {
+        ok: true,
+        latencyMs,
+        message: `Antigravity verified by real request — answered in ${latencyMs}ms.`,
+        response: result.text,
+      };
+    } catch (e: any) {
+      const latencyMs = Math.round(performance.now() - t0);
+      return {
+        ok: false,
+        latencyMs,
+        message: `Antigravity probe failed (${latencyMs}ms): ${e?.message ?? e}`,
+      };
+    }
   }
 
   async listModels(config: ProviderConfig): Promise<string[]> {

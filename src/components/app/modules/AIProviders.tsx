@@ -406,7 +406,7 @@ export function AIProviders() {
                             const snap = getProviderConcurrencySnapshot(p.id, p.concurrencyCap);
                             const cd = getProviderCooldownSnapshot(p.id);
                             const cdLabel: Record<ProviderCooldownClass, string> = {
-                              quota: "QUOTA", "429": "RATE-LIMIT", "401": "AUTH", timeout: "TIMEOUT", unknown: "COOLDOWN",
+                              quota: "QUOTA", "429": "RATE-LIMIT", "401": "AUTH", timeout: "TIMEOUT", endpoint: "ENDPOINT", unknown: "COOLDOWN",
                             };
                             const cdLong = cd.class === "quota" || cd.class === "401";
                             return (

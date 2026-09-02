@@ -49,7 +49,7 @@ export const PROVIDER_QUOTA_PERSIST_PREFIX = "resumeai-provider-quota-cooldown-"
 export const QUOTA_PERSIST_MIN_MS = 10 * 60 * 1000; // persist windows >= 10 minutes
 
 /** Cooldown class recorded alongside the window (feeds S2 skip reasons). */
-export type ProviderCooldownClass = "quota" | "429" | "401" | "timeout" | "unknown";
+export type ProviderCooldownClass = "quota" | "429" | "401" | "timeout" | "endpoint" | "unknown";
 
 interface StoredCooldown { until: number; class: ProviderCooldownClass }
 
@@ -301,6 +301,43 @@ export function isTimeoutError(err: any): boolean {
   return /timed out|timeout/i.test(msg);
 }
 
+// ============================================================================
+// ENDPOINT-ERROR COOLDOWN (production evidence, 2026-09-02).
+//
+// Antigravity (browser integration) proxies every call through
+// cloudcode-pa.googleapis.com, which answers 404 HTML on EVERY request; the
+// dead NVIDIA NIM function id answered the same way. recordTrafficCooldown-
+// FromError only armed windows for 429/401/timeout — a permanently-404ing
+// provider therefore NEVER cooled down and was retried by every pipeline
+// step, every attempt, all session long (the console showed dozens of
+// Antigravity 404s per optimization run).
+//
+// A 404-family failure is NOT transient like a timeout: waiting 90s cannot
+// fix a stale endpoint/function id. Window is 10 minutes (bounded — the
+// P1 early-clear on success evidence still applies), session-only, and
+// probes never arm it (same rule as every other class).
+// ============================================================================
+export const PROVIDER_ENDPOINT_COOLDOWN_MS = 10 * 60 * 1000;
+
+/** Marks a provider as endpoint-dead (404-family) for PROVIDER_ENDPOINT_COOLDOWN_MS. */
+export function markProviderEndpointCooldown(providerId: string): void {
+  if (typeof window === "undefined") return;
+  const entry: StoredCooldown = { until: Date.now() + PROVIDER_ENDPOINT_COOLDOWN_MS, class: "endpoint" };
+  writeSession(providerId, entry);
+  console.warn(
+    `[AI] Provider "${providerId}" returned a 404-family endpoint error — skipping for ${PROVIDER_ENDPOINT_COOLDOWN_MS / 1000}s. ` +
+    `Endpoint/function-id errors do not heal by retrying; run Auto-Heal or fix the Base URL/function id.`,
+  );
+}
+
+/** True when the error/status is a 404-family endpoint failure. */
+export function isEndpointNotFoundError(err: any, statusCode?: number): boolean {
+  const status = statusCode ?? err?.statusCode;
+  if (status === 404 || status === 410) return true;
+  const msg = err?.message ?? String(err ?? "");
+  return /\b404\b/.test(msg) || /http 404/i.test(msg) || /not found for (account|function)/i.test(msg);
+}
+
 /** Clears all provider cooldowns (e.g. on manual retry or settings change). */
 export function clearAllProviderCooldowns(): void {
   if (typeof window === "undefined") return;
@@ -427,6 +464,11 @@ export function recordTrafficCooldownFromError(opts: {
   } else if (opts.isTimeout) {
     markProviderTimeoutCooldown(opts.cooldownId);
     return "timeout";
+  } else if (isEndpointNotFoundError(opts.error, status)) {
+    // Endpoint-dead providers never cooled down before — every pipeline step
+    // re-hit the same 404 (Antigravity browser proxy, stale NVIDIA function).
+    markProviderEndpointCooldown(opts.cooldownId);
+    return "endpoint";
   }
   return null;
 }
