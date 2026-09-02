@@ -194,3 +194,84 @@ describe("config-lock + supervisor failover", () => {
     expect(getJobAILock()?.failoverCount).toBe(1);
   });
 });
+
+// ============================================================================
+// Directive #50 — PIPELINE ROUTING proof scenarios for supervisorFailover.
+// Every ping is injected via deps; no network. (2026-09-02: the failover walk
+// was also CORRECTED — a fallback that fails validation is now SKIPPED and
+// recorded, never activated; the old recursion activated the refused fallback
+// and inflated failoverCount without an actual switch.)
+// ============================================================================
+import { supervisorFailover } from "./preflight";
+
+function lockWith(primary: string, fallbacks: { providerId: string; providerName: string }[]) {
+  setJobAILock({
+    jobId: "j50",
+    lockedAt: new Date().toISOString(),
+    primary: { providerId: primary, providerName: primary.toUpperCase(), model: "m-primary", readinessScore: 90 },
+    fallbacks: fallbacks.map((f) => ({ ...f, model: `m-${f.providerId}`, readinessScore: 80 })),
+    eligibleProviderIds: [primary, ...fallbacks.map((f) => f.providerId)],
+    activeIndex: 0,
+    failoverCount: 0,
+    events: [],
+  });
+}
+
+describe("directive #50: controlled failover scenarios", () => {
+  beforeEach(() => {
+    clearJobAILock();
+    providers.length = 0;
+    providers.push(makeProvider(), makeProvider({ id: "p_b", name: "ProviderB", priority: 20 }));
+  });
+
+  it("scenario 1 — primary fails, healthy fallback validates, pipeline continues on it", async () => {
+    lockWith("p_a", [{ providerId: "p_b", providerName: "ProviderB" }]);
+    const ping = vi.fn(async (provider: any) =>
+      provider.id === "p_b" ? { ok: true, latencyMs: 120, reply: "READY" } : { ok: false, latencyMs: 30, error: "HTTP 500" }
+    );
+    const next = await supervisorFailover("primary timeout", { ping });
+    expect(next?.providerId).toBe("p_b");
+    expect(getJobAILock()?.failoverCount).toBe(1);
+    expect(getJobAILock()?.events.some((e) => e.note.startsWith("Failover: primary timeout"))).toBe(true);
+  });
+
+  it("scenario 2 — a fallback that FAILS validation is skipped, never activated; walk continues", async () => {
+    providers.push(makeProvider({ id: "p_c", name: "ProviderC", priority: 30 }));
+    lockWith("p_a", [
+      { providerId: "p_b", providerName: "ProviderB" },
+      { providerId: "p_c", providerName: "ProviderC" },
+    ]);
+    const ping = vi.fn(async (provider: any) =>
+      provider.id === "p_c" ? { ok: true, latencyMs: 100, reply: "READY" } : { ok: false, latencyMs: 25, error: "HTTP 404" }
+    );
+    const next = await supervisorFailover("primary dead", { ping });
+    // Active route = the VALIDATED fallback, never the refused one (#36).
+    expect(next?.providerId).toBe("p_c");
+    expect(getActiveJobModel()?.providerId).toBe("p_c");
+    // Exactly ONE real switch happened (to C) — no phantom activation of B.
+    expect(getJobAILock()?.failoverCount).toBe(1);
+    // The refusal is recorded for observability (#44).
+    expect(getJobAILock()?.events.some((e) => e.note.includes("ProviderB refused"))).toBe(true);
+  });
+
+  it("scenario 3 — no fallback validates: safe stop, active stays on primary, no fake switch", async () => {
+    lockWith("p_a", [
+      { providerId: "p_b", providerName: "ProviderB" },
+      { providerId: "p_ghost", providerName: "GhostProvider" }, // not in registry
+    ]);
+    const ping = vi.fn(async () => ({ ok: false, latencyMs: 20, error: "HTTP 429 rate limited" }));
+    const next = await supervisorFailover("all providers degraded", { ping });
+    expect(next).toBeNull();
+    const lock = getJobAILock()!;
+    expect(getActiveJobModel()?.providerId).toBe("p_a"); // declared primary preserved
+    expect(lock.failoverCount).toBe(0); // nothing was activated
+    // Both refusals recorded — B by failed ping, ghost by missing registry entry.
+    expect(lock.events.filter((e) => e.note.includes("refused"))).toHaveLength(2);
+  });
+
+  it("no lock → no failover (gate never ran), returns null", async () => {
+    const ping = vi.fn();
+    expect(await supervisorFailover("anything", { ping })).toBeNull();
+    expect(ping).not.toHaveBeenCalled();
+  });
+});

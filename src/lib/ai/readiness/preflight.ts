@@ -357,29 +357,39 @@ export async function supervisedRecovery(
 }
 
 /**
- * SUPERVISOR FAILOVER PROTOCOL (directive #35): if the active model fails
- * mid-job, the supervisor activates the highest-ranked PRE-VALIDATED fallback
- * (never an unvalidated one — directive #36). Returns the new active ref.
+ * SUPERVISOR FAILOVER PROTOCOL (directives #35, #36, #50): if the active model
+ * fails mid-job, the supervisor activates the highest-ranked PRE-VALIDATED
+ * fallback. Directive #36 is absolute: the ACTIVE route may never reference an
+ * unvalidated provider — so a fallback that fails its validation ping is
+ * SKIPPED (recorded, never activated) and the walk continues down the chain.
+ * When no fallback validates, the function returns null and the lock still
+ * points at the declared primary — the caller surfaces the real error and the
+ * pipeline stops safely (§50 scenario 3). Fixes the earlier recursion that
+ * activated a refused fallback (activeIndex landed on a just-refused provider
+ * and failoverCount was inflated without any actual switch).
  */
 export async function supervisorFailover(reason: string, deps?: HealerDeps): Promise<LockedModelRef | null> {
   const lock = getJobAILock();
   if (!lock) return null;
-  // Try the next pre-validated fallback.
-  const nextIndex = lock.activeIndex; // fallbacks[nextIndex-1+1] → fallbacks[nextIndex]
-  if (nextIndex < lock.fallbacks.length) {
-    const candidate = lock.fallbacks[nextIndex];
-    // Verify current health before switching (no unvalidated fallbacks).
+  for (let i = lock.activeIndex; i < lock.fallbacks.length; i++) {
+    const candidate = lock.fallbacks[i];
     const provider = useApp.getState().providers.find((p) => p.id === candidate.providerId);
     if (provider && !providerInCooldown(provider)) {
+      // Verify current health before switching (no unvalidated fallbacks).
       const ping = await pingCandidate(provider, candidate.model, 15000, deps);
       if (ping.ok) {
-        activateFallback(nextIndex, `Failover: ${reason}`);
+        activateFallback(i, `Failover: ${reason}`);
         return getActiveJobModel();
       }
     }
-    // That fallback failed validation — recurse once down the chain.
-    activateFallback(nextIndex, `Fallback ${candidate.providerName} failed validation — continuing down the chain: ${reason}`);
-    return supervisorFailover(reason, deps);
+    // Refused (failed ping / cooldown / missing provider) — record for
+    // observability, never activate. The active route stays on the last
+    // VALIDATED position until a fallback actually passes validation.
+    lock.events.push({
+      at: new Date().toISOString(),
+      type: "failover",
+      note: `Fallback ${candidate.providerName} refused — continuing down the chain: ${reason}`,
+    });
   }
   return null;
 }
