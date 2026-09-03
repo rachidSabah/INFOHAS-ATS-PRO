@@ -350,7 +350,10 @@ function updateAgent(id: AgentId, patch: Partial<AgentState>): void {
 // No Durable Objects, no WebSockets — pure D1 + polling.
 
 const TASK_API_BASE_URL =
-  typeof window !== "undefined" && window.location.hostname === "localhost"
+  typeof window !== "undefined" &&
+  typeof window.location !== "undefined" &&
+  typeof window.location.hostname === "string" &&
+  window.location.hostname === "localhost"
     ? "http://localhost:8787"
     : "https://resumeai-pro-api.rachidelsabah.workers.dev";
 

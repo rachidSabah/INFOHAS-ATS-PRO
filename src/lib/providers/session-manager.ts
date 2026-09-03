@@ -291,7 +291,10 @@ export async function getAllSessions(): Promise<ProviderSession[]> {
 const CLOUD_API_BASE =
   (typeof window !== "undefined" && (window as any).__CLOUD_API_BASE) ||
   (typeof process !== "undefined" && process.env?.NEXT_PUBLIC_CLOUD_API_BASE) ||
-  (typeof window !== "undefined" && window.location.hostname === "localhost"
+  (typeof window !== "undefined" &&
+  typeof window.location !== "undefined" &&
+  typeof window.location.hostname === "string" &&
+  window.location.hostname === "localhost"
     ? "http://localhost:8787"
     : "https://resumeai-pro-api.rachidelsabah.workers.dev");
 
