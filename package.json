@@ -94,6 +94,7 @@
   },
   "devDependencies": {
     "@cloudflare/next-on-pages": "^1.13.16",
+    "@cloudflare/workers-types": "^5.20260903.1",
     "@opencode-ai/plugin": "^1.17.15",
     "@playwright/test": "^1.61.1",
     "@tailwindcss/postcss": "^4",

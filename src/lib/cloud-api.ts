@@ -203,6 +203,21 @@ export const api = {
   createCareerMaterial: (cm: any) => apiFetch("/api/career-materials", { method: "POST", body: JSON.stringify(cm) }),
   deleteCareerMaterial: (id: string) => apiFetch(`/api/career-materials/${id}`, { method: "DELETE" }),
 
+  // Agent Configuration Center (directives #20/#21) — authoritative D1
+  // persistence for the 18-agent registry with server-side versioning.
+  getAgentConfigs: () => apiFetch<{ ok: boolean; agentConfigs: any[]; version: number; updatedAt: string | null; updatedBy: string | null }>("/api/agent-configs"),
+  updateAgentConfigs: (agentConfigs: any[], updatedBy?: string) =>
+    apiFetch<{ ok: boolean; version: number; updatedAt: string; count: number }>(
+      "/api/agent-configs",
+      { method: "PUT", body: JSON.stringify({ agentConfigs, updatedBy }) },
+    ),
+
+  // Provider sessions (directive #39) — real lifecycle (session payloads are
+  // encrypted client-side by the SessionManager before reaching the API).
+  getProviderSession: (provider: string) => apiFetch<{ ok: boolean; session: any }>(`/api/provider-sessions/${provider}`),
+  putProviderSession: (provider: string, session: any) =>
+    apiFetch(`/api/provider-sessions/${provider}`, { method: "PUT", body: JSON.stringify(session) }),
+
   // Health
   health: () => apiFetch<{ ok: boolean }>("/api/health"),
 };
@@ -476,9 +491,21 @@ export async function syncAllFromCloud(store: any): Promise<void> {
       if (bd.selectedProfileId && typeof bd.selectedProfileId === "string") {
         store.setState({ selectedProfileId: bd.selectedProfileId });
       }
-      if (bd.agentConfigs && Array.isArray(bd.agentConfigs) && bd.agentConfigs.length > 0) {
-        console.info(`[syncAllFromCloud] Restoring agentConfigs from D1 (${bd.agentConfigs.length} agents)`);
-        store.setState({ agentConfigs: bd.agentConfigs });
+      // Agent Configuration Center restore (directive #21) — the dedicated
+      // /api/agent-configs endpoint is the authoritative source (versioned);
+      // fall back to a legacy inline `agentConfigs` array on branding if the
+      // endpoint has nothing persisted yet.
+      try {
+        const acRes = await api.getAgentConfigs();
+        if (acRes?.ok && Array.isArray(acRes.agentConfigs) && acRes.agentConfigs.length > 0) {
+          console.info(`[syncAllFromCloud] Restoring agentConfigs from D1 via /api/agent-configs (${acRes.agentConfigs.length} agents, version ${acRes.version})`);
+          store.setState({ agentConfigs: acRes.agentConfigs, agentConfigVersion: acRes.version ?? 0 });
+        } else if (bd.agentConfigs && Array.isArray(bd.agentConfigs) && bd.agentConfigs.length > 0) {
+          console.info(`[syncAllFromCloud] Restoring agentConfigs from legacy branding payload (${bd.agentConfigs.length} agents)`);
+          store.setState({ agentConfigs: bd.agentConfigs });
+        }
+      } catch (acErr: any) {
+        console.warn("[syncAllFromCloud] agent-configs restore failed (non-fatal):", acErr?.message || acErr);
       }
       if (bd.promptVersions && Array.isArray(bd.promptVersions) && bd.promptVersions.length > 0) {
         console.info(`[syncAllFromCloud] Restoring promptVersions from D1 (${bd.promptVersions.length} prompts)`);

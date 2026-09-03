@@ -25,8 +25,54 @@ import type { ReflectionResult } from "./orchestrator";
 import type { CompanyIntelligence, SkillGapIntelligence } from "./company-skill-agents";
 
 // ============================================================================
-// Context shape
+// Execution ledger (directive #18 — PipelineContext contract)
+//
+// ONE optimization job → ONE healthy AI execution route → ALL compatible
+// agents → ONE execution context. The ledger records the route every agent
+// actually used, token usage, timings, warnings, errors, retry state and
+// failover events so the run is fully auditable (directive #46) and the UI
+// can explain override reasons (directive #24).
 // ============================================================================
+
+/** Mirrors HealthyExecutionRoute (route-manager) without importing runtime code. */
+export interface ExecutionRouteRecord {
+  providerId: string;
+  providerName: string;
+  canonicalModelId: string;
+  healthStatus: string;
+  latencyMs?: number;
+  readinessScore?: number;
+  configurationId: string;
+  resolvedAt: string;
+  /** What established the route — always "readiness_gate" for job locks. */
+  authority: "readiness_gate" | "agent-config" | "app-default";
+}
+
+export interface FailoverEventRecord {
+  reason: string;
+  from: { providerId: string; canonicalModelId: string } | null;
+  to: { providerId: string; canonicalModelId: string } | null;
+  timestamp: string;
+  agent?: string;
+  note?: string;
+}
+
+export interface TokenUsageRecord {
+  inputTokens: number;
+  outputTokens: number;
+  calls: number;
+}
+
+export interface RetryStateRecord {
+  totalRetries: number;
+  perAgent: Record<string, number>;
+}
+
+export interface CancellationStateRecord {
+  cancelled: boolean;
+  reason?: string;
+  at?: string;
+}
 
 export interface GlobalPipelineContext {
   // === Identifiers ===
@@ -67,6 +113,33 @@ export interface GlobalPipelineContext {
   // === Metadata ===
   createdAt: string;
   updatedAt: string;
+
+  // === Execution ledger (directive #18) ===
+  /** Canonical id of the optimization mission (== optimizationId when set). */
+  missionId?: string;
+  /** Resume version string at optimization time. */
+  resumeVersion?: string;
+  /** Structured job context snapshot (title/company/industry summary). */
+  jobContext?: Record<string, unknown> | null;
+  /** Structured company context snapshot. */
+  companyContext?: Record<string, unknown> | null;
+  /** The ONE healthy route locked to this job (readiness gate). */
+  executionRoute?: ExecutionRouteRecord | null;
+  /** True while the job's route lock is active. */
+  routeLock?: { locked: boolean; jobId?: string; lockedAt?: string; failoverCount?: number } | null;
+  /** Standardized per-agent results: agentId → structured output envelope. */
+  agentResults?: Record<string, { success: boolean; agentId: string; outputVersion: string; completedAt: string; durationMs?: number }>;
+  /** Per-agent diagnostics (errors, warnings, category). */
+  agentDiagnostics?: Record<string, { errors: string[]; warnings: string[]; state: string }>;
+  /** Aggregate token usage across the pipeline. */
+  tokenUsage?: TokenUsageRecord;
+  /** Per-agent + total wall-clock timings (ms). */
+  timings?: Record<string, number> & { totalMs?: number };
+  warnings?: string[];
+  errors?: string[];
+  retryState?: RetryStateRecord;
+  failoverEvents?: FailoverEventRecord[];
+  cancellationState?: CancellationStateRecord;
 }
 
 export interface InterviewPackage {
@@ -186,7 +259,96 @@ export function createEmptyContext(): GlobalPipelineContext {
     missingSkills: [],
     createdAt: now,
     updatedAt: now,
+    // Execution ledger defaults (directive #18)
+    missionId: undefined,
+    resumeVersion: undefined,
+    jobContext: null,
+    companyContext: null,
+    executionRoute: null,
+    routeLock: null,
+    agentResults: {},
+    agentDiagnostics: {},
+    tokenUsage: { inputTokens: 0, outputTokens: 0, calls: 0 },
+    timings: {},
+    warnings: [],
+    errors: [],
+    retryState: { totalRetries: 0, perAgent: {} },
+    failoverEvents: [],
+    cancellationState: { cancelled: false },
   };
+}
+
+// ============================================================================
+// EXECUTION LEDGER HELPERS (directive #18/#19 — standardized AgentResult-ish
+// records on the shared context; every agent execution should record here).
+// ============================================================================
+
+/** Record/refresh the locked execution route on a context (idempotent). */
+export function setContextExecutionRoute(
+  ctx: GlobalPipelineContext,
+  route: ExecutionRouteRecord,
+  lock?: { jobId?: string; lockedAt?: string; failoverCount?: number } | null,
+): GlobalPipelineContext {
+  ctx.executionRoute = route;
+  ctx.routeLock = {
+    locked: true,
+    jobId: lock?.jobId,
+    lockedAt: lock?.lockedAt,
+    failoverCount: lock?.failoverCount ?? 0,
+  };
+  if (!ctx.missionId && ctx.optimizationId) ctx.missionId = ctx.optimizationId;
+  ctx.updatedAt = new Date().toISOString();
+  return ctx;
+}
+
+/** Append a failover event to the context ledger. */
+export function recordContextFailover(ctx: GlobalPipelineContext, event: FailoverEventRecord): GlobalPipelineContext {
+  if (!ctx.failoverEvents) ctx.failoverEvents = [];
+  ctx.failoverEvents.push(event);
+  if (ctx.routeLock) ctx.routeLock.failoverCount = (ctx.routeLock.failoverCount ?? 0) + 1;
+  ctx.updatedAt = new Date().toISOString();
+  return ctx;
+}
+
+/** Record a standardized agent result + diagnostics (directive #19). */
+export function recordContextAgentResult(
+  ctx: GlobalPipelineContext,
+  entry: { agentId: string; success: boolean; durationMs?: number; warnings?: string[]; errors?: string[]; tokens?: { inputTokens?: number; outputTokens?: number } },
+): GlobalPipelineContext {
+  const now = new Date().toISOString();
+  if (!ctx.agentResults) ctx.agentResults = {};
+  if (!ctx.agentDiagnostics) ctx.agentDiagnostics = {};
+  if (!ctx.timings) ctx.timings = {};
+  if (!ctx.warnings) ctx.warnings = [];
+  if (!ctx.errors) ctx.errors = [];
+  if (!ctx.retryState) ctx.retryState = { totalRetries: 0, perAgent: {} };
+  if (!ctx.tokenUsage) ctx.tokenUsage = { inputTokens: 0, outputTokens: 0, calls: 0 };
+
+  ctx.agentResults[entry.agentId] = {
+    success: entry.success,
+    agentId: entry.agentId,
+    outputVersion: `v1:${now}`,
+    completedAt: now,
+    durationMs: entry.durationMs,
+  };
+  ctx.agentDiagnostics[entry.agentId] = {
+    errors: entry.errors ?? [],
+    warnings: entry.warnings ?? [],
+    state: entry.success ? "completed" : "failed",
+  };
+  if (entry.durationMs != null) {
+    ctx.timings[entry.agentId] = entry.durationMs;
+    ctx.timings.totalMs = (ctx.timings.totalMs ?? 0) + entry.durationMs;
+  }
+  if (entry.warnings?.length) ctx.warnings.push(...entry.warnings);
+  if (entry.errors?.length) ctx.errors.push(...entry.errors);
+  if (entry.tokens) {
+    ctx.tokenUsage.inputTokens += entry.tokens.inputTokens ?? 0;
+    ctx.tokenUsage.outputTokens += entry.tokens.outputTokens ?? 0;
+    ctx.tokenUsage.calls += 1;
+  }
+  ctx.updatedAt = now;
+  return ctx;
 }
 
 /**

@@ -50,6 +50,9 @@ import { withTimeout, OptimizationProviderExhaustedError, AI_CALL_TIMEOUT_MS } f
 import { truncatePromptToTokenLimit, MAX_INPUT_TOKENS } from "../../ai-diagnostics";
 import { isOpenCodeZenFree } from "../../provider-capabilities";
 import { shouldSkipForOptimization, EMERGENCY_ONLY_PROVIDERS } from "../../circuit-breaker";
+// Central health registry + validated rotation (directives #9, #12):
+import { aiHealthManager } from "../health/ai-health-manager";
+import { filterCompatibleRotationCandidates } from "../routing/model-compatibility";
 
 export interface RouterOptions {
   /** Override the default provider for this single call. */
@@ -843,13 +846,13 @@ export class ProviderRouter {
    *
    *   keyRotation   — 401/402/403/429, rate-limit, quota, billing, credits,
    *                   unauthorized, invalid API key: a DIFFERENT KEY may help.
-   *   modelRotation — 429 / rate-limit / quota: a DIFFERENT MODEL may have a
-   *                   separate quota. Auth/credit errors exclude this (another
-   *                   model on the same dead credential won't help).
-   *                   MODEL ERRORS ("model X not found / not supported /
-   *                   invalid model") now ALSO trigger model rotation: trying
-   *                   the provider's other enabledModels is exactly the safe
-   *                   first-line repair for a stale model id (directive #3/#11).
+   *   modelRotation — ONLY model-not-found / unsupported-model errors: a
+   *                   stale model id is repaired by trying the provider's
+   *                   other COMPATIBLE enabledModels (directives #3/#11/#12).
+   *                   429 / quota / rate-limit DO NOT rotate models (directive
+   *                   #12): quota is a provider-level failure handled by the
+   *                   cooldown + central health registry + provider-level
+   *                   failover — never by blind model-name rotation.
    */
   private static classifyRotationError(e: any): { keyRotation: boolean; modelRotation: boolean } {
     const statusCode = e?.statusCode || e?.status || 0;
@@ -864,13 +867,14 @@ export class ProviderRouter {
       /unauthorized/i.test(eMsg) ||
       /invalid.?(api.?)?key/i.test(eMsg) ||
       /FreeUsageLimitError/i.test(eMsg);
+    // DIRECTIVE #12 — 429 / quota / rate-limit DO NOT trigger model rotation:
+    // a provider-level quota failure is not a model problem, and blind
+    // rotation through arbitrary model names produced the 401 "Model not
+    // supported by provider" storms (directive #11). Quota failures are
+    // handled by provider cooldowns + the central health registry, and
+    // failover happens at PROVIDER level via the validated chain.
     const modelRotation =
-      statusCode === 429 ||
-      /429/.test(eMsg) ||
-      /rate.?limit/i.test(eMsg) ||
-      /quota/i.test(eMsg) ||
-      /FreeUsageLimitError/i.test(eMsg) ||
-      /model[s]?[\s`"'/.\w-]{0,60}?(?:not.?found|does.?not.?exist|is.?not.?supported|unsupported|error\b)|not.?found.?for.?api.?version|invalid.?model|decommissioned/i.test(eMsg);
+      /model[s]?[\s`"'/.\w-]{0,60}?(?:not.?found|does.?not.?exist|(?:is.?)?not.?supported|unsupported|error\b)|not.?found.?for.?api.?version|invalid.?model|decommissioned/i.test(eMsg);
     return { keyRotation, modelRotation };
   }
 
@@ -985,12 +989,16 @@ export class ProviderRouter {
       }
     }
 
-    // === C. Model rotation ===
+    // === C. Model rotation — VALIDATED CANDIDATES ONLY (directive #12) ===
+    // Rotation only runs after the error was classified as a MODEL error, and
+    // every candidate is compatibility-validated BEFORE execution: unknown,
+    // provider-declared-unsupported or known-dead model ids never enter the
+    // rotation pool (no more 401 "Model not supported by provider" storms).
     const enabledModels = (provider.enabledModels as string[] | undefined) || [];
     const currentModel = modelForAttempt || req.model || config.modelName || "";
     if (enabledModels.length > 1) {
-      const otherModels = enabledModels.filter((m: string) => m !== currentModel && !rotationState.triedModels.has(m));
-      const maxAltModels = otherModels.slice(0, 3);
+      const rawCandidates = enabledModels.filter((m: string) => m !== currentModel && !rotationState.triedModels.has(m));
+      const maxAltModels = filterCompatibleRotationCandidates(provider, rawCandidates, new Set()).slice(0, 3);
       for (const altModel of maxAltModels) {
         rotationState.triedModels.add(altModel);
         console.log(`[PROVIDER] Rotating model to "${altModel}" for ${provider.name}...`);
@@ -1006,6 +1014,13 @@ export class ProviderRouter {
           useApp.getState().updateProvider(provider.id, { modelName: altModel });
 
           rateLimitTracker.recordSuccess(provider.id, res.model || altModel);
+          aiHealthManager.recordSuccess({
+            providerId: provider.id,
+            providerName: provider.name,
+            canonicalModelId: res.model || altModel,
+            ok: true,
+            latencyMs: res.latencyMs,
+          });
           this.log({
             providerId: provider.id,
             providerName: provider.name,
@@ -1021,6 +1036,14 @@ export class ProviderRouter {
           return res;
         } catch (modelErr: any) {
           console.warn(`[PROVIDER] Model "${altModel}" failed for ${provider.name}: ${modelErr?.message || modelErr}`);
+          aiHealthManager.recordFailure({
+            providerId: provider.id,
+            providerName: provider.name,
+            canonicalModelId: altModel,
+            ok: false,
+            httpStatus: modelErr?.statusCode || modelErr?.status || undefined,
+            errorMessage: modelErr?.message || String(modelErr ?? ""),
+          });
         }
       }
     }
@@ -1065,6 +1088,15 @@ export class ProviderRouter {
 
         // Record success in rate-limit tracker
         rateLimitTracker.recordSuccess(provider.id, res.model || config.modelName || "default");
+        // Central health registry observation (directive #9) — same evidence
+        // feeds the Agent Configuration Center, benchmark and pipeline.
+        aiHealthManager.recordSuccess({
+          providerId: provider.id,
+          providerName: provider.name,
+          canonicalModelId: res.model || modelForAttempt || config.modelName || "default",
+          ok: true,
+          latencyMs: res.latencyMs,
+        });
         // Evidence of recovery clears any stale cooldown (P1 early-clear).
         clearProviderCooldownOnSuccess(provider.id || provider.name || provider.type);
 
@@ -1085,6 +1117,17 @@ export class ProviderRouter {
         return res;
       } catch (e: any) {
         lastError = e;
+
+        // Central health registry observation (directive #9, #10) — preserves
+        // the explicit failure reason (quota vs auth vs unsupported model...).
+        aiHealthManager.recordFailure({
+          providerId: provider.id,
+          providerName: provider.name,
+          canonicalModelId: modelForAttempt || req.model || config.modelName || "default",
+          ok: false,
+          httpStatus: e?.statusCode || e?.status || undefined,
+          errorMessage: e?.message || String(e ?? ""),
+        });
 
         const { keyRotation, modelRotation } = this.classifyRotationError(e);
         if (keyRotation || modelRotation) {
@@ -1160,9 +1203,16 @@ export class ProviderRouter {
       try {
         const adapter = ProviderFactory.get(prov.type);
         const config = toProviderConfig(prov);
-        
+
+        // MODEL-LEAK GUARD (directive #12): each race candidate must run its
+        // OWN model — the requested model id may only execute on the provider
+        // it was resolved against (same rule as the sequential chain's
+        // modelForProvider). Previously the raw request model leaked into
+        // every race candidate and produced cross-provider 404s.
+        const candidateModel = this.modelForProvider(prov, opts, req);
         const candidateReq: ChatRequest = {
           ...req,
+          model: candidateModel,
           signal: globalAc.signal
         };
 

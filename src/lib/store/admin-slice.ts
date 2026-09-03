@@ -107,6 +107,15 @@ export interface AdminSlice {
   removePipelineProfile: (id: string) => void;
   selectPipelineProfile: (id: string) => void;
   updateAgentConfig: (agentType: string, patch: Partial<AgentConfig>) => void;
+  /**
+   * Bulk-assign a config patch to MULTIPLE agents at once (directives #5/#25).
+   * Operates against the COMPLETE registry — never only visible DOM items —
+   * so Select All + bulk provider/model assignment work across all 18 agents.
+   * Persists once to D1 and writes a single audit entry.
+   */
+  bulkUpdateAgentConfigs: (agentTypes: string[], patch: Partial<AgentConfig>) => number;
+  /** Server-side config version from the last D1 sync (cache consistency, dir. #40). */
+  agentConfigVersion: number;
   applyOptimalAgentDefaults: () => void;
   updatePromptVersion: (id: string, patch: Partial<PromptVersion>) => void;
   addPromptVersion: (prompt: PromptVersion) => void;
@@ -133,6 +142,7 @@ export const createAdminSlice: StateCreator<AppState, [], [], AdminSlice> = (set
   pipelineProfiles: SEED_PIPELINE_PROFILES,
   selectedProfileId: SEED_PIPELINE_PROFILES.find((p) => p.isDefault)?.id || SEED_PIPELINE_PROFILES[0]?.id || "",
   agentConfigs: SEED_AGENT_CONFIGS,
+  agentConfigVersion: 0,
   promptVersions: SEED_PROMPT_VERSIONS,
   prompts: applyActiveOverrides(SEED_PROMPTS, loadActiveOverrides(PROMPT_ACTIVE_KEY)),
   branding: SEED_BRANDING,
@@ -431,14 +441,64 @@ export const createAdminSlice: StateCreator<AppState, [], [], AdminSlice> = (set
         a.agentType === agentType ? { ...a, ...patch, updatedAt: new Date().toISOString() } : a,
       ),
     }));
-    cloudApiSafe(cloudApi.updateBranding as any)({ agentConfigs: get().agentConfigs }).catch((e) => { console.warn("[store] Cloud sync failed:", e); });
+    // Directive #21 — persist to D1 via the dedicated agent-configs endpoint
+    // (the old branding sinkhole dropped agentConfigs silently).
+    cloudApiSafe(cloudApi.updateAgentConfigs as any)(get().agentConfigs, get().user?.email ?? "admin")
+      .then((res: any) => {
+        if (res?.ok && typeof res.version === "number") {
+          set({ agentConfigVersion: res.version });
+          console.info(`[AI_CONFIG_SYNC] agent=${agentType} version=${res.version} source=D1 runtime=updated`);
+        }
+      })
+      .catch((e: any) => { console.warn("[store] Cloud sync failed:", e); });
+    console.info(`[AI_CONFIG] agent=${agentType} fields=${Object.keys(patch).join(",")} source=AgentConfigCenter`);
     get().log({ actor: get().user?.email ?? "admin", action: "Agent config updated", category: "admin", details: `Agent: ${agentType}, fields: ${Object.keys(patch).join(", ")}`, severity: "info" });
+  },
+
+  bulkUpdateAgentConfigs: (agentTypes, patch) => {
+    const targets = new Set(agentTypes);
+    const now = new Date().toISOString();
+    let updated = 0;
+    set((s) => ({
+      agentConfigs: s.agentConfigs.map((a) => {
+        if (!targets.has(a.agentType)) return a;
+        updated += 1;
+        return { ...a, ...patch, updatedAt: now };
+      }),
+    }));
+    if (updated > 0) {
+      // One D1 transaction for the whole bulk assignment (directive #21).
+      cloudApiSafe(cloudApi.updateAgentConfigs as any)(get().agentConfigs, get().user?.email ?? "admin")
+        .then((res: any) => {
+          if (res?.ok && typeof res.version === "number") {
+            set({ agentConfigVersion: res.version });
+            console.info(`[AI_CONFIG_SYNC] agents=${updated} version=${res.version} source=D1 runtime=updated bulk=true`);
+          }
+        })
+        .catch((e: any) => { console.warn("[store] Cloud sync failed:", e); });
+      console.info(`[AI_CONFIG] bulk=true agents=${updated} fields=${Object.keys(patch).join(",")}`);
+      get().log({
+        actor: get().user?.email ?? "admin",
+        action: "Agent configs bulk updated",
+        category: "admin",
+        details: `${updated} agent(s): ${Object.keys(patch).join(", ")}`,
+        severity: "info",
+      });
+    }
+    return updated;
   },
 
   applyOptimalAgentDefaults: () => {
     const now = new Date().toISOString();
     set({ agentConfigs: SEED_AGENT_CONFIGS.map((a) => ({ ...a, createdAt: now, updatedAt: now })) });
-    cloudApiSafe(cloudApi.updateBranding as any)({ agentConfigs: get().agentConfigs }).catch((e) => { console.warn("[store] Cloud sync failed:", e); });
+    cloudApiSafe(cloudApi.updateAgentConfigs as any)(get().agentConfigs, get().user?.email ?? "admin")
+      .then((res: any) => {
+        if (res?.ok && typeof res.version === "number") {
+          set({ agentConfigVersion: res.version });
+          console.info(`[AI_CONFIG_SYNC] agents=${SEED_AGENT_CONFIGS.length} version=${res.version} source=D1 runtime=updated reset=true`);
+        }
+      })
+      .catch((e: any) => { console.warn("[store] Cloud sync failed:", e); });
     get().log({ actor: get().user?.email ?? "admin", action: "Optimal agent defaults applied", category: "admin", details: `${SEED_AGENT_CONFIGS.length} agent configs restored to tuned optimal values (Task 7)`, severity: "warning" });
   },
 

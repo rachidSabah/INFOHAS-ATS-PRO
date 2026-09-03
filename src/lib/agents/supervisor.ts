@@ -41,8 +41,13 @@ import {
   type AgentId,
   type AgentStatus,
   type PipelineEvent,
+  type ExecutionRouteRecord,
   createEmptyContext,
+  setContextExecutionRoute,
+  recordContextFailover,
 } from "./pipeline-context";
+import { getJobAILock, getActiveJobModel } from "../ai/readiness/config-lock";
+import { supervisorLog, aiRouteLog, pipelineLog } from "../ai/observability";
 import {
   type UserProfile,
   loadUserProfile,
@@ -877,6 +882,63 @@ export async function handleResumeUploaded(resume: ResumeData): Promise<void> {
  *
  * This wraps the existing runOptimizationPipeline() — 100% backward compatible.
  */
+/**
+ * Mirror the active Job AI Lock into the shared PipelineContext execution
+ * ledger (directive #18) and emit the [AI_ROUTE] observability line
+ * (directive #46). No-op when no lock is active — non-locked runs fall to
+ * the documented resolution order (explicit pin > lock > agent config > app
+ * default) and the Agent Configuration Center remains the visible source.
+ */
+function stampRouteLockIntoContext(jobId: string | null): void {
+  try {
+    const lock = getJobAILock();
+    const active = getActiveJobModel();
+    if (!lock || !active) return;
+    const route: ExecutionRouteRecord = {
+      providerId: active.providerId,
+      providerName: active.providerName,
+      canonicalModelId: active.model,
+      healthStatus: "healthy",
+      latencyMs: active.latencyMs,
+      readinessScore: active.readinessScore,
+      configurationId: `job-lock:${lock.jobId}`,
+      resolvedAt: lock.lockedAt,
+      authority: "readiness_gate",
+    };
+    const ctx = state.context;
+    setContextExecutionRoute(ctx, route, {
+      jobId: lock.jobId,
+      lockedAt: lock.lockedAt,
+      failoverCount: lock.failoverCount,
+    });
+    // Replay any failover events the lock already recorded (controlled
+    // failovers happen ONLY through Route Manager / activateFallback).
+    for (const ev of lock.events) {
+      if (ev.type === "failover") {
+        recordContextFailover(ctx, {
+          reason: "supervisor_failover",
+          from: ev.from ? { providerId: ev.from, canonicalModelId: "" } : null,
+          to: ev.to ? { providerId: ev.to, canonicalModelId: "" } : null,
+          timestamp: ev.at,
+          agent: "supervisor",
+          note: ev.note,
+        });
+      }
+    }
+    aiRouteLog({
+      job: lock.jobId || jobId || "-",
+      provider: active.providerName,
+      model: active.model,
+      status: "locked",
+      authority: "readiness_gate",
+      failovers: lock.failoverCount,
+    });
+    supervisorLog({ job: lock.jobId || jobId || "-", status: "route-locked" }, "Healthy execution route stamped into PipelineContext");
+  } catch (e: any) {
+    console.warn("[Supervisor] Route lock stamping failed (non-fatal):", e?.message || e);
+  }
+}
+
 export async function handleOptimizationRequested(
   inputs: {
     resume: ResumeData;
@@ -912,6 +974,14 @@ export async function handleOptimizationRequested(
     companyName: jd.company ?? null,
     jobTitle: jd.title ?? null,
   });
+
+  // === ROUTE LOCK STAMPING (directives #13, #18, #46) ===
+  // If the Supervisor's readiness gate established a Job AI Lock, record the
+  // ONE healthy execution route on the shared PipelineContext so every agent,
+  // the QA view and the UI can see WHICH provider+model this job runs on and
+  // WHY (authority=readiness_gate). The lock itself stays the single source
+  // of truth — this is the observable mirror, not a second authority.
+  stampRouteLockIntoContext(jd.id);
 
   // Check cache — include provider/model/directiveHash so switching providers or directives invalidates cache.
   // Task 7: also include the SELECTED PIPELINE PROFILE (id + updatedAt) and the

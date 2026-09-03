@@ -8,6 +8,7 @@
 "use client";
 
 import type { AIProvider } from "./types";
+import { aiHealthManager } from "./ai/health/ai-health-manager";
 import { recordProviderFailure } from "./telemetry";
 
 export interface ModelDiscoveryResult {
@@ -100,6 +101,13 @@ export async function syncModelsForProvider(provider: AIProvider): Promise<Model
     }
 
     result.models = discovered;
+
+    // Directive #8/#32 — live discovery is REAL: discovered ids enter the
+    // central health registry with the explicit DISCOVERED lifecycle state.
+    // DISCOVERED models are metadata only — they are NOT executable until a
+    // provider declaration (SUPPORTED) or a real execution (HEALTHY)
+    // validates them. Nothing is manufactured here.
+    aiHealthManager.registerDiscovered(provider.id, provider.name, discovered);
 
     // Find new models not already in enabledModels
     const existingModels = new Set(provider.enabledModels || []);

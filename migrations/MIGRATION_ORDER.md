@@ -24,6 +24,8 @@
 | `0013_alternate_api_keys.sql` | Alternate API key support | 0002 |
 | `0014_career_materials.sql` | career_materials table | 0001 |
 | `0015_antigravity_provider.sql` | provider_tokens, provider_connections, provider_models, provider_health, provider_capabilities | 0001 |
+| `0016_provider_models_stable_ids.sql` | provider_models stable ids (UNIQUE(provider_id, model_id)) | 0015 |
+| `0017_agent_configs_and_sessions.sql` | branding: agent_configs_json/_version/_updated_at/_updated_by + provider_sessions table (Agent Configuration Center D1 persistence + provider session lifecycle) | 0008 |
 
 ## How to Add a New Migration
 

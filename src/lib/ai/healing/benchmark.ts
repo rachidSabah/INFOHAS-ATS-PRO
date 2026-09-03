@@ -19,6 +19,10 @@ import { getProviderCatalogEntry } from "../provider-catalog";
 import { classifyProviderFailure, chipForClassification, type HealthChip } from "./error-classifier";
 import { ProviderHealer, providerInCooldown, cooldownRemainingSeconds, type HealerDeps, type HealReportEntry } from "./provider-healer";
 import { rateLimitTracker } from "../../rate-limit-tracker";
+// Central AI Health Manager (directive #9/#31): benchmark results MUST feed
+// the SAME registry the pipeline uses — no competing health systems.
+import { aiHealthManager } from "../health/ai-health-manager";
+import { aiBenchmarkLog } from "../observability";
 
 export type BenchmarkStatus =
   | "pass" | "cooldown" | "model_error" | "endpoint_error" | "auth_error"
@@ -124,6 +128,8 @@ export async function runProviderAwareBenchmark(opts: {
     // === Cooldown check — report, don't punish (directive #6) ===
     if (providerInCooldown(provider)) {
       const remaining = cooldownRemainingSeconds(provider);
+      aiHealthManager.setCooldown(provider.id, model, Date.now() + remaining * 1000);
+      aiBenchmarkLog({ provider: provider.name, model, status: "cooldown", remaining_s: remaining }, "cooldown row reported, not punished");
       rows.push({
         providerId: provider.id, providerName: provider.name, providerType: provider.type,
         resolvedModel: model, modelSource: source,
@@ -181,6 +187,16 @@ export async function runProviderAwareBenchmark(opts: {
     // === Update health state from the benchmark result ===
     if (ok) {
       rateLimitTracker.recordSuccess(provider.id, model);
+      // Exact provider+model pair validated by a REAL ping (directive #31).
+      aiHealthManager.recordBenchmark({
+        providerId: provider.id,
+        providerName: provider.name,
+        canonicalModelId: model,
+        ok: true,
+        latencyMs,
+        httpStatus: 200,
+      });
+      aiBenchmarkLog({ provider: provider.name, model, status: "pass", latency_ms: latencyMs });
       const current = provider.health || { consecutiveFailures: 0, consecutiveSuccesses: 0 };
       useApp.getState().updateProvider(provider.id, {
         status: "healthy",
@@ -205,6 +221,15 @@ export async function runProviderAwareBenchmark(opts: {
     }
 
     // === Failure: record + classify + optional Auto-Heal (directives #3, #13) ===
+    aiHealthManager.recordBenchmark({
+      providerId: provider.id,
+      providerName: provider.name,
+      canonicalModelId: model,
+      ok: false,
+      latencyMs,
+      errorMessage: pingError,
+    });
+    aiBenchmarkLog({ provider: provider.name, model, status, category: cls.kind, latency_ms: latencyMs }, pingError?.slice(0, 120));
     const current = provider.health || { consecutiveFailures: 0, consecutiveSuccesses: 0 };
     useApp.getState().updateProvider(provider.id, {
       // Both temporary and permanent failures keep the provider "degraded" —

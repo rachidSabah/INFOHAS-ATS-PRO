@@ -157,9 +157,17 @@ export async function callWithRouting(
     attemptedRoutes.push(route);
 
     try {
+      // ROUTE PINNING FIX (directives #12/#16): the advertised route is the
+      // route that must execute. Previously the providerId/model were NOT
+      // passed to callAI — every iteration silently re-ran the ENTIRE router
+      // chain, so attempts and usedProvider were misattributed and each
+      // "route" multiplied into a full-chain attempt. The call is now pinned
+      // to the exact provider (+ its declared model) per iteration.
       const result = await callAI({
         systemPrompt: prompt.systemPrompt,
         userPrompt: prompt.userPrompt,
+        providerId: route.providerId,
+        modelOverride: route.modelName || undefined,
         maxTokens: opts?.maxTokens,
         temperature: opts?.temperature,
         taskCategory: opts?.taskCategory ?? "document",

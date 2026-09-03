@@ -1097,17 +1097,169 @@ app.delete("/api/providers/:id", async (c) => {
 });
 
 // ============ PROVIDER SESSIONS (Puter, Antigravity, OAuth) ============
+// REAL D1 lifecycle (directive #39): the client SessionManager issues
+// PUT/GET/DELETE /api/provider-sessions/:provider — previously every handler
+// was a stub and PUT did not exist at all (the production 404). Sessions are
+// stored per provider so authentication state survives restore.
+// NOTE: payloads are encrypted client-side by the SessionManager before they
+// reach this route; access tokens are never logged here (directive #43).
+
+async function ensureProviderSessionsTable(db: D1Database): Promise<void> {
+  await db.prepare(
+    `CREATE TABLE IF NOT EXISTS provider_sessions (
+      provider TEXT PRIMARY KEY,
+      session_json TEXT NOT NULL,
+      authenticated INTEGER NOT NULL DEFAULT 0,
+      updated_at TEXT NOT NULL
+    )`
+  ).run();
+}
+
+app.put("/api/provider-sessions/:provider", async (c) => {
+  const provider = c.req.param("provider");
+  try {
+    const body = await parseBody(c.req.raw);
+    if (!body || typeof body !== "object") {
+      return c.json({ ok: false, error: "Invalid session payload" }, 400);
+    }
+    await ensureProviderSessionsTable(c.env.DB);
+    const now = new Date().toISOString();
+    await c.env.DB.prepare(
+      `INSERT INTO provider_sessions (provider, session_json, authenticated, updated_at)
+       VALUES (?, ?, ?, ?)
+       ON CONFLICT(provider) DO UPDATE SET session_json = excluded.session_json, authenticated = excluded.authenticated, updated_at = excluded.updated_at`
+    ).bind(provider, JSON.stringify(body), body?.authenticated ? 1 : 0, now).run();
+    console.log(`[ProviderSessions] Session persisted for ${provider} (authenticated=${!!body?.authenticated})`);
+    return c.json({ ok: true, success: true, provider, updatedAt: now });
+  } catch (e: any) {
+    console.error("[ProviderSessions PUT Error]", e?.message);
+    return c.json({ ok: false, error: e?.message || "Failed to persist provider session" }, 500);
+  }
+});
+
 app.get("/api/provider-sessions/:provider", async (c) => {
-  return c.json({ ok: true, sessions: [] });
+  const provider = c.req.param("provider");
+  try {
+    await ensureProviderSessionsTable(c.env.DB);
+    const row = await c.env.DB.prepare("SELECT session_json, authenticated, updated_at FROM provider_sessions WHERE provider = ?").bind(provider).first<any>();
+    if (!row) return c.json({ ok: true, session: null, sessions: [] });
+    let session: any = null;
+    try { session = JSON.parse(row.session_json); } catch { session = null; }
+    return c.json({ ok: true, session, sessions: session ? [session] : [] });
+  } catch (e: any) {
+    console.error("[ProviderSessions GET Error]", e?.message);
+    return c.json({ ok: true, session: null, sessions: [] });
+  }
 });
 
 app.post("/api/provider-sessions/:provider", async (c) => {
-  return c.json({ ok: true, success: true });
+  // POST behaves as an upsert alias of PUT (legacy clients).
+  const provider = c.req.param("provider");
+  try {
+    const body = await parseBody(c.req.raw);
+    await ensureProviderSessionsTable(c.env.DB);
+    const now = new Date().toISOString();
+    await c.env.DB.prepare(
+      `INSERT INTO provider_sessions (provider, session_json, authenticated, updated_at)
+       VALUES (?, ?, ?, ?)
+       ON CONFLICT(provider) DO UPDATE SET session_json = excluded.session_json, authenticated = excluded.authenticated, updated_at = excluded.updated_at`
+    ).bind(provider, JSON.stringify(body ?? {}), body?.authenticated ? 1 : 0, now).run();
+    return c.json({ ok: true, success: true, provider, updatedAt: now });
+  } catch (e: any) {
+    console.error("[ProviderSessions POST Error]", e?.message);
+    return c.json({ ok: false, error: e?.message || "Failed to persist provider session" }, 500);
+  }
 });
 
 app.delete("/api/provider-sessions/:provider", async (c) => {
-  return c.json({ ok: true, success: true });
+  const provider = c.req.param("provider");
+  try {
+    await ensureProviderSessionsTable(c.env.DB);
+    await c.env.DB.prepare("DELETE FROM provider_sessions WHERE provider = ?").bind(provider).run();
+    return c.json({ ok: true, success: true });
+  } catch (e: any) {
+    console.error("[ProviderSessions DELETE Error]", e?.message);
+    return c.json({ ok: false, error: e?.message || "Failed to clear provider session" }, 500);
+  }
 });
+
+// ============ AGENT CONFIGURATION CENTER (directives #20/#21/#22) ============
+// Authoritative D1 persistence for the 18-agent registry. Stored on the
+// existing branding settings singleton row (adapted to the existing database
+// architecture — directive #20) with a monotonically increasing version so
+// stale writers are detected (cache-consistency directive #40).
+
+async function ensureAgentConfigColumns(db: D1Database): Promise<void> {
+  // Migration 0017 may not be applied on every environment yet; self-heal the
+  // columns so the route works as soon as it is deployed.
+  const alters: [string, string][] = [
+    ["agent_configs_json", "TEXT"],
+    ["agent_configs_version", "INTEGER NOT NULL DEFAULT 0"],
+    ["agent_configs_updated_at", "TEXT"],
+    ["agent_configs_updated_by", "TEXT"],
+  ];
+  for (const [col, def] of alters) {
+    try {
+      await db.prepare(`SELECT ${col} FROM branding WHERE id = 1`).first();
+    } catch {
+      try {
+        await db.prepare(`ALTER TABLE branding ADD COLUMN ${col} ${def}`).run();
+      } catch (e: any) {
+        if (!/duplicate column/i.test(e?.message || "")) throw e;
+      }
+    }
+  }
+}
+
+app.get("/api/agent-configs", async (c) => {
+  try {
+    await ensureAgentConfigColumns(c.env.DB);
+    const row = await c.env.DB.prepare(
+      "SELECT agent_configs_json, agent_configs_version, agent_configs_updated_at, agent_configs_updated_by FROM branding WHERE id = 1"
+    ).first<any>();
+    const configs = row?.agent_configs_json ? JSON.parse(row.agent_configs_json) : [];
+    return c.json({
+      ok: true,
+      agentConfigs: configs ?? [],
+      version: row?.agent_configs_version ?? 0,
+      updatedAt: row?.agent_configs_updated_at ?? null,
+      updatedBy: row?.agent_configs_updated_by ?? null,
+    });
+  } catch (e: any) {
+    console.error("[AgentConfigs GET Error]", e?.message);
+    return c.json({ ok: false, error: e?.message || "Failed to load agent configs", agentConfigs: [], version: 0 }, 500);
+  }
+});
+
+app.put("/api/agent-configs", async (c) => {
+  try {
+    const body = await parseBody(c.req.raw);
+    const configs = body?.agentConfigs;
+    if (!Array.isArray(configs)) {
+      return c.json({ ok: false, error: "agentConfigs must be an array" }, 400);
+    }
+    // Light structural validation: every entry needs agentType + enabled.
+    for (const cfg of configs) {
+      if (!cfg || typeof cfg !== "object" || typeof cfg.agentType !== "string" || typeof cfg.enabled !== "boolean") {
+        return c.json({ ok: false, error: "Invalid agent config entry (agentType + enabled required)" }, 400);
+      }
+    }
+    await ensureAgentConfigColumns(c.env.DB);
+    const existing: any = await c.env.DB.prepare("SELECT agent_configs_version FROM branding WHERE id = 1").first() ?? {};
+    const nextVersion = (existing?.agent_configs_version ?? 0) + 1;
+    const now = new Date().toISOString();
+    const updatedBy = typeof body?.updatedBy === "string" && body.updatedBy ? body.updatedBy : "admin";
+    await c.env.DB.prepare(
+      `UPDATE branding SET agent_configs_json = ?, agent_configs_version = ?, agent_configs_updated_at = ?, agent_configs_updated_by = ?, updated_at = ? WHERE id = ?`
+    ).bind(JSON.stringify(configs), nextVersion, now, updatedBy, now, "1").run();
+    console.log(`[AgentConfigs] Persisted ${configs.length} agent configs (version ${nextVersion})`);
+    return c.json({ ok: true, version: nextVersion, updatedAt: now, count: configs.length });
+  } catch (e: any) {
+    console.error("[AgentConfigs PUT Error]", e?.message);
+    return c.json({ ok: false, error: e?.message || "Failed to persist agent configs" }, 500);
+  }
+});
+
 
 // ============ PROMPT TEMPLATES ============
 app.get("/api/prompts", async (c) => {
