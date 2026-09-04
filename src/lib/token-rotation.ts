@@ -208,18 +208,47 @@ function updateProviderToken(providerId: string, newToken: string): void {
 // ============================================================================
 
 /**
+ * Returns true when the error is a billing/entitlement failure (no payment
+ * method, insufficient credits, paid-model-on-free-workspace). Rotation can
+ * never fix billing — a fresh token on the same workspace hits the same
+ * billing wall — so these must bypass silent token rotation entirely and
+ * surface as an actionable billing diagnosis instead.
+ */
+export function isBillingError(err: any): boolean {
+  if (!err) return false;
+  const msg = (err?.message || String(err || "")).toLowerCase();
+  return (
+    /creditserror/i.test(msg) ||
+    /no.?credits/i.test(msg) ||
+    /no.?payment.?method/i.test(msg) ||
+    /add.?a.?payment/i.test(msg) ||
+    /billing/i.test(msg) ||
+    /insufficient.?credits/i.test(msg) ||
+    /credit.?balance/i.test(msg) ||
+    /payment.?required/i.test(msg) ||
+    /free.?tier.?exceeded/i.test(msg) ||
+    /quota.?exceeded/i.test(msg)
+  );
+}
+
+/**
  * Returns true if the error indicates a credential/session expiry that
- * token rotation might fix (401, 403, CreditsError, Unauthorized, etc.)
+ * token rotation might fix (401 session expiry, invalid/expired token…).
+ * Billing failures are explicitly EXCLUDED: rotating tokens against a
+ * billing wall only burns time and spams CORS-doomed guest endpoints.
  */
 export function isRotatableAuthError(err: any): boolean {
   if (!err) return false;
+  if (isBillingError(err)) return false;
+  // Entitlement opt-in (e.g. opencode.ai DataPolicyError): requires a manual
+  // opt-in click in the provider dashboard — no token swap fixes that.
+  const msg0 = (err?.message || String(err || "")).toLowerCase();
+  if (/datapolicyerror|requires.?explicit.?opt.?in|opt.?in.?required|explicit.?consent.?required/i.test(msg0)) return false;
   const code = err?.statusCode || err?.status || 0;
   if (code === 401 || code === 403) return true;
   const msg = (err?.message || String(err || "")).toLowerCase();
   return (
     /unauthorized/i.test(msg) ||
-    /creditserror/i.test(msg) ||
-    /no credits/i.test(msg) ||
     /session.?expired/i.test(msg) ||
     /token.?expired/i.test(msg) ||
     /invalid.?token/i.test(msg) ||
