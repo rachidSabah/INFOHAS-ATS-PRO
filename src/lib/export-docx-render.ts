@@ -19,10 +19,19 @@ import type {
   RenderDocument,
   RenderContentItem,
   RenderNestedBulletList,
+  TextAlignment,
 } from "./types";
+import { resolveSectionAlignment } from "./types";
 import { getDefaultResumeLayout } from "./exporter";
 
 type DocxTabStop = { type: typeof TabStopType; position: number };
+
+/** Map a layout alignment to a docx paragraph alignment. */
+function toDocxAlignment(a: TextAlignment): (typeof AlignmentType)[keyof typeof AlignmentType] {
+  if (a === "center") return AlignmentType.CENTER;
+  if (a === "left") return AlignmentType.LEFT;
+  return AlignmentType.JUSTIFIED;
+}
 
 /**
  * Export resume as DOCX using RenderDocument as single source of truth.
@@ -109,9 +118,10 @@ export async function exportResumeDOCXRenderDoc(
   // ===== RENDER SECTIONS from RenderDocument =====
   for (const section of rd.sections) {
     addSection(section.title);
+    const sectionAlign = resolveSectionAlignment(L, section.type);
 
     for (const item of section.items) {
-      renderContentItem(item, children, L, bodyHex, docxTabStops);
+      renderContentItem(item, children, L, bodyHex, docxTabStops, sectionAlign);
     }
   }
 
@@ -171,11 +181,13 @@ function renderContentItem(
   L: ResumeLayoutModel,
   bodyHex: string,
   docxTabStops: any,
+  align: TextAlignment = "justify",
 ): void {
+  const paraAlign = toDocxAlignment(align);
   switch (item.kind) {
     case "text":
       children.push(new Paragraph({
-        alignment: AlignmentType.JUSTIFIED,
+        alignment: paraAlign,
         spacing: { before: 0, after: 30, line: 240 },
         children: parseMarkdownToTextRuns(item.text, {
           size: (item.fontSizePt ?? L.bodyFontSizePt) * 2,
@@ -191,7 +203,7 @@ function renderContentItem(
       for (const b of item.bullets) {
         children.push(new Paragraph({
           bullet: { level: item.level ?? 0 },
-          alignment: AlignmentType.JUSTIFIED,
+          alignment: paraAlign,
           spacing: { before: 0, after: 15, line: 230 },
           children: parseMarkdownToTextRuns(b, {
             size: L.bodyFontSizePt * 2,
@@ -203,7 +215,7 @@ function renderContentItem(
       break;
 
     case "nested-bullets":
-      renderNestedBullets(item, children, L, bodyHex);
+      renderNestedBullets(item, children, L, bodyHex, paraAlign);
       break;
 
     case "table-row": {
@@ -239,10 +251,12 @@ function renderNestedBullets(
   children: Paragraph[],
   L: ResumeLayoutModel,
   bodyHex: string,
+  paraAlign: (typeof AlignmentType)[keyof typeof AlignmentType] = AlignmentType.JUSTIFIED,
 ): void {
   for (const group of item.groups) {
     children.push(new Paragraph({
       bullet: { level: 0 },
+      alignment: paraAlign,
       spacing: { before: 0, after: 15, line: 230 },
       children: [
         new TextRun({ text: `${group.label}: `, bold: true, size: L.bodyFontSizePt * 2, font: L.fontFamily, color: bodyHex }),

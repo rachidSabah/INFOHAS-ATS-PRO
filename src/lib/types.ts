@@ -798,6 +798,14 @@ export interface OptimizerDirectiveConfig {
   // === CONTACT BLOCK LAYOUT ===
   contactSpacing?: "stacked" | "single-line";
 
+  // === TEXT ALIGNMENT ===
+  // Body alignment ("justify" preserves the long-standing preview/DOCX look).
+  // Per-section overrides keyed by canonical section type; absent entry =
+  // inherit bodyAlignment. Enforced deterministically by every renderer
+  // (Preview, PDF, DOCX, directive HTML) — not left to the AI.
+  bodyAlignment?: TextAlignment;
+  sectionAlignment?: Partial<Record<RenderSectionType, TextAlignment>>;
+
   // === CUSTOM SECTION INSTRUCTIONS ===
   customSectionInstructions?: Record<string, string>;
 }
@@ -1049,6 +1057,19 @@ export interface ComplianceRuleToggles {
  * Both PDF and DOCX exporters consume this model.
  * Never duplicate layout logic between exporters.
  */
+export type TextAlignment = "left" | "center" | "justify";
+
+/**
+ * Resolve the effective text alignment for a resume section:
+ * per-section override > layout body default > "justify" (historic look).
+ */
+export function resolveSectionAlignment(
+  layout: Pick<ResumeLayoutModel, "bodyAlignment" | "sectionAlignment"> | null | undefined,
+  sectionType: RenderSectionType,
+): TextAlignment {
+  return layout?.sectionAlignment?.[sectionType] ?? layout?.bodyAlignment ?? "justify";
+}
+
 export interface ResumeLayoutModel {
   pageSize: "A4" | "Letter";
   marginTopMm: number;
@@ -1081,6 +1102,11 @@ export interface ResumeLayoutModel {
 
   sectionOrder?: string[];
   contactSpacing?: "stacked" | "single-line";
+
+  /** Body text alignment (absent = "justify", the historic preview/DOCX look). */
+  bodyAlignment?: TextAlignment;
+  /** Per-section alignment overrides; absent entry inherits bodyAlignment. */
+  sectionAlignment?: Partial<Record<RenderSectionType, TextAlignment>>;
 }
 
 /**

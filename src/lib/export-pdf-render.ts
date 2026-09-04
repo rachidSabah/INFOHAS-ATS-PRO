@@ -10,7 +10,9 @@ import type {
   RenderContentItem,
   RenderNestedBulletList,
   ResumeLayoutModel,
+  TextAlignment,
 } from "./types";
+import { resolveSectionAlignment } from "./types";
 
 const A4_W = 210;
 const A4_H = 297;
@@ -83,23 +85,31 @@ export async function exportResumePDFRenderDoc(
       advanceMm(ptToMm(currentSectionTitleSize) * 0.8 + 1.0);
     };
 
-    const drawWrapped = (text: string, w: number) => {
+    const drawWrapped = (text: string, w: number, align: TextAlignment = "justify") => {
       text = (text || "").replace(/\*\*|\*/g, "");
       doc.setFont(fontName, "normal");
       doc.setFontSize(currentBodyFontSize);
       doc.setTextColor(bodyRgb[0], bodyRgb[1], bodyRgb[2]);
       const lines = doc.splitTextToSize(text, w);
-      for (const line of lines) {
+      for (let li = 0; li < lines.length; li++) {
+        const line = lines[li];
         if (y > maxY - 10) {
           hasTruncated = true;
           break;
         }
-        doc.text(line, left, textY(currentBodyFontSize));
+        const last = li === lines.length - 1;
+        if (align === "center") {
+          doc.text(line, left + w / 2, textY(currentBodyFontSize), { align: "center" });
+        } else if (align === "justify" && !last) {
+          doc.text(line, left, textY(currentBodyFontSize), { align: "justify", maxWidth: w });
+        } else {
+          doc.text(line, left, textY(currentBodyFontSize));
+        }
         advanceLine();
       }
     };
 
-    const drawBulletLine = (text: string, w: number, indent = 0) => {
+    const drawBulletLine = (text: string, w: number, indent = 0, align: TextAlignment = "justify") => {
       text = (text || "").replace(/\*\*|\*/g, "");
       doc.setFont(fontName, "normal");
       doc.setFontSize(currentBodyFontSize);
@@ -116,11 +126,17 @@ export async function exportResumePDFRenderDoc(
           hasTruncated = true;
           break;
         }
+        const last = i === lines.length - 1;
+        const lineAlign = align === "center" ? "center" : (align === "justify" && !last ? "justify" : "left");
+        const lineX = lineAlign === "center" ? textXPos + wrapW / 2 : textXPos;
+        const lineOpts = lineAlign === "left" ? undefined : { align: lineAlign, maxWidth: wrapW } as const;
         if (i === 0) {
           doc.text("•", bulletX, textY(currentBodyFontSize));
-          doc.text(lines[i], textXPos, textY(currentBodyFontSize));
+          if (lineOpts) doc.text(lines[i], lineX, textY(currentBodyFontSize), lineOpts);
+          else doc.text(lines[i], lineX, textY(currentBodyFontSize));
         } else {
-          doc.text(lines[i], textXPos, textY(currentBodyFontSize));
+          if (lineOpts) doc.text(lines[i], lineX, textY(currentBodyFontSize), lineOpts);
+          else doc.text(lines[i], lineX, textY(currentBodyFontSize));
         }
         advanceLine();
       }
@@ -194,6 +210,7 @@ export async function exportResumePDFRenderDoc(
         break;
       }
       sectionHeader(section.title);
+      const sectionAlign = resolveSectionAlignment(L, section.type);
 
       for (const item of section.items) {
         if (y > maxY - 10) {
@@ -203,7 +220,7 @@ export async function exportResumePDFRenderDoc(
 
         switch (item.kind) {
           case "text":
-            drawWrapped(item.text, contentW);
+            drawWrapped(item.text, contentW, sectionAlign);
             break;
 
           case "bullets":
@@ -212,7 +229,7 @@ export async function exportResumePDFRenderDoc(
                 hasTruncated = true;
                 break;
               }
-              drawBulletLine(b, contentW, item.level ? 6 : 0);
+              drawBulletLine(b, contentW, item.level ? 6 : 0, sectionAlign);
             }
             advanceMm(0.2);
             break;

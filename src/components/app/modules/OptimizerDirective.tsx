@@ -11,9 +11,22 @@ import { Badge, Icon } from "@/components/shared";
 import { useApp } from "@/lib/store";
 import { SEED_OPTIMIZER_DIRECTIVE } from "@/lib/mock-data";
 import { toast } from "sonner";
-import type { OptimizerDirectiveConfig, AgentDirectives, ATSSystemTarget, ToneWritingConfig, CustomKeywordsConfig } from "@/lib/types";
+import type { OptimizerDirectiveConfig, AgentDirectives, ATSSystemTarget, ToneWritingConfig, CustomKeywordsConfig, TextAlignment, RenderSectionType } from "@/lib/types";
 import { BUILT_IN_PROFILES, applyProfileToConfig } from "@/lib/directive-profiles";
 import { STRUCTURAL_BLUEPRINTS } from "@/lib/structural-blueprints";
+
+// Canonical resume sections available for per-section text-alignment overrides.
+const ALIGNMENT_SECTIONS: Array<{ key: RenderSectionType; label: string }> = [
+  { key: "professionalProfile", label: "Summary" },
+  { key: "professionalExperience", label: "Experience" },
+  { key: "education", label: "Education" },
+  { key: "skills", label: "Skills" },
+  { key: "languages", label: "Languages" },
+  { key: "projects", label: "Projects" },
+  { key: "certifications", label: "Certifications" },
+  { key: "dynamicSections", label: "Dynamic sections" },
+  { key: "additionalInformation", label: "Additional info" },
+];
 
 export function OptimizerDirective() {
   const config = useApp((s) => s.optimizerDirective);
@@ -271,6 +284,56 @@ export function OptimizerDirective() {
           <NumberField label="Line Height (CSS)" value={draft.lineHeight} onChange={(v) => patch({ lineHeight: v })} step={0.05} min={1} max={2} />
           <NumberField label="Section Gap (mm)" value={draft.sectionGapMm} onChange={(v) => patch({ sectionGapMm: v })} step={0.5} min={0} max={20} />
           <NumberField label="Bullet Indent (mm)" value={draft.bulletIndentMm} onChange={(v) => patch({ bulletIndentMm: v })} step={0.5} min={0} max={15} />
+        </CardContent>
+      </Card>
+
+      {/* TEXT ALIGNMENT */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-lg flex items-center gap-2"><Icon name="AlignJustify" className="w-4 h-4 text-brand" /> Text Alignment</CardTitle>
+          <CardDescription>Body text alignment for the whole resume, with optional per-section overrides. Applied by Preview, PDF, DOCX and DOC exports.</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div>
+            <Label htmlFor="bodyAlignment">Whole resume body</Label>
+            <select
+              id="bodyAlignment"
+              value={draft.bodyAlignment ?? "justify"}
+              onChange={(e) => patch({ bodyAlignment: e.target.value as TextAlignment })}
+              className="w-full h-9 px-3 rounded-md border border-input bg-background text-sm mt-1"
+            >
+              <option value="left">Left</option>
+              <option value="justify">Justify (straight right edge)</option>
+              <option value="center">Center</option>
+            </select>
+          </div>
+          <div>
+            <Label>Per-section overrides</Label>
+            <p className="text-xs text-muted-foreground mb-2">Inherit = follow the whole-resume setting above.</p>
+            <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">
+              {ALIGNMENT_SECTIONS.map(({ key, label }) => (
+                <div key={key}>
+                  <Label>{label}</Label>
+                  <select
+                    value={draft.sectionAlignment?.[key] ?? ""}
+                    onChange={(e) => {
+                      const v = e.target.value;
+                      const next: Partial<Record<RenderSectionType, TextAlignment>> = { ...(draft.sectionAlignment ?? {}) };
+                      if (v) next[key] = v as TextAlignment;
+                      else delete next[key];
+                      patch({ sectionAlignment: next });
+                    }}
+                    className="w-full h-9 px-3 rounded-md border border-input bg-background text-sm mt-1"
+                  >
+                    <option value="">Inherit</option>
+                    <option value="left">Left</option>
+                    <option value="justify">Justify</option>
+                    <option value="center">Center</option>
+                  </select>
+                </div>
+              ))}
+            </div>
+          </div>
         </CardContent>
       </Card>
 

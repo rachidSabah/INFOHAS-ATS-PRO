@@ -11,7 +11,8 @@ import {
   TabStopType, TabStopPosition, convertInchesToTwip,
 } from "docx";
 import { saveAs } from "file-saver";
-import type { ResumeData, CoverLetter, InterviewPackage, ResumeLayoutModel } from "./types";
+import type { ResumeData, CoverLetter, InterviewPackage, ResumeLayoutModel, TextAlignment } from "./types";
+import { SEED_OPTIMIZER_DIRECTIVE } from "./mock-data";
 import { getDocxHtml, resumeToDirectiveHtml } from "./ats-directives";
 import { useApp } from "./store";
 import { analyzeATS } from "./agents/ats-analysis";
@@ -167,6 +168,9 @@ export function getDefaultResumeLayout(): ResumeLayoutModel {
 
     sectionOrder: config?.sectionOrder ?? ["summary", "experience", "education", "skills", "languages", "projects", "certifications", "additionalInfo"],
     contactSpacing: config?.contactSpacing ?? "stacked",
+
+    bodyAlignment: config?.bodyAlignment ?? "justify",
+    sectionAlignment: config?.sectionAlignment ?? {},
   };
 }
 
@@ -176,6 +180,15 @@ export function getDefaultResumeLayout(): ResumeLayoutModel {
  * downloaded PDF/DOCX actually reflects what the user sees in the preview.
  */
 export function getLayoutForTemplate(template: string, accentColor?: string): ResumeLayoutModel {
+  return applyUserLayoutOverrides(templateLayoutFor(template, accentColor));
+}
+
+/**
+ * Template-designed layout (unchanged house styles). Never called directly —
+ * always go through getLayoutForTemplate so explicit user customizations win
+ * over template hardcodes.
+ */
+function templateLayoutFor(template: string, accentColor?: string): ResumeLayoutModel {
   const base = getDefaultResumeLayout();
   const accent = accentColor || "#1154A3";
 
@@ -268,6 +281,60 @@ export function getLayoutForTemplate(template: string, accentColor?: string): Re
     default:
       return base;
   }
+}
+
+/**
+ * Honor explicit user customizations over template hardcodes.
+ *
+ * Rule: a directive field the user actually changed (differs from the seed
+ * default) wins; untouched fields keep the template's designed value. This
+ * fixes "I set 11pt but the export ignores it" without restyling templates
+ * for users who never customized anything. Alignment always flows through
+ * (templates don't define it).
+ */
+function applyUserLayoutOverrides(L: ResumeLayoutModel): ResumeLayoutModel {
+  let config: any = null;
+  try {
+    config = useApp.getState()?.optimizerDirective;
+  } catch {
+    return L;
+  }
+  if (!config) return L;
+  const S = SEED_OPTIMIZER_DIRECTIVE;
+  const userOr = <T,>(v: T | undefined, seed: T, fallback: T): T =>
+    v !== undefined && v !== seed ? v : fallback;
+
+  const out = { ...L };
+  out.fontFamily = userOr(config.fontFamily, S.fontFamily, L.fontFamily);
+  out.nameSizePt = userOr(config.nameSizePt, S.nameSizePt, L.nameSizePt);
+  out.sectionTitleSizePt = userOr(config.sectionTitleSizePt, S.sectionTitleSizePt, L.sectionTitleSizePt);
+  out.bodyFontSizePt = userOr(config.bodyFontSizePt, S.bodyFontSizePt, L.bodyFontSizePt);
+  out.nameColor = userOr(config.nameColor, S.nameColor, L.nameColor);
+  out.sectionTitleColor = userOr(config.sectionTitleColor, S.sectionTitleColor, L.sectionTitleColor);
+  out.bodyTextColor = userOr(config.bodyTextColor, S.bodyTextColor, L.bodyTextColor);
+  // Contact follows body text only when the user customized the body color.
+  if (config.bodyTextColor !== undefined && config.bodyTextColor !== S.bodyTextColor) {
+    out.contactColor = config.bodyTextColor;
+  }
+  out.marginTopMm = userOr(config.marginTopMm, S.marginTopMm, L.marginTopMm);
+  out.marginLeftMm = userOr(config.marginLeftMm, S.marginLeftMm, L.marginLeftMm);
+  out.marginRightMm = userOr(config.marginRightMm, S.marginRightMm, L.marginRightMm);
+  out.sectionGapMm = userOr(config.sectionGapMm, S.sectionGapMm, L.sectionGapMm);
+  // Recompute line height from the winning size × winning factor so a
+  // user-enlarged font doesn't inherit a cramped template line box.
+  const templateFactor =
+    L.bodyFontSizePt > 0 ? L.lineHeightMm / (L.bodyFontSizePt * 0.352778) : S.lineHeight;
+  const factor = userOr(config.lineHeight, S.lineHeight, templateFactor);
+  out.lineHeightMm = out.bodyFontSizePt * 0.352778 * factor;
+  // Alignment: templates never define it — always honor the directive.
+  const align = config.bodyAlignment as TextAlignment | undefined;
+  if (align === "left" || align === "center" || align === "justify") {
+    out.bodyAlignment = align;
+  }
+  if (config.sectionAlignment && typeof config.sectionAlignment === "object") {
+    out.sectionAlignment = { ...(config.sectionAlignment as Record<string, TextAlignment>) };
+  }
+  return out;
 }
 
 // Convert pt → mm
@@ -1239,11 +1306,29 @@ export function exportResumeDOC(resume: ResumeData, template: "professional" | "
     throw new Error(`Export cancelled: data-loss detected.\n${msg}`);
   }
 
-  const innerHtml = resumeToDirectiveHtml(resume);
+  const innerHtml = resumeToDirectiveHtml(resume, readAlignmentOpts());
   const fullHtml = getDocxHtml(innerHtml, template);
   // .doc with Word namespace opens natively in Word with CSS preserved
   const blob = new Blob(["\ufeff" + fullHtml], { type: "application/msword" });
   saveAs(blob, (resume.name || "resume").replace(/\s+/g, "_") + "_resume.doc");
+}
+
+/**
+ * Read the user's text-alignment settings from the directive store.
+ * Shared by renderers that don't receive a full ResumeLayoutModel
+ * (directive HTML / .DOC path). Never throws — falls back to justify.
+ */
+function readAlignmentOpts(): { bodyAlignment?: string; sectionAlignment?: Record<string, string> } {
+  try {
+    const config = useApp.getState()?.optimizerDirective as any;
+    if (!config) return {};
+    return {
+      bodyAlignment: config.bodyAlignment,
+      sectionAlignment: config.sectionAlignment,
+    };
+  } catch {
+    return {};
+  }
 }
 
 /**

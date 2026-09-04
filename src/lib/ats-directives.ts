@@ -1029,7 +1029,14 @@ export function getDocxHtml(content: string, template: "professional" | "modern"
  *     <ul><li>modules</li></ul>
  *   <h3>SKILLS</h3><p>skill, skill, skill</p>
  */
-export function resumeToDirectiveHtml(r: ResumeData): string {
+export function resumeToDirectiveHtml(r: ResumeData, opts?: { bodyAlignment?: string; sectionAlignment?: Record<string, string> }): string {
+  const alignFor = (section: string): string => {
+    const per = opts?.sectionAlignment?.[section];
+    if (per === "left" || per === "center" || per === "justify") return per;
+    const body = opts?.bodyAlignment;
+    if (body === "left" || body === "center" || body === "justify") return body;
+    return "justify";
+  };
   const fmtDate = (d?: string) => {
     if (!d) return "";
     if (/present/i.test(d)) return "Present";
@@ -1047,7 +1054,7 @@ export function resumeToDirectiveHtml(r: ResumeData): string {
 
   // Summary
   if (r.summary) {
-    parts.push(`<h3>PROFESSIONAL SUMMARY</h3><p>${escapeHtml(r.summary)}</p>`);
+    parts.push(`<h3>PROFESSIONAL SUMMARY</h3><p style="text-align:${alignFor("professionalProfile")}">${escapeHtml(r.summary)}</p>`);
   }
 
   // Experience
@@ -1057,7 +1064,7 @@ export function resumeToDirectiveHtml(r: ResumeData): string {
       const dateStr = `${fmtDate(e.startDate)} to ${fmtDate(e.endDate)}`;
       parts.push(`<h4><strong>${escapeHtml(e.title)}</strong> | <strong>${escapeHtml(e.company)}</strong>${e.location ? ", " + escapeHtml(e.location) : ""} | <strong>${escapeHtml(dateStr)}</strong></h4>`);
       if (e.bullets.length) {
-        parts.push(`<ul>${e.bullets.map((b) => `<li>${escapeHtml(b)}</li>`).join("")}</ul>`);
+        parts.push(`<ul style="text-align:${alignFor("professionalExperience")}">${e.bullets.map((b) => `<li>${escapeHtml(b)}</li>`).join("")}</ul>`);
       }
     }
   }
@@ -1069,24 +1076,24 @@ export function resumeToDirectiveHtml(r: ResumeData): string {
       const dateStr = `${fmtDate(ed.startDate)} to ${fmtDate(ed.endDate)}`;
       parts.push(`<h4><strong>${escapeHtml(ed.degree)}${ed.field ? " in " + escapeHtml(ed.field) : ""}</strong> | <strong>${escapeHtml(ed.institution)}</strong> | <strong>${escapeHtml(dateStr)}</strong></h4>`);
       if (ed.highlights?.length) {
-        parts.push(`<ul>${ed.highlights.map((h) => `<li>${escapeHtml(h)}</li>`).join("")}</ul>`);
+        parts.push(`<ul style="text-align:${alignFor("education")}">${ed.highlights.map((h) => `<li>${escapeHtml(h)}</li>`).join("")}</ul>`);
       }
     }
   }
 
   // Skills
   if (r.skills.length) {
-    parts.push(`<h3>SKILLS</h3><p>${r.skills.map((s) => `<strong>${escapeHtml(s.name)}</strong>${s.category ? ` (${escapeHtml(s.category)})` : ""}`).join(", ")}</p>`);
+    parts.push(`<h3>SKILLS</h3><p style="text-align:${alignFor("skills")}">${r.skills.map((s) => `<strong>${escapeHtml(s.name)}</strong>${s.category ? ` (${escapeHtml(s.category)})` : ""}`).join(", ")}</p>`);
   }
 
   // Languages
   if (r.languages.length) {
-    parts.push(`<h3>LANGUAGES</h3><p>${r.languages.map((l) => `<strong>${escapeHtml(l.name)}</strong>: ${escapeHtml(l.proficiency)}`).join(", ")}</p>`);
+    parts.push(`<h3>LANGUAGES</h3><p style="text-align:${alignFor("languages")}">${r.languages.map((l) => `<strong>${escapeHtml(l.name)}</strong>: ${escapeHtml(l.proficiency)}`).join(", ")}</p>`);
   }
 
   // Certifications
   if ((r.certifications?.length ?? 0) > 0) {
-    parts.push(`<h3>CERTIFICATIONS</h3><ul>${
+    parts.push(`<h3>CERTIFICATIONS</h3><ul style="text-align:${alignFor("certifications")}">${
       (r.certifications??[]).map((c) => `<li><strong>${escapeHtml(c.name)}</strong>${
         c.issuer ? " - " + escapeHtml(c.issuer) : ""
       }${c.date ? ` (${escapeHtml(fmtDate(c.date))})` : ""}</li>`).join("")
@@ -1095,7 +1102,7 @@ export function resumeToDirectiveHtml(r: ResumeData): string {
 
   // Projects
   if ((r.projects?.length ?? 0) > 0) {
-    parts.push(`<h3>PROJECTS</h3><ul>${
+    parts.push(`<h3>PROJECTS</h3><ul style="text-align:${alignFor("projects")}">${
       r.projects.map((p) => `<li><strong>${escapeHtml(p.name)}</strong>${
         p.description ? " — " + escapeHtml(p.description) : ""
       }${p.url ? ` (${escapeHtml(p.url)})` : ""}</li>`).join("")
@@ -1104,14 +1111,14 @@ export function resumeToDirectiveHtml(r: ResumeData): string {
 
   // Achievements
   if ((r.achievements?.length ?? 0) > 0) {
-    parts.push(`<h3>ACHIEVEMENTS</h3><ul>${
+    parts.push(`<h3>ACHIEVEMENTS</h3><ul style="text-align:${alignFor("achievements")}">${
       (r.achievements??[]).map((a) => `<li>${escapeHtml(a)}</li>`).join("")
     }</ul>`);
   }
 
   // Additional Information
   if (r.additionalInfo) {
-    parts.push(`<h3>ADDITIONAL INFORMATION</h3><p>${escapeHtml(r.additionalInfo)}</p>`);
+    parts.push(`<h3>ADDITIONAL INFORMATION</h3><p style="text-align:${alignFor("additionalInformation")}">${escapeHtml(r.additionalInfo)}</p>`);
   }
 
   // Dynamic Sections — custom sections from the optimizer pipeline
@@ -1120,10 +1127,10 @@ export function resumeToDirectiveHtml(r: ResumeData): string {
     for (const ds of r.dynamicSections!) {
       parts.push(`<h3>${escapeHtml(ds.title)}</h3>`);
       if (ds.content) {
-        parts.push(`<p>${escapeHtml(ds.content)}</p>`);
+        parts.push(`<p style="text-align:${alignFor("dynamicSections")}">${escapeHtml(ds.content)}</p>`);
       }
       if (ds.bullets?.length) {
-        parts.push(`<ul>${
+        parts.push(`<ul style="text-align:${alignFor("dynamicSections")}">${
           (ds.bullets??[]).map((b) => `<li>${escapeHtml(b)}</li>`).join("")
         }</ul>`);
       }

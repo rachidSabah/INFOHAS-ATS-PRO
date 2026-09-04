@@ -132,7 +132,15 @@ export function EditableA4Preview({ resume, onChange, scale = 0.7, className, ac
     sectionGapMm: config?.sectionGapMm ?? 3,
     bulletIndentMm: config?.bulletIndentMm ?? 6.4,
     contactSpacing: config?.contactSpacing ?? "stacked",
+    bodyAlignment: config?.bodyAlignment ?? "justify",
+    sectionAlignment: config?.sectionAlignment ?? {},
   };
+  const alignFor = (section: string): "left" | "center" | "justify" => {
+    const per = (L.sectionAlignment as Record<string, string> | undefined)?.[section];
+    if (per === "left" || per === "center" || per === "justify") return per;
+    return L.bodyAlignment ?? "justify";
+  };
+
 
   const BLACK = L.bodyTextColor;
 
@@ -432,7 +440,7 @@ export function EditableA4Preview({ resume, onChange, scale = 0.7, className, ac
             {resume.summary && (
               <EditableBlock isEditing={editing === "summary"} onEdit={() => openSection("summary")} label="Edit summary" isTouch={isTouch} isOptimizing={optimizingSection === "all" || optimizingSection === "summary"}>
                 <InfohasSection title="PROFESSIONAL SUMMARY">
-                  <p style={{ margin: 0, textAlign: "justify", color: BLACK, lineHeight: 1.2 }}>{renderHText(resume.summary)}</p>
+                  <p style={{ margin: 0, textAlign: alignFor("professionalProfile"), color: BLACK, lineHeight: 1.2 }}>{renderHText(resume.summary)}</p>
                 </InfohasSection>
               </EditableBlock>
             )}
@@ -462,7 +470,7 @@ export function EditableA4Preview({ resume, onChange, scale = 0.7, className, ac
                       </div>
                       <ul style={{ margin: 0, paddingLeft: `${L.bulletIndentMm}mm`, listStyleType: "•", lineHeight: 1.2 }}>
                         {e.bullets.map((b, i) => (
-                          <li key={i} style={{ marginBottom: 0, color: BLACK, textAlign: "justify", lineHeight: 1.2 }}>{renderHText(b)}</li>
+                          <li key={i} style={{ marginBottom: 0, color: BLACK, textAlign: alignFor("professionalExperience"), lineHeight: 1.2 }}>{renderHText(b)}</li>
                         ))}
                       </ul>
                     </div>
@@ -517,7 +525,7 @@ export function EditableA4Preview({ resume, onChange, scale = 0.7, className, ac
                     return (
                       <ul style={{ margin: "0.3mm 0 0 0", paddingLeft: `${L.bulletIndentMm}mm`, listStyleType: "•", lineHeight: 1.2 }}>
                         {allBullets.map((m, i) => (
-                          <li key={i} style={{ color: BLACK, lineHeight: 1.2, textAlign: "justify" }}>{renderHText(m)}</li>
+                          <li key={i} style={{ color: BLACK, lineHeight: 1.2, textAlign: alignFor("education") }}>{renderHText(m)}</li>
                         ))}
                       </ul>
                     );
@@ -534,7 +542,7 @@ export function EditableA4Preview({ resume, onChange, scale = 0.7, className, ac
                 <InfohasSection title="CORE COMPETENCIES & SKILLS">
                   <ul style={{ margin: 0, paddingLeft: `${L.bulletIndentMm}mm`, listStyleType: "•", lineHeight: 1.2 }}>
                     {groupSkillsByCategory(resume.skills).slice(0, 4).map((g, i) => (
-                      <li key={i} style={{ marginBottom: 0, color: BLACK, lineHeight: 1.2, textAlign: "justify" }}>
+                      <li key={i} style={{ marginBottom: 0, color: BLACK, lineHeight: 1.2, textAlign: alignFor("skills") }}>
                         <span style={{ fontWeight: 700 }}>{safeRender(g.category)}:</span> <span>{g.items.length > 0 ? g.items.map((item: any) => renderHText(item)).reduce((prev: any, curr: any) => [prev, ", ", curr]) : ""}.</span>
                       </li>
                     ))}
@@ -549,7 +557,7 @@ export function EditableA4Preview({ resume, onChange, scale = 0.7, className, ac
                 <InfohasSection title="LANGUAGES">
                   <ul style={{ margin: 0, paddingLeft: `${L.bulletIndentMm}mm`, listStyleType: "•", lineHeight: 1.2 }}>
                     {resume.languages.map((l) => (
-                      <li key={l.id} style={{ color: BLACK, lineHeight: 1.2 }}>
+                      <li key={l.id} style={{ color: BLACK, lineHeight: 1.2, textAlign: alignFor("languages") }}>
                         {safeRender(l.name)}{l.proficiency ? ` (${safeRender(l.proficiency)})` : ""}
                       </li>
                     ))}
@@ -563,7 +571,7 @@ export function EditableA4Preview({ resume, onChange, scale = 0.7, className, ac
               <InfohasSection title="CERTIFICATIONS">
                 <ul style={{ margin: 0, paddingLeft: `${L.bulletIndentMm}mm`, listStyleType: "•", lineHeight: 1.2 }}>
                   {resume.certifications.map((cert) => (
-                    <li key={cert.id} style={{ color: BLACK, lineHeight: 1.2 }}>
+                    <li key={cert.id} style={{ color: BLACK, lineHeight: 1.2, textAlign: alignFor("certifications") }}>
                       {renderHText(cert.name)}{cert.issuer ? ` — ${renderHText(cert.issuer)}` : ""}{cert.date ? ` (${cert.date})` : ""}
                     </li>
                   ))}
@@ -580,14 +588,14 @@ export function EditableA4Preview({ resume, onChange, scale = 0.7, className, ac
                       {safeRender(proj.name)}
                     </div>
                     {proj.description && (
-                      <p style={{ margin: "0.2mm 0", color: BLACK, lineHeight: 1.2, textAlign: "justify" }}>
+                      <p style={{ margin: "0.2mm 0", color: BLACK, lineHeight: 1.2, textAlign: alignFor("projects") }}>
                         {renderHText(proj.description)}
                       </p>
                     )}
                     {proj.bullets && proj.bullets.length > 0 && (
                       <ul style={{ margin: 0, paddingLeft: `${L.bulletIndentMm}mm`, listStyleType: "•", lineHeight: 1.2 }}>
                         {proj.bullets.map((b, i) => (
-                          <li key={i} style={{ color: BLACK, lineHeight: 1.2 }}>{renderHText(b)}</li>
+                          <li key={i} style={{ color: BLACK, lineHeight: 1.2, textAlign: alignFor("projects") }}>{renderHText(b)}</li>
                         ))}
                       </ul>
                     )}
@@ -634,14 +642,14 @@ export function EditableA4Preview({ resume, onChange, scale = 0.7, className, ac
                 .map((ds) => (
                   <InfohasSection key={ds.id} title={ds.title.toUpperCase()}>
                     {ds.content && (
-                      <p style={{ margin: 0, color: BLACK, lineHeight: 1.2, textAlign: "justify" }}>
+                      <p style={{ margin: 0, color: BLACK, lineHeight: 1.2, textAlign: alignFor("dynamicSections") }}>
                         {renderHText(ds.content)}
                       </p>
                     )}
                     {ds.bullets && ds.bullets.length > 0 && (
                       <ul style={{ margin: "0.3mm 0 0 0", paddingLeft: `${L.bulletIndentMm}mm`, listStyleType: "•", lineHeight: 1.2 }}>
                         {ds.bullets.map((b, i) => (
-                          <li key={i} style={{ color: BLACK, lineHeight: 1.2 }}>{renderHText(b)}</li>
+                          <li key={i} style={{ color: BLACK, lineHeight: 1.2, textAlign: alignFor("dynamicSections") }}>{renderHText(b)}</li>
                         ))}
                       </ul>
                     )}
@@ -654,7 +662,7 @@ export function EditableA4Preview({ resume, onChange, scale = 0.7, className, ac
               <InfohasSection title="ADDITIONAL INFORMATION">
                 {resume.additionalInfo.split("\n").map((line, i) => (
                   line.trim() ? (
-                    <p key={i} style={{ margin: 0, color: BLACK, lineHeight: 1.2, textAlign: "justify" }}>
+                    <p key={i} style={{ margin: 0, color: BLACK, lineHeight: 1.2, textAlign: alignFor("additionalInformation") }}>
                       {safeRender(line.trim())}
                     </p>
                   ) : null

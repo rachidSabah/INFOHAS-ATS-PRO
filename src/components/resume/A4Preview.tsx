@@ -261,7 +261,15 @@ function InfohasProTemplate({ resume, accent }: { resume: ResumeData; accent: st
     sectionGapMm: config?.sectionGapMm ?? 3,
     bulletIndentMm: config?.bulletIndentMm ?? 6.4,
     contactSpacing: config?.contactSpacing ?? "stacked",
+    bodyAlignment: config?.bodyAlignment ?? "justify",
+    sectionAlignment: config?.sectionAlignment ?? {},
   };
+  const alignFor = (section: string): "left" | "center" | "justify" => {
+    const per = (L.sectionAlignment as Record<string, string> | undefined)?.[section];
+    if (per === "left" || per === "center" || per === "justify") return per;
+    return L.bodyAlignment ?? "justify";
+  };
+
 
   const BLACK = L.bodyTextColor;
 
@@ -358,7 +366,7 @@ function InfohasProTemplate({ resume, accent }: { resume: ResumeData; accent: st
         {/* PROFESSIONAL PROFILE (matching target format) */}
         {resume.summary && (
           <InfohasSection title="PROFESSIONAL PROFILE" titleColor={L.sectionTitleColor} titleSize={`${L.sectionTitleSizePt}pt`} gap={`${L.sectionGapMm}mm`}>
-            <p style={{ margin: 0, textAlign: "justify", color: BLACK }}>{resume.summary}</p>
+            <p style={{ margin: 0, textAlign: alignFor("professionalProfile"), color: BLACK }}>{resume.summary}</p>
           </InfohasSection>
         )}
 
@@ -378,7 +386,7 @@ function InfohasProTemplate({ resume, accent }: { resume: ResumeData; accent: st
                   </div>
                   <ul style={{ margin: 0, paddingLeft: `${L.bulletIndentMm}mm`, listStyleType: "•" }}>
                     {e.bullets.map((b, i) => (
-                      <li key={i} style={{ marginBottom: "0.5mm", color: BLACK, textAlign: "justify" }}>{b}</li>
+                      <li key={i} style={{ marginBottom: "0.5mm", color: BLACK, textAlign: alignFor("professionalExperience") }}>{b}</li>
                     ))}
                   </ul>
                 </div>
@@ -458,11 +466,11 @@ function InfohasProTemplate({ resume, accent }: { resume: ResumeData; accent: st
         {(resume.dynamicSections || []).map((ds) => (
           <InfohasSection key={ds.id} title={ds.title} titleColor={L.sectionTitleColor} titleSize={`${L.sectionTitleSizePt}pt`} gap={`${L.sectionGapMm}mm`}>
             <div style={{ color: BLACK }}>
-              {ds.content && <p style={{ margin: "0 0 1mm 0", textAlign: "justify" }}>{ds.content}</p>}
+              {ds.content && <p style={{ margin: "0 0 1mm 0", textAlign: alignFor("dynamicSections") }}>{ds.content}</p>}
               {ds.bullets && ds.bullets.length > 0 && (
                 <ul style={{ margin: 0, paddingLeft: `${L.bulletIndentMm}mm`, listStyleType: "•" }}>
                   {ds.bullets.map((b, i) => (
-                    <li key={i} style={{ marginBottom: "0.5mm", textAlign: "justify" }}>{b}</li>
+                    <li key={i} style={{ marginBottom: "0.5mm", textAlign: alignFor("dynamicSections") }}>{b}</li>
                   ))}
                 </ul>
               )}
@@ -473,7 +481,7 @@ function InfohasProTemplate({ resume, accent }: { resume: ResumeData; accent: st
         {/* ADDITIONAL INFORMATION */}
         {resume.additionalInfo && (
           <InfohasSection title="ADDITIONAL INFORMATION" titleColor={L.sectionTitleColor} titleSize={`${L.sectionTitleSizePt}pt`} gap={`${L.sectionGapMm}mm`}>
-            <div style={{ color: BLACK, whiteSpace: "pre-wrap", textAlign: "justify" }}>
+            <div style={{ color: BLACK, whiteSpace: "pre-wrap", textAlign: alignFor("additionalInformation") }}>
               {resume.additionalInfo}
             </div>
           </InfohasSection>

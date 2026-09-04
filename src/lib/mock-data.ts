@@ -1349,6 +1349,10 @@ export const SEED_OPTIMIZER_DIRECTIVE: OptimizerDirectiveConfig = {
   // === CONTACT BLOCK LAYOUT ===
   contactSpacing: "stacked",
 
+  // === TEXT ALIGNMENT ===
+  bodyAlignment: "justify",   // historic preview/DOCX look; "left" or "center" also allowed
+  sectionAlignment: {},       // per-section overrides; empty = inherit bodyAlignment
+
   // === CUSTOM SECTION INSTRUCTIONS ===
   customSectionInstructions: {},
 };

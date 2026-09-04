@@ -20,7 +20,9 @@ import type {
   RenderContentItem,
   RenderDocumentSection,
   ResumeLayoutModel,
+  TextAlignment,
 } from "@/lib/types";
+import { resolveSectionAlignment } from "@/lib/types";
 
 // ── Props ─────────────────────────────────────────────────────────────────
 export interface RenderDocumentPreviewProps {
@@ -345,6 +347,7 @@ function RenderSection({
           fontSize={L.bodyFontSizePt}
           color={bodyColor}
           accentColor={accentColor}
+          align={resolveSectionAlignment(L, section.type)}
         />
       ))}
     </div>
@@ -357,11 +360,13 @@ function RenderContentItem({
   fontSize,
   color,
   accentColor,
+  align = "justify",
 }: {
   item: RenderContentItem;
   fontSize: number;
   color: string;
   accentColor: string;
+  align?: TextAlignment;
 }) {
   switch (item.kind) {
     case "text":
@@ -373,6 +378,7 @@ function RenderContentItem({
             fontSize: `${fontSize}pt`,
             color,
             fontWeight: item.bold ? "bold" : "normal",
+            textAlign: align,
           }}
         >
           {item.text}
@@ -397,6 +403,7 @@ function RenderContentItem({
                 color,
                 marginBottom: "0.5mm",
                 lineHeight: 1.3,
+                textAlign: align,
               }}
             >
               {b}
@@ -452,6 +459,7 @@ function RenderContentItem({
                 marginBottom: "0.5mm",
                 fontSize: `${fontSize}pt`,
                 color,
+                textAlign: align,
               }}
             >
               <span style={{ fontWeight: "bold" }}>{group.label}: </span>
