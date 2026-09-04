@@ -4,7 +4,7 @@ import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { logger } from "hono/logger";
 import { getDb, schema } from "./db";
-import { eq, and, desc } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 
 export interface Env {
   DB: D1Database;
@@ -148,7 +148,6 @@ async function verifyNextAuthJwt(token: string, secret: string): Promise<string 
 
     // Verify signature over "header.payload"
     const signingInput = new TextEncoder().encode(`${headerB64}.${payloadB64}`);
-    const sigBytes = Uint8Array.from(atob(base64UrlDecode(sigB64).replace(/-/g, "+").replace(/_/g, "/")), (c) => c.charCodeAt(0));
 
     // Re-derive signature bytes correctly from base64url
     const rawSig = base64UrlDecode(sigB64);
@@ -605,7 +604,13 @@ app.put("/api/users/:id", async (c) => {
   const updates: string[] = [];
   const values: any[] = [];
   for (const f of fields) {
-    const key = f === "password_hash" ? "passwordHash" : f === "avatar" ? "avatarUrl" : f;
+    // Map camelCase body keys → snake_case columns. "lastLoginAt" was
+    // previously dropped (auth-slice sends camelCase) so last-login was
+    // never persisted.
+    const key = f === "password_hash" ? "passwordHash"
+      : f === "avatar" ? "avatarUrl"
+      : f === "last_login_at" ? "lastLoginAt"
+      : f;
     if (body[key] !== undefined || body[f] !== undefined) {
       updates.push(`${f} = ?`);
       values.push(body[key] ?? body[f]);
@@ -629,15 +634,16 @@ app.delete("/api/users/:id", async (c) => {
 app.get("/api/resumes", async (c) => {
   const userId = getUserId(c.req.raw);
   if (!userId) return c.json({ resumes: [] });
-  const drizzleDb = getDb(c.env);
-  const results = await drizzleDb
-    .select()
-    .from(schema.resumes)
-    .where(eq(schema.resumes.userId, userId))
-    .orderBy(desc(schema.resumes.updatedAt))
-    .all();
-  const resumes = (results || []).map(parseDbResume);
-  return c.json({ resumes });
+  // Return RAW D1 rows (snake_case columns) — same contract as every other
+  // collection endpoint (cover-letters, job-descriptions, interviews,
+  // ats-reports). The frontend parser (cloud-api.ts parseDbResume) expects
+  // snake_case keys. The previous drizzle select returned rows keyed by JS
+  // property names (contactJson, ...) while parseDbResume read snake_case,
+  // so every JSON column fell back to empty and resumes loaded BLANK.
+  const { results } = await c.env.DB.prepare(
+    "SELECT * FROM resumes WHERE user_id = ? ORDER BY updated_at DESC"
+  ).bind(userId).all();
+  return c.json({ resumes: results || [] });
 });
 
 /** Ensure the user exists in the users table — auto-create if missing. */
@@ -952,7 +958,9 @@ app.post("/api/providers", async (c) => {
     await purgeCached(c, buildUrl(c.req.raw, "/api/providers"));
     return c.json({ success: true, ok: true, provider: { ...body, id } });
   } catch (error: any) {
-    console.error("[Provider Save Error]", error, { body: await parseBody(c.req.raw).catch(() => ({})) });
+    // NOTE: do not re-read the request body here — the stream was already
+    // consumed by the handler's first parseBody() call.
+    console.error("[Provider Save Error]", error, { id: error?.id });
     return c.json({
       success: false,
       code: "PROVIDER_SAVE_FAILED",
@@ -1336,7 +1344,24 @@ app.get("/api/settings/branding", async (c) => {
 
   try {
     const result = await c.env.DB.prepare("SELECT * FROM branding WHERE id = 1").first<any>();
-    const response = c.json({ branding: result || {} });
+    // Expose camelCase aliases alongside the raw snake_case columns — the
+    // frontend restore (cloud-api.ts) reads bd.appName/bd.primaryColor/…
+    // which never existed on the raw D1 row, so branding was silently never
+    // restored. Keeping the raw keys too preserves every existing consumer.
+    let branding: any = result || {};
+    if (result) {
+      branding = {
+        ...result,
+        appName: result.app_name ?? result.appName,
+        primaryColor: result.primary_color ?? result.primaryColor,
+        accentColor: result.accent_color ?? result.accentColor,
+        logoUrl: result.logo_url ?? result.logoUrl,
+        emailFromName: result.email_from_name ?? result.emailFromName,
+        emailFromAddress: result.email_from_address ?? result.emailFromAddress,
+        pdfFooterText: result.pdf_footer_text ?? result.pdfFooterText,
+      };
+    }
+    const response = c.json({ branding });
     response.headers.set("X-Cache-Status", "MISS");
     // Cache the response (fire-and-forget via waitUntil)
     await setCached(c, fullUrl, response.clone());
@@ -1454,8 +1479,13 @@ app.put("/api/settings/flags/:key", async (c) => {
   const key = c.req.param("key");
   const body = await parseBody(c.req.raw);
   try {
-    await c.env.DB.prepare("UPDATE feature_flags SET value = ?, updated_at = ? WHERE key = ?")
-      .bind(body.value ? 1 : 0, new Date().toISOString(), key).run();
+    // Upsert (was UPDATE-only): a flag key that was never seeded silently
+    // matched 0 rows while still reporting ok:true, so the toggle was lost
+    // on every refresh.
+    await c.env.DB.prepare(
+      `INSERT INTO feature_flags (key, value, updated_at) VALUES (?, ?, ?)
+       ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`
+    ).bind(key, body.value ? 1 : 0, new Date().toISOString()).run();
     // === P4: Purge the edge cache for flags ===
     await purgeCached(c, buildUrl(c.req.raw, "/api/settings/flags"));
     return c.json({ ok: true });
@@ -1665,7 +1695,8 @@ app.get("/api/tasks", async (c) => {
 // === POST /api/tasks/purge — purge completed/failed tasks older than 30 days ===
 app.post("/api/tasks/purge", async (c) => {
   try {
-    const maxAgeDays = parseInt(c.req.query("days") || "30", 10);
+    const parsedDays = parseInt(c.req.query("days") || "30", 10);
+    const maxAgeDays = Number.isFinite(parsedDays) && parsedDays >= 0 ? parsedDays : 30;
     const cutoff = Date.now() - maxAgeDays * 24 * 60 * 60 * 1000;
     const result = await c.env.DB.prepare(
       `DELETE FROM ai_tasks
@@ -1844,6 +1875,9 @@ app.onError((err, c) => {
 });
 
 // Helper: parse DB resume row to app format
+// NOTE: no longer used by GET /api/resumes — that endpoint returns raw D1
+// rows (snake_case) which the frontend parses once (cloud-api.ts). Kept for
+// reference by future server-side consumers.
 function parseDbResume(row: any): any {
   if (!row) return null;
   return {

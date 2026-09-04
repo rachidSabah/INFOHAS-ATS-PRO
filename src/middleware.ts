@@ -66,7 +66,11 @@ export function middleware(request: NextRequest) {
 
   // === 2. Rate limiting for API routes ===
   if (pathname.startsWith("/api/")) {
+    // Prefer Cloudflare's canonical client IP (set by the edge, cannot be
+    // spoofed by the client). The first x-forwarded-for entry is client-
+    // controlled and lets attackers rotate identities to defeat the limit.
     const ip =
+      request.headers.get("cf-connecting-ip") ||
       request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
       request.headers.get("x-real-ip") ||
       "unknown";

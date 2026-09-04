@@ -549,7 +549,10 @@ export async function syncAllFromCloud(store: any): Promise<void> {
         }
       }
     }
-    if (flagsRes.flags) store.setState({ flags: flagsRes.flags });
+    // MERGE (not replace): D1 only stores keys that were toggled/persisted.
+    // Replacing the store wholesale turned every local-only flag into
+    // undefined, silently disabling features until the next toggle.
+    if (flagsRes.flags) store.setState({ flags: { ...store.getState().flags, ...flagsRes.flags } });
   } catch (e) {
     console.error("[syncAllFromCloud] Error:", e);
   }
@@ -564,6 +567,13 @@ function safeJson(s: any, fallback: any) {
 function safeArray(s: any): any[] { const v = safeJson(s, []); return Array.isArray(v) ? v : []; }
 function safeObj(s: any): Record<string, any> { const v = safeJson(s, {}); return v && typeof v === "object" ? v : {}; }
 function safeStr(s: any): string { return s ? String(s) : ""; }
+/** Coerce a parsed JSON value that must be a plain string (e.g. additionalInfo). */
+function safeString(s: any): string {
+  if (s === null || s === undefined) return "";
+  if (typeof s === "string") return s;
+  if (typeof s === "number" || typeof s === "boolean") return String(s);
+  return "";
+}
 
 function parseDbResume(r: any): any {
   const experience = safeArray(r.experience_json).map((e: any) => ({
@@ -593,7 +603,9 @@ function parseDbResume(r: any): any {
     level: s.level || undefined,
   }));
   return {
-    id: r.id, name: r.name || "", headline: r.headline || "",
+    id: r.id,
+    userId: r.user_id,
+    name: r.name || "", headline: r.headline || "",
     contact: safeObj(r.contact_json),
     summary: r.summary || "",
     experience, education, skills,
@@ -601,6 +613,11 @@ function parseDbResume(r: any): any {
     certifications: safeArray(r.certifications_json),
     languages: safeArray(r.languages_json),
     achievements: safeArray(r.achievements_json),
+    // additional_info_json is a JSON-encoded string; dynamic_sections_json an
+    // array. Both were previously dropped on cloud restore (silently losing
+    // the data the worker had persisted).
+    additionalInfo: safeString(safeJson(r.additional_info_json, "")),
+    dynamicSections: safeArray(r.dynamic_sections_json),
     template: r.template || "ats-professional",
     accentColor: r.accent_color || "#1154A3",
     photoUrl: r.photo_url || undefined,

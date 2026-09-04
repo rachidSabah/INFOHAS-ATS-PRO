@@ -316,7 +316,12 @@ async function loadFromCloud(provider: string): Promise<ProviderSession | null> 
   try {
     const res = await fetch(`${CLOUD_API_BASE}/api/provider-sessions/${provider}`);
     if (res.ok) {
-      return (await res.json()) as any;
+      // The worker returns an envelope { ok, session, sessions } — unwrap it.
+      // Returning the raw envelope as a session made loadSession() see
+      // authenticated=undefined (→ treated as logged out) and saveSession()
+      // re-persist the envelope itself, corrupting localStorage AND D1.
+      const data: any = await res.json().catch(() => null);
+      return data?.session ?? null;
     }
   } catch (loadErr) {
     console.warn("[SessionManager] Cloud load failed:", loadErr instanceof Error ? loadErr.message : loadErr);

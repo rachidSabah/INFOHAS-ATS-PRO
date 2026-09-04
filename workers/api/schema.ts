@@ -14,7 +14,11 @@ export const users = sqliteTable("users", {
   provider: text("provider").default("email").notNull(),
   avatarUrl: text("avatar_url"),
   status: text("status").default("active").notNull(), // 'active','suspended','deleted'
-  createdAt: text("createdAt").default("datetime('now')").notNull(),
+  // NOTE: column names MUST match the real D1 schema (migrations 0001/0008):
+  // "created_at" / "updated_at" (snake_case). A previous "createdAt" mapping
+  // generated INSERTs referencing a non-existent column, crashing
+  // ensureUserExists() and POST /api/resumes for brand-new users.
+  createdAt: text("created_at").default("datetime('now')").notNull(),
   lastActiveAt: text("last_active_at"),
   lastLoginAt: text("last_login_at"),
   updatedAt: text("updated_at"),

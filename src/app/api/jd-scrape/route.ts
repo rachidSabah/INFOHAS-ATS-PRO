@@ -38,27 +38,79 @@ function setCached(url: string, data: unknown): void {
 }
 
 /**
+ * Validate a fetch target before each hop. Returns an error message or null.
+ * Applies the same guards as the POST handler: protocol allowlist, numeric
+ * hostname shapes, and the private/loopback/metadata SSRF check.
+ */
+function validateFetchTarget(rawUrl: string): string | null {
+  let parsed: URL;
+  try {
+    parsed = new URL(rawUrl);
+  } catch {
+    return "Invalid URL";
+  }
+  if (!/^https?:$/.test(parsed.protocol)) {
+    return "Only http/https URLs are supported";
+  }
+  const host = parsed.hostname.toLowerCase();
+  if (/^0x[0-9a-f]+$/i.test(host) || /^\d+$/.test(host) || /^0[0-7]+$/.test(host)) {
+    return "URLs with numeric hostnames are blocked.";
+  }
+  const ssrfError = checkSsrf(host);
+  if (ssrfError) return ssrfError;
+  return null;
+}
+
+/**
  * Fetch with retry — tries up to 3 times (initial + 2 retries) with
  * exponential backoff (1s, 2s). Only retries on network errors and 5xx
  * responses (4xx errors are not retried — they're the client's fault).
+ *
+ * Redirects are followed MANUALLY (max 3 hops) and every hop's target is
+ * re-validated. With `redirect: "follow"` the initial SSRF check was bypassed
+ * by any URL that 302'd into a private/metadata address.
  */
+const MAX_REDIRECT_HOPS = 3;
+
 async function fetchWithRetry(url: string, maxRetries = 2): Promise<Response> {
   let lastError: Error | null = null;
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     try {
-      const res = await fetch(url, {
-        headers: {
-          "User-Agent":
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-          Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-          "Accept-Language": "en-US,en;q=0.9",
-          "Accept-Encoding": "gzip, deflate, br",
-          Connection: "keep-alive",
-          "Upgrade-Insecure-Requests": "1",
-        },
-        redirect: "follow",
-        signal: AbortSignal.timeout(15000),
-      });
+      let currentUrl = url;
+      let res: Response | null = null;
+      for (let hop = 0; hop <= MAX_REDIRECT_HOPS; hop++) {
+        const targetError = validateFetchTarget(currentUrl);
+        if (targetError) {
+          throw new Error(targetError);
+        }
+        const hopRes = await fetch(currentUrl, {
+          headers: {
+            "User-Agent":
+              "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            "Accept-Language": "en-US,en;q=0.9",
+            "Accept-Encoding": "gzip, deflate, br",
+            Connection: "keep-alive",
+            "Upgrade-Insecure-Requests": "1",
+          },
+          redirect: "manual",
+          signal: AbortSignal.timeout(15000),
+        });
+        if (hopRes.status >= 300 && hopRes.status < 400) {
+          const location = hopRes.headers.get("location");
+          if (!location) {
+            res = hopRes; // No location — surface the redirect as-is
+            break;
+          }
+          currentUrl = new URL(location, currentUrl).toString();
+          continue; // Next hop — re-validated above
+        }
+        res = hopRes;
+        break;
+      }
+      if (!res) {
+        throw new Error("Too many redirects");
+      }
 
       // Retry on 5xx server errors (transient)
       if (res.status >= 500 && attempt < maxRetries) {
@@ -284,6 +336,21 @@ function checkSsrf(hostname: string): string | null {
   ];
   if (blockedHosts.includes(hostname)) {
     return "URLs pointing to internal/metadata endpoints are blocked.";
+  }
+
+  // Block non-canonical numeric hostnames that resolve to loopback/private
+  // IPs but slip past the dotted-quad regex: "127.1", "0177.0.0.1",
+  // "127.000.0.1", hex/octal dotted forms, etc. Every label of a real DNS
+  // name contains a letter beyond a-f — pure [0-9a-fx]/dot hostnames are
+  // always IPv4 shorthand, never a legitimate job-board domain.
+  if (hostname.includes(".") && /^[0-9a-fx.]+$/.test(hostname)) {
+    const parts = hostname.split(".");
+    const canonical =
+      parts.length === 4 &&
+      parts.every((p) => /^\d{1,3}$/.test(p) && !/^0\d/.test(p) && Number(p) <= 255);
+    if (!canonical) {
+      return "URLs with non-canonical numeric hostnames are blocked.";
+    }
   }
 
   // Block IPv4 in private ranges

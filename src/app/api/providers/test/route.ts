@@ -83,13 +83,27 @@ export async function POST(req: NextRequest) {
   } else {
     // No admin token configured — restrict to same-origin requests only
     // by checking the Origin header against the request host.
+    // Compare HOSTNAMES for equality: the previous `origin.includes(host)`
+    // was satisfied by attacker origins like https://app.example.com.attacker.io
+    // (dots are legal in subdomains), bypassing the cross-origin block.
     const origin = req.headers.get("origin") || "";
     const host = req.headers.get("host") || "";
-    if (origin && !origin.includes(host.split(":")[0])) {
-      return NextResponse.json(
-        { ok: false, message: "Unauthorized: cross-origin requests require admin token" },
-        { status: 403 },
-      );
+    if (origin) {
+      let originHostname: string;
+      try {
+        originHostname = new URL(origin).hostname;
+      } catch {
+        return NextResponse.json(
+          { ok: false, message: "Unauthorized: invalid origin" },
+          { status: 403 },
+        );
+      }
+      if (originHostname !== host.split(":")[0]) {
+        return NextResponse.json(
+          { ok: false, message: "Unauthorized: cross-origin requests require admin token" },
+          { status: 403 },
+        );
+      }
     }
   }
 

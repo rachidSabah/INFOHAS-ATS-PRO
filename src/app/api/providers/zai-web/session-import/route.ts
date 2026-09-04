@@ -35,6 +35,25 @@ interface Env {
   ANTIGRAVITY_ENCRYPTION_KEY?: string; // shared AES key material
 }
 
+/**
+ * Resolve the Cloudflare bindings (D1, secrets) for this request.
+ * Under @cloudflare/next-on-pages the env lives in the request context
+ * (AsyncLocalStorage) — `req.env` is always undefined there, which silently
+ * disabled every D1-backed branch of this route in production. Falls back to
+ * `req.env` for runtimes that populate it, and to an empty env under plain
+ * `next dev` (preserving the documented fail-closed behavior).
+ */
+async function getCloudEnv(req: NextRequest): Promise<Env> {
+  try {
+    const { getRequestContext } = await import("@cloudflare/next-on-pages");
+    const ctx = getRequestContext();
+    if (ctx?.env) return ctx.env as Env;
+  } catch {
+    /* not running under next-on-pages */
+  }
+  return (req as unknown as { env?: Env }).env ?? {};
+}
+
 function json(body: unknown, status = 200, cors = true): NextResponse {
   return NextResponse.json(body, { status, headers: cors ? CORS_HEADERS : undefined });
 }
@@ -49,7 +68,7 @@ export async function OPTIONS() {
 // must ask the server to validate the encrypted D1 copy. The token is
 // decrypted only inside the edge runtime and is never echoed back.
 export async function GET(req: NextRequest) {
-  const env = (req as unknown as { env?: Env }).env ?? {};
+  const env = await getCloudEnv(req);
   const { validateStoredZaiWebSession } = await import(
     "@/lib/providers/zai-web/server-validate"
   );
@@ -65,7 +84,7 @@ export async function GET(req: NextRequest) {
 // Other providers (Z.ai API fallback, Antigravity, Google Gemini, ...) are
 // never touched.
 export async function DELETE(req: NextRequest) {
-  const env = (req as unknown as { env?: Env }).env ?? {};
+  const env = await getCloudEnv(req);
   const db = env.DB;
   if (!db || typeof db.prepare !== "function") {
     // No server copy exists — nothing to delete is a success for the caller.
@@ -105,7 +124,7 @@ export async function POST(req: NextRequest) {
   const { validateZaiWebSession } = await import("@/lib/providers/zai-web/session-validator");
   const validation = await validateZaiWebSession({ token }, fetch);
 
-  const env = (req as unknown as { env?: Env }).env ?? {};
+  const env = await getCloudEnv(req);
   const db = env.DB;
 
   // ---- Secure storage (fail closed when the sink is unavailable) ----------

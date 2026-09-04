@@ -10,9 +10,19 @@ CREATE TABLE IF NOT EXISTS users (
   role TEXT NOT NULL DEFAULT 'user' CHECK (role IN ('guest','user','admin','super_admin')),
   provider TEXT NOT NULL DEFAULT 'email',
   avatar_url TEXT,
-  status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active','suspended')),
+  -- WIDE status CHECK: superset of the original two values and the
+  -- management-workflow values (0007/0008). SQLite cannot widen a CHECK via
+  -- ALTER, so fresh databases must be born with the full accepted set
+  -- ('pending' registration, 'approved' approval, 'active' auto-create,
+  -- 'suspended', 'deleted' soft-delete).
+  status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active','suspended','pending','approved','deleted')),
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   last_active_at TEXT,
+  -- Management-workflow columns (previously added by 0007's ALTERs — those
+  -- ALTERs duplicated 0001 columns and broke the fresh-database chain).
+  username TEXT,
+  last_login_at TEXT,
+  updated_at TEXT,
   usage_resumes INTEGER NOT NULL DEFAULT 0,
   usage_ats_checks INTEGER NOT NULL DEFAULT 0,
   usage_cover_letters INTEGER NOT NULL DEFAULT 0,

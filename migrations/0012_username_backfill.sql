@@ -1,11 +1,12 @@
--- Migration 0008: Backfill username column in ai_tasks (D1 nullable field crash fix)
+-- Migration 0012: ai_tasks.username backfill (historical fix, now a no-op)
 --
--- This migration adds the username column to ai_tasks for databases that
--- already ran 0007_task_tracking.sql before the fix was applied.
--- The 0007 migration was updated to include username NOT NULL DEFAULT 'anonymous'
--- for fresh deployments; this migration handles existing tables.
+-- HISTORY: this migration originally ran
+--   ALTER TABLE ai_tasks ADD COLUMN username TEXT NOT NULL DEFAULT 'anonymous';
+-- for databases that ran an older 0010_task_tracking.sql without the column.
+-- 0010 was later amended to create `username` directly, so on every fresh
+-- database the ALTER hit "duplicate column name: username" and BROKE the
+-- migration chain (nothing after 0012 could apply).
 --
--- SQLite / D1: ALTER TABLE ... ADD COLUMN only supports adding a column with
--- a DEFAULT value (NOT NULL constraint requires DEFAULT in SQLite).
-
-ALTER TABLE ai_tasks ADD COLUMN username TEXT NOT NULL DEFAULT 'anonymous';
+-- ACTION: the ALTER is intentionally gone. Databases that needed it already
+-- have it applied (recorded in d1_migrations). Fresh databases get the
+-- column from 0010's CREATE TABLE. Nothing to do here anymore.

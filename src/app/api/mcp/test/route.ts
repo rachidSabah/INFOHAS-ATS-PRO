@@ -61,10 +61,46 @@ export async function POST(req: Request) {
     ) {
       return NextResponse.json({ error: "URL points to a loopback/link-local IPv6 address" }, { status: 400 });
     }
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 4000);
-    const res = await fetch(url, { signal: controller.signal });
-    clearTimeout(timeoutId);
+    // Block non-canonical numeric hostnames ("127.1", "0177.0.0.1", "0x7f.0.0.1")
+    // that resolve to loopback/private IPs but bypass the dotted-quad regex.
+    if (ssrfHost.includes(".") && /^[0-9a-fx.]+$/.test(ssrfHost)) {
+      const parts = ssrfHost.split(".");
+      const canonical =
+        parts.length === 4 &&
+        parts.every((p) => /^\d{1,3}$/.test(p) && !/^0\d/.test(p) && Number(p) <= 255);
+      if (!canonical) {
+        return NextResponse.json({ error: "URL points to a non-canonical numeric hostname" }, { status: 400 });
+      }
+    }
+    // Fetch with manual redirect handling — every hop is re-validated so a
+    // redirect to a private/metadata address cannot bypass the guards above.
+    const MAX_REDIRECT_HOPS = 3;
+    let currentUrl = url;
+    let res: Response | null = null;
+    for (let hop = 0; hop <= MAX_REDIRECT_HOPS; hop++) {
+      const hopUrl = new URL(currentUrl);
+      const hopHost = hopUrl.hostname.toLowerCase();
+      if (!/^https?:$/.test(hopUrl.protocol) ||
+          ["localhost", "metadata.google.internal", "metadata", "169.254.169.254", "metadata.azure.com"].includes(hopHost) ||
+          /^0x[0-9a-f]+$/i.test(hopHost) || /^\d+$/.test(hopHost) || /^0[0-7]+$/.test(hopHost)) {
+        return NextResponse.json({ error: "Redirect target points to an internal/blocked endpoint" }, { status: 400 });
+      }
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 4000);
+      const hopRes = await fetch(currentUrl, { signal: controller.signal, redirect: "manual" });
+      clearTimeout(timeoutId);
+      if (hopRes.status >= 300 && hopRes.status < 400) {
+        const location = hopRes.headers.get("location");
+        if (!location) { res = hopRes; break; }
+        currentUrl = new URL(location, currentUrl).toString();
+        continue;
+      }
+      res = hopRes;
+      break;
+    }
+    if (!res) {
+      return NextResponse.json({ error: "Too many redirects" }, { status: 508 });
+    }
     if (!res.ok) {
       throw new Error(`Server returned HTTP ${res.status}`);
     }

@@ -363,6 +363,10 @@ const TASK_API_BASE_URL =
     : "https://resumeai-pro-api.rachidelsabah.workers.dev";
 
 let activePipelineId: string | null = null;
+// Server-generated D1 task id ("task_...") returned by POST /api/tasks/create.
+// PATCHes must target THIS id — the local pipelineId is unknown to the worker
+// and previously every status PATCH was a silent 0-row no-op.
+let activeD1TaskId: string | null = null;
 
 /**
  * Initialize a D1 task for a new optimization run.
@@ -370,10 +374,11 @@ let activePipelineId: string | null = null;
  */
 export async function initPipelineTask(pipelineId: string): Promise<void> {
   activePipelineId = pipelineId;
+  activeD1TaskId = null;
   if (typeof window === "undefined") return;
 
   try {
-    await fetch(`${TASK_API_BASE_URL}/api/tasks/create`, {
+    const res = await fetch(`${TASK_API_BASE_URL}/api/tasks/create`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -381,9 +386,12 @@ export async function initPipelineTask(pipelineId: string): Promise<void> {
         message: "Initializing pipeline",
       }),
     });
-    // Note: the task ID is generated server-side; we use the pipelineId locally
-    // to correlate. In a future enhancement, we could store the task ID returned
-    // by the server and use it for polling.
+    // Capture the server-generated task id so status PATCHes below hit the
+    // row that was actually created (previously discarded → stuck "queued").
+    const data: any = await res.json().catch(() => null);
+    if (data?.ok && data?.task?.id) {
+      activeD1TaskId = data.task.id;
+    }
   } catch (e) {
     console.warn("[Supervisor] Failed to init D1 task:", e);
   }
@@ -399,7 +407,7 @@ async function reportAgentStatusToD1(
 ): Promise<void> {
   if (typeof window === "undefined") return;
   if (!activePipelineId) return;
-
+  const d1TaskId = activeD1TaskId || activePipelineId;
   // Map agent status to progress percentage
   const progressMap: Record<AgentStatus, number> = {
     pending: 0,
@@ -426,7 +434,7 @@ async function reportAgentStatusToD1(
   };
 
   try {
-    await fetch(`${TASK_API_BASE_URL}/api/tasks/${activePipelineId}`, {
+    await fetch(`${TASK_API_BASE_URL}/api/tasks/${d1TaskId}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -455,7 +463,7 @@ export async function completePipelineTask(
   if (typeof window === "undefined" || !activePipelineId) return;
 
   try {
-    await fetch(`${TASK_API_BASE_URL}/api/tasks/${activePipelineId}`, {
+    await fetch(`${TASK_API_BASE_URL}/api/tasks/${activeD1TaskId || activePipelineId}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -469,6 +477,7 @@ export async function completePipelineTask(
     console.warn("[Supervisor] Failed to complete D1 task:", e);
   } finally {
     activePipelineId = null;
+    activeD1TaskId = null;
   }
 }
 

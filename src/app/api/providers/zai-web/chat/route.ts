@@ -22,6 +22,24 @@ interface Env {
   ANTIGRAVITY_ENCRYPTION_KEY?: string;
 }
 
+/**
+ * Resolve the Cloudflare bindings (D1, secrets) for this request.
+ * Under @cloudflare/next-on-pages the env lives in the request context
+ * (AsyncLocalStorage) — `req.env` is always undefined there, so the
+ * server-stored session could never be resolved in production. Falls back
+ * to `req.env` / an empty env (memory-token only) elsewhere.
+ */
+async function getCloudEnv(req: NextRequest): Promise<Env> {
+  try {
+    const { getRequestContext } = await import("@cloudflare/next-on-pages");
+    const ctx = getRequestContext();
+    if (ctx?.env) return ctx.env as Env;
+  } catch {
+    /* not running under next-on-pages */
+  }
+  return (req as unknown as { env?: Env }).env ?? {};
+}
+
 interface ChatBody {
   model?: string;
   messages?: Array<{ role: string; content: string }>;
@@ -80,7 +98,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: false, state: "session_invalid", message: "messages are required." }, { status: 400 });
   }
 
-  const env = (req as unknown as { env?: Env }).env ?? {};
+  const env = await getCloudEnv(req);
   const resolved = await resolveToken(body.token, env);
   if (!resolved.token) {
     return NextResponse.json(
