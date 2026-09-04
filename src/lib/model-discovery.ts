@@ -165,3 +165,43 @@ export async function syncAllProviderModels(providers: AIProvider[]): Promise<Mo
 export function countNewModels(results: ModelDiscoveryResult[]): number {
   return results.reduce((sum, r) => sum + r.newModels.length, 0);
 }
+
+export interface ModelReconciliation {
+  /** Authoritative live list: trimmed, de-duplicated, sorted. */
+  merged: string[];
+  /** In live but not in current — newly available upstream. */
+  added: string[];
+  /** In current but no longer live — retired upstream. */
+  retired: string[];
+  /** Current default model that is itself retired (null when fine or empty). */
+  defaultRetired: string | null;
+}
+
+/**
+ * Reconcile a stored model list against a freshly fetched live list.
+ *
+ * Pure function (no I/O): the live API response is authoritative — models it
+ * contains that we lack are added, models we list that it lacks are reported
+ * as retired. A retired current-default is flagged (never silently dropped)
+ * so the caller can warn and prompt for a replacement.
+ */
+export function reconcileModelLists(
+  currentModels: string[],
+  liveModels: string[],
+  defaultModel?: string,
+): ModelReconciliation {
+  const clean = (v: unknown): string => (typeof v === "string" ? v.trim() : "");
+  const live = Array.from(new Set(liveModels.map(clean).filter(Boolean))).sort();
+  const current = currentModels.map(clean).filter(Boolean);
+  const currentSet = new Set(current);
+  const liveSet = new Set(live);
+  const added = live.filter((m) => !currentSet.has(m));
+  const retired = Array.from(currentSet).filter((m) => !liveSet.has(m));
+  const def = clean(defaultModel);
+  return {
+    merged: live,
+    added,
+    retired,
+    defaultRetired: def && !liveSet.has(def) ? def : null,
+  };
+}

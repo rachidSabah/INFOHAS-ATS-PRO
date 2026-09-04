@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useRef } from "react";
 import { motion } from "framer-motion";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -11,6 +11,7 @@ import { ProviderManager } from "@/lib/ai/services";
 import { toast } from "sonner";
 import type { AIProvider, AIProviderType } from "@/lib/types";
 import { PROVIDER_CATALOG, getProviderCatalogEntry, type ProviderCatalogEntry } from "@/lib/ai/provider-catalog";
+import { reconcileModelLists } from "@/lib/model-discovery";
 import { clampProviderConcurrencyCap } from "@/lib/provider-concurrency";
 
 // Re-exported as PROVIDER_TYPES for the existing JSX references below.
@@ -25,6 +26,7 @@ export function ProviderEditor({ provider, onClose, onSave }: {
 }) {
   const [fetchingModels, setFetchingModels] = useState(false);
   const [fetchedModels, setFetchedModels] = useState<string[]>([]);
+  const [syncSummary, setSyncSummary] = useState<{ added: string[]; retired: string[]; defaultRetired: string | null } | null>(null);
   const [form, setForm] = useState(() => ({
     name: provider?.name ?? "",
     type: (provider?.type ?? "custom") as AIProviderType,
@@ -71,6 +73,43 @@ export function ProviderEditor({ provider, onClose, onSave }: {
       modelName: f.modelName || t.defaultModel || "",
       authType: t.authType ?? "bearer",
     }));
+  };
+
+  // Fresh-form mirror: the Fetch response arrives after an await, so the
+  // click-time closure may be stale if the user kept editing. The ref always
+  // holds the latest committed draft.
+  const formRef = useRef(form);
+  formRef.current = form;
+
+  // Reconcile a live model list into the DRAFT provider: new models are
+  // added, retired models are removed, and a retired current-default is
+  // flagged loudly (kept, never silently dropped). Nothing persists until
+  // "Save provider" — the reconciled draft stays reviewable.
+  const applyLiveModelList = (live: string[], sourceLabel: string) => {
+    const f = formRef.current;
+    const current = f.enabledModels.split(",").map((s) => s.trim()).filter(Boolean);
+    const rec = reconcileModelLists(current, live, f.modelName);
+    if (rec.merged.length === 0) {
+      toast.error("No models returned. Check the API key and Base URL.");
+      return;
+    }
+    setForm({ ...f, enabledModels: rec.merged.join(", ") });
+    setFetchedModels(rec.merged);
+    setSyncSummary({ added: rec.added, retired: rec.retired, defaultRetired: rec.defaultRetired });
+    const parts = [rec.merged.length + " models from " + sourceLabel];
+    if (rec.added.length > 0) parts.push("+" + rec.added.length + " added");
+    if (rec.retired.length > 0) parts.push("-" + rec.retired.length + " retired");
+    toast.success("Model list synced: " + parts.join(", ") + ".", {
+      description:
+        rec.retired.length > 0
+          ? "Retired: " + rec.retired.slice(0, 5).join(", ") + (rec.retired.length > 5 ? " (+" + (rec.retired.length - 5) + " more)" : "")
+          : rec.added.length > 0
+            ? "New: " + rec.added.slice(0, 5).join(", ") + (rec.added.length > 5 ? " (+" + (rec.added.length - 5) + " more)" : "")
+            : "Already up to date.",
+    });
+    if (rec.defaultRetired) {
+      toast.warning("Default model \u201C" + rec.defaultRetired + "\u201D is retired \u2014 pick a replacement from the fresh list.", { duration: 8000 });
+    }
   };
 
   return (
@@ -131,14 +170,14 @@ export function ProviderEditor({ provider, onClose, onSave }: {
                     // === PUTER: use static built-in models, not API fetch ===
                     if (form.type === "puter") {
                       setFetchingModels(true);
+                      setSyncSummary(null);
                       const result = await ProviderManager.fetchModels({
                         type: "puter",
                         isActive: true,
                       } as any);
                       setFetchingModels(false);
                       if (result.ok && result.models.length > 0) {
-                        setFetchedModels(result.models);
-                        toast.success(`Loaded ${result.models.length} built-in Puter models.`);
+                        applyLiveModelList(result.models, "built-in Puter models");
                       } else {
                         toast.error("Failed to load Puter models.");
                       }
@@ -147,6 +186,7 @@ export function ProviderEditor({ provider, onClose, onSave }: {
                     if (!form.baseUrl) { toast.error("Enter a Base URL first."); return; }
                     setFetchingModels(true);
                     setFetchedModels([]);
+                    setSyncSummary(null);
                     const result = await ProviderManager.fetchModelsForConfig({
                       type: form.type,
                       baseUrl: form.baseUrl,
@@ -158,8 +198,7 @@ export function ProviderEditor({ provider, onClose, onSave }: {
                     });
                     setFetchingModels(false);
                     if (result.ok && result.models.length > 0) {
-                      setFetchedModels(result.models);
-                      toast.success(`Fetched ${result.models.length} models from the API.`);
+                      applyLiveModelList(result.models, "the API");
                     } else {
                       toast.error(result.error || "No models returned. Check the API key and Base URL.");
                     }
@@ -182,6 +221,16 @@ export function ProviderEditor({ provider, onClose, onSave }: {
                     {fetchedModels.map((m) => <option key={m} value={m}>{m}</option>)}
                   </select>
                   <p className="text-[10px] text-muted-foreground mt-0.5">{fetchedModels.length} live models fetched from the API</p>
+                  {syncSummary && (syncSummary.added.length > 0 || syncSummary.retired.length > 0) && (
+                    <p className="text-[10px] mt-0.5 text-muted-foreground">
+                      {syncSummary.added.length > 0 && <span className="text-emerald-600">+{syncSummary.added.length} added</span>}
+                      {syncSummary.added.length > 0 && syncSummary.retired.length > 0 && <span> · </span>}
+                      {syncSummary.retired.length > 0 && <span className="text-red-600">-{syncSummary.retired.length} retired: {syncSummary.retired.slice(0, 3).join(", ")}{syncSummary.retired.length > 3 ? "…" : ""}</span>}
+                    </p>
+                  )}
+                  {syncSummary?.defaultRetired && (
+                    <p className="text-[10px] mt-0.5 text-amber-600">Current default is retired — pick a replacement above before saving.</p>
+                  )}
                 </div>
               )}
             </div>
