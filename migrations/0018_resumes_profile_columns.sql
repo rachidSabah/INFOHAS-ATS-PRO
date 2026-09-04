@@ -1,23 +1,35 @@
 -- ============================================================================
--- D1 Migration 0018: resumes profile columns + users.avatar
+-- D1 Migration 0018: resumes profile columns + users.avatar (now a no-op)
 --
--- CHAIN FIX: the Workers API writes these columns (POST/PUT /api/resumes,
--- POST/PUT /api/users) but no earlier migration ever ADDED them to
--- databases created from 0001 (they only existed inside 0008's
--- CREATE TABLE IF NOT EXISTS — which never runs when 0001's tables are
--- already present). On any 0001-based database the resume INSERT failed
--- with "no such column: photo_url".
+-- HISTORY: this migration originally ran
+--   ALTER TABLE resumes ADD COLUMN photo_url TEXT;
+--   ALTER TABLE resumes ADD COLUMN date_of_birth TEXT;
+--   ALTER TABLE users ADD COLUMN avatar TEXT;
+-- for databases whose resumes/users tables predated those columns (they only
+-- existed inside 0008's CREATE TABLE IF NOT EXISTS — a no-op wherever 0001's
+-- tables were already present).
 --
---   resumes.photo_url / resumes.date_of_birth — worker INSERT + UPDATE
---   users.avatar                              — worker INSERT/UPDATE
---     (0001 provides avatar_url, the API's "avatar" column is the
---      0008-era name and is now guaranteed to exist alongside it)
+-- REALITY CHECK (2026-09, verified live against production via the deployed
+-- API): the production database ALREADY HAS all three columns — its resumes/
+-- users tables were born from 0008's CREATE TABLE — so every ALTER here hit
+-- "duplicate column name: photo_url" and BROKE the CI migrate job (nothing
+-- after 0017 could be recorded).
+--
+-- ACTION: the ALTERs are intentionally gone.
+--   - Databases that needed the columns already have them (0008-born tables
+--     or a past manual ALTER), and 0018 is now recorded in d1_migrations.
+--   - Fresh databases get photo_url / date_of_birth (resumes) and avatar
+--     (users) directly from 0001's CREATE TABLE.
+--
+-- NOTE for a database stuck in the middle (0001-born tables AND 0018 applied
+-- as the original ALTER version is impossible — if such a DB reports
+-- "no such column: photo_url/avatar" from the API), add the missing columns
+-- manually, then re-run `wrangler d1 migrations apply`:
+--   ALTER TABLE resumes ADD COLUMN photo_url TEXT;      -- if missing
+--   ALTER TABLE resumes ADD COLUMN date_of_birth TEXT;  -- if missing
+--   ALTER TABLE users ADD COLUMN avatar TEXT;           -- if missing
 --
 -- Run: npx wrangler d1 migrations apply resumeai-pro-db --remote
 -- ============================================================================
-
-ALTER TABLE resumes ADD COLUMN photo_url TEXT;
-ALTER TABLE resumes ADD COLUMN date_of_birth TEXT;
-ALTER TABLE users ADD COLUMN avatar TEXT;
--- NOTE: ats_reports.user_id is added by 0007_user_management.sql — it must
--- exist BEFORE 0008 creates idx_ats_user on it.
+-- No-op: columns are provided by 0001 (fresh databases) or already present
+-- (0008-born tables, including production). See history above.

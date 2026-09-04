@@ -10,6 +10,9 @@ CREATE TABLE IF NOT EXISTS users (
   role TEXT NOT NULL DEFAULT 'user' CHECK (role IN ('guest','user','admin','super_admin')),
   provider TEXT NOT NULL DEFAULT 'email',
   avatar_url TEXT,
+  -- 0008-era column name written by the Workers API (users INSERT/UPDATE);
+  -- born here so fresh databases satisfy the API without 0018's ALTER.
+  avatar TEXT,
   -- WIDE status CHECK: superset of the original two values and the
   -- management-workflow values (0007/0008). SQLite cannot widen a CHECK via
   -- ALTER, so fresh databases must be born with the full accepted set
@@ -62,6 +65,12 @@ CREATE TABLE IF NOT EXISTS resumes (
   achievements_json TEXT NOT NULL DEFAULT '[]',
   template TEXT NOT NULL DEFAULT 'ats-professional',
   accent_color TEXT DEFAULT '#1154A3',
+  -- Profile columns written by the Workers API (POST/PUT /api/resumes);
+  -- born here so fresh databases satisfy the API without 0018's ALTER
+  -- (which conflicts with databases that already created resumes from
+  -- 0008's CREATE TABLE, where these columns also exist).
+  photo_url TEXT,
+  date_of_birth TEXT,
   source TEXT NOT NULL DEFAULT 'manual',
   file_name TEXT,
   file_path TEXT,
