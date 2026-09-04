@@ -340,7 +340,7 @@ export async function runLockedPipeline(
             runBulletOnlyOptimizer(
               idReadyResume, jd, intelligenceContext, directiveConfig,
               [...arenaProviders.filter((_: any, j: number) => j !== idx).map((q: any) => q.id), ...excludeProviderIds],
-              optimizationPolicy, feedback, baselineResume, idx === 0 ? onChunk : undefined,
+              optimizationPolicy, attemptFeedback, baselineResume, idx === 0 ? onChunk : undefined,
             ).catch(e => {
               console.warn(`[Model Arena] Candidate ${p.id} failed:`, e);
               return null;
@@ -372,7 +372,7 @@ export async function runLockedPipeline(
           optimizerResult = null;
         }
       } else {
-        optimizerResult = await runBulletOnlyOptimizer(idReadyResume, jd, intelligenceContext, directiveConfig, excludeProviderIds, optimizationPolicy, feedback, baselineResume, onChunk);
+        optimizerResult = await runBulletOnlyOptimizer(idReadyResume, jd, intelligenceContext, directiveConfig, excludeProviderIds, optimizationPolicy, attemptFeedback, baselineResume, onChunk);
       }
       } catch (monolithicErr: any) {
         // P4 ACTIVATED — progressive section-by-section salvage (bounded: one
