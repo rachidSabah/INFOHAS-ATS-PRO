@@ -620,26 +620,42 @@ function AgentDirectivesSection({ draft, patch }: { draft: OptimizerDirectiveCon
             onChange={(v) => updateAgent("skills", { allowTransferableSkills: v })}
           />
           <div className="rounded-lg bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-800 p-3 space-y-2">
-            <div className="flex items-center justify-between">
+            <div
+              className="flex items-center justify-between cursor-not-allowed"
+              onClick={() => toast.info("Locked OFF — company names as skills trigger a Structure Guardian veto and stall optimization (Keyword-Guardian deadlock fix). Must stay OFF.", { duration: 6000 })}
+              title="Locked OFF — company names as skills trigger a Structure Guardian veto and stall optimization."
+            >
               <div>
-                <Label className="text-red-800 dark:text-red-200">Allow Company Keywords</Label>
+                <Label className="text-red-800 dark:text-red-200 flex items-center gap-1.5">
+                  <Icon name="Lock" className="w-3 h-3 shrink-0" /> Allow Company Keywords
+                  <Badge variant="outline" className="text-[9px] px-1 py-0 text-red-700 dark:text-red-300 border-red-300 dark:border-red-700">Locked</Badge>
+                </Label>
                 <p className="text-xs text-red-700 dark:text-red-300">FORBIDDEN — company names as skills (e.g., "Qatar Duty Free")</p>
               </div>
               <Switch
                 checked={draft.agentDirectives.skills.allowCompanyKeywords}
-                onCheckedChange={(v) => updateAgent("skills", { allowCompanyKeywords: v })}
-                disabled
+                aria-disabled="true"
+                onCheckedChange={() => toast.info("Locked OFF — company names as skills trigger a Structure Guardian veto and stall optimization (Keyword-Guardian deadlock fix). Must stay OFF.", { duration: 6000 })}
+                className="cursor-not-allowed opacity-60"
               />
             </div>
-            <div className="flex items-center justify-between">
+            <div
+              className="flex items-center justify-between cursor-not-allowed"
+              onClick={() => toast.info("Locked OFF — location names as skills trigger a Structure Guardian veto and stall optimization (Keyword-Guardian deadlock fix). Must stay OFF.", { duration: 6000 })}
+              title="Locked OFF — location names as skills trigger a Structure Guardian veto and stall optimization."
+            >
               <div>
-                <Label className="text-red-800 dark:text-red-200">Allow Location Keywords</Label>
+                <Label className="text-red-800 dark:text-red-200 flex items-center gap-1.5">
+                  <Icon name="Lock" className="w-3 h-3 shrink-0" /> Allow Location Keywords
+                  <Badge variant="outline" className="text-[9px] px-1 py-0 text-red-700 dark:text-red-300 border-red-300 dark:border-red-700">Locked</Badge>
+                </Label>
                 <p className="text-xs text-red-700 dark:text-red-300">FORBIDDEN — location names as skills (e.g., "Doha", "Qatar")</p>
               </div>
               <Switch
                 checked={draft.agentDirectives.skills.allowLocationKeywords}
-                onCheckedChange={(v) => updateAgent("skills", { allowLocationKeywords: v })}
-                disabled
+                aria-disabled="true"
+                onCheckedChange={() => toast.info("Locked OFF — location names as skills trigger a Structure Guardian veto and stall optimization (Keyword-Guardian deadlock fix). Must stay OFF.", { duration: 6000 })}
+                className="cursor-not-allowed opacity-60"
               />
             </div>
           </div>
@@ -667,22 +683,22 @@ function AgentDirectivesSection({ draft, patch }: { draft: OptimizerDirectiveCon
               <ImmutableSwitch
                 label="Rewrite Title"
                 checked={draft.agentDirectives.experience.rewriteTitle}
-                onChange={(v) => updateAgent("experience", { rewriteTitle: v })}
+                lockReason="Locked OFF — the locked pipeline forbids rewriting job titles; only bullet text may change. This protects employers, dates and places from AI fabrication."
               />
               <ImmutableSwitch
                 label="Rewrite Company"
                 checked={draft.agentDirectives.experience.rewriteCompany}
-                onChange={(v) => updateAgent("experience", { rewriteCompany: v })}
+                lockReason="Locked OFF — the locked pipeline forbids rewriting company names; only bullet text may change. This protects employers, dates and places from AI fabrication."
               />
               <ImmutableSwitch
                 label="Rewrite Dates"
                 checked={draft.agentDirectives.experience.rewriteDates}
-                onChange={(v) => updateAgent("experience", { rewriteDates: v })}
+                lockReason="Locked OFF — the locked pipeline forbids rewriting employment dates; only bullet text may change. This protects employers, dates and places from AI fabrication."
               />
               <ImmutableSwitch
                 label="Rewrite Location"
                 checked={draft.agentDirectives.experience.rewriteLocation}
-                onChange={(v) => updateAgent("experience", { rewriteLocation: v })}
+                lockReason="Locked OFF — the locked pipeline forbids rewriting job locations; only bullet text may change. This protects employers, dates and places from AI fabrication."
               />
             </div>
           </div>
@@ -1066,11 +1082,22 @@ function SwitchRow({ label, description, checked, onChange }: { label: string; d
   );
 }
 
-function ImmutableSwitch({ label, checked, onChange }: { label: string; checked: boolean; onChange: (v: boolean) => void }) {
+// Locked invariant switch — intentionally NON-toggleable. These flags must stay
+// OFF (entity integrity + Keyword-Guardian deadlock fix d29cde78). Rendered as
+// a locked control that explains itself on click instead of a dead switch.
+function ImmutableSwitch({ label, checked, lockReason }: { label: string; checked: boolean; lockReason: string }) {
+  const explain = () => toast.info(lockReason, { duration: 6000 });
   return (
-    <div className="flex items-center justify-between bg-white dark:bg-secondary/30 rounded-md p-2 border border-red-100 dark:border-red-900/50">
-      <Label className="text-xs text-red-800 dark:text-red-200">{label}</Label>
-      <Switch checked={checked} onCheckedChange={onChange} disabled />
+    <div
+      className="flex items-center justify-between bg-white dark:bg-secondary/30 rounded-md p-2 border border-red-100 dark:border-red-900/50 cursor-not-allowed"
+      onClick={explain}
+      title={lockReason}
+    >
+      <Label className="text-xs text-red-800 dark:text-red-200 flex items-center gap-1.5">
+        <Icon name="Lock" className="w-3 h-3 shrink-0" /> {label}
+        <Badge variant="outline" className="text-[9px] px-1 py-0 text-red-700 dark:text-red-300 border-red-300 dark:border-red-700">Locked</Badge>
+      </Label>
+      <Switch checked={checked} aria-disabled="true" onCheckedChange={explain} className="cursor-not-allowed opacity-60" />
     </div>
   );
 }
