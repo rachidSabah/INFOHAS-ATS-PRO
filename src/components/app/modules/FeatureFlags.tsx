@@ -26,6 +26,8 @@ const DEFAULT_SEED_FLAGS: Record<keyof Flags, boolean> = {
   enableAIGuardian: true,
   enableSelfHealing: true,
   enableModelArena: true,
+  enableDurablePipeline: true,
+  enableRateGovernor: true,
 };
 
 const FLAGS: { key: keyof Flags; label: string; desc: string; icon: string; severity: "safe" | "feature" | "danger" }[] = [
@@ -42,6 +44,8 @@ const FLAGS: { key: keyof Flags; label: string; desc: string; icon: string; seve
   { key: "enableAIGuardian", label: "AI Guardian Auditor", desc: "Enforce honesty via the Guardian Agent to filter fact fabrications.", icon: "ShieldAlert", severity: "safe" },
   { key: "enableSelfHealing", label: "Autonomous Self-Healing", desc: "Automatically schedule self-healing scripts to repair API nodes on failures.", icon: "Activity", severity: "safe" },
   { key: "enableModelArena", label: "Multi-Model Variant Arena", desc: "Run optimization variants in parallel on different providers and choose the highest-scoring layout/ATS output.", icon: "Swords", severity: "safe" },
+  { key: "enableDurablePipeline", label: "Durable Pipeline Queue", desc: "Run optimizer stages as durable D1 jobs (resumable, retry with backoff on rate limits, stage checkpoints). Falls back to the inline pipeline on any failure.", icon: "DatabaseZap", severity: "safe" },
+  { key: "enableRateGovernor", label: "Rate Governor", desc: "Proactively pace AI calls per provider (token bucket + Retry-After) so parallel agents avoid hitting provider 429 limits.", icon: "Gauge", severity: "safe" },
   { key: "maintenanceMode", label: "Maintenance Mode", desc: "Take the entire app offline for users.", icon: "Wrench", severity: "danger" },
 ];
 

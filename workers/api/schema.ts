@@ -382,3 +382,23 @@ export const providerCapabilities = sqliteTable("provider_capabilities", {
   capabilitiesJson: text("capabilities_json").notNull(),
   updatedAt: text("updated_at").default("datetime('now')").notNull(),
 });
+
+// 30. Pipeline Jobs Table — durable queue for the optimization pipeline
+// (Option 1). One row per (task, stage): the client runner claims jobs with
+// a lease, checkpoints stage results into result_json, and re-queues
+// failures with bounded backoff (next_run_at). Expired leases are re-queued
+// automatically so a closed tab never orphans a run. Migration 0019.
+export const pipelineJobs = sqliteTable("pipeline_jobs", {
+  id: text("id").primaryKey(),
+  taskId: text("task_id").notNull(),
+  stage: text("stage").notNull(),
+  status: text("status").default("queued").notNull(), // queued|running|done|dead
+  attempts: integer("attempts").default(0).notNull(),
+  maxAttempts: integer("max_attempts").default(5).notNull(),
+  nextRunAt: text("next_run_at"),
+  leaseExpiresAt: text("lease_expires_at"),
+  lastError: text("last_error"),
+  resultJson: text("result_json"),
+  createdAt: text("created_at").default("datetime('now')").notNull(),
+  updatedAt: text("updated_at").default("datetime('now')").notNull(),
+});

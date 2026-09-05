@@ -329,26 +329,50 @@ export async function callAIRaw(opts: AICallOptions): Promise<AICallResult> {
   // Single execution path with ONE supervised recovery cycle (directives
   // #14/#35): FAIL → CLASSIFY → AUTO-HEAL → VALIDATE → one repaired retry,
   // or failover to a pre-validated fallback. Never an infinite retry loop.
+  //
+  // === RATE GOVERNOR (proactive pacing, Option 1) =========================
+  // Pace the call under the provider's RPM cap BEFORE hitting the router:
+  // bursty parallel agents queue here instead of colliding into 429s.
+  // No-op when capacity is available; the enableRateGovernor flag disables
+  // it entirely. A governor failure must NEVER block the call path.
+  let governor: typeof import("./ai/rate-governor")["rateGovernor"] | undefined;
+  try {
+    const mod = await import("./ai/rate-governor");
+    governor = mod.rateGovernor;
+    await governor.acquire(effProviderId, effModel);
+  } catch {
+    governor = undefined; // proceed ungoverned
+  }
   let res;
   try {
     res = await ProviderRouter.chat(chatRequest, routerOptions);
   } catch (primaryErr: any) {
+    try { governor?.reportFailure(effProviderId, effModel, primaryErr); } catch { /* never block */ }
     if (supervisedCall && !controllerAborted(opts.signal)) {
       try {
         const { supervisedRecovery } = await import("./ai/readiness/preflight");
         const recovered = await supervisedRecovery(primaryErr);
-        if (recovered) {
-          console.warn(`[AI] Supervised recovery: retrying once via ${recovered.providerId} (${recovered.model})`);
-          const retryRes = await ProviderRouter.chat(
-            { ...chatRequest, model: recovered.model },
-            {
-              ...routerOptions,
-              preferredProviderId: recovered.providerId,
-              providerId: recovered.providerId,
-              modelOverride: recovered.model,
-              singleProvider: true,
-            }
-          );
+        let recoveredRoute: { providerId: string; model: string } | null = recovered ?? null;
+        if (recoveredRoute) {
+          console.warn(`[AI] Supervised recovery: retrying once via ${recoveredRoute.providerId} (${recoveredRoute.model})`);
+          try { await governor?.acquire(recoveredRoute.providerId, recoveredRoute.model); } catch { /* never block */ }
+          let retryRes;
+          try {
+            retryRes = await ProviderRouter.chat(
+              { ...chatRequest, model: recoveredRoute.model },
+              {
+                ...routerOptions,
+                preferredProviderId: recoveredRoute.providerId,
+                providerId: recoveredRoute.providerId,
+                modelOverride: recoveredRoute.model,
+                singleProvider: true,
+              }
+            );
+          } catch (retryErr: any) {
+            try { governor?.reportFailure(recoveredRoute.providerId, recoveredRoute.model, retryErr); } catch { /* never block */ }
+            throw retryErr;
+          }
+          try { governor?.reportSuccess(recoveredRoute.providerId, recoveredRoute.model); } catch { /* never block */ }
           return {
             text: retryRes.text,
             provider: retryRes.provider,
@@ -365,6 +389,8 @@ export async function callAIRaw(opts: AICallOptions): Promise<AICallResult> {
     }
     throw primaryErr;
   }
+
+  try { governor?.reportSuccess(effProviderId, effModel); } catch { /* never block */ }
 
   return {
     text: res.text,
@@ -488,7 +514,25 @@ export async function callAIRawStreamed(
       : opts.excludeProviderIds,
   } as RouterOptions;
 
-  const res = await ProviderRouter.stream(chatRequest, routerOptions, onChunk);
+  // === RATE GOVERNOR (proactive pacing, streaming parity) ================
+  // Same contract as callAIRaw: acquire before the router, report the
+  // outcome after. A governor failure never blocks the call path.
+  let governorStream: typeof import("./ai/rate-governor")["rateGovernor"] | undefined;
+  try {
+    const mod = await import("./ai/rate-governor");
+    governorStream = mod.rateGovernor;
+    await governorStream.acquire(effProviderIdStream, effModelStream);
+  } catch {
+    governorStream = undefined; // proceed ungoverned
+  }
+  let res;
+  try {
+    res = await ProviderRouter.stream(chatRequest, routerOptions, onChunk);
+  } catch (streamErr: any) {
+    try { governorStream?.reportFailure(effProviderIdStream, effModelStream, streamErr); } catch { /* never block */ }
+    throw streamErr;
+  }
+  try { governorStream?.reportSuccess(effProviderIdStream, effModelStream); } catch { /* never block */ }
 
   return {
     text: res.text,

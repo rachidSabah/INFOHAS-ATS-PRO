@@ -1845,6 +1845,198 @@ app.delete("/api/career-materials/:id", async (c) => {
   return c.json({ success: true });
 });
 
+// ============ PIPELINE JOBS (durable queue — Option 1) ============
+// Durable per-stage jobs for the optimization pipeline. The client runner
+// (src/lib/agents/durable-pipeline.ts) enqueues one job per stage, claims
+// them with a lease, checkpoints stage results into result_json, and
+// re-queues failures with bounded backoff (next_run_at, Retry-After aware).
+// Expired leases are re-queued on every claim sweep so a closed tab can
+// never orphan a run. Same trust model as /api/tasks/* (task-scoped,
+// non-sensitive). Schema: migrations/0019_pipeline_jobs.sql.
+
+const PIPELINE_JOB_LEASE_MS = 10 * 60 * 1000; // 10 min visibility timeout
+const PIPELINE_JOB_BACKOFF_BASE_MS = 60_000;  // 60s — matches rate-limit-tracker
+const PIPELINE_JOB_BACKOFF_CAP_MS = 30 * 60 * 1000; // 30 min hard cap
+
+/**
+ * Backoff for the n-th attempt: an explicit Retry-After from the provider
+ * (when surfaced) wins, else the bounded exponential curve 60s→2m→4m→…→30m.
+ */
+function pipelineJobBackoffMs(attempts: number, retryAfterMs?: number): number {
+  if (Number.isFinite(retryAfterMs) && (retryAfterMs as number) > 0) {
+    return Math.min(retryAfterMs as number, PIPELINE_JOB_BACKOFF_CAP_MS);
+  }
+  const shifted = Math.max(0, Math.min(Math.max(1, attempts) - 1, 5));
+  return Math.min(PIPELINE_JOB_BACKOFF_BASE_MS * 2 ** shifted, PIPELINE_JOB_BACKOFF_CAP_MS);
+}
+
+function parseJobRow(row: any): any {
+  if (!row) return row;
+  let result: unknown = null;
+  if (row.result_json) {
+    try { result = JSON.parse(row.result_json); } catch { result = row.result_json; }
+  }
+  return { ...row, result };
+}
+
+// POST /api/pipeline/jobs — bulk enqueue (idempotent per task+stage)
+app.post("/api/pipeline/jobs", async (c) => {
+  try {
+    const body = await parseBody(c.req.raw);
+    const taskId = typeof body.taskId === "string" ? body.taskId : "";
+    const jobs = Array.isArray(body.jobs) ? body.jobs : [];
+    if (!taskId) return c.json({ ok: false, error: "taskId is required" }, 400);
+    if (jobs.length === 0) return c.json({ ok: false, error: "jobs[] is required" }, 400);
+
+    const now = new Date().toISOString();
+    for (const j of jobs) {
+      const stage = typeof j?.stage === "string" ? j.stage : "";
+      if (!stage) return c.json({ ok: false, error: "each job needs a stage" }, 400);
+      const maxAttempts = Number.isFinite(j?.maxAttempts) && j.maxAttempts > 0 ? Math.floor(j.maxAttempts) : 5;
+      const id = `pjob_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+      // OR IGNORE → re-enqueuing the same (task, stage) is a safe no-op.
+      await c.env.DB.prepare(
+        `INSERT OR IGNORE INTO pipeline_jobs (id, task_id, stage, status, attempts, max_attempts, created_at, updated_at)
+         VALUES (?, ?, ?, 'queued', 0, ?, ?, ?)`,
+      ).bind(id, taskId, stage, maxAttempts, now, now).run();
+    }
+
+    const { results } = await c.env.DB.prepare(
+      `SELECT * FROM pipeline_jobs WHERE task_id = ? ORDER BY created_at, id`,
+    ).bind(taskId).all();
+    return c.json({ ok: true, jobs: (results ?? []).map(parseJobRow) });
+  } catch (e: any) {
+    console.error("POST /api/pipeline/jobs failed:", e?.message);
+    return c.json({ ok: false, error: e?.message || "Failed to enqueue jobs" }, 500);
+  }
+});
+
+// POST /api/pipeline/jobs/claim — atomically claim 1..N runnable jobs.
+// Runs BEFORE the claim: re-queue 'running' jobs whose lease expired.
+app.post("/api/pipeline/jobs/claim", async (c) => {
+  try {
+    const body = await parseBody(c.req.raw);
+    const taskId = typeof body.taskId === "string" ? body.taskId : "";
+    const stage = typeof body.stage === "string" && body.stage ? body.stage : null;
+    const count = Number.isFinite(body.count) && body.count > 0 ? Math.min(Math.floor(body.count), 10) : 1;
+    if (!taskId) return c.json({ ok: false, error: "taskId is required" }, 400);
+
+    const now = new Date();
+    const nowIso = now.toISOString();
+
+    // Sweep expired leases for this task (crash recovery).
+    await c.env.DB.prepare(
+      `UPDATE pipeline_jobs SET status = 'queued', lease_expires_at = NULL, updated_at = ?
+       WHERE task_id = ? AND status = 'running' AND lease_expires_at IS NOT NULL AND lease_expires_at < ?`,
+    ).bind(nowIso, taskId, nowIso).run();
+
+    // Atomic claim: single UPDATE with a subselect + RETURNING — no read-
+    // then-write race even with multiple concurrent runners.
+    const claimed: any[] = [];
+    const leaseExpires = new Date(now.getTime() + PIPELINE_JOB_LEASE_MS).toISOString();
+    for (let i = 0; i < count; i++) {
+      const stmt = stage
+        ? c.env.DB.prepare(
+          `UPDATE pipeline_jobs
+             SET status = 'running', attempts = attempts + 1, lease_expires_at = ?, updated_at = ?
+           WHERE id = (
+             SELECT id FROM pipeline_jobs
+              WHERE task_id = ? AND stage = ? AND status = 'queued' AND (next_run_at IS NULL OR next_run_at <= ?)
+              ORDER BY created_at, id LIMIT 1
+           )
+           RETURNING *`,
+        ).bind(leaseExpires, nowIso, taskId, stage, nowIso)
+        : c.env.DB.prepare(
+          `UPDATE pipeline_jobs
+             SET status = 'running', attempts = attempts + 1, lease_expires_at = ?, updated_at = ?
+           WHERE id = (
+             SELECT id FROM pipeline_jobs
+              WHERE task_id = ? AND status = 'queued' AND (next_run_at IS NULL OR next_run_at <= ?)
+              ORDER BY created_at, id LIMIT 1
+           )
+           RETURNING *`,
+        ).bind(leaseExpires, nowIso, taskId, nowIso);
+      const { results } = await stmt.all();
+      if (!results || results.length === 0) break;
+      claimed.push(parseJobRow(results[0]));
+    }
+
+    return c.json({ ok: true, jobs: claimed });
+  } catch (e: any) {
+    console.error("POST /api/pipeline/jobs/claim failed:", e?.message);
+    return c.json({ ok: false, error: e?.message || "Failed to claim jobs" }, 500);
+  }
+});
+
+// POST /api/pipeline/jobs/:id/complete — checkpoint the stage result
+app.post("/api/pipeline/jobs/:id/complete", async (c) => {
+  try {
+    const id = c.req.param("id");
+    const body = await parseBody(c.req.raw);
+    const now = new Date().toISOString();
+    const resultJson = body?.result !== undefined ? JSON.stringify(body.result) : null;
+
+    const out = await c.env.DB.prepare(
+      `UPDATE pipeline_jobs
+          SET status = 'done', result_json = ?, lease_expires_at = NULL, next_run_at = NULL, last_error = NULL, updated_at = ?
+        WHERE id = ?`,
+    ).bind(resultJson, now, id).run();
+
+    if (!out.meta || out.meta.changes === 0) return c.json({ ok: false, error: "Job not found" }, 404);
+    const row = await c.env.DB.prepare(`SELECT * FROM pipeline_jobs WHERE id = ?`).bind(id).first<any>();
+    return c.json({ ok: true, job: parseJobRow(row) });
+  } catch (e: any) {
+    console.error("POST /api/pipeline/jobs/:id/complete failed:", e?.message);
+    return c.json({ ok: false, error: e?.message || "Failed to complete job" }, 500);
+  }
+});
+
+// POST /api/pipeline/jobs/:id/fail — re-queue with bounded backoff
+// (Retry-After aware) or mark dead when attempts are exhausted.
+app.post("/api/pipeline/jobs/:id/fail", async (c) => {
+  try {
+    const id = c.req.param("id");
+    const body = await parseBody(c.req.raw);
+    const now = new Date();
+    const retryAfterMs = Number.isFinite(body?.retryAfterMs) ? Number(body.retryAfterMs) : undefined;
+
+    const row = await c.env.DB.prepare(
+      `SELECT attempts, max_attempts FROM pipeline_jobs WHERE id = ?`,
+    ).bind(id).first<any>();
+    if (!row) return c.json({ ok: false, error: "Job not found" }, 404);
+
+    const exhausted = row.attempts >= row.max_attempts;
+    const status = exhausted ? "dead" : "queued";
+    const nextRunAt = exhausted ? null : new Date(now.getTime() + pipelineJobBackoffMs(row.attempts, retryAfterMs)).toISOString();
+
+    await c.env.DB.prepare(
+      `UPDATE pipeline_jobs SET status = ?, next_run_at = ?, lease_expires_at = NULL, last_error = ?, updated_at = ? WHERE id = ?`,
+    ).bind(status, nextRunAt, String(body?.error ?? "unknown error"), now.toISOString(), id).run();
+
+    return c.json({ ok: true, status, next_run_at: nextRunAt, attempts: row.attempts, max_attempts: row.max_attempts });
+  } catch (e: any) {
+    console.error("POST /api/pipeline/jobs/:id/fail failed:", e?.message);
+    return c.json({ ok: false, error: e?.message || "Failed to fail job" }, 500);
+  }
+});
+
+// GET /api/pipeline/jobs?task_id=…[&status=…] — job snapshot for UI/progress
+app.get("/api/pipeline/jobs", async (c) => {
+  try {
+    const taskId = c.req.query("task_id");
+    if (!taskId) return c.json({ ok: false, error: "task_id is required" }, 400);
+    const status = c.req.query("status");
+    const stmt = status
+      ? c.env.DB.prepare(`SELECT * FROM pipeline_jobs WHERE task_id = ? AND status = ? ORDER BY created_at, id`).bind(taskId, status)
+      : c.env.DB.prepare(`SELECT * FROM pipeline_jobs WHERE task_id = ? ORDER BY created_at, id`).bind(taskId);
+    const { results } = await stmt.all();
+    return c.json({ ok: true, jobs: (results ?? []).map(parseJobRow) });
+  } catch (e: any) {
+    console.error("GET /api/pipeline/jobs failed:", e?.message);
+    return c.json({ ok: false, error: e?.message || "Failed to list jobs" }, 500);
+  }
+});
+
 // 404
 app.notFound((c) => c.json({ error: "Not found", path: c.req.path }, 404));
 

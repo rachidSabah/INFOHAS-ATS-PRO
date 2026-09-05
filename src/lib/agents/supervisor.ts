@@ -369,6 +369,30 @@ let activePipelineId: string | null = null;
 let activeD1TaskId: string | null = null;
 
 /**
+ * The D1 task id for the active run (null when task creation failed/offline).
+ * Read by the durable pipeline runner to anchor pipeline_jobs rows to the run.
+ */
+export function getActiveD1TaskId(): string | null {
+  return activeD1TaskId;
+}
+
+/**
+ * Whether the DURABLE pipeline runner (Option 1) should drive this run.
+ * Feature-flagged via the D1-backed feature_flags (enableDurablePipeline),
+ * browser-only (the runner needs fetch + the page lifecycle). Any doubt →
+ * false → the legacy inline path runs (zero behavior change).
+ */
+export function isDurablePipelineEnabled(): boolean {
+  if (typeof window === "undefined") return false;
+  try {
+    const flags = useApp.getState()?.flags;
+    return !(flags && flags.enableDurablePipeline === false);
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Initialize a D1 task for a new optimization run.
  * Call this at the start of runOptimizationPipeline().
  */
@@ -1070,22 +1094,72 @@ export async function handleOptimizationRequested(
     });
     updateAgent("supervisor", { status: "running", startedAt: new Date().toISOString(), log: `Profile: ${describeProfileRuntime(profileCfg)}. Running pipeline (${plan.summary})…` });
 
-    result = await runOptimizationPipeline({
-      resume,
-      jd,
-      userDirectives: plan.userDirectives ?? userDirectives,
-      aviationMode: planAviationMode,
-      enableReflection: planReflection,
-      deepAgenticMode,
-      checkExport: false,
-      onProgress,
-      // Task 7 — Pipeline Profiles are LIVE: the Supervisor loads the selected
-      // profile at the start of each run and passes it to the pipeline.
-      profile: selectedProfile ?? undefined,
-      // S4 — checkpoint resume: restores completed intelligence artifacts
-      // from a previous recoverable run instead of re-calling those agents.
-      checkpoint,
-    });
+    // === DURABLE QUEUE RUNNER (Option 1 — flag-gated, legacy fallback) =====
+    // When enabled AND the D1 task anchor exists, the intelligence triplet +
+    // optimizer run as DURABLE D1 jobs (claim → execute → checkpoint →
+    // bounded backoff honoring Retry-After) so provider-limit hits become
+    // waits instead of degraded results, and completed stages are never
+    // re-billed. A null/throw from the durable layer falls back to the
+    // legacy inline run below — identical behavior, zero regression.
+    if (isDurablePipelineEnabled()) {
+      try {
+        const { runDurableCorePipeline } = await import("./durable-pipeline");
+        const durableResult = await runDurableCorePipeline({
+          resume,
+          jd,
+          userDirectives: plan.userDirectives ?? userDirectives,
+          aviationMode: planAviationMode,
+          enableReflection: planReflection,
+          deepAgenticMode,
+          checkpoint,
+          profile: selectedProfile ?? undefined,
+          onProgress,
+          onStageEvent: (event) => {
+            const agentId = event.stage === "job_intelligence" ? "job-intelligence"
+              : event.stage === "company_intelligence" ? "company-intelligence"
+              : event.stage === "skill_gap" ? "skill-gap"
+              : "optimizer";
+            const log = `[durable] ${event.stage} ${event.state} (attempt ${event.attempt})${event.message ? `: ${event.message}` : ""}`;
+            updateAgent(agentId, {
+              status: event.state === "completed" ? "completed" : event.state === "exhausted" ? "failed" : "running",
+              log,
+            });
+            appendTimelineEntry({
+              timestamp: new Date().toISOString(),
+              agentId,
+              agentName: agentId,
+              event: event.state === "retrying" ? "retry" : event.state === "completed" ? "complete" : "fail",
+              message: log,
+            });
+          },
+        });
+        if (durableResult) {
+          result = durableResult;
+        }
+      } catch (durableErr: any) {
+        console.warn("[Supervisor] Durable pipeline failed — falling back to the legacy inline run:", durableErr?.message ?? durableErr);
+        result = null;
+      }
+    }
+
+    if (!result) {
+      result = await runOptimizationPipeline({
+        resume,
+        jd,
+        userDirectives: plan.userDirectives ?? userDirectives,
+        aviationMode: planAviationMode,
+        enableReflection: planReflection,
+        deepAgenticMode,
+        checkExport: false,
+        onProgress,
+        // Task 7 — Pipeline Profiles are LIVE: the Supervisor loads the selected
+        // profile at the start of each run and passes it to the pipeline.
+        profile: selectedProfile ?? undefined,
+        // S4 — checkpoint resume: restores completed intelligence artifacts
+        // from a previous recoverable run instead of re-calling those agents.
+        checkpoint,
+      });
+    }
 
     // === SYNC CORE AGENT STATUSES FROM THE V2 PIPELINE RESULT ===
     // The V2 runOptimizationPipeline() runs 6 core agents internally but

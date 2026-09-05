@@ -682,6 +682,21 @@ export interface FeatureFlags {
   enableAIGuardian?: boolean;
   enableSelfHealing?: boolean;
   enableModelArena?: boolean;
+  /**
+   * Option 1 — Durable Queue Runner: run the pipeline's AI stages as D1
+   * pipeline_jobs (claim/lease, bounded backoff honoring Retry-After,
+   * per-stage result checkpoints) instead of one-shot in-memory execution.
+   * Default: true (the runner falls back to the legacy inline path on any
+   * durable-layer failure). Set false to force the legacy path.
+   */
+  enableDurablePipeline?: boolean;
+  /**
+   * Option 1 — Rate Governor: proactive per-provider pacing (token bucket +
+   * AIMD + Retry-After parking) at the single raw AI call path. Prevents
+   * agents from colliding into provider 429s. Default: true. Set false to
+   * disable pacing entirely (reactive layers still apply).
+   */
+  enableRateGovernor?: boolean;
 }
 
 /**
