@@ -323,7 +323,7 @@ export class ProviderRouter {
       }
 
       try {
-        const attemptTimeout = chain.length > 1 ? Math.min(25000, callTimeoutMs - elapsedMs) : callTimeoutMs - elapsedMs;
+        const attemptTimeout = ProviderRouter.perAttemptTimeoutMs(callTimeoutMs, elapsedMs, chain.length, opts.timeoutMs);
         const res = await this.tryProviderWithRotations(
           provider,
           req,
@@ -594,7 +594,7 @@ export class ProviderRouter {
       };
 
       try {
-        const attemptTimeout = chain.length > 1 ? Math.min(25000, callTimeoutMs - elapsedMs) : callTimeoutMs - elapsedMs;
+        const attemptTimeout = ProviderRouter.perAttemptTimeoutMs(callTimeoutMs, elapsedMs, chain.length, opts.timeoutMs);
         const adapter = ProviderFactory.get(provider.type);
         const config = toProviderConfig(provider);
 
@@ -683,7 +683,8 @@ export class ProviderRouter {
         // A broken stream cannot be resumed, so a rotated retry is delivered
         // as chunks via the shared onChunk path (same as non-streaming
         // adapters). Previously streaming had NO key/token/model rotation.
-        const attemptTimeout = chain.length > 1 ? Math.min(25000, callTimeoutMs - Math.round(performance.now() - t0)) : callTimeoutMs - Math.round(performance.now() - t0);
+        const elapsedForRotation = Math.round(performance.now() - t0);
+        const attemptTimeout = ProviderRouter.perAttemptTimeoutMs(callTimeoutMs, elapsedForRotation, chain.length, opts.timeoutMs);
         const { keyRotation, modelRotation } = this.classifyRotationError(e);
         if (keyRotation || modelRotation) {
           try {
@@ -729,6 +730,38 @@ export class ProviderRouter {
     throw new OptimizationProviderExhaustedError(
       `All AI providers failed for this streaming request:\n${errors.map((e, i) => `  ${i + 1}. ${e}`).join("\n")}`
     );
+  }
+
+  /**
+   * Per-attempt failover slice of the call budget (chat + stream parity).
+   *
+   * With the DEFAULT 60s budget each provider gets at most 25s so a
+   * multi-provider chain can still fail over inside the budget. Callers that
+   * explicitly request a LONGER budget (the optimizer's 120s
+   * OPTIMIZER_CALL_TIMEOUT_MS, the 90s pipeline-step budget, per-agent
+   * configured timeouts) must NOT be squeezed into that 25s slice: a full
+   * resume rewrite generates for 60–120s, so the hard 25s cap killed every
+   * healthy attempt mid-generation whenever 2+ providers were active —
+   * Step 5 (Resume Optimization) always failed at ~50% progress with
+   * "timed out after 25s" on every attempt.
+   *
+   * For explicit long budgets each attempt may use the full remaining budget;
+   * provider switching is then handled by the caller's bounded retry loop
+   * (locked-pipeline attempts + ProviderHealer), and fast failures (auth,
+   * 429, contract errors) still fail over immediately since they never
+   * consume the timer.
+   */
+  static perAttemptTimeoutMs(
+    callTimeoutMs: number,
+    elapsedMs: number,
+    chainLength: number,
+    explicitTimeoutMs?: number,
+  ): number {
+    const remaining = Math.max(0, callTimeoutMs - elapsedMs);
+    if (chainLength <= 1) return remaining;
+    const explicitLongBudget = (explicitTimeoutMs ?? 0) > AI_CALL_TIMEOUT_MS;
+    if (explicitLongBudget) return remaining;
+    return Math.min(25000, remaining);
   }
 
   /**
