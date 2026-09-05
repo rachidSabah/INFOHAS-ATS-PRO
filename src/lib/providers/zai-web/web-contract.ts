@@ -1,24 +1,34 @@
 /**
- * Task 30c — Z.ai Web v2 chat contract (signed request builder).
+ * Task 30c/31 — Z.ai Web v2 chat contract (signed request builder).
  *
- * Reverse-engineered from the OFFICIAL chat.z.ai web client (public
- * production bundle) so the user's own web session can be used as a real
- * API channel — the same requests their browser already makes:
+ * Reverse-engineered and CALIBRATED against the OFFICIAL chat.z.ai web
+ * client production bundle (prod-fe-1.1.93, asset index-hicAZtW-.js) so
+ * the user's own web session works as a real API channel — the same
+ * requests their browser already makes:
  *
  *   POST {origin}/api/v2/chat/completions?{urlParams}&signature_timestamp={ts}
  *   Headers:
  *     Authorization: Bearer {sessionToken}
  *     Content-Type: application/json
  *     Accept-Language: en-US
- *     X-FE-Version: prod-fe-1.1.92
+ *     X-FE-Version: prod-fe-1.1.93
  *     X-Signature: {signature}
+ *     X-Device-ID: {deviceUuid}          (wy() adds it client-side)
  *
- * Signature (two-layer HMAC-SHA256, hex):
+ * Signature (two-layer HMAC-SHA256, hex — CONFIRMED identical in 1.1.93):
  *   sortedPayload = entries({timestamp, requestId, user_id}) sorted by key,
  *                   joined as "k1,v1,k2,v2,k3,v3"
  *   h             = sortedPayload | base64(utf8(signature_prompt)) | timestamp
- *   innerKey      = HMAC_SHA256(STATIC_KEY, String(floor(ts / 5min)))
- *   signature     = HMAC_SHA256(innerKey, h)
+ *   innerKey      = HMAC_SHA256(STATIC_KEY, String(floor(ts / 5min)))  → hex
+ *   signature     = HMAC_SHA256(innerKeyHex, h)                        → hex
+ *
+ * Response (SSE, frames separated by "\n\n", each frame `data: {json}`):
+ *   {type:"chat:completion", data:{id, done, content, delta_content,
+ *        error, usage, phase("thinking"|"answer"|...), scope, ...}}
+ *   {type:"chat:message:delta"|"message", data:{content}}   → append
+ *   {type:"chat:message"|"replace",        data:{content}}   → replace
+ *   {type:"status"|"source"|"citation"|"chat:title"|"chat:tags"|
+ *        "notification"|"conn:heartbeat"}                    → ignore
  *
  * The signing key ships inside the public client bundle; nothing here
  * bypasses any protection — this reimplements exactly what the user's own
@@ -26,7 +36,7 @@
  */
 
 export const ZAI_WEB_STATIC_SIGNING_KEY = "key-@@@@)))()((9))-xxxx&&&%%%%%";
-export const ZAI_WEB_FE_VERSION = "prod-fe-1.1.92";
+export const ZAI_WEB_FE_VERSION = "prod-fe-1.1.93";
 export const ZAI_WEB_CHAT_V2_PATH = "/api/v2/chat/completions";
 export const ZAI_WEB_SIGNATURE_WINDOW_MS = 5 * 60 * 1000;
 
@@ -92,6 +102,8 @@ export async function buildZaiWebSignature(
 export interface ZaiWebDeviceContext {
   userAgent: string;
   language: string;
+  /** navigator.languages.join(",") — the official client joins the list. */
+  languages: string;
   timezone: string;
   screenWidth: number;
   screenHeight: number;
@@ -113,6 +125,7 @@ export const SERVER_DEVICE_CONTEXT: ZaiWebDeviceContext = {
   userAgent:
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
   language: "en-US",
+  languages: "en-US,en",
   timezone: "UTC",
   screenWidth: 1920,
   screenHeight: 1080,
@@ -138,7 +151,7 @@ function deviceContextFields(ctx: ZaiWebDeviceContext, token: string): Record<st
     token,
     user_agent: ctx.userAgent,
     language: ctx.language,
-    languages: ctx.language,
+    languages: ctx.languages,
     timezone: ctx.timezone,
     cookie_enabled: "true",
     screen_width: String(ctx.screenWidth),
@@ -178,9 +191,15 @@ export interface ZaiWebChatRequestInput {
   requestId?: string;
   userId?: string;
   timestamp?: string;
+  /** The official client streams (model params default stream on). Default true. */
   stream?: boolean;
   maxTokens?: number;
   temperature?: number;
+  /** Stable per-install device id (X-Device-ID header). A UUID is generated when omitted. */
+  deviceId?: string;
+  /** Z.ai chat/message ids — the web app tracks completions per chat. Fresh UUIDs by default. */
+  chatId?: string;
+  messageId?: string;
   device?: ZaiWebDeviceContext;
 }
 
@@ -196,6 +215,9 @@ export async function buildZaiWebChatRequest(
 ): Promise<ZaiWebSignedChatRequest> {
   const timestamp = input.timestamp ?? String(Date.now());
   const requestId = input.requestId ?? crypto.randomUUID();
+  const chatId = input.chatId ?? crypto.randomUUID();
+  const messageId = input.messageId ?? crypto.randomUUID();
+  const deviceId = input.deviceId ?? crypto.randomUUID();
   const ctx = input.device ?? SERVER_DEVICE_CONTEXT;
 
   const { signature } = await buildZaiWebSignature({
@@ -216,16 +238,20 @@ export async function buildZaiWebChatRequest(
   }
   const urlParams = params.toString();
 
-  const headers = {
+  const headers: Record<string, string> = {
     Authorization: `Bearer ${input.token}`,
     "Content-Type": "application/json",
     "Accept-Language": ctx.language,
     "X-FE-Version": ZAI_WEB_FE_VERSION,
     "X-Signature": signature,
+    "X-Device-ID": deviceId,
   };
 
+  // Payload mirrors the official v2 body: stream + model + messages +
+  // signature_prompt + params + features + chat/message ids + the v2
+  // message-tree references (null for a fresh conversation).
   const payload: Record<string, unknown> = {
-    stream: input.stream ?? false,
+    stream: input.stream ?? true,
     model: input.model,
     messages: input.messages,
     signature_prompt: input.prompt,
@@ -233,6 +259,16 @@ export async function buildZaiWebChatRequest(
       ...(input.maxTokens ? { max_tokens: input.maxTokens } : {}),
       ...(input.temperature !== undefined ? { temperature: input.temperature } : {}),
     },
+    features: {
+      image_generation: false,
+      web_search: false,
+      auto_web_search: false,
+      enable_thinking: false,
+    },
+    chat_id: chatId,
+    id: messageId,
+    current_user_message_id: null,
+    current_user_message_parent_id: null,
   };
 
   return {
@@ -243,14 +279,56 @@ export async function buildZaiWebChatRequest(
   };
 }
 
+/** Parsed completion: content, optional model/usage, and an optional Z.ai-side error. */
+export interface ZaiWebChatParseResult {
+  content: string;
+  model?: string;
+  usage?: Record<string, number>;
+  /** Human-presentable Z.ai-side failure (error event / quota code), token-free. */
+  error?: string;
+}
+
+/** Phases that never carry the user-facing answer text. */
+const NON_ANSWER_PHASES = new Set(["thinking", "tool_call", "tool_response", "planning"]);
+
+interface CompletionEventData {
+  id?: unknown;
+  done?: unknown;
+  content?: unknown;
+  delta_content?: unknown;
+  error?: unknown;
+  usage?: unknown;
+  phase?: unknown;
+  status?: unknown;
+  model?: unknown;
+}
+
+function completionErrorMessage(error: unknown): string | null {
+  if (!error || typeof error !== "object") {
+    return typeof error === "string" && error.trim() ? error.trim().slice(0, 300) : null;
+  }
+  const rec = error as Record<string, unknown>;
+  const code = typeof rec.code === "number" || typeof rec.code === "string" ? rec.code : null;
+  const detail =
+    typeof rec.detail === "string"
+      ? rec.detail
+      : typeof rec.content === "string"
+        ? rec.content
+        : typeof rec.message === "string"
+          ? rec.message
+          : "";
+  const text = detail.trim();
+  if (!text && code === null) return null;
+  return code !== null ? `Z.ai completion error ${code}${text ? `: ${text}` : ""}` : text.slice(0, 300);
+}
+
 /**
- * Parse a v2 completion response: JSON (stream:false) or an SSE stream
- * (some deployments ignore stream:false). Returns null when neither shape
- * matches — callers must surface that as an honest contract failure.
+ * Parse a v2 completion response: the CONFIRMED official SSE event protocol
+ * ({type, data} frames), legacy JSON shapes (OpenAI choices / flat content),
+ * and OpenAI-shaped SSE. Returns null only when NOTHING matches — callers
+ * must surface that as an honest contract failure.
  */
-export function parseZaiWebChatResponseText(
-  text: string,
-): { content: string; model?: string; usage?: Record<string, number> } | null {
+export function parseZaiWebChatResponseText(text: string): ZaiWebChatParseResult | null {
   const trimmed = text.trim();
   if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
     try {
@@ -261,26 +339,99 @@ export function parseZaiWebChatResponseText(
       /* fall through to SSE */
     }
   }
-  // SSE: "data: {json}" lines, delta.content or message.content per event.
+
   let content = "";
+  let fullContent = "";
   let model: string | undefined;
   let usage: Record<string, number> | undefined;
+  let error: string | undefined;
+  let sawEvent = false;
+
   for (const line of trimmed.split("\n")) {
     const l = line.trim();
     if (!l.startsWith("data:")) continue;
     const raw = l.slice(5).trim();
     if (!raw || raw === "[DONE]") continue;
+    let ev: Record<string, unknown>;
     try {
-      const ev = JSON.parse(raw) as Record<string, unknown>;
-      const delta = fromJsonShape(ev, true);
-      if (delta?.content) content += delta.content;
-      if (typeof ev.model === "string") model = ev.model;
-      if (ev.usage && typeof ev.usage === "object") usage = ev.usage as Record<string, number>;
+      ev = JSON.parse(raw) as Record<string, unknown>;
     } catch {
-      /* skip malformed event */
+      continue; // skip malformed event, like the official reader does
     }
+    sawEvent = true;
+    const type = typeof ev.type === "string" ? ev.type : null;
+    const data = (ev.data ?? null) as Record<string, unknown> | null;
+
+    if (type === "chat:completion" && data && typeof data === "object") {
+      const d = data as CompletionEventData;
+      if (d.error) {
+        const msg = completionErrorMessage(d.error);
+        if (msg) error = msg;
+      }
+      if (d.usage && typeof d.usage === "object") usage = d.usage as Record<string, number>;
+      if (typeof d.model === "string" && d.model) model = d.model;
+      const phase = typeof d.phase === "string" ? d.phase : "";
+      if (typeof d.delta_content === "string" && d.delta_content) {
+        if (!NON_ANSWER_PHASES.has(phase)) content += d.delta_content;
+      }
+      // Full-update events (done/finish) carry the complete answer — they
+      // override accumulated deltas, matching the official client's
+      // "full update" branch.
+      if (
+        (d.done === true || phase === "done" || (typeof d.status === "string" && d.status === "finish")) &&
+        typeof d.content === "string" &&
+        d.content
+      ) {
+        fullContent = d.content;
+      } else if (typeof d.content === "string" && d.content && !d.delta_content && d.done !== true) {
+        // Non-delta full content on a streaming event (edit_content-style replace)
+        fullContent = d.content;
+      }
+      continue;
+    }
+
+    if (
+      (type === "chat:message:delta" || type === "message") &&
+      data &&
+      typeof (data as { content?: unknown }).content === "string"
+    ) {
+      content += (data as { content: string }).content;
+      continue;
+    }
+
+    if (
+      (type === "chat:message" || type === "replace") &&
+      data &&
+      typeof (data as { content?: unknown }).content === "string"
+    ) {
+      fullContent = (data as { content: string }).content;
+      continue;
+    }
+
+    if (
+      type === "status" ||
+      type === "source" ||
+      type === "citation" ||
+      type === "chat:title" ||
+      type === "chat:tags" ||
+      type === "notification" ||
+      type === "conn:heartbeat"
+    ) {
+      continue; // metadata events — no completion content
+    }
+
+    // Unknown/absent type — try the legacy shapes on the raw event.
+    const legacy = fromJsonShape(ev, true);
+    if (legacy?.content) content += legacy.content;
+    if (legacy?.model) model = legacy.model;
+    if (legacy?.usage) usage = legacy.usage;
   }
-  if (content) return { content, model, usage };
+
+  if (error && !fullContent && !content) {
+    return { content: "", error };
+  }
+  const finalContent = fullContent || content;
+  if (sawEvent && finalContent) return { content: finalContent, model, usage };
   return null;
 }
 

@@ -183,7 +183,7 @@ export class ZaiWebSessionAdapter implements AIProviderAdapter {
           ...(req.temperature !== undefined ? { temperature: req.temperature } : {}),
           ...(resolveSessionToken(config) ? { token: resolveSessionToken(config) } : {}),
         }),
-        signal: req.signal ?? AbortSignal.timeout(config.timeout ?? 60000),
+        signal: req.signal ?? AbortSignal.timeout(config.timeout ?? 180000),
       } as RequestInit);
       const latencyMs = Math.round(performance.now() - t0);
       const data = (await (res as Response).json().catch(() => null)) as
@@ -238,7 +238,9 @@ export class ZaiWebSessionAdapter implements AIProviderAdapter {
         method: "POST",
         headers: signed.headers,
         body: signed.body,
-        signal: req.signal ?? AbortSignal.timeout(config.timeout ?? 60000),
+        // Full resume rewrites generate long completions; 60s killed healthy
+        // generations at ~50% progress. 180s matches the pipeline budget.
+        signal: req.signal ?? AbortSignal.timeout(config.timeout ?? 180000),
       } as RequestInit);
     } catch (e: unknown) {
       // Network/timeout failures degrade gracefully — never a silent success.

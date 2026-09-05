@@ -134,7 +134,9 @@ export async function POST(req: NextRequest) {
       method: "POST",
       headers: request.headers,
       body: request.body,
-      signal: AbortSignal.timeout(60000),
+      // Full resume rewrites generate long completions — the edge fetch waits
+      // on the upstream stream (no CPU burn), so 120s is a safe ceiling.
+      signal: AbortSignal.timeout(120000),
     });
   } catch (e: unknown) {
     const message = e instanceof Error ? e.message : String(e);
@@ -178,12 +180,24 @@ export async function POST(req: NextRequest) {
 
   const text = await res.text().catch(() => "");
   const parsed = parseZaiWebChatResponseText(text);
+  if (parsed?.error && !parsed.content) {
+    // Z.ai sent an explicit error event (quota, rate limit, risk control…).
+    const rateLimited = /429|rate|limit|quota/i.test(parsed.error);
+    return NextResponse.json(
+      {
+        ok: false,
+        state: rateLimited ? "rate_limited" : "session_invalid",
+        message: redact(parsed.error),
+      },
+      { status: 200 },
+    );
+  }
   if (!parsed || !parsed.content) {
     return NextResponse.json(
       {
         ok: false,
         state: "session_invalid",
-        message: "Z.ai chat response does not match the expected web contract (JSON or SSE).",
+        message: "Z.ai chat response does not match the expected web contract (JSON or SSE). The web client may have been updated — the adapter fails honestly until re-calibrated.",
       },
       { status: 200 },
     );
@@ -196,4 +210,11 @@ export async function POST(req: NextRequest) {
     model: parsed.model ?? body.model ?? null,
     usage: parsed.usage ?? null,
   });
+}
+
+/** Token-free rendering of upstream error text (defense in depth). */
+function redact(text: string): string {
+  return text
+    .replace(/Bearer\s+[A-Za-z0-9._-]+/gi, "Bearer ***")
+    .replace(/[A-Za-z0-9_-]{24,}/g, (m) => (m.includes("@") ? m : "***"));
 }
