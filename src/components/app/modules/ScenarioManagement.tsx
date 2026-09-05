@@ -15,6 +15,7 @@ import { Input } from "@/components/ui/input";
 import { Badge, Icon } from "@/components/shared";
 import { useApp, uid } from "@/lib/store";
 import { INTERVIEW_PERSONAS } from "@/lib/interview/personas";
+import { UnsavedBanner } from "./unsaved-changes";
 import type { InterviewScenario as Scenario } from "@/lib/types";
 
 export function ScenarioManagement() {
@@ -57,6 +58,13 @@ export function ScenarioManagement() {
         <Card>
           <CardHeader><CardTitle className="text-base">Edit scenario</CardTitle></CardHeader>
           <CardContent className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            {/* Draft-in-progress indicator: this editor is component-local state;
+                nothing reaches D1 until "Save" commits it. */}
+            <div className="sm:col-span-2">
+              <UnsavedBanner saveLabel="Save">
+                This draft isn&apos;t saved yet — click &quot;Save&quot; to commit it to the cloud, or &quot;Cancel&quot; to discard.
+              </UnsavedBanner>
+            </div>
             <div><label className="text-xs text-muted-foreground">Name</label><Input value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} /></div>
             <div><label className="text-xs text-muted-foreground">Company</label><Input value={draft.company} onChange={(e) => setDraft({ ...draft, company: e.target.value })} /></div>
             <div><label className="text-xs text-muted-foreground">Role</label><Input value={draft.role} onChange={(e) => setDraft({ ...draft, role: e.target.value })} /></div>

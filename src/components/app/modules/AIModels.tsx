@@ -14,6 +14,7 @@ import { api as cloudApi } from "@/lib/cloud-api";
 import { ProviderManager } from "@/lib/ai/services";
 import { toast } from "sonner";
 import { ProviderHealthPanel } from "./ProviderHealthPanel";
+import { UnsavedBanner } from "./unsaved-changes";
 import { isCliIntegration, isWebSessionIntegration } from "@/lib/provider-sync";
 
 // Common models per provider type — used to populate the model picker
@@ -208,6 +209,11 @@ export function AIModels() {
   const [autoAddFree, setAutoAddFree] = useState(true);
   const [newlyDiscovered, setNewlyDiscovered] = useState<string[]>([]);
   const [savingAll, setSavingAll] = useState(false);
+  // Unsaved-changes tracking (same contract as the other Super Admin panels):
+  // model edits (toggle, custom add, default model, auto-add) mark the panel
+  // dirty until "Save Models" confirms every provider reached D1. Cleared only
+  // on a fully successful save-all.
+  const [dirty, setDirty] = useState(false);
 
   // Explicit cloud commit of every provider's model configuration
   // (enabledModels + modelName). Inline edits already sync fire-and-forget;
@@ -221,8 +227,10 @@ export function AIModels() {
         })),
       );
       const failed = results.filter((r) => r.status === "rejected").length;
-      if (failed === 0) toast.success("All model selections saved — they survive refresh now.");
-      else toast.error(`${failed} provider(s) failed to save — check your connection and retry.`);
+      if (failed === 0) {
+        setDirty(false);
+        toast.success("All model selections saved — they survive refresh now.");
+      } else toast.error(`${failed} provider(s) failed to save — check your connection and retry.`);
     } finally {
       setSavingAll(false);
     }
@@ -294,6 +302,7 @@ export function AIModels() {
         );
         if (discovered.length > 0) {
           updateProvider(selected.id, { enabledModels: [...currentEnabled, ...discovered] });
+          setDirty(true);
           setNewlyDiscovered(discovered);
           toast.success(
             `✨ Auto-added ${discovered.length} new free model${discovered.length > 1 ? "s" : ""} from ${selected.name}.`,
@@ -317,6 +326,7 @@ export function AIModels() {
       ? current.filter((m) => m !== modelName)
       : [...current, modelName];
     updateProvider(selected.id, { enabledModels: next });
+    setDirty(true);
     toast.success(`${modelName} ${next.includes(modelName) ? "enabled" : "disabled"} for ${selected.name}.`);
   };
 
@@ -324,6 +334,7 @@ export function AIModels() {
     if (!selected || !customModel.trim()) return;
     const next = [...(selected.enabledModels ?? []), customModel.trim()];
     updateProvider(selected.id, { enabledModels: next });
+    setDirty(true);
     setCustomModel("");
     toast.success(`Added custom model: ${customModel.trim()}`);
   };
@@ -331,6 +342,7 @@ export function AIModels() {
   const setAsDefaultModel = (modelName: string) => {
     if (!selected) return;
     updateProvider(selected.id, { modelName });
+    setDirty(true);
     toast.success(`${modelName} set as default model for ${selected.name}.`);
   };
 
@@ -345,6 +357,8 @@ export function AIModels() {
           <Icon name="Save" className="w-4 h-4" /> {savingAll ? "Saving…" : "Save Models"}
         </Button>
       </div>
+
+      {dirty && <UnsavedBanner saveLabel="Save Models" />}
 
       {/* Provider Health — Auto-Heal + Manual Heal (directives #7–#20).
           Rendered UNCONDITIONALLY at the top so the healing controls are always

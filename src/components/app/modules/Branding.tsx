@@ -8,12 +8,22 @@ import { Label } from "@/components/ui/label";
 import { Badge, Icon, Logo } from "@/components/shared";
 import { useApp } from "@/lib/store";
 import { api as cloudApi } from "@/lib/cloud-api";
+import { UnsavedBanner } from "./unsaved-changes";
 import { toast } from "sonner";
 
 export function Branding() {
   const branding = useApp((s) => s.branding);
   const updateBranding = useApp((s) => s.updateBranding);
   const log = useApp((s) => s.log);
+
+  // Unsaved-changes tracking: any field edit marks the panel dirty until the
+  // explicit save confirms D1 has the full state (same contract as the other
+  // Super Admin panels). Cleared ONLY on a successful save.
+  const [dirty, setDirty] = useState(false);
+  const patch = (p: Parameters<typeof updateBranding>[0]) => {
+    updateBranding(p);
+    setDirty(true);
+  };
 
   // Real save: explicitly pushes the full branding state to D1 (PUT
   // /api/settings/branding). Fields already persist per-keystroke via the
@@ -24,6 +34,7 @@ export function Branding() {
     setSaving(true);
     try {
       await cloudApi.updateBranding(branding);
+      setDirty(false);
       log({ actor: "you", action: "Branding updated", category: "admin", details: `${branding.appName} · ${branding.primaryColor}`, severity: "info" });
       toast.success("Branding saved to cloud — persists across refreshes.");
     } catch {
@@ -40,29 +51,31 @@ export function Branding() {
         <p className="text-sm text-muted-foreground mt-1">Customize the app's name, colors, logo, and email/PDF branding.</p>
       </div>
 
+      {dirty && <UnsavedBanner saveLabel="Save branding" />}
+
       <div className="grid lg:grid-cols-3 gap-6">
         <Card className="lg:col-span-2">
           <CardHeader><CardTitle className="text-lg">Brand identity</CardTitle><CardDescription>Used across the app, PDFs, and emails.</CardDescription></CardHeader>
           <CardContent className="space-y-4">
             <div className="grid sm:grid-cols-2 gap-3">
-              <Field label="App name"><Input value={branding.appName} onChange={(e) => updateBranding({ appName: e.target.value })} /></Field>
-              <Field label="Tagline"><Input value={branding.tagline} onChange={(e) => updateBranding({ tagline: e.target.value })} /></Field>
+              <Field label="App name"><Input value={branding.appName} onChange={(e) => patch({ appName: e.target.value })} /></Field>
+              <Field label="Tagline"><Input value={branding.tagline} onChange={(e) => patch({ tagline: e.target.value })} /></Field>
             </div>
             <div className="grid sm:grid-cols-2 gap-3">
               <Field label="Primary color">
                 <div className="flex gap-2">
-                  <Input type="color" value={branding.primaryColor} onChange={(e) => updateBranding({ primaryColor: e.target.value })} className="w-12 h-9 p-1" />
-                  <Input value={branding.primaryColor} onChange={(e) => updateBranding({ primaryColor: e.target.value })} />
+                  <Input type="color" value={branding.primaryColor} onChange={(e) => patch({ primaryColor: e.target.value })} className="w-12 h-9 p-1" />
+                  <Input value={branding.primaryColor} onChange={(e) => patch({ primaryColor: e.target.value })} />
                 </div>
               </Field>
               <Field label="Accent color">
                 <div className="flex gap-2">
-                  <Input type="color" value={branding.accentColor} onChange={(e) => updateBranding({ accentColor: e.target.value })} className="w-12 h-9 p-1" />
-                  <Input value={branding.accentColor} onChange={(e) => updateBranding({ accentColor: e.target.value })} />
+                  <Input type="color" value={branding.accentColor} onChange={(e) => patch({ accentColor: e.target.value })} className="w-12 h-9 p-1" />
+                  <Input value={branding.accentColor} onChange={(e) => patch({ accentColor: e.target.value })} />
                 </div>
               </Field>
             </div>
-            <Field label="Logo URL"><Input value={branding.logoUrl} onChange={(e) => updateBranding({ logoUrl: e.target.value })} /></Field>
+            <Field label="Logo URL"><Input value={branding.logoUrl} onChange={(e) => patch({ logoUrl: e.target.value })} /></Field>
           </CardContent>
         </Card>
 
@@ -90,15 +103,15 @@ export function Branding() {
       <Card>
         <CardHeader><CardTitle className="text-lg">Email branding</CardTitle><CardDescription>Used in transactional emails and magic links.</CardDescription></CardHeader>
         <CardContent className="grid sm:grid-cols-2 gap-3">
-          <Field label="From name"><Input value={branding.emailFromName} onChange={(e) => updateBranding({ emailFromName: e.target.value })} /></Field>
-          <Field label="From address"><Input value={branding.emailFromAddress} onChange={(e) => updateBranding({ emailFromAddress: e.target.value })} /></Field>
+          <Field label="From name"><Input value={branding.emailFromName} onChange={(e) => patch({ emailFromName: e.target.value })} /></Field>
+          <Field label="From address"><Input value={branding.emailFromAddress} onChange={(e) => patch({ emailFromAddress: e.target.value })} /></Field>
         </CardContent>
       </Card>
 
       <Card>
         <CardHeader><CardTitle className="text-lg">PDF branding</CardTitle><CardDescription>Footer text on exported resumes and cover letters.</CardDescription></CardHeader>
         <CardContent>
-          <Field label="PDF footer text"><Input value={branding.pdfFooterText} onChange={(e) => updateBranding({ pdfFooterText: e.target.value })} /></Field>
+          <Field label="PDF footer text"><Input value={branding.pdfFooterText} onChange={(e) => patch({ pdfFooterText: e.target.value })} /></Field>
         </CardContent>
       </Card>
 

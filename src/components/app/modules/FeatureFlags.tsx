@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Badge, Icon } from "@/components/shared";
 import { useApp } from "@/lib/store";
 import { api as cloudApi } from "@/lib/cloud-api";
+import { UnsavedBanner } from "./unsaved-changes";
 import { toast } from "sonner";
 import type { FeatureFlags as Flags } from "@/lib/types";
 
@@ -58,6 +59,14 @@ export function FeatureFlags() {
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState<"all" | "feature" | "safe" | "danger">("all");
   const [savingAll, setSavingAll] = useState(false);
+  // Unsaved-changes tracking (same contract as the other Super Admin panels):
+  // toggles/reset mark the panel dirty until the explicit save-all confirms
+  // every flag reached D1. Cleared only on a fully successful save.
+  const [dirty, setDirty] = useState(false);
+  const toggleFlag = (key: keyof Flags, val: boolean) => {
+    updateFlag(key, val);
+    setDirty(true);
+  };
 
   const filteredFlags = FLAGS.filter((f) => {
     const matchesSearch = f.label.toLowerCase().includes(search.toLowerCase()) || 
@@ -77,6 +86,7 @@ export function FeatureFlags() {
       const results = await Promise.allSettled(entries.map(([k, v]) => cloudApi.updateFlag(k, v)));
       const failed = results.filter((r) => r.status === "rejected").length;
       if (failed === 0) {
+        setDirty(false);
         log({ actor: "you", action: "All feature flags saved to cloud", category: "admin", details: `${entries.length} flags persisted`, severity: "info" });
         toast.success("All feature flags saved — they survive refresh now.");
       } else {
@@ -90,7 +100,7 @@ export function FeatureFlags() {
 
   const handleResetDefaults = () => {
     Object.entries(DEFAULT_SEED_FLAGS).forEach(([key, val]) => {
-      updateFlag(key as keyof Flags, val);
+      toggleFlag(key as keyof Flags, val);
     });
     log({ actor: "you", action: "Reset all flags to defaults", category: "admin", details: "All flags", severity: "warning" });
     toast.success("All feature flags reset to system defaults.");
@@ -114,6 +124,12 @@ export function FeatureFlags() {
           </Button>
         </div>
       </div>
+
+      {dirty && (
+        <UnsavedBanner saveLabel="Save All Flags">
+          You have unsaved flags. Click &quot;Save All Flags&quot; to confirm them on the server.
+        </UnsavedBanner>
+      )}
 
       {/* Search and Filters */}
       <div className="flex flex-wrap gap-2 items-center">
@@ -156,7 +172,7 @@ export function FeatureFlags() {
                 <Switch
                   checked={!!on}
                   onCheckedChange={(v) => {
-                    updateFlag(f.key, v);
+                    toggleFlag(f.key, v);
                     log({ actor: "you", action: `Flag ${f.key} ${v ? "ON" : "OFF"}`, category: "admin", details: f.label, severity: v ? "info" : "warning" });
                     toast.success(`${f.label} ${v ? "enabled" : "disabled"}.`);
                   }}

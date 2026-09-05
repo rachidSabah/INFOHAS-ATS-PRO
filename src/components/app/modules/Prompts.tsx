@@ -9,6 +9,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Badge, Icon } from "@/components/shared";
 import { useApp, uid } from "@/lib/store";
 import { api as cloudApi } from "@/lib/cloud-api";
+import { UnsavedBanner } from "./unsaved-changes";
 import { toast } from "sonner";
 import type { PromptTemplate } from "@/lib/types";
 
@@ -34,6 +35,11 @@ export function Prompts() {
   const [editing, setEditing] = useState<PromptTemplate | null>(null);
   const [filter, setFilter] = useState<string>("all");
   const [savingAll, setSavingAll] = useState(false);
+  // Unsaved-changes tracking (same contract as the other Super Admin panels):
+  // prompt edits (editor save, activate/deactivate, clone, delete) mark the
+  // panel dirty until "Save All Prompts" confirms every prompt reached D1.
+  // Cleared only on a fully successful save-all.
+  const [dirty, setDirty] = useState(false);
 
   // Explicit cloud commit for the whole prompt library (worker whitelist
   // filters each payload). Repairs any prompt whose earlier fire-and-forget
@@ -49,6 +55,7 @@ export function Prompts() {
       );
       const failed = results.filter((r) => r.status === "rejected").length;
       if (failed === 0) {
+        setDirty(false);
         log({ actor: "you", action: "All prompts saved to cloud", category: "admin", details: `${prompts.length} prompt(s) persisted`, severity: "info" });
         toast.success("All prompts saved — they survive refresh now.");
       } else {
@@ -77,6 +84,8 @@ export function Prompts() {
           </Button>
         </div>
       </div>
+
+      {dirty && <UnsavedBanner saveLabel="Save All Prompts" />}
 
       {/* Filter chips */}
       <div className="flex flex-wrap gap-2">
@@ -118,7 +127,7 @@ export function Prompts() {
                 )}
                 <div className="mt-3 flex flex-wrap gap-1 items-center">
                   <Button size="sm" variant="outline" onClick={() => setEditing(p)} className="gap-1.5"><Icon name="Pencil" className="w-3.5 h-3.5" /> Edit</Button>
-                  <Button size="sm" variant="outline" onClick={() => { updatePrompt(p.id, { isActive: !p.isActive }); toast.success(p.isActive ? "Deactivated" : "Activated"); }} className="gap-1.5"><Icon name="Power" className="w-3.5 h-3.5" /> {p.isActive ? "Deactivate" : "Activate"}</Button>
+                  <Button size="sm" variant="outline" onClick={() => { updatePrompt(p.id, { isActive: !p.isActive }); setDirty(true); toast.success(p.isActive ? "Deactivated" : "Activated"); }} className="gap-1.5"><Icon name="Power" className="w-3.5 h-3.5" /> {p.isActive ? "Deactivate" : "Activate"}</Button>
                   <Button 
                     size="sm" 
                     variant="outline" 
@@ -132,6 +141,7 @@ export function Prompts() {
                         isActive: false,
                         variables: [...p.variables],
                       });
+                      setDirty(true);
                       log({ actor: "you", action: `Duplicated prompt: ${p.name}`, category: "admin", details: p.category, severity: "info" });
                       toast.success("Prompt duplicated.");
                     }} 
@@ -139,7 +149,7 @@ export function Prompts() {
                   >
                     <Icon name="Copy" className="w-3.5 h-3.5" /> Clone
                   </Button>
-                  <Button size="sm" variant="ghost" className="text-destructive ml-auto" onClick={() => { removePrompt(p.id); toast.success("Deleted."); }}><Icon name="Trash2" className="w-3.5 h-3.5" /></Button>
+                  <Button size="sm" variant="ghost" className="text-destructive ml-auto" onClick={() => { removePrompt(p.id); setDirty(true); toast.success("Deleted."); }}><Icon name="Trash2" className="w-3.5 h-3.5" /></Button>
                 </div>
               </CardContent>
             </Card>
@@ -161,6 +171,7 @@ export function Prompts() {
               log({ actor: "you", action: `Added prompt: ${p.name}`, category: "admin", details: p.category || "uncategorized", severity: "info" });
               toast.success("Prompt added.");
             }
+            setDirty(true);
             setEditing(null);
           }}
         />

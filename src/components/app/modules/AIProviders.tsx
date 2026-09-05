@@ -18,6 +18,7 @@ import { isOpenCodeZenFree } from "@/lib/provider-capabilities";
 import { getProviderConcurrencySnapshot, resetProviderAdaptiveCap, ADAPTIVE_CAP_RECOVER_THRESHOLD } from "@/lib/provider-concurrency";
 import { getProviderCooldownSnapshot, formatCooldownRemaining, clearProviderCooldownOnSuccess, type ProviderCooldownClass } from "@/lib/provider-cooldown";
 import { ProviderEditor } from "./AIProviderEditor";
+import { UnsavedBanner } from "./unsaved-changes";
 import { ProviderAnalytics } from "./ProviderAnalytics";
 import { ProviderLogsTable } from "./ProviderLogsTable";
 import { TestConnectionModal } from "./TestConnectionModal";
@@ -140,6 +141,11 @@ export function AIProviders() {
   // failed, and gives Super Admin a visible save affordance. API keys are safe
   // to send: GET /api/providers returns them decrypted, PUT re-encrypts.
   const [savingAll, setSavingAll] = useState(false);
+  // Unsaved-changes tracking (same contract as the other Super Admin panels):
+  // every provider mutation (editor save, add, duplicate, default, delete,
+  // backup import) marks the panel dirty until "Save Providers" confirms all
+  // providers reached D1. Cleared only on a fully successful save-all.
+  const [dirty, setDirty] = useState(false);
   const handleSaveAllProviders = async () => {
     setSavingAll(true);
     try {
@@ -162,6 +168,7 @@ export function AIProviders() {
       );
       const failed = results.filter((r) => r.status === "rejected").length;
       if (failed === 0) {
+        setDirty(false);
         toast.success("All providers saved — they survive refresh now.");
       } else {
         toast.error(`${failed} provider(s) failed to save — check your connection and retry.`);
@@ -247,6 +254,7 @@ export function AIProviders() {
         const id = ProviderManager.add(fullConfig as any);
         if (id) added++;
       }
+      setDirty(true);
       toast.success(`Imported ${added} provider configs from backup.`);
     } catch (err: any) {
       toast.error(`Import failed: ${err?.message || "Invalid file"}`);
@@ -282,6 +290,8 @@ export function AIProviders() {
           </Button>
         </div>
       </div>
+
+      {dirty && <UnsavedBanner saveLabel="Save Providers" />}
 
       {/* KPI cards */}
       <div className="grid grid-cols-2 lg:grid-cols-6 gap-3">
@@ -508,9 +518,9 @@ export function AIProviders() {
                             <IconBtn icon="Pencil" label="Edit" onClick={() => { setEditing(p); setShowAdd(true); }} />
                             <IconBtn icon="Zap" label="Test connection" onClick={() => handleTest(p)} color="#F59E2B" />
                             <IconBtn icon="Wrench" label="Heal provider (diagnose + repair + validate)" onClick={() => { if (healingId !== p.id) handleHealOne(p); }} color={healingId === p.id ? "#D97706" : "#D97706"} />
-                            <IconBtn icon="Copy" label="Duplicate" onClick={() => { const id = ProviderManager.duplicate(p.id); if (id) toast.success("Provider duplicated."); }} />
-                            <IconBtn icon={p.isDefault ? "Star" : "StarOff"} label="Set as default" onClick={() => { ProviderManager.setDefault(p.id); toast.success(`${p.name} set as default.`); }} color={p.isDefault ? "#F59E2B" : undefined} />
-                            <IconBtn icon="Trash2" label="Delete" color="#DC2626" onClick={() => { if (confirm(`Delete provider "${p.name}"?`)) { ProviderManager.remove(p.id); toast.success(`Provider deleted.`); } }} />
+                            <IconBtn icon="Copy" label="Duplicate" onClick={() => { const id = ProviderManager.duplicate(p.id); if (id) { setDirty(true); toast.success("Provider duplicated."); } }} />
+                            <IconBtn icon={p.isDefault ? "Star" : "StarOff"} label="Set as default" onClick={() => { ProviderManager.setDefault(p.id); setDirty(true); toast.success(`${p.name} set as default.`); }} color={p.isDefault ? "#F59E2B" : undefined} />
+                            <IconBtn icon="Trash2" label="Delete" color="#DC2626" onClick={() => { if (confirm(`Delete provider "${p.name}"?`)) { ProviderManager.remove(p.id); setDirty(true); toast.success(`Provider deleted.`); } }} />
                           </div>
                         </td>
                       </tr>
@@ -594,6 +604,7 @@ export function AIProviders() {
               } as any);
               toast.success(`Provider added (id: ${id}).`);
             }
+            setDirty(true);
             setShowAdd(false);
             setEditing(null);
           }}

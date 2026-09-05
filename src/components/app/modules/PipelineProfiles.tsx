@@ -9,6 +9,7 @@ import { Switch } from "@/components/ui/switch";
 import { Badge, Icon } from "@/components/shared";
 import { useApp } from "@/lib/store";
 import { SEED_PIPELINE_PROFILES } from "@/lib/pipeline-orchestration-seeds";
+import { UnsavedBanner } from "./unsaved-changes";
 import { toast } from "sonner";
 import type { PipelineProfile, PipelineProfileType } from "@/lib/pipeline-orchestration-types";
 
@@ -24,6 +25,12 @@ export function PipelineProfiles() {
   const [editingProfile, setEditingProfile] = useState<PipelineProfile | null>(null);
 
   const selectedProfile = profiles.find((p) => p.id === selectedProfileId);
+
+  // The profile editor works on a local copy; nothing reaches the store (and
+  // from there D1) until "Save Profile" commits it. Snapshot-compare against
+  // the stored version so the indicator only appears once a field changes.
+  const profileDirty = !!editingProfile &&
+    JSON.stringify(editingProfile) !== JSON.stringify(profiles.find((p) => p.id === editingProfile.id));
 
   const handleSelect = (id: string) => {
     selectProfile(id);
@@ -229,6 +236,11 @@ export function PipelineProfiles() {
             <CardDescription>Configure the custom pipeline profile.</CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
+            {profileDirty && (
+              <UnsavedBanner saveLabel="Save Profile">
+                You have unsaved profile changes — click &quot;Save Profile&quot; to commit them, or &quot;Cancel&quot; to discard.
+              </UnsavedBanner>
+            )}
             <div className="grid sm:grid-cols-2 gap-3">
               <div>
                 <Label>Profile Name</Label>
