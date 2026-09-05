@@ -1360,6 +1360,21 @@ app.get("/api/settings/branding", async (c) => {
         emailFromAddress: result.email_from_address ?? result.emailFromAddress,
         pdfFooterText: result.pdf_footer_text ?? result.pdfFooterText,
       };
+      // === Admin settings blob (migration 0020) ===
+      // optimizerDirective / fallbackChain / pipelineProfiles /
+      // selectedProfileId / aiDevSettings live in admin_settings_json and are
+      // spread back as TOP-LEVEL keys — syncAllFromCloud (cloud-api.ts)
+      // hydrates them from bd.optimizerDirective, bd.fallbackChain, etc.
+      if (result.admin_settings_json) {
+        try {
+          const adminSettings = JSON.parse(result.admin_settings_json);
+          if (adminSettings && typeof adminSettings === "object" && !Array.isArray(adminSettings)) {
+            branding = { ...branding, ...adminSettings };
+          }
+        } catch (e: any) {
+          console.warn("GET /api/settings/branding admin_settings_json parse failed:", e?.message);
+        }
+      }
     }
     const response = c.json({ branding });
     response.headers.set("X-Cache-Status", "MISS");
@@ -1391,6 +1406,39 @@ app.put("/api/settings/branding", async (c) => {
   const existingLogo = existing.logo_url ?? existing.logoUrl ?? existing.logo ?? "/brand/logo.svg";
   const existingCompany = existing.company ?? "ResumeAI Pro";
 
+  // === Admin settings blob (migration 0020) ===
+  // The Super Admin store pushes optimizerDirective / fallbackChain /
+  // pipelineProfiles / selectedProfileId / aiDevSettings through this very
+  // endpoint. The previous whitelist silently discarded them (while still
+  // returning ok:true), so every save vanished on refresh. Merge the known
+  // admin keys into one JSON column; keys absent from this request body keep
+  // their previously stored value, so unrelated updateBranding callers can
+  // never wipe another panel's settings.
+  const ADMIN_SETTING_KEYS = [
+    "optimizerDirective",
+    "fallbackChain",
+    "pipelineProfiles",
+    "selectedProfileId",
+    "aiDevSettings",
+  ] as const;
+  let adminSettings: Record<string, unknown> = {};
+  try {
+    if (existing.admin_settings_json) {
+      const parsed = JSON.parse(existing.admin_settings_json);
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+        adminSettings = parsed;
+      }
+    }
+  } catch {
+    adminSettings = {};
+  }
+  for (const k of ADMIN_SETTING_KEYS) {
+    if (body[k] !== undefined && body[k] !== null) {
+      adminSettings[k] = body[k];
+    }
+  }
+  const adminSettingsJson = Object.keys(adminSettings).length > 0 ? JSON.stringify(adminSettings) : null;
+
   // Merge values exactly as required
   const payload = {
     appName: body.appName ?? existingAppName,
@@ -1411,6 +1459,7 @@ app.put("/api/settings/branding", async (c) => {
     "logo_url = ?", "email_from_name = ?", "email_from_address = ?",
     "pdf_footer_text = ?", "updated_at = ?",
     "provider_settings_json = ?", "ai_routing_settings_json = ?",
+    "admin_settings_json = ?",
   ];
 
   const n = (bodyValue: any, dbField: string, defaultValue: string) => {
@@ -1430,6 +1479,7 @@ app.put("/api/settings/branding", async (c) => {
     now,
     body.providerSettings !== undefined && body.providerSettings !== null ? JSON.stringify(body.providerSettings) : (existing.provider_settings_json ?? null),
     body.aiRoutingSettings !== undefined && body.aiRoutingSettings !== null ? JSON.stringify(body.aiRoutingSettings) : (existing.ai_routing_settings_json ?? null),
+    adminSettingsJson,
   ];
 
   values.push("1"); // WHERE id = 1

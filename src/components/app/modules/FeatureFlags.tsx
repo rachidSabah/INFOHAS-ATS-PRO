@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Badge, Icon } from "@/components/shared";
 import { useApp } from "@/lib/store";
+import { api as cloudApi } from "@/lib/cloud-api";
 import { toast } from "sonner";
 import type { FeatureFlags as Flags } from "@/lib/types";
 
@@ -56,6 +57,7 @@ export function FeatureFlags() {
 
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState<"all" | "feature" | "safe" | "danger">("all");
+  const [savingAll, setSavingAll] = useState(false);
 
   const filteredFlags = FLAGS.filter((f) => {
     const matchesSearch = f.label.toLowerCase().includes(search.toLowerCase()) || 
@@ -63,6 +65,28 @@ export function FeatureFlags() {
     const matchesFilter = filter === "all" || f.severity === filter;
     return matchesSearch && matchesFilter;
   });
+
+  // Explicit Save button — persists EVERY flag to D1 (PUT /api/settings/flags/:key)
+  // so the whole flag set is guaranteed refresh-proof even if an individual
+  // fire-and-forget toggle sync failed earlier. Toggles still apply instantly;
+  // this button is the authoritative "commit to server" affordance.
+  const handleSaveAll = async () => {
+    setSavingAll(true);
+    try {
+      const entries = Object.entries(flags) as [keyof Flags, boolean][];
+      const results = await Promise.allSettled(entries.map(([k, v]) => cloudApi.updateFlag(k, v)));
+      const failed = results.filter((r) => r.status === "rejected").length;
+      if (failed === 0) {
+        log({ actor: "you", action: "All feature flags saved to cloud", category: "admin", details: `${entries.length} flags persisted`, severity: "info" });
+        toast.success("All feature flags saved — they survive refresh now.");
+      } else {
+        log({ actor: "you", action: "Feature flag save partially failed", category: "admin", details: `${failed}/${entries.length} failed`, severity: "warning" });
+        toast.error(`${failed} flag(s) failed to save — check your connection and retry.`);
+      }
+    } finally {
+      setSavingAll(false);
+    }
+  };
 
   const handleResetDefaults = () => {
     Object.entries(DEFAULT_SEED_FLAGS).forEach(([key, val]) => {
@@ -79,10 +103,16 @@ export function FeatureFlags() {
           <h1 className="font-display text-2xl font-bold flex items-center gap-2"><Icon name="Flag" className="w-6 h-6 text-brand" /> Feature Flags</h1>
           <p className="text-sm text-muted-foreground mt-1">Toggle features on or off instantly, without redeploying.</p>
         </div>
-        <Button onClick={handleResetDefaults} variant="outline" size="sm" className="gap-1.5 text-xs">
-          <Icon name="RotateCcw" className="w-3.5 h-3.5" />
-          Reset to Defaults
-        </Button>
+        <div className="flex gap-2">
+          <Button onClick={handleSaveAll} disabled={savingAll} size="sm" className="gap-1.5 text-xs bg-brand hover:bg-brand-dark text-white">
+            <Icon name="Save" className="w-3.5 h-3.5" />
+            {savingAll ? "Saving…" : "Save All Flags"}
+          </Button>
+          <Button onClick={handleResetDefaults} variant="outline" size="sm" className="gap-1.5 text-xs">
+            <Icon name="RotateCcw" className="w-3.5 h-3.5" />
+            Reset to Defaults
+          </Button>
+        </div>
       </div>
 
       {/* Search and Filters */}

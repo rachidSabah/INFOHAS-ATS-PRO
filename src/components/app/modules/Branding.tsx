@@ -1,11 +1,13 @@
 "use client";
 
+import { useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge, Icon, Logo } from "@/components/shared";
 import { useApp } from "@/lib/store";
+import { api as cloudApi } from "@/lib/cloud-api";
 import { toast } from "sonner";
 
 export function Branding() {
@@ -13,9 +15,22 @@ export function Branding() {
   const updateBranding = useApp((s) => s.updateBranding);
   const log = useApp((s) => s.log);
 
-  const save = () => {
-    log({ actor: "you", action: "Branding updated", category: "admin", details: `${branding.appName} · ${branding.primaryColor}`, severity: "info" });
-    toast.success("Branding saved. Regenerate icons to apply everywhere.");
+  // Real save: explicitly pushes the full branding state to D1 (PUT
+  // /api/settings/branding). Fields already persist per-keystroke via the
+  // store; this button guarantees the current state is on the server and
+  // gives the user a confirmed, refresh-proof save.
+  const [saving, setSaving] = useState(false);
+  const save = async () => {
+    setSaving(true);
+    try {
+      await cloudApi.updateBranding(branding);
+      log({ actor: "you", action: "Branding updated", category: "admin", details: `${branding.appName} · ${branding.primaryColor}`, severity: "info" });
+      toast.success("Branding saved to cloud — persists across refreshes.");
+    } catch {
+      toast.error("Branding save failed — check your connection and try again.");
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (
@@ -88,7 +103,7 @@ export function Branding() {
       </Card>
 
       <div className="flex justify-end">
-        <Button onClick={save} className="bg-brand hover:bg-brand-dark text-white gap-2"><Icon name="Save" className="w-4 h-4" /> Save branding</Button>
+        <Button onClick={save} disabled={saving} className="bg-brand hover:bg-brand-dark text-white gap-2"><Icon name="Save" className="w-4 h-4" /> {saving ? "Saving…" : "Save branding"}</Button>
       </div>
     </div>
   );

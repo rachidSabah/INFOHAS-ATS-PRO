@@ -74,6 +74,21 @@ R=$(curl -s "http://127.0.0.1:8799/api/settings/branding" -H "$UID_HDR")
 check "branding camelCase alias appName" '"appName":"SmokeBrand"' "$R"
 check "branding raw snake_case kept" '"app_name":"SmokeBrand"' "$R"
 
+echo "[8b] PUT branding admin settings blob (regression: optimizerDirective/fallbackChain/pipelineProfiles/selectedProfileId/aiDevSettings silently dropped)"
+R=$(curl -s -X PUT "http://127.0.0.1:8799/api/settings/branding" -H "$UID_HDR" -H "Content-Type: application/json" -d '{"optimizerDirective":{"customDirectiveOverride":"SMOKE_DIRECTIVE_XY","bodyFontSizePt":11.5},"fallbackChain":{"enabled":true,"entries":[{"id":"smoke_fb_entry","providerId":"p_smoke","priority":1}]},"pipelineProfiles":[{"id":"prof_smoke_123","name":"Smoke Profile"}],"selectedProfileId":"prof_smoke_123","aiDevSettings":{"smokeProbeKey":"smokeProbeVal"}}')
+check "PUT admin settings ok" '"ok":true' "$R"
+R=$(curl -s "http://127.0.0.1:8799/api/settings/branding" -H "$UID_HDR")
+check "optimizerDirective restored top-level" 'SMOKE_DIRECTIVE_XY' "$R"
+check "fallbackChain restored top-level" '"smoke_fb_entry"' "$R"
+check "pipelineProfiles restored top-level" '"prof_smoke_123"' "$R"
+check "selectedProfileId restored top-level" '"selectedProfileId":"prof_smoke_123"' "$R"
+check "aiDevSettings restored top-level" '"smokeProbeKey":"smokeProbeVal"' "$R"
+# Merge semantics: a branding-only PUT must NOT wipe stored admin settings
+R=$(curl -s -X PUT "http://127.0.0.1:8799/api/settings/branding" -H "$UID_HDR" -H "Content-Type: application/json" -d '{"appName":"SmokeBrand"}')
+check "branding-only PUT ok" '"ok":true' "$R"
+R=$(curl -s "http://127.0.0.1:8799/api/settings/branding" -H "$UID_HDR")
+check "admin settings survive branding-only PUT" 'SMOKE_DIRECTIVE_XY' "$R"
+
 echo "[9] provider-sessions envelope"
 R=$(curl -s -X PUT "http://127.0.0.1:8799/api/provider-sessions/puter" -H "$UID_HDR" -H "Content-Type: application/json" -d '{"authenticated":true,"accessToken":"tok"}')
 check "PUT session ok" '"ok":true' "$R"

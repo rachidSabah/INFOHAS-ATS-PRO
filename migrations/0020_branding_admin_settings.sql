@@ -1,0 +1,21 @@
+-- 0020_branding_admin_settings.sql
+-- Super Admin settings persistence: optimizerDirective, fallbackChain,
+-- pipelineProfiles, selectedProfileId and aiDevSettings are all pushed from
+-- the frontend store through PUT /api/settings/branding, but the worker's
+-- column whitelist only persisted provider_settings_json and
+-- ai_routing_settings_json — every other key returned ok:true and was
+-- silently discarded, so those settings vanished on every page refresh.
+--
+-- Fix: one generic JSON column on `branding` holding the admin settings
+-- blob. PUT merges the known admin keys into it; GET spreads them back as
+-- top-level keys of the branding payload, which is exactly the shape the
+-- existing hydration code in syncAllFromCloud (cloud-api.ts) already reads:
+--   bd.optimizerDirective / bd.fallbackChain / bd.pipelineProfiles /
+--   bd.selectedProfileId / bd.aiDevSettings
+--
+-- Fresh databases: 0001 creates branding WITHOUT this column, so this ALTER
+-- applies cleanly in sequence. Production: column does not exist yet, so the
+-- ALTER is required exactly once. (Deliberately NOT added to 0001 — doing
+-- both would reproduce the "duplicate column name" failure fixed in 0018.)
+
+ALTER TABLE branding ADD COLUMN admin_settings_json TEXT;

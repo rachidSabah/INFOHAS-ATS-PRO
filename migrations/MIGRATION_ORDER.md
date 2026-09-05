@@ -28,6 +28,7 @@
 | `0017_agent_configs_and_sessions.sql` | branding: agent_configs_json/_version/_updated_at/_updated_by + provider_sessions table (Agent Configuration Center D1 persistence + provider session lifecycle) | 0008 |
 | `0018_resumes_profile_columns.sql` | (now a no-op) resumes: photo_url, date_of_birth + users: avatar — provided by 0001 on fresh databases; production already has them (0008-born tables) | 0001, 0003 |
 | `0019_pipeline_jobs.sql` | pipeline_jobs: durable per-stage queue for the optimization pipeline (claim/lease, bounded backoff, result checkpoints) | 0001, 0008 |
+| `0020_branding_admin_settings.sql` | branding: admin_settings_json — persists Super Admin settings (optimizerDirective, fallbackChain, pipelineProfiles, selectedProfileId, aiDevSettings) that PUT /api/settings/branding previously dropped | 0001 |
 
 ## How to Add a New Migration
 
