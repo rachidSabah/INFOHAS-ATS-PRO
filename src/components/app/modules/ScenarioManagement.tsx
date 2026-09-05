@@ -2,9 +2,10 @@
 
 // ============================================================================
 // Phase 8.1.5 (P8) — Scenario Management (Super Admin).
-// Manages interview scenarios in session-local state (there is no scenario
-// store yet — persistence is a follow-up). A scenario groups a role/company +
-// difficulty + persona mix used to drive an interview. No interview logic here.
+// Manages interview scenarios. Persisted to D1 via the branding
+// admin-settings blob (saveScenarios → PUT /api/settings/branding →
+// admin_settings_json) so every edit survives refresh and syncs across
+// devices. No interview logic here.
 // ============================================================================
 
 import { useState } from "react";
@@ -14,33 +15,25 @@ import { Input } from "@/components/ui/input";
 import { Badge, Icon } from "@/components/shared";
 import { useApp, uid } from "@/lib/store";
 import { INTERVIEW_PERSONAS } from "@/lib/interview/personas";
-
-interface Scenario {
-  id: string;
-  name: string;
-  company: string;
-  role: string;
-  difficulty: "easy" | "medium" | "hard";
-  personaIds: string[];
-}
-
-const SEED: Scenario[] = [
-  { id: "sc-cabin-crew", name: "Cabin Crew — Emirates", company: "Emirates", role: "Cabin Crew", difficulty: "medium", personaIds: ["hr", "cabin-crew-manager", "safety-trainer"] },
-  { id: "sc-swe", name: "Senior SWE — Big Tech", company: "Big Tech", role: "Senior Software Engineer", difficulty: "hard", personaIds: ["hr", "hiring-manager"] },
-];
+import type { InterviewScenario as Scenario } from "@/lib/types";
 
 export function ScenarioManagement() {
   const setView = useApp((s) => s.setView);
-  const [scenarios, setScenarios] = useState<Scenario[]>(SEED);
+  const scenarios = useApp((s) => s.scenarios);
+  const saveScenarios = useApp((s) => s.saveScenarios);
   const [draft, setDraft] = useState<Scenario | null>(null);
 
+  // Every mutation goes through saveScenarios → local state + D1, so the
+  // list is refresh-proof the moment the user acts.
   const save = () => {
     if (!draft) return;
-    setScenarios((s) => {
-      const exists = s.some((x) => x.id === draft.id);
-      return exists ? s.map((x) => (x.id === draft.id ? draft : x)) : [draft, ...s];
-    });
+    const exists = scenarios.some((x) => x.id === draft.id);
+    saveScenarios(exists ? scenarios.map((x) => (x.id === draft.id ? draft : x)) : [draft, ...scenarios]);
     setDraft(null);
+  };
+
+  const remove = (id: string) => {
+    saveScenarios(scenarios.filter((x) => x.id !== id));
   };
 
   return (
@@ -52,7 +45,7 @@ export function ScenarioManagement() {
           </Button>
           <div>
             <h1 className="font-display text-2xl font-bold">Scenario Management</h1>
-            <p className="text-sm text-muted-foreground">{scenarios.length} scenarios · edits are session-local.</p>
+            <p className="text-sm text-muted-foreground">{scenarios.length} scenarios · saved to cloud — survives refresh.</p>
           </div>
         </div>
         <Button size="sm" onClick={() => setDraft({ id: uid("sc"), name: "", company: "", role: "", difficulty: "medium", personaIds: [] })}>
@@ -111,7 +104,7 @@ export function ScenarioManagement() {
               </div>
               <div className="flex gap-2">
                 <Button size="sm" variant="outline" onClick={() => setDraft(sc)}><Icon name="Pencil" className="w-4 h-4 mr-2" /> Edit</Button>
-                <Button size="sm" variant="ghost" onClick={() => setScenarios((s) => s.filter((x) => x.id !== sc.id))}><Icon name="Trash2" className="w-4 h-4" /></Button>
+                <Button size="sm" variant="ghost" onClick={() => remove(sc.id)}><Icon name="Trash2" className="w-4 h-4" /></Button>
               </div>
             </CardContent>
           </Card>

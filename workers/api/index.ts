@@ -1021,6 +1021,8 @@ app.put("/api/providers/:id", async (c) => {
       clientId: "client_id", redirectUri: "redirect_uri",
       supportsFunctionCalling: "supports_function_calling",
       type: "provider_type", apiUrl: "base_url",
+      retryAttempts: "retry_attempts", rateLimitPerMinute: "rate_limit_per_minute",
+      concurrencyCap: "concurrency_cap",
     };
 
     for (const [k, col] of Object.entries(fieldToColumn)) {
@@ -1420,6 +1422,8 @@ app.put("/api/settings/branding", async (c) => {
     "pipelineProfiles",
     "selectedProfileId",
     "aiDevSettings",
+    "scenarios",
+    "interviewPersonas",
   ] as const;
   let adminSettings: Record<string, unknown> = {};
   try {

@@ -2,9 +2,10 @@
 
 // ============================================================================
 // Phase 8.1.5 (P8) — Persona Management (Super Admin).
-// Renders the existing INTERVIEW_PERSONAS in an editable grid. Edits live in
-// local state (persistence into the store/config is a follow-up); the view
-// consumes the existing persona data and never re-implements interview logic.
+// Renders the interviewer personas in an editable grid. The live list lives
+// in the store and persists to D1 via the branding admin-settings blob
+// (saveInterviewPersonas → PUT /api/settings/branding) so edits survive
+// refresh; the view never re-implements interview logic.
 // ============================================================================
 
 import { useState } from "react";
@@ -13,15 +14,37 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge, Icon } from "@/components/shared";
 import { useApp } from "@/lib/store";
+import { api as cloudApi } from "@/lib/cloud-api";
 import { INTERVIEW_PERSONAS, type InterviewPersona } from "@/lib/interview/personas";
+import { toast } from "sonner";
 
 export function PersonaManagement() {
   const setView = useApp((s) => s.setView);
-  const [personas, setPersonas] = useState<InterviewPersona[]>(() => INTERVIEW_PERSONAS.map((p) => ({ ...p })));
+  const savedPersonas = useApp((s) => s.interviewPersonas);
+  const saveInterviewPersonas = useApp((s) => s.saveInterviewPersonas);
+  // Local working copy — "Save Personas" commits it to the store + D1.
+  const [personas, setPersonas] = useState<InterviewPersona[]>(savedPersonas);
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  const dirty = JSON.stringify(personas) !== JSON.stringify(savedPersonas);
 
   const update = (id: string, patch: Partial<InterviewPersona>) =>
     setPersonas((ps) => ps.map((p) => (p.id === id ? { ...p, ...patch } : p)));
+
+  const handleSave = async () => {
+    setSaving(true);
+    try {
+      // Awaited PUT — the toast only shows once D1 actually has the data.
+      await cloudApi.updateBranding({ interviewPersonas: personas });
+      saveInterviewPersonas(personas); // store state (+ idempotent fire-and-forget sync)
+      toast.success("Personas saved — they survive refresh now.");
+    } catch {
+      toast.error("Save failed — check your connection and try again.");
+    } finally {
+      setSaving(false);
+    }
+  };
 
   return (
     <div className="space-y-6">
@@ -31,9 +54,22 @@ export function PersonaManagement() {
         </Button>
         <div>
           <h1 className="font-display text-2xl font-bold">Persona Management</h1>
-          <p className="text-sm text-muted-foreground">{personas.length} interviewer personas · edits are session-local.</p>
+          <p className="text-sm text-muted-foreground">{personas.length} interviewer personas · click "Save Personas" to persist.</p>
         </div>
+        <Button
+          onClick={handleSave}
+          disabled={!dirty || saving}
+          className="bg-brand hover:bg-brand-dark text-white gap-2"
+        >
+          <Icon name="Save" className="w-4 h-4" /> {saving ? "Saving…" : "Save Personas"}
+        </Button>
       </div>
+      {dirty && (
+        <div className="flex items-center gap-2 rounded-lg border border-amber-300/50 bg-amber-100/40 px-3 py-2 text-sm text-amber-800 dark:bg-amber-400/5 dark:text-amber-200">
+          <Icon name="AlertTriangle" className="w-4 h-4 shrink-0" />
+          You have unsaved changes. Click "Save Personas" to apply them everywhere.
+        </div>
+      )}
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
         {personas.map((p) => {

@@ -8,6 +8,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge, Icon } from "@/components/shared";
 import { useApp, uid } from "@/lib/store";
+import { api as cloudApi } from "@/lib/cloud-api";
 import { toast } from "sonner";
 import type { PromptTemplate } from "@/lib/types";
 
@@ -32,6 +33,31 @@ export function Prompts() {
 
   const [editing, setEditing] = useState<PromptTemplate | null>(null);
   const [filter, setFilter] = useState<string>("all");
+  const [savingAll, setSavingAll] = useState(false);
+
+  // Explicit cloud commit for the whole prompt library (worker whitelist
+  // filters each payload). Repairs any prompt whose earlier fire-and-forget
+  // sync failed and gives a visible save affordance.
+  const handleSaveAll = async () => {
+    setSavingAll(true);
+    try {
+      const results = await Promise.allSettled(
+        prompts.map((p) => cloudApi.updatePrompt(p.id, {
+          name: p.name, category: p.category, content: p.content,
+          isActive: p.isActive, variables: p.variables,
+        })),
+      );
+      const failed = results.filter((r) => r.status === "rejected").length;
+      if (failed === 0) {
+        log({ actor: "you", action: "All prompts saved to cloud", category: "admin", details: `${prompts.length} prompt(s) persisted`, severity: "info" });
+        toast.success("All prompts saved — they survive refresh now.");
+      } else {
+        toast.error(`${failed} prompt(s) failed to save — check your connection and retry.`);
+      }
+    } finally {
+      setSavingAll(false);
+    }
+  };
 
   const filtered = filter === "all" ? prompts : prompts.filter((p) => p.category === filter);
 
@@ -42,9 +68,14 @@ export function Prompts() {
           <h1 className="font-display text-2xl font-bold flex items-center gap-2"><Icon name="Brain" className="w-6 h-6 text-brand" /> Prompt Library</h1>
           <p className="text-sm text-muted-foreground mt-1">Versioned prompt templates for every AI feature. Edit, version, and activate.</p>
         </div>
-        <Button onClick={() => setEditing({ id: uid("pt"), name: "", category: "resume", content: "", version: 1, isActive: true, variables: [] })} className="bg-brand hover:bg-brand-dark text-white gap-2">
-          <Icon name="Plus" className="w-4 h-4" /> New prompt
-        </Button>
+        <div className="flex gap-2">
+          <Button onClick={handleSaveAll} disabled={savingAll} variant="outline" className="gap-2">
+            <Icon name="Save" className="w-4 h-4" /> {savingAll ? "Saving…" : "Save All Prompts"}
+          </Button>
+          <Button onClick={() => setEditing({ id: uid("pt"), name: "", category: "resume", content: "", version: 1, isActive: true, variables: [] })} className="bg-brand hover:bg-brand-dark text-white gap-2">
+            <Icon name="Plus" className="w-4 h-4" /> New prompt
+          </Button>
+        </div>
       </div>
 
       {/* Filter chips */}

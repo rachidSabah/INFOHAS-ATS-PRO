@@ -89,6 +89,23 @@ check "branding-only PUT ok" '"ok":true' "$R"
 R=$(curl -s "http://127.0.0.1:8799/api/settings/branding" -H "$UID_HDR")
 check "admin settings survive branding-only PUT" 'SMOKE_DIRECTIVE_XY' "$R"
 
+echo "[8c] scenarios + interviewPersonas round-trip (Scenario/Persona Management persistence)"
+R=$(curl -s -X PUT "http://127.0.0.1:8799/api/settings/branding" -H "$UID_HDR" -H "Content-Type: application/json" -d '{"scenarios":[{"id":"sc_smoke_1","name":"Smoke Scenario","company":"SmokeCo","role":"QA","difficulty":"easy","personaIds":["hr"]}],"interviewPersonas":[{"id":"persona_smoke_1","name":"Smoke Persona","role":"QA Lead","shortLabel":"SP","icon":"Bot","accent":"#123456","category":"technical","focusAreas":["regression"],"bias":"thorough"}]}')
+check "PUT scenarios+personas ok" '"ok":true' "$R"
+R=$(curl -s "http://127.0.0.1:8799/api/settings/branding" -H "$UID_HDR")
+check "scenarios restored top-level" '"sc_smoke_1"' "$R"
+check "interviewPersonas restored top-level" '"persona_smoke_1"' "$R"
+
+echo "[8d] provider numeric fields persist (regression: retryAttempts/rateLimitPerMinute/concurrencyCap silently dropped)"
+PID=$(curl -s "http://127.0.0.1:8799/api/providers" -H "$UID_HDR" | python3 -c "import sys,json;print(json.load(sys.stdin)['providers'][0]['id'])" 2>/dev/null)
+R=$(curl -s -X PUT "http://127.0.0.1:8799/api/providers/$PID" -H "$UID_HDR" -H "Content-Type: application/json" -d '{"retryAttempts":7,"rateLimitPerMinute":42,"concurrencyCap":3}')
+check "PUT provider numeric fields ok" '"ok":true' "$R"
+R=$(curl -s "http://127.0.0.1:8799/api/providers" -H "$UID_HDR" | python3 -c "
+import sys,json
+p=[x for x in json.load(sys.stdin)['providers'] if x['id']=='$PID'][0]
+print('ok' if p.get('retry_attempts')==7 and p.get('rate_limit_per_minute')==42 and p.get('concurrency_cap')==3 else 'MISMATCH:'+json.dumps({k:p.get(k) for k in ['retry_attempts','rate_limit_per_minute','concurrency_cap']}))" 2>/dev/null)
+check "provider numeric fields round-trip" '^ok$' "$R"
+
 echo "[9] provider-sessions envelope"
 R=$(curl -s -X PUT "http://127.0.0.1:8799/api/provider-sessions/puter" -H "$UID_HDR" -H "Content-Type: application/json" -d '{"authenticated":true,"accessToken":"tok"}')
 check "PUT session ok" '"ok":true' "$R"
@@ -109,6 +126,10 @@ else
 fi
 
 echo "[11] pipeline_jobs durable queue (Option 1: enqueue→claim→complete→fail→backoff→dead)"
+# Re-runnability: purge any rows left by a previous smoke run on this machine
+# (CI runners are always fresh; local .wrangler state persists between runs
+# and would otherwise shift the expected claim order/statuses below).
+npx wrangler d1 execute resumeai-pro-db --local --command "DELETE FROM pipeline_jobs WHERE task_id = 'task_smoke_1'" --json > /dev/null 2>&1
 R=$(curl -s -X POST "http://127.0.0.1:8799/api/pipeline/jobs" -H "Content-Type: application/json" -d '{
   "taskId": "task_smoke_1",
   "jobs": [

@@ -514,6 +514,17 @@ export async function syncAllFromCloud(store: any): Promise<void> {
       if (bd.aiDevSettings && typeof bd.aiDevSettings === "object") {
         store.setState({ aiDevSettings: { ...store.getState().aiDevSettings, ...bd.aiDevSettings } });
       }
+      // Restore interview scenarios + personas (Super Admin → Scenario/Persona
+      // Management). Non-empty arrays only, so a wiped/legacy row never clobbers
+      // the in-store seeds.
+      if (Array.isArray(bd.scenarios) && bd.scenarios.length > 0) {
+        console.info(`[syncAllFromCloud] Restoring scenarios from D1 (${bd.scenarios.length})`);
+        store.setState({ scenarios: bd.scenarios });
+      }
+      if (Array.isArray(bd.interviewPersonas) && bd.interviewPersonas.length > 0) {
+        console.info(`[syncAllFromCloud] Restoring interviewPersonas from D1 (${bd.interviewPersonas.length})`);
+        store.setState({ interviewPersonas: bd.interviewPersonas });
+      }
 
       // === RESTORE provider settings from D1 ===
       // The provider_settings_json column stores the AI routing config
@@ -681,6 +692,7 @@ function parseDbProvider(p: any): any {
     costPerInputToken: p.cost_per_input_token, costPerOutputToken: p.cost_per_output_token,
     applicationId: p.application_id, clientId: p.client_id, redirectUri: p.redirect_uri,
     enabledModels: safeJson(p.enabled_models_json, []),
+    concurrencyCap: p.concurrency_cap ?? undefined,
     lastUsedAt: p.last_used_at, status: p.status,
     usage: { requests: p.usage_requests, tokens: p.usage_tokens, errors: p.usage_errors, avgLatencyMs: p.usage_avg_latency_ms, cost: p.usage_cost },
   };

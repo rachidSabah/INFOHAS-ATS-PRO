@@ -650,6 +650,20 @@ export interface PromptTemplate {
   variables: string[];
 }
 
+/**
+ * Interview scenario managed by Super Admin → Scenario Management.
+ * Persisted to D1 via the branding admin-settings blob (migration 0020/0021)
+ * so scenarios survive refresh and sync across devices.
+ */
+export interface InterviewScenario {
+  id: string;
+  name: string;
+  company: string;
+  role: string;
+  difficulty: "easy" | "medium" | "hard";
+  personaIds: string[];
+}
+
 export interface BrandingConfig {
   appName: string;
   tagline: string;

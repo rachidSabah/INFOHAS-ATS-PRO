@@ -7,7 +7,7 @@ import type {
   OptimizerDirectiveConfig,
   AIDevAgentSettings, AIDevAgentHistory, AIDevReport,
   AITask, AIWorkspacePatch, AIGitBranch, AIGitCommit, AIRollback,
-  FallbackChainConfig,
+  FallbackChainConfig, InterviewScenario,
 } from "./types";
 import { BRAND } from "./brand";
 
@@ -982,6 +982,14 @@ export const SEED_PROVIDER_LOGS: AIProviderLog[] = [
     requestPreview: "Extract keywords from JD...",
     createdAt: new Date(Date.now() - 1000 * 60 * 60 * 5).toISOString(),
   },
+];
+
+// Seed interview scenarios for Super Admin → Scenario Management.
+// The store hydrates the live list from D1 (branding admin-settings blob)
+// when present; these defaults apply on first run / fresh databases.
+export const SEED_SCENARIOS: InterviewScenario[] = [
+  { id: "sc-cabin-crew", name: "Cabin Crew — Emirates", company: "Emirates", role: "Cabin Crew", difficulty: "medium", personaIds: ["hr", "cabin-crew-manager", "safety-trainer"] },
+  { id: "sc-swe", name: "Senior SWE — Big Tech", company: "Big Tech", role: "Senior Software Engineer", difficulty: "hard", personaIds: ["hr", "hiring-manager"] },
 ];
 
 export const SEED_PROVIDER_SETTINGS: AIProviderSettings = {

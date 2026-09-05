@@ -8,15 +8,19 @@ import type { StateCreator } from "zustand";
 import type { AppState } from "../store";
 import type {
   AIProvider, AIProviderLog, AIProviderSettings, FallbackChainConfig,
-  PromptTemplate, BrandingConfig, FeatureFlags, OptimizerDirectiveConfig
+  PromptTemplate, BrandingConfig, FeatureFlags, OptimizerDirectiveConfig,
+  InterviewScenario
 } from "../types";
+import type { InterviewPersona } from "../interview/personas";
 import type {
   PipelineProfile, AgentConfig, PromptVersion
 } from "../pipeline-orchestration-types";
 import {
   SEED_PROVIDERS, SEED_PROVIDER_LOGS, SEED_PROVIDER_SETTINGS, SEED_PROMPTS,
-  SEED_BRANDING, SEED_FLAGS, SEED_OPTIMIZER_DIRECTIVE, SEED_FALLBACK_CHAIN
+  SEED_BRANDING, SEED_FLAGS, SEED_OPTIMIZER_DIRECTIVE, SEED_FALLBACK_CHAIN,
+  SEED_SCENARIOS
 } from "../mock-data";
+import { INTERVIEW_PERSONAS } from "../interview/personas";
 import {
   SEED_PIPELINE_PROFILES, SEED_AGENT_CONFIGS, SEED_PROMPT_VERSIONS
 } from "../pipeline-orchestration-seeds";
@@ -80,6 +84,10 @@ export interface AdminSlice {
   branding: BrandingConfig;
   flags: FeatureFlags;
   optimizerDirective: OptimizerDirectiveConfig;
+  /** Interview scenarios (Super Admin → Scenario Management) — persisted to D1. */
+  scenarios: InterviewScenario[];
+  /** Interviewer personas (Super Admin → Persona Management) — persisted to D1. */
+  interviewPersonas: InterviewPersona[];
 
   addProvider: (p: AIProvider) => void;
   updateProvider: (id: string, patch: Partial<AIProvider>) => void;
@@ -93,6 +101,10 @@ export interface AdminSlice {
   addProviderLog: (l: AIProviderLog) => void;
   clearProviderLogs: (providerId?: string) => void;
   updateProviderSettings: (patch: Partial<AIProviderSettings>) => void;
+  /** Replace the whole scenario list and persist it to D1 (survives refresh). */
+  saveScenarios: (list: InterviewScenario[]) => void;
+  /** Replace the whole persona list and persist it to D1 (survives refresh). */
+  saveInterviewPersonas: (list: InterviewPersona[]) => void;
   addPrompt: (p: PromptTemplate) => void;
   updatePrompt: (id: string, patch: Partial<PromptTemplate>) => void;
   removePrompt: (id: string) => void;
@@ -148,6 +160,8 @@ export const createAdminSlice: StateCreator<AppState, [], [], AdminSlice> = (set
   branding: SEED_BRANDING,
   flags: SEED_FLAGS,
   optimizerDirective: SEED_OPTIMIZER_DIRECTIVE,
+  scenarios: SEED_SCENARIOS,
+  interviewPersonas: INTERVIEW_PERSONAS.map((p) => ({ ...p })),
 
   addProvider: (p) => {
     set((s) => ({ providers: [...s.providers, p] }));
@@ -341,6 +355,21 @@ export const createAdminSlice: StateCreator<AppState, [], [], AdminSlice> = (set
         localStorage.setItem("resumeai-provider-settings", JSON.stringify(settings));
       } catch (syncErr) { console.warn("[store] Operation failed:", syncErr); }
     }
+  },
+
+  saveScenarios: (list) => {
+    set({ scenarios: list });
+    // Persist via the branding admin-settings blob (migration 0020) — the
+    // worker merges it into admin_settings_json and GET spreads it back, so
+    // syncAllFromCloud restores it on every load.
+    cloudApiSafe(cloudApi.updateBranding as any)({ scenarios: list }).catch((e) => { console.warn("[store] Cloud sync failed:", e); });
+    get().log({ actor: get().user?.email ?? "admin", action: "Scenarios saved", category: "admin", details: `${list.length} scenario(s) persisted to D1`, severity: "info" });
+  },
+
+  saveInterviewPersonas: (list) => {
+    set({ interviewPersonas: list });
+    cloudApiSafe(cloudApi.updateBranding as any)({ interviewPersonas: list }).catch((e) => { console.warn("[store] Cloud sync failed:", e); });
+    get().log({ actor: get().user?.email ?? "admin", action: "Interview personas saved", category: "admin", details: `${list.length} persona(s) persisted to D1`, severity: "info" });
   },
 
   addPrompt: (p) => {

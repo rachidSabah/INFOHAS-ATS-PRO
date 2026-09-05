@@ -9,6 +9,7 @@ import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Badge, Icon } from "@/components/shared";
 import { useApp, uid } from "@/lib/store";
+import { api as cloudApi } from "@/lib/cloud-api";
 import { ProviderManager } from "@/lib/ai/services";
 import { toast } from "sonner";
 import type { AIProvider } from "@/lib/types";
@@ -134,6 +135,42 @@ export function AIProviders() {
 
   const importRef = useRef<HTMLInputElement>(null);
 
+  // Explicit cloud commit for ALL providers (the worker whitelist filters each
+  // payload). Repairs any provider field whose earlier fire-and-forget sync
+  // failed, and gives Super Admin a visible save affordance. API keys are safe
+  // to send: GET /api/providers returns them decrypted, PUT re-encrypts.
+  const [savingAll, setSavingAll] = useState(false);
+  const handleSaveAllProviders = async () => {
+    setSavingAll(true);
+    try {
+      const results = await Promise.allSettled(
+        providers.map((p) => cloudApi.updateProvider(p.id, {
+          name: p.name, type: p.type, baseUrl: p.baseUrl || p.apiUrl || "",
+          modelName: p.modelName, enabledModels: p.enabledModels,
+          priority: p.priority, isActive: p.isActive, isDefault: p.isDefault,
+          isFallback: p.isFallback, timeout: p.timeout, maxTokens: p.maxTokens,
+          temperature: p.temperature, retryAttempts: p.retryAttempts,
+          rateLimitPerMinute: p.rateLimitPerMinute, concurrencyCap: p.concurrencyCap,
+          authType: p.authType, allowedForRegularUsers: p.allowedForRegularUsers,
+          headersJson: p.headersJson, parametersJson: p.parametersJson,
+          requestTemplate: p.requestTemplate, responsePath: p.responsePath,
+          streamingEnabled: p.streamingEnabled,
+          costPerInputToken: p.costPerInputToken, costPerOutputToken: p.costPerOutputToken,
+          applicationId: p.applicationId, clientId: p.clientId, redirectUri: p.redirectUri,
+          supportsFunctionCalling: p.supportsFunctionCalling,
+        })),
+      );
+      const failed = results.filter((r) => r.status === "rejected").length;
+      if (failed === 0) {
+        toast.success("All providers saved — they survive refresh now.");
+      } else {
+        toast.error(`${failed} provider(s) failed to save — check your connection and retry.`);
+      }
+    } finally {
+      setSavingAll(false);
+    }
+  };
+
   const handleExportConfig = () => {
     const config = providers.map((p) => ({
       name: p.name,
@@ -227,6 +264,9 @@ export function AIProviders() {
           <p className="text-sm text-muted-foreground mt-1">Multi-provider system with automatic failover. 17 types supported — extendable without code changes.</p>
         </div>
         <div className="flex gap-2">
+          <Button onClick={handleSaveAllProviders} disabled={savingAll} className="gap-2">
+            <Icon name="Save" className="w-4 h-4" /> {savingAll ? "Saving…" : "Save Providers"}
+          </Button>
           <Button variant="outline" onClick={handleExportConfig} className="gap-2">
             <Icon name="Download" className="w-4 h-4" /> Export
           </Button>

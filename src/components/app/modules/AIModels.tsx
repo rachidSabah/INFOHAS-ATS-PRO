@@ -10,6 +10,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge, Icon } from "@/components/shared";
 import { useApp } from "@/lib/store";
+import { api as cloudApi } from "@/lib/cloud-api";
 import { ProviderManager } from "@/lib/ai/services";
 import { toast } from "sonner";
 import { ProviderHealthPanel } from "./ProviderHealthPanel";
@@ -206,6 +207,26 @@ export function AIModels() {
   const [freeOnly, setFreeOnly] = useState(false);
   const [autoAddFree, setAutoAddFree] = useState(true);
   const [newlyDiscovered, setNewlyDiscovered] = useState<string[]>([]);
+  const [savingAll, setSavingAll] = useState(false);
+
+  // Explicit cloud commit of every provider's model configuration
+  // (enabledModels + modelName). Inline edits already sync fire-and-forget;
+  // this button repairs any that failed and confirms persistence.
+  const handleSaveModels = async () => {
+    setSavingAll(true);
+    try {
+      const results = await Promise.allSettled(
+        providers.map((p) => cloudApi.updateProvider(p.id, {
+          modelName: p.modelName, enabledModels: p.enabledModels,
+        })),
+      );
+      const failed = results.filter((r) => r.status === "rejected").length;
+      if (failed === 0) toast.success("All model selections saved — they survive refresh now.");
+      else toast.error(`${failed} provider(s) failed to save — check your connection and retry.`);
+    } finally {
+      setSavingAll(false);
+    }
+  };
 
   // === COST CALCULATOR STATES ===
   const [testModel, setTestModel] = useState("");
@@ -315,9 +336,14 @@ export function AIModels() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="font-display text-2xl font-bold flex items-center gap-2"><Icon name="Boxes" className="w-6 h-6 text-brand" /> AI Models</h1>
-        <p className="text-sm text-muted-foreground mt-1">Browse the model catalog and enable specific models per provider.</p>
+      <div className="flex items-center justify-between flex-wrap gap-3">
+        <div>
+          <h1 className="font-display text-2xl font-bold flex items-center gap-2"><Icon name="Boxes" className="w-6 h-6 text-brand" /> AI Models</h1>
+          <p className="text-sm text-muted-foreground mt-1">Browse the model catalog and enable specific models per provider.</p>
+        </div>
+        <Button onClick={handleSaveModels} disabled={savingAll} className="bg-brand hover:bg-brand-dark text-white gap-2">
+          <Icon name="Save" className="w-4 h-4" /> {savingAll ? "Saving…" : "Save Models"}
+        </Button>
       </div>
 
       {/* Provider Health — Auto-Heal + Manual Heal (directives #7–#20).

@@ -45,6 +45,7 @@ vi.mock("../mock-data", () => ({
   SEED_FLAGS: {},
   SEED_OPTIMIZER_DIRECTIVE: {},
   SEED_FALLBACK_CHAIN: {},
+  SEED_SCENARIOS: [],
 }));
 
 const seedConfigs = vi.hoisted(() => {
