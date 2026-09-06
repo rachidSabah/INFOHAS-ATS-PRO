@@ -106,7 +106,16 @@ export async function POST(req: NextRequest) {
     if (data?.data) {
       models = data.data.map((m: { id?: string }) => m.id).filter(Boolean);
     } else if (data?.models) {
-      models = data.models.map((m: { name?: string }) => m.name?.replace(/^models\//, "") || m.name).filter(Boolean);
+      // Puter (api.puter.com/puterai/chat/models) returns { models: string[] } —
+      // plain string ids. Other providers (Gemini) return { models: [{name}] }.
+      models = data.models
+        .map((m: unknown) =>
+          typeof m === "string"
+            ? m.replace(/^models\//, "")
+            : ((m as Record<string, string>)?.name?.replace(/^models\//, "") ||
+               (m as Record<string, string>)?.id)
+        )
+        .filter(Boolean);
     } else if (Array.isArray(data)) {
       models = data.map((m: unknown) => typeof m === "string" ? m : ((m as Record<string, string>)?.id || (m as Record<string, string>)?.name)).filter(Boolean);
     }

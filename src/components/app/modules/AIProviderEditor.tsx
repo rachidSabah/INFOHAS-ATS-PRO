@@ -167,7 +167,7 @@ export function ProviderEditor({ provider, onClose, onSave }: {
                   variant="outline"
                   size="sm"
                   onClick={async () => {
-                    // === PUTER: use static built-in models, not API fetch ===
+                    // === PUTER: LIVE catalog from api.puter.com (curated-first) ===
                     if (form.type === "puter") {
                       setFetchingModels(true);
                       setSyncSummary(null);
@@ -177,7 +177,7 @@ export function ProviderEditor({ provider, onClose, onSave }: {
                       } as any);
                       setFetchingModels(false);
                       if (result.ok && result.models.length > 0) {
-                        applyLiveModelList(result.models, "built-in Puter models");
+                        applyLiveModelList(result.models, "the live Puter catalog");
                       } else {
                         toast.error("Failed to load Puter models.");
                       }
@@ -207,7 +207,7 @@ export function ProviderEditor({ provider, onClose, onSave }: {
                   className="gap-1.5 shrink-0"
                 >
                   {fetchingModels ? <Icon name="Loader2" className="w-3.5 h-3.5 animate-spin" /> : <Icon name="DownloadCloud" className="w-3.5 h-3.5" />}
-                  {form.type === "puter" ? "Built-in" : "Fetch"}
+                  {form.type === "puter" ? "Fetch live catalog" : "Fetch"}
                 </Button>
               </div>
               {fetchedModels.length > 0 && (

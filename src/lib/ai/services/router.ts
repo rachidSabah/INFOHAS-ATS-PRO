@@ -49,7 +49,7 @@ import { tryRotateProviderToken, isRotatableAuthError } from "../../token-rotati
 import { withTimeout, OptimizationProviderExhaustedError, AI_CALL_TIMEOUT_MS } from "../../pipeline-watchdog";
 import { truncatePromptToTokenLimit, MAX_INPUT_TOKENS } from "../../ai-diagnostics";
 import { isOpenCodeZenFree } from "../../provider-capabilities";
-import { shouldSkipForOptimization, EMERGENCY_ONLY_PROVIDERS } from "../../circuit-breaker";
+import { shouldSkipForOptimization, isProviderAvailable, EMERGENCY_ONLY_PROVIDERS } from "../../circuit-breaker";
 // Central health registry + validated rotation (directives #9, #12):
 import { aiHealthManager } from "../health/ai-health-manager";
 import { filterCompatibleRotationCandidates } from "../routing/model-compatibility";
@@ -601,13 +601,13 @@ export class ProviderRouter {
         let res: ChatResponse;
         if (typeof (adapter as any).stream === "function" && provider.type !== "local") {
           res = await withTimeout(
-            (adapter as any).stream({ ...req, model: modelForAttempt }, config, onChunk),
+            (adapter as any).stream(withAttemptDeadline({ ...req, model: modelForAttempt }, attemptTimeout), config, onChunk),
             attemptTimeout,
             `${provider.name}.stream`
           );
         } else {
           res = await withTimeout(
-            adapter.chat({ ...req, model: modelForAttempt }, config),
+            adapter.chat(withAttemptDeadline({ ...req, model: modelForAttempt }, attemptTimeout), config),
             attemptTimeout,
             `${provider.name}.generate`
           );
@@ -946,7 +946,7 @@ export class ProviderRouter {
         try {
           const altConfig = { ...config, apiKey: altKey };
           const res = await withTimeout(
-            adapter.chat({ ...req, model: modelForAttempt }, altConfig),
+            adapter.chat(withAttemptDeadline({ ...req, model: modelForAttempt }, timeoutMs), altConfig),
             timeoutMs,
             `${provider.name}.generate`
           );
@@ -995,7 +995,7 @@ export class ProviderRouter {
             : config;
           try {
             const res = await withTimeout(
-              adapter.chat({ ...req, model: modelForAttempt }, rotatedConfig),
+              adapter.chat(withAttemptDeadline({ ...req, model: modelForAttempt }, timeoutMs), rotatedConfig),
               timeoutMs,
               `${provider.name}.generate`
             );
@@ -1038,7 +1038,7 @@ export class ProviderRouter {
         try {
           const altConfig = { ...config, modelName: altModel };
           const res = await withTimeout(
-            adapter.chat({ ...req, model: altModel }, altConfig),
+            adapter.chat(withAttemptDeadline({ ...req, model: altModel }, timeoutMs), altConfig),
             timeoutMs,
             `${provider.name}.generate`
           );
@@ -1112,9 +1112,12 @@ export class ProviderRouter {
     let lastError: any;
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
       try {
-        // Run with timeout watchdog
+        // Run with timeout watchdog. withAttemptDeadline also aborts the
+        // underlying fetch at the SAME deadline — the withTimeout race alone
+        // never aborts the request, so the adapter fell back to its own
+        // provider-row timeout (see withAttemptDeadline docstring).
         const res = await withTimeout(
-          adapter.chat({ ...req, model: modelForAttempt }, config),
+          adapter.chat(withAttemptDeadline({ ...req, model: modelForAttempt }, timeoutMs), config),
           timeoutMs,
           `${provider.name}.generate`
         );
@@ -1347,6 +1350,39 @@ export class ProviderRouter {
 // Core provider-selection static helpers (exported for backwards compatibility)
 // ============================================================================
 
+/**
+ * ROUTER-OWNED ATTEMPT DEADLINE (root-cause fix for "Step 5 fails at ~50%").
+ *
+ * Adapters abort fetches with `req.signal ?? AbortSignal.timeout(config.timeout)`.
+ * The router's withTimeout() is only a Promise.race — it NEVER aborts the
+ * underlying request — so when the caller passed no signal, the PROVIDER-ROW
+ * timeout (e.g. p_mistral = 30 000 ms) silently capped every routed attempt
+ * at 30s while the router believed it had granted the full 120s optimizer
+ * budget. A full resume rewrite generates for 60–120s, so every attempt died
+ * mid-generation — exactly the recurring "Step 5 (Resume Optimization) fails
+ * at ~50%" symptom.
+ *
+ * Fix: every routed attempt carries the attempt deadline as BOTH
+ *  - an AbortSignal (the fetch really aborts; also stops leaked in-flight
+ *    requests after failover), and
+ *  - a `timeoutMs` request hint (the /api/providers/chat proxy caps its
+ *    upstream at min(clientTimeoutMs, 180s) — the hint must reflect the
+ *    attempt budget, not the shorter provider-row timeout).
+ * A caller-provided signal always wins; the hint never overrides an explicit
+ * one. Runtimes without AbortSignal.timeout degrade to the previous behavior.
+ */
+export function withAttemptDeadline(req: ChatRequest, timeoutMs: number): ChatRequest {
+  let signal = req.signal;
+  if (!signal) {
+    try {
+      signal = AbortSignal.timeout(timeoutMs);
+    } catch {
+      signal = undefined; // ancient runtime — keep withTimeout() race only
+    }
+  }
+  return { ...req, signal, timeoutMs: req.timeoutMs ?? timeoutMs };
+}
+
 export function hasValidApiKey(p: any): boolean {
   if (!p) return false;
   if (p.type === "puter" || p.type === "local") return true;
@@ -1525,11 +1561,30 @@ export function getProviderTier(p: any): number {
   return 4;
 }
 
-export function isAvailableForSelection(p: any, excludeIds?: string[]): boolean {
+export function isAvailableForSelection(
+  p: any,
+  excludeIds?: string[],
+  opts?: { allowEmergency?: boolean }
+): boolean {
   const pid = p.id || p.name || p.type;
   const excluded = excludeIds?.some((eid) =>
     pid === eid || p.id === eid || p.name === eid || p.type === eid
   );
+  if (opts?.allowEmergency === true) {
+    // Explicit agent route / emergency rescue: emergency-only providers
+    // (Puter) are ALLOWED here — circuit-breaker evidence still applies so a
+    // tripped puter is not hammered.
+    const emergencyId = p.id || p.type;
+    const circuitOk =
+      EMERGENCY_ONLY_PROVIDERS.has(emergencyId) || isProviderAvailable(emergencyId);
+    return (
+      p.isActive &&
+      p.type !== "local" &&
+      circuitOk &&
+      hasValidApiKey(p) &&
+      !excluded
+    );
+  }
   return (
     p.isActive &&
     p.type !== "local" &&
@@ -1573,7 +1628,12 @@ export async function selectProviderForAgent(
   if (agentType !== "emergency" && settings?.agentRoutes?.[agentType] && settings.agentRoutes[agentType] !== "default") {
     const routeId = settings.agentRoutes[agentType];
     const routedProvider = providers.find((p: any) => p.id === routeId);
-    if (routedProvider && isAvailableForSelection(routedProvider, excludeIds)) {
+    // An EXPLICIT agent route is the user's own configuration — honor it even
+    // when the target is an emergency-only provider (e.g. optimizer=puter on
+    // free pipelines). Previously the routed puter was silently discarded by
+    // the emergency-only gate and the optimizer fell through to priority
+    // order — dead opencode-zen first — and Step 5 failed at ~50%.
+    if (routedProvider && isAvailableForSelection(routedProvider, excludeIds, { allowEmergency: true })) {
       return routedProvider;
     }
   }
@@ -1618,6 +1678,20 @@ export async function selectProviderForAgent(
   eligible = eligible.sort((a: any, b: any) => (a.priority ?? 50) - (b.priority ?? 50));
 
   if (eligible.length > 0) return eligible[0];
+
+  // EMERGENCY RESCUE — fail-safe: never return "no provider" while Puter is
+  // alive. The emergency-only designation exists to RESERVE Puter for exactly
+  // this situation; when every selectable provider is exhausted/parked, this
+  // IS the emergency. Gated by providerSettings.puterEmergencyRescue
+  // (default ON) so it can be disabled explicitly.
+  if (settings?.puterEmergencyRescue !== false) {
+    const rescue = providers.find(
+      (p: any) =>
+        (EMERGENCY_ONLY_PROVIDERS.has(p.id) || EMERGENCY_ONLY_PROVIDERS.has(p.type)) &&
+        isAvailableForSelection(p, excludeIds, { allowEmergency: true })
+    );
+    if (rescue) return rescue;
+  }
 
   return selectProvider(excludeIds);
 }

@@ -68,7 +68,10 @@ export class OpenAICompatibleProvider implements AIProviderAdapter {
           maxTokens: req.maxTokens ?? config.maxTokens,
           temperature: req.temperature ?? config.temperature,
           topP: req.topP ?? config.topP,
-          timeoutMs: config.timeout,
+          // Router-injected attempt budget (withAttemptDeadline) — NOT the
+          // provider-row config.timeout, which is often far shorter (30s) and
+          // used to abort optimizer rewrites mid-generation at the proxy.
+          timeoutMs: req.timeoutMs ?? config.timeout,
           cacheEnabled,
         }),
         signal: req.signal ?? AbortSignal.timeout(config.timeout),

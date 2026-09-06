@@ -764,7 +764,8 @@ export async function runOptimizationPipeline(input: PipelineInput): Promise<Pip
     // Ensure watchdog is always stopped
     watchdog.stop();
     if (err instanceof OptimizationTimeoutError) {
-      console.error("[Pipeline] 300s hard timeout reached. Aborting optimization.");
+      const timeoutMinutes = Math.round(PIPELINE_TIMEOUT_MS / 6000) / 10;
+      console.error(`[Pipeline] ${timeoutMinutes}min hard timeout reached. Aborting optimization.`);
       return {
         optimizedResume: input.resume,
         beforeATS: null,
@@ -776,7 +777,7 @@ export async function runOptimizationPipeline(input: PipelineInput): Promise<Pip
         reflection: null,
         steps: [],
         status: "failed",
-        error: "Optimization timed out after 300 seconds. Please retry. If the issue persists, check your AI provider connection.",
+        error: `Optimization timed out after ${Math.round(PIPELINE_TIMEOUT_MS / 1000)} seconds. Please retry. If the issue persists, check your AI provider connection.`,
         provider: "none",
         charCount: 0,
         metCharTarget: false,

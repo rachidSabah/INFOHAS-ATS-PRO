@@ -19,6 +19,14 @@ export interface ChatRequest {
   tools?: ToolDefinition[];
   signal?: AbortSignal;
   /**
+   * Caller's attempt-deadline hint (ms). The router injects it together with
+   * the deadline AbortSignal so REST-proxied calls can scale the SERVER-side
+   * upstream cap (/api/providers/chat honors body.timeoutMs up to 180s) to the
+   * real attempt budget instead of the shorter provider-row `config.timeout`.
+   * Absent = callers outside the router (tests, direct adapter use).
+   */
+  timeoutMs?: number;
+  /**
    * Skip the proxy's edge response cache for this call. Set by testConnection
    * so the Providers-panel "Test" button always measures the LIVE upstream
    * and never reports a stale cached answer as a healthy provider.

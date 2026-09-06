@@ -10,6 +10,66 @@ import { ProviderFactory } from "./factory";
 import { toProviderConfig } from "./fallback";
 import type { AIProvider, AIProviderLog, AIProviderSettings } from "../../types";
 
+// ============================================================================
+// PUTER LIVE MODEL CATALOG (prefetch fix)
+// ============================================================================
+// Doc-verified plain ids (see puter-client.ts KNOWN_GOOD_PUTER_MODELS) — kept
+// as a local literal so this module stays import-safe outside the browser.
+const PUTER_CURATED_MODEL_IDS: readonly string[] = [
+  "gpt-5-nano",
+  "gpt-5.4-nano",
+  "gpt-5.4",
+  "gpt-4o-mini",
+  "gpt-4o",
+  "o3-mini",
+  "o4-mini",
+  "claude-sonnet-4-5",
+  "claude-opus-4-8",
+  "claude-3-7-sonnet",
+  "gemini-2.5-flash",
+  "gemini-2.5-flash-lite",
+  "gemini-2.0-flash",
+  "gemini-2.5-flash-image",
+  "deepseek-chat",
+  "mistral-large-latest",
+  "grok-beta",
+  "reka/reka-edge",
+];
+
+const PUTER_CATALOG_TTL_MS = 5 * 60 * 1000;
+const PuterCatalogCache: { data: string[] | null; at: number } = { data: null, at: 0 };
+
+/**
+ * Normalize a live Puter catalog id into the id form the puter.js chat SDK
+ * accepts:
+ *   "openai:openai/gpt-4o"                      → "gpt-4o"        (first-party)
+ *   "anthropic:anthropic/claude-sonnet-4-5"     → "claude-sonnet-4-5"
+ *   "openrouter:meta-llama/llama-3.3-70b-..."   → "meta-llama/llama-3.3-70b-..."
+ *   "infron:deepseek/deepseek-chat"             → "deepseek/deepseek-chat"
+ * Vendor-prefix-only ids ("gpt-5-nano") pass through unchanged.
+ */
+export function normalizePuterModelId(raw: unknown): string | null {
+  if (typeof raw !== "string") return null;
+  let id = raw.trim();
+  if (!id) return null;
+  const colonIdx = id.indexOf(":");
+  if (colonIdx > 0) {
+    const vendor = id.slice(0, colonIdx);
+    if (/^[a-z0-9][a-z0-9-]*$/i.test(vendor)) {
+      const rest = id.slice(colonIdx + 1);
+      const slashIdx = rest.indexOf("/");
+      const org = slashIdx > 0 ? rest.slice(0, slashIdx) : "";
+      const same = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
+      if (org && same(org) === same(vendor)) {
+        id = rest.slice(slashIdx + 1); // first-party org — collapse to plain id
+      } else {
+        id = rest;
+      }
+    }
+  }
+  return id || null;
+}
+
 export class ProviderManager {
   static list(): AIProvider[] {
     return useApp.getState().providers;
@@ -221,31 +281,59 @@ export class ProviderManager {
 
   /**
    * Fetch the list of available models from a provider's API.
-   * For Puter (browser-only, no API endpoint), returns a static built-in
-   * model list — Puter does NOT support model discovery.
+   * Puter: LIVE catalog from api.puter.com/puterai/chat/models (public,
+   * keyless, SSRF-allow-listed) — previously a stale 8-id static list that
+   * hid ~900 available models from the UI prefetch.
    */
   static async fetchModels(provider: AIProvider): Promise<{ ok: boolean; models: string[]; error?: string }> {
-    // === PUTER: static built-in models (no model discovery endpoint) ===
+    // === PUTER: live catalog, curated-first, static fallback ===
     if (provider.type === "puter") {
-      return {
-        ok: true,
-        models: [
-          "deepseek-v4-flash",
-          "deepseek-chat",
-          "gpt-oss",
-          "glm-4",
-          "claude-3-5-sonnet",
-          "gpt-4o-mini",
-          "gpt-4o",
-          "o1-mini",
-        ],
-      };
+      return this.fetchPuterModelsLive();
     }
 
     // NOTE: the NON-REST integration branches (Antigravity CLI + Z.ai Web,
     // Task 29b/30) were removed along with those integrations. Fetch-models
     // now always goes through the generic REST {baseUrl}/models proxy path.
     return this.fetchModelsForConfig(provider);
+  }
+
+  /**
+   * Puter LIVE model catalog. Normalizes the catalog's vendor-prefixed ids
+   * ("anthropic:anthropic/claude-sonnet-4-5" → "claude-sonnet-4-5"), ranks the
+   * doc-verified curated ids first, and falls back to the curated list when
+   * the live endpoint is unreachable. Results are cached in-memory for 5 min.
+   */
+  static async fetchPuterModelsLive(): Promise<{ ok: boolean; models: string[]; error?: string }> {
+    if (PuterCatalogCache.data && Date.now() - PuterCatalogCache.at < PUTER_CATALOG_TTL_MS) {
+      return { ok: true, models: PuterCatalogCache.data };
+    }
+    let live: string[] | null = null;
+    try {
+      // The models proxy appends "/models" → api.puter.com/puterai/chat/models.
+      const res = await fetch("/api/providers/models", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ baseUrl: "https://api.puter.com/puterai/chat" }),
+      });
+      if (res.ok) {
+        const data = (await res.json().catch(() => null)) as any;
+        const normalized = new Set<string>();
+        for (const raw of (Array.isArray(data?.models) ? data.models : []) as unknown[]) {
+          const id = normalizePuterModelId(raw);
+          if (id) normalized.add(id);
+        }
+        if (normalized.size > 0) live = Array.from(normalized);
+      }
+    } catch {
+      live = null; // offline / proxy down — curated fallback below
+    }
+
+    const rest = (live ?? []).filter((id) => !PUTER_CURATED_MODEL_IDS.includes(id))
+      .sort((a, b) => a.localeCompare(b));
+    const models = [...PUTER_CURATED_MODEL_IDS, ...rest];
+    PuterCatalogCache.data = models;
+    PuterCatalogCache.at = Date.now();
+    return { ok: true, models };
   }
 
   /**

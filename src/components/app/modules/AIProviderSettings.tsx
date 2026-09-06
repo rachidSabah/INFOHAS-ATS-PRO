@@ -135,7 +135,7 @@ export function AIProviderSettings() {
     setFetchingModels(false);
     if (result.ok && result.models.length > 0) {
       setLiveModels(result.models);
-      toast.success(`Loaded ${result.models.length} ${defaultProvider.type === "puter" ? "built-in" : "live"} models from ${defaultProvider.name}.`);
+      toast.success(`Loaded ${result.models.length} ${defaultProvider.type === "puter" ? "live-catalog" : "live"} models from ${defaultProvider.name}.`);
     } else {
       toast.error(result.error || "Failed to fetch models. Your existing configuration is preserved.");
     }
@@ -278,7 +278,7 @@ export function AIProviderSettings() {
                 {defaultProvider?.type === "puter" ? (
                   <Button variant="outline" size="sm" onClick={fetchModels} disabled={fetchingModels} className="gap-1.5 shrink-0">
                     {fetchingModels ? <Icon name="Loader2" className="w-3.5 h-3.5 animate-spin" /> : <Icon name="List" className="w-3.5 h-3.5" />}
-                    Show built-in models
+                    Show live models
                   </Button>
                 ) : (
                   <Button variant="outline" size="sm" onClick={fetchModels} disabled={fetchingModels || !defaultProvider} className="gap-1.5 shrink-0">
@@ -287,8 +287,8 @@ export function AIProviderSettings() {
                   </Button>
                 )}
               </div>
-              {defaultProvider?.type === "puter" && liveModels.length === 0 && <p className="text-[10px] text-muted-foreground">Puter uses built-in models — click "Show built-in models" to load them.</p>}
-              {liveModels.length > 0 && <p className="text-[10px] text-muted-foreground">{liveModels.length} {defaultProvider?.type === "puter" ? "built-in" : "live"} models from {defaultProvider?.name}</p>}
+              {defaultProvider?.type === "puter" && liveModels.length === 0 && <p className="text-[10px] text-muted-foreground">Puter's live catalog is fetched from api.puter.com — click "Show live models" to load it (curated models ranked first).</p>}
+              {liveModels.length > 0 && <p className="text-[10px] text-muted-foreground">{liveModels.length} {defaultProvider?.type === "puter" ? "live-catalog" : "live"} models from {defaultProvider?.name}</p>}
             </div>
           </div>
         </CardContent>
