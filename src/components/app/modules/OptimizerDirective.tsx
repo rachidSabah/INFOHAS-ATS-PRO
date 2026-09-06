@@ -73,6 +73,10 @@ export function OptimizerDirective() {
   const [bpEditor, setBpEditor] = useState<StructuralBlueprint | null>(null);
   const [bpOverridesBuiltIn, setBpOverridesBuiltIn] = useState(false);
 
+  // Profile currently being EDITED — its settings live in the draft below;
+  // "Update profile" snapshots the draft back into it (in place).
+  const [editingProfileId, setEditingProfileId] = useState<string | null>(null);
+
   // Merged registries — a custom entry whose id equals a built-in id SHADOWS it.
   const mergedProfiles = useMemo(() => {
     const map: Record<string, DirectiveProfile> = { ...BUILT_IN_PROFILES };
@@ -85,6 +89,10 @@ export function OptimizerDirective() {
     for (const bp of customBlueprints) map[bp.id] = bp;
     return Object.values(map);
   }, [customBlueprints]);
+
+  const editingProfile = editingProfileId
+    ? (mergedProfiles.find((p) => p.id === editingProfileId) ?? null)
+    : null;
 
   const patch = (p: Partial<OptimizerDirectiveConfig>) => {
     setDraft((d) => ({ ...d, ...p }));
@@ -150,7 +158,47 @@ export function OptimizerDirective() {
       ? "Restore this built-in profile to its factory definition? Your customization will be removed."
       : "Delete this custom profile? This cannot be undone.")) return;
     saveCustomProfiles(customProfiles.filter((p) => p.id !== id));
+    if (editingProfileId === id) setEditingProfileId(null);
     toast.success(wasBuiltIn ? "Built-in profile restored to factory definition." : "Custom profile deleted.");
+  };
+
+  /** EDIT — load a profile's effective configuration into the draft for fine-tuning. */
+  const editProfile = (profile: DirectiveProfile) => {
+    setDraft(applyProfileToConfig(SEED_OPTIMIZER_DIRECTIVE, profile));
+    setDirty(true);
+    setEditingProfileId(profile.id);
+    toast.info(`Editing profile "${profile.name}" — adjust any settings below, then click "Update profile" to save back into it, or "Save current settings as profile" to fork your changes into a new one.`);
+  };
+
+  /** SAVE — snapshot the current draft back into an existing profile, in place. */
+  const saveIntoProfile = (id: string, exitEdit = false) => {
+    const existing = mergedProfiles.find((p) => p.id === id);
+    if (!existing) return;
+    const builtIn = isBuiltInProfile(id);
+    if (!confirm(builtIn
+      ? `Customize built-in profile "${existing.name}" with your current settings? Its factory definition stays recoverable via the restore icon on the card.`
+      : `Update custom profile "${existing.name}" with your current settings? Its previous configuration will be replaced.`)) return;
+    const profile: DirectiveProfile = {
+      id,
+      name: existing.name,
+      description: existing.description,
+      tags: existing.tags ? [...existing.tags] : [],
+      // Snapshot the ENTIRE current draft (same semantics as Save-as).
+      overrides: JSON.parse(JSON.stringify(draft)) as Partial<OptimizerDirectiveConfig>,
+    };
+    const next = [...customProfiles.filter((p) => p.id !== id), profile];
+    saveCustomProfiles(next);
+    if (exitEdit) setEditingProfileId(null);
+    toast.success(`Profile "${existing.name}" updated with your current settings${builtIn ? " (overrides the built-in — factory definition recoverable)" : ""}.`);
+  };
+
+  const updateEditingProfile = () => {
+    if (editingProfileId) saveIntoProfile(editingProfileId, true);
+  };
+
+  const cancelEditProfile = () => {
+    setEditingProfileId(null);
+    toast.info("Profile editing cancelled — the profile was left unchanged. Use \"Save directive\" if you want to keep the loaded settings as your current directive.");
   };
 
   // ======================================================================
@@ -297,19 +345,35 @@ export function OptimizerDirective() {
               <Icon name="Save" className="w-4 h-4" /> Save current settings as profile
             </Button>
           </div>
+          {editingProfile && (
+            <div className="rounded-lg bg-brand/10 dark:bg-brand/20 border border-brand/30 p-3 flex items-center justify-between flex-wrap gap-2">
+              <span className="text-sm flex items-center gap-2 text-foreground">
+                <Icon name="Pencil" className="w-4 h-4 text-brand shrink-0" />
+                <span>Editing profile <b>{editingProfile.name}</b> — fine-tune any settings below, then update the profile or fork it as a new one.</span>
+              </span>
+              <span className="flex gap-2">
+                <Button size="sm" onClick={updateEditingProfile} className="bg-brand hover:bg-brand-dark text-white gap-1.5">
+                  <Icon name="Save" className="w-3.5 h-3.5" /> Update profile
+                </Button>
+                <Button size="sm" variant="outline" onClick={cancelEditProfile}>Cancel</Button>
+              </span>
+            </div>
+          )}
           <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
             {mergedProfiles.map((profile) => {
               const customized = customProfiles.some((c) => c.id === profile.id);
               const builtIn = isBuiltInProfile(profile.id);
+              const beingEdited = editingProfileId === profile.id;
               return (
-                <div key={profile.id} className="relative flex flex-col items-start p-3 rounded-lg border border-input bg-background hover:bg-secondary/40 hover:border-brand/40 transition-all text-left">
+                <div key={profile.id} className={`relative flex flex-col items-start p-3 rounded-lg border text-left transition-all ${beingEdited ? "border-brand bg-brand/5 dark:bg-brand/10 ring-1 ring-brand" : "border-input bg-background hover:bg-secondary/40 hover:border-brand/40"}`}>
                   <button
                     onClick={() => {
                       const merged = applyProfileToConfig(draft, profile);
                       if (merged) {
                         setDraft(merged);
                         setDirty(true);
-                        toast.info(`Profile "${profile.name}" applied — review and save changes.`);
+                        setEditingProfileId(profile.id);
+                        toast.info(`Profile "${profile.name}" applied — fine-tune below, then "Update profile" to save back into it, "Save directive" to keep as your directive, or Cancel.`);
                       }
                     }}
                     className="w-full text-left"
@@ -326,13 +390,30 @@ export function OptimizerDirective() {
                         {builtIn ? "Modified" : "Custom"}
                       </Badge>
                     )}
+                  </div>
+                  <div className="w-full flex items-center gap-1 mt-2 pt-2 border-t border-border/60">
+                    <span className="text-[10px] uppercase font-bold tracking-wide text-muted-foreground mr-auto">{beingEdited ? "Editing" : builtIn ? "Built-in" : "Custom"}</span>
+                    <button
+                      onClick={() => editProfile(profile)}
+                      title="Edit profile — load its settings into the form below for fine-tuning"
+                      className="h-6 w-6 grid place-items-center rounded hover:bg-secondary text-muted-foreground hover:text-foreground"
+                    >
+                      <Icon name="Pencil" className="w-3.5 h-3.5" />
+                    </button>
+                    <button
+                      onClick={() => saveIntoProfile(profile.id)}
+                      title="Save your CURRENT settings into this profile (customizing a built-in keeps its factory definition recoverable)"
+                      className="h-6 w-6 grid place-items-center rounded hover:bg-secondary text-muted-foreground hover:text-foreground"
+                    >
+                      <Icon name="Save" className="w-3.5 h-3.5" />
+                    </button>
                     {customized && (
                       <button
                         onClick={() => deleteProfile(profile.id)}
-                        title={builtIn ? "Restore factory definition" : "Delete custom profile"}
+                        title={builtIn ? "Restore factory definition (removes your customization)" : "Delete this custom profile"}
                         className="h-6 w-6 grid place-items-center rounded hover:bg-destructive/10 text-muted-foreground hover:text-destructive"
                       >
-                        <Icon name="RotateCcw" className="w-3.5 h-3.5" />
+                        <Icon name={builtIn ? "RotateCcw" : "Trash2"} className="w-3.5 h-3.5" />
                       </button>
                     )}
                   </div>
@@ -341,9 +422,7 @@ export function OptimizerDirective() {
             })}
           </div>
           <p className="text-xs text-muted-foreground">
-            Selecting a profile modifies all applicable fields above. You can then fine-tune individual settings before saving.
-            "Save current settings as profile" snapshots EVERYTHING (agents, limits, layout) into a reusable profile; saving over a
-            built-in's name in the overwrite list customizes it while keeping the factory definition recoverable.
+            Click a card to apply it. The pencil (Edit) loads that profile into the form below for fine-tuning — "Update profile" then saves it back in place, or "Save current settings as profile" forks your changes into a new one. The disk icon saves your CURRENT settings into that profile without loading it first. The trash icon deletes a custom profile; the restore icon returns a customized built-in to its factory definition. "Save current settings as profile" snapshots EVERYTHING (agents, limits, layout) into a reusable profile; saving over a built-in's name in the overwrite list customizes it while keeping the factory definition recoverable.
           </p>
         </CardContent>
       </Card>
