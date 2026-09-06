@@ -44,6 +44,17 @@ export class OpenAICompatibleProvider implements AIProviderAdapter {
     // CORS proxy fallback for browser clients calling third-party provider APIs
     const isLocal = baseUrl.includes("localhost") || baseUrl.includes("127.0.0.1") || baseUrl.includes("0.0.0.0");
     if (typeof window !== "undefined" && !isLocal) {
+      // Edge response cache opt-in — the store's enableCaching toggle (seeded
+      // true). testConnection passes noCache so panel "Test" always hits the
+      // LIVE upstream. Lazy store import avoids an adapter→store cycle
+      // (same pattern as the rate governor).
+      let cacheEnabled = false;
+      if (!req.noCache) {
+        try {
+          const { useApp } = await import("../../store");
+          cacheEnabled = useApp.getState()?.providerSettings?.enableCaching !== false;
+        } catch { cacheEnabled = false; }
+      }
       const proxyRes = await fetch("/api/providers/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -58,6 +69,7 @@ export class OpenAICompatibleProvider implements AIProviderAdapter {
           temperature: req.temperature ?? config.temperature,
           topP: req.topP ?? config.topP,
           timeoutMs: config.timeout,
+          cacheEnabled,
         }),
         signal: req.signal ?? AbortSignal.timeout(config.timeout),
       });
@@ -129,7 +141,7 @@ export class OpenAICompatibleProvider implements AIProviderAdapter {
     const t0 = performance.now();
     try {
       const res = await this.chat(
-        { messages: [{ role: "user", content: "Reply with exactly: OK" }], maxTokens: 10 },
+        { messages: [{ role: "user", content: "Reply with exactly: OK" }], maxTokens: 10, noCache: true },
         // Task 24① — reasoning-aware: fast models keep the 10s cap; a
         // reasoning-route default model gets ≥30s (floor) up to 60s, since
         // verified-working Zen reasoning models answer in 8-33s.

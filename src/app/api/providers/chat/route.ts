@@ -1,6 +1,9 @@
 // CORS proxy for AI provider chat completions
 // Browser cannot call provider APIs directly due to CORS — this route proxies the request server-side
+// + edge response cache (see chat-proxy-cache.ts): identical prompts, when the client passes
+// cacheEnabled, are served from the Cloudflare edge cache — zero upstream calls, zero provider quota.
 import { NextRequest, NextResponse } from "next/server";
+import { chatCacheKey, matchCachedChat, putCachedChat } from "@/lib/ai/providers/chat-proxy-cache";
 
 export const runtime = "edge";
 
@@ -77,6 +80,20 @@ export async function POST(req: NextRequest) {
         if (!baseUrl.includes("/openai")) {
           baseUrl = `${baseUrl.replace(/\/$/, "")}/openai`;
         }
+      }
+    }
+
+    // === Edge response cache (opt-in via body.cacheEnabled) ===
+    // Keyed AFTER the baseUrl rewrites above so the key reflects the FINAL
+    // upstream URL. The key never includes the API key — identical prompts
+    // from different users share one hit instead of doubling the shared-IP
+    // provider quota burn (the OpenCode Zen free-tier squeeze).
+    let cacheKey: string | null = null;
+    if (body.cacheEnabled === true) {
+      cacheKey = await chatCacheKey({ baseUrl, model, messages, maxTokens, temperature, topP });
+      const cached = await matchCachedChat(cacheKey);
+      if (cached) {
+        return NextResponse.json(cached, { headers: { "X-Cache": "HIT" } });
       }
     }
 
@@ -222,7 +239,11 @@ export async function POST(req: NextRequest) {
       text = JSON.stringify(data);
     }
 
-    return NextResponse.json({ ok: true, latencyMs, text });
+    const successBody: Record<string, unknown> = { ok: true, latencyMs, text };
+    if (cacheKey) {
+      await putCachedChat(cacheKey, successBody);
+    }
+    return NextResponse.json(successBody, { headers: { "X-Cache": cacheKey ? "MISS" : "BYPASS" } });
   } catch (e: unknown) {
     const isAbort = e instanceof Error && e.name === "AbortError";
     const isFetchFail = e instanceof Error && (e.message.includes("fetch") || e.message.includes("Failed to fetch"));

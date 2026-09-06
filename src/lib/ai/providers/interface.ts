@@ -18,6 +18,12 @@ export interface ChatRequest {
   stream?: boolean;
   tools?: ToolDefinition[];
   signal?: AbortSignal;
+  /**
+   * Skip the proxy's edge response cache for this call. Set by testConnection
+   * so the Providers-panel "Test" button always measures the LIVE upstream
+   * and never reports a stale cached answer as a healthy provider.
+   */
+  noCache?: boolean;
 }
 
 export interface ToolDefinition {
