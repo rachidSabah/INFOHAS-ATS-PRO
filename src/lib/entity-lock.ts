@@ -860,11 +860,37 @@ export function verifyEntityIntegrity(
     const ed = optimized.education[i];
     const origEd = locked.education[i];
 
-    // Skip placeholder check if original institution was also empty/N/A
-    const origInst = (origEd?.institution || "").trim().toLowerCase();
-    const origWasEmpty = !origInst || origInst === "n/a" || origInst === "institution";
+    // Original-membership check — computed BEFORE the placeholder check so
+    // verbatim preservation of an original-carried placeholder can be
+    // distinguished from degradation/invention.
+    const instLower = (ed.institution || "").toLowerCase().trim();
+    const isOriginalInst = locked.education.some(
+      (l) => l.institution.toLowerCase().trim() === instLower ||
+        l.institution.toLowerCase().trim().includes(instLower) ||
+        instLower.includes(l.institution.toLowerCase().trim()),
+    );
+    // Strict verbatim preservation (guarded against the empty-string substring
+    // quirk: "" is "included" in everything, so an empty optimized value must
+    // NOT count as preserved — that case stays a critical failure).
+    const preservedFromOriginal = instLower.length > 0 && isOriginalInst;
 
-    if (isPlaceholderInstitution(ed.institution) && !origWasEmpty) {
+    // === PLACEHOLDER vs PRESERVATION (deadlock fix) ==========================
+    // This check exists to catch the model DEGRADING a real institution into
+    // a placeholder ("Qatar University" → "University Name"). It must NOT
+    // condemn a placeholder that the ORIGINAL resume already contained: the
+    // entity-lock system forbids inventing a real institution, so the
+    // optimizer's only correct move is to preserve the original value
+    // verbatim — and flagging that preservation as "hallucinated_university"
+    // made every attempt fail identically (Guardian BLOCKED 4/4 → pipeline
+    // dead at 50% for any resume carrying a template placeholder). Mirrors
+    // the company-name guard above (origCompanyIsPlaceholder).
+    const origInst = (origEd?.institution || "").trim().toLowerCase();
+    // Kept from the original guard: nothing to degrade when the original was
+    // empty/N-A/bare-"institution" (the restore path legitimately emits "").
+    const origWasEmpty = !origInst || origInst === "n/a" || origInst === "institution";
+    const origInstitutionIsPlaceholder = origEd ? isPlaceholderInstitution(origEd.institution) : true;
+
+    if (isPlaceholderInstitution(ed.institution) && !origWasEmpty && !origInstitutionIsPlaceholder && !preservedFromOriginal) {
       criticalFailures.push({
         type: "hallucinated_university",
         message: `Education #${i + 1} has placeholder institution: "${ed.institution}". Original: "${origEd?.institution || "N/A"}"`,
@@ -873,15 +899,15 @@ export function verifyEntityIntegrity(
         actual: ed.institution,
       });
       score -= 15;
+    } else if (isPlaceholderInstitution(ed.institution) && instLower) {
+      // Non-fatal signal: the placeholder came from the ORIGINAL resume and
+      // was preserved as-is (the pipeline cannot replace it without
+      // fabricating a fact). Surface it so the user fixes the source resume.
+      warnings.push(
+        `Education #${i + 1} institution "${ed.institution}" is a placeholder in the original resume — preserved as-is (edit the source resume to name the real institution)`,
+      );
     }
 
-    // Check if institution was in original
-    const instLower = (ed.institution || "").toLowerCase().trim();
-    const isOriginalInst = locked.education.some(
-      (l) => l.institution.toLowerCase().trim() === instLower ||
-        l.institution.toLowerCase().trim().includes(instLower) ||
-        instLower.includes(l.institution.toLowerCase().trim()),
-    );
     if (!isOriginalInst && ed.institution) {
       criticalFailures.push({
         type: "hallucinated_university",

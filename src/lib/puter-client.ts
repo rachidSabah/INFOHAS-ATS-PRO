@@ -10,6 +10,9 @@
 
 "use client";
 
+// Curated Puter model catalog — SINGLE SOURCE OF TRUTH (src/lib/puter-models.ts).
+import { KNOWN_GOOD_PUTER_MODELS as _KNOWN_GOOD_PUTER_MODELS } from "./puter-models";
+
 declare global {
   interface Window {
     puter?: any;
@@ -157,39 +160,12 @@ export async function discoverPuterModels(): Promise<PuterModel[]> {
 }
 
 /**
- * Curated list of models known to work on Puter.js.
- * Updated per https://docs.puter.com/AI/chat/ (2026-06).
- * Puter supports 500+ models from OpenAI, Anthropic, Google, xAI, Mistral,
- * OpenRouter, and DeepSeek.
+ * Curated list of models known to work on Puter.js — MOVED to
+ * src/lib/puter-models.ts (single source of truth, shared with the AI-layer
+ * adapter, the OAuth provider, and ProviderManager). Re-exported here for
+ * backward compatibility with existing importers.
  */
-export const KNOWN_GOOD_PUTER_MODELS: PuterModel[] = [
-  // OpenAI models (default is gpt-5-nano per the docs)
-  { id: "gpt-5-nano", label: "GPT-5 Nano (Puter default)", provider: "OpenAI" },
-  { id: "gpt-5.4-nano", label: "GPT-5.4 Nano", provider: "OpenAI" },
-  { id: "gpt-5.4", label: "GPT-5.4", provider: "OpenAI" },
-  { id: "gpt-4o-mini", label: "GPT-4o Mini", provider: "OpenAI" },
-  { id: "gpt-4o", label: "GPT-4o", provider: "OpenAI" },
-  // OpenAI reasoning models (support reasoning_effort: none/minimal/low/medium/high/xhigh)
-  { id: "o3-mini", label: "o3-mini (reasoning)", provider: "OpenAI" },
-  { id: "o4-mini", label: "o4-mini (reasoning)", provider: "OpenAI" },
-  // Anthropic models
-  { id: "claude-sonnet-4-5", label: "Claude Sonnet 4.5", provider: "Anthropic" },
-  { id: "claude-opus-4-8", label: "Claude Opus 4.8", provider: "Anthropic" },
-  { id: "claude-3-7-sonnet", label: "Claude 3.7 Sonnet", provider: "Anthropic" },
-  // Google models (some support image generation)
-  { id: "gemini-2.5-flash", label: "Gemini 2.5 Flash", provider: "Google" },
-  { id: "gemini-2.5-flash-lite", label: "Gemini 2.5 Flash Lite", provider: "Google" },
-  { id: "gemini-2.0-flash", label: "Gemini 2.0 Flash", provider: "Google" },
-  { id: "gemini-2.5-flash-image", label: "Gemini 2.5 Flash (Image Gen)", provider: "Google" },
-  // DeepSeek
-  { id: "deepseek-chat", label: "DeepSeek Chat", provider: "DeepSeek" },
-  // Mistral
-  { id: "mistral-large-latest", label: "Mistral Large", provider: "Mistral" },
-  // xAI
-  { id: "grok-beta", label: "Grok Beta", provider: "xAI" },
-  // Reka (video analysis)
-  { id: "reka/reka-edge", label: "Reka Edge (Video)", provider: "Reka" },
-];
+export const KNOWN_GOOD_PUTER_MODELS: PuterModel[] = _KNOWN_GOOD_PUTER_MODELS;
 
 function inferProvider(modelId: string): string {
   const lower = modelId.toLowerCase();

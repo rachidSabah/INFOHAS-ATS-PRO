@@ -8,18 +8,11 @@
 import type { OAuthAIProvider, ProviderSession, ProviderAuthStatus } from "./interface";
 import { ProviderAuthenticationError, createEmptySession } from "./interface";
 import { saveSession, loadSession, clearSession, isSessionExpired, isSessionExpiringSoon, encryptValue, decryptValue } from "./session-manager";
+// Puter curated ids — SINGLE SOURCE OF TRUTH (src/lib/puter-models.ts).
+import { PUTER_CURATED_MODEL_IDS } from "../puter-models";
 
-// Available models on Puter (per official docs)
-const PUTER_MODELS = [
-  "claude-sonnet-4-5",
-  "gpt-5.4-nano",
-  "gpt-4o",
-  "gpt-4o-mini",
-  "gemini-2.5-flash",
-  "deepseek-chat",
-  "deepseek-reasoner",
-  "meta-llama/Llama-3.3-70B-Instruct",
-];
+// Available models on Puter — derived from the shared curated catalog.
+const PUTER_MODELS: string[] = [...PUTER_CURATED_MODEL_IDS];
 
 // Session TTL — Puter sessions typically last ~1 hour
 const SESSION_TTL_MS = 60 * 60 * 1000; // 1 hour

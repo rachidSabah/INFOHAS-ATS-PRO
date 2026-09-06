@@ -777,6 +777,19 @@ export async function runLockedPipeline(
         nodeRuns.push({ node: "guardian", attempt: attempts, status: "completed", durationMs: 0, detail: `verdict: ${guardianVerdict.status}` });
         if (guardianVerdict.status === "BLOCKED") {
           const criticalFailures = guardianVerdict.checks.filter(c => c.critical && !c.passed).map(c => c.detail);
+          // Directive §23 — Guardian-class failures MUST feed the retry.
+          // Without this the next attempt reruns an IDENTICAL prompt and
+          // deterministically fails the same way (observed in production:
+          // 4/4 attempts burned on the same Guardian check with zero
+          // corrective signal). The structured block names the failed check
+          // so the retry can actually correct course.
+          attemptFeedback = [
+            attemptFeedback,
+            buildStructuredFailureFeedback({
+              stage: `optimizer attempt ${attempts} (rejected by Guardian)`,
+              violations: criticalFailures,
+            }),
+          ].filter(Boolean).join("\n");
           const errObj: any = new Error(`Guardian BLOCKED: ${criticalFailures.join("; ")}`);
           errObj.provider = optimizerResult.provider;
           throw errObj;

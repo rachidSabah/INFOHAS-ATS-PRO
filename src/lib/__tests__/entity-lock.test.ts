@@ -367,6 +367,99 @@ describe("verifyEntityIntegrity", () => {
     expect(result.criticalFailures.some((f) => f.type === "education_missing")).toBe(true);
   });
 
+  // ========================================================================
+  // Task 14 — Guardian deadlock regression: a placeholder institution that
+  // the ORIGINAL resume already contained (e.g. "University Name") was
+  // condemned as "hallucinated_university" even though the optimizer's only
+  // correct move is to preserve it verbatim. Every attempt failed
+  // identically → "Guardian BLOCKED" 4/4 → pipeline dead at 50%.
+  // ========================================================================
+  const placeholderResume: ResumeData = {
+    ...baseResume,
+    education: [
+      {
+        id: "edu_1", degree: "Bachelor of Science", institution: "University Name",
+        field: "Computer Science", location: "Doha, Qatar", startDate: "2013", endDate: "2017",
+        highlights: ["Dean's List", "GPA 3.8"],
+      },
+    ],
+  };
+
+  it("PASSES when an original-carried placeholder institution is preserved verbatim", () => {
+    const locked = extractLockedEntities(placeholderResume);
+    const result = verifyEntityIntegrity({ ...placeholderResume }, locked);
+    expect(result.criticalFailures).toHaveLength(0);
+    expect(result.passed).toBe(true);
+    // Non-fatal signal must still surface the placeholder to the user
+    expect(result.warnings.some((w) => w.includes("University Name"))).toBe(true);
+  });
+
+  it("FAILS when a REAL institution is degraded into a placeholder", () => {
+    const locked = extractLockedEntities(baseResume); // "Qatar University"
+    const corrupted: ResumeData = {
+      ...baseResume,
+      education: [{ ...baseResume.education[0], institution: "University Name" }],
+    };
+    const result = verifyEntityIntegrity(corrupted, locked);
+    expect(result.passed).toBe(false);
+    expect(result.criticalFailures.some((f) => f.type === "hallucinated_university")).toBe(true);
+  });
+
+  it("FAILS when a placeholder institution is replaced by an invented real one", () => {
+    const locked = extractLockedEntities(placeholderResume);
+    const corrupted: ResumeData = {
+      ...placeholderResume,
+      education: [{ ...placeholderResume.education[0], institution: "MIT" }],
+    };
+    const result = verifyEntityIntegrity(corrupted, locked);
+    expect(result.passed).toBe(false);
+    expect(result.criticalFailures.some((f) => f.type === "hallucinated_university")).toBe(true);
+  });
+
+  it("PASSES with a warning when the original institution was empty and the optimized carries a placeholder", () => {
+    const emptyResume: ResumeData = {
+      ...baseResume,
+      education: [{ ...baseResume.education[0], institution: "" }],
+    };
+    const locked = extractLockedEntities(emptyResume);
+    const optimized: ResumeData = {
+      ...emptyResume,
+      education: [{ ...emptyResume.education[0], institution: "University Name" }],
+    };
+    const result = verifyEntityIntegrity(optimized, locked);
+    expect(result.criticalFailures).toHaveLength(0);
+    expect(result.passed).toBe(true);
+  });
+
+  it("FAILS when the institution is dropped (empty) but the original had a real one", () => {
+    const locked = extractLockedEntities(baseResume);
+    const corrupted: ResumeData = {
+      ...baseResume,
+      education: [{ ...baseResume.education[0], institution: "" }],
+    };
+    const result = verifyEntityIntegrity(corrupted, locked);
+    expect(result.passed).toBe(false);
+    expect(result.criticalFailures.some((f) => f.type === "hallucinated_university")).toBe(true);
+  });
+
+  it("PASSES when preserved placeholders survive an education REORDER (order-independent preservation)", () => {
+    const twoEntryResume: ResumeData = {
+      ...baseResume,
+      education: [
+        baseResume.education[0], // "Qatar University" (real)
+        placeholderResume.education[0], // "University Name" (original placeholder)
+      ],
+    };
+    const locked = extractLockedEntities(twoEntryResume);
+    const reordered: ResumeData = {
+      ...twoEntryResume,
+      education: [twoEntryResume.education[1], twoEntryResume.education[0]], // swapped
+    };
+    const result = verifyEntityIntegrity(reordered, locked);
+    expect(result.criticalFailures).toHaveLength(0);
+    expect(result.passed).toBe(true);
+  });
+
   it("FAILS when languages are removed", () => {
     const locked = extractLockedEntities(baseResume);
     const corrupted: ResumeData = {

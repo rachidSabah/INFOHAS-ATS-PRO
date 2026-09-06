@@ -9,32 +9,13 @@ import { ProviderRouter } from "./router";
 import { ProviderFactory } from "./factory";
 import { toProviderConfig } from "./fallback";
 import type { AIProvider, AIProviderLog, AIProviderSettings } from "../../types";
+// Puter curated ids — SINGLE SOURCE OF TRUTH (src/lib/puter-models.ts).
+// Pure module, import-safe outside the browser.
+import { PUTER_CURATED_MODEL_IDS } from "../../puter-models";
 
 // ============================================================================
 // PUTER LIVE MODEL CATALOG (prefetch fix)
 // ============================================================================
-// Doc-verified plain ids (see puter-client.ts KNOWN_GOOD_PUTER_MODELS) — kept
-// as a local literal so this module stays import-safe outside the browser.
-const PUTER_CURATED_MODEL_IDS: readonly string[] = [
-  "gpt-5-nano",
-  "gpt-5.4-nano",
-  "gpt-5.4",
-  "gpt-4o-mini",
-  "gpt-4o",
-  "o3-mini",
-  "o4-mini",
-  "claude-sonnet-4-5",
-  "claude-opus-4-8",
-  "claude-3-7-sonnet",
-  "gemini-2.5-flash",
-  "gemini-2.5-flash-lite",
-  "gemini-2.0-flash",
-  "gemini-2.5-flash-image",
-  "deepseek-chat",
-  "mistral-large-latest",
-  "grok-beta",
-  "reka/reka-edge",
-];
 
 const PUTER_CATALOG_TTL_MS = 5 * 60 * 1000;
 const PuterCatalogCache: { data: string[] | null; at: number } = { data: null, at: 0 };

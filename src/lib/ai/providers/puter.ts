@@ -1,6 +1,10 @@
 // Puter.js provider adapter — runs in the browser, uses window.puter.
 // Free for end users — they authenticate with their own Google account via Puter.
 import type { AIProviderAdapter, ChatRequest, ChatResponse, ProviderConfig } from "./interface";
+// Curated fallback ids — SINGLE SOURCE OF TRUTH (src/lib/puter-models.ts).
+// The LIVE catalog is fetched via ProviderManager.fetchModels() →
+// /api/providers/models → api.puter.com/puterai/chat/models.
+import { PUTER_CURATED_MODEL_IDS } from "../../puter-models";
 
 /**
  * Dynamically load the Puter.js SDK script and wait for it to be ready.
@@ -105,7 +109,7 @@ export class PuterProvider implements AIProviderAdapter {
   }
 
   async listModels(config: ProviderConfig): Promise<string[]> {
-    return config.enabledModels ?? ["gpt-5.4-nano", "gpt-5-nano", "gpt-4o-mini", "gpt-4o", "claude-sonnet-4-5", "claude-3-5-sonnet", "gemini-2.5-flash", "deepseek-chat", "llama-3.3-70b", "mistral-large"];
+    return config.enabledModels ?? [...PUTER_CURATED_MODEL_IDS];
   }
 
   /**
