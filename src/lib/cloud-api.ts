@@ -525,6 +525,31 @@ export async function syncAllFromCloud(store: any): Promise<void> {
         console.info(`[syncAllFromCloud] Restoring interviewPersonas from D1 (${bd.interviewPersonas.length})`);
         store.setState({ interviewPersonas: bd.interviewPersonas });
       }
+      // Restore custom directive profiles + structural blueprints (Optimizer
+      // Directive editors). Restored whenever the key is an array — INCLUDING
+      // an empty one — so deletions sync across devices too. Both the store
+      // state AND the lib registries are hydrated (the pipeline resolves
+      // blueprints through the registry, not the store).
+      if (Array.isArray(bd.customDirectiveProfiles)) {
+        console.info(`[syncAllFromCloud] Restoring customDirectiveProfiles from D1 (${bd.customDirectiveProfiles.length})`);
+        store.setState({ customDirectiveProfiles: bd.customDirectiveProfiles });
+        try {
+          const { registerCustomProfiles } = await import("./directive-profiles");
+          registerCustomProfiles(bd.customDirectiveProfiles);
+        } catch (regErr: any) {
+          console.warn("[syncAllFromCloud] customProfiles registration failed (non-fatal):", regErr?.message);
+        }
+      }
+      if (Array.isArray(bd.customStructuralBlueprints)) {
+        console.info(`[syncAllFromCloud] Restoring customStructuralBlueprints from D1 (${bd.customStructuralBlueprints.length})`);
+        store.setState({ customStructuralBlueprints: bd.customStructuralBlueprints });
+        try {
+          const { registerCustomBlueprints } = await import("./structural-blueprints");
+          registerCustomBlueprints(bd.customStructuralBlueprints);
+        } catch (regErr: any) {
+          console.warn("[syncAllFromCloud] customBlueprints registration failed (non-fatal):", regErr?.message);
+        }
+      }
 
       // === RESTORE provider settings from D1 ===
       // The provider_settings_json column stores the AI routing config

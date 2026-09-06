@@ -1,19 +1,22 @@
 "use client";
 
-import { useState, useRef } from "react";
+import { useState, useRef, useMemo } from "react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Switch } from "@/components/ui/switch";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { Badge, Icon } from "@/components/shared";
 import { useApp } from "@/lib/store";
 import { SEED_OPTIMIZER_DIRECTIVE } from "@/lib/mock-data";
 import { toast } from "sonner";
 import type { OptimizerDirectiveConfig, AgentDirectives, ATSSystemTarget, ToneWritingConfig, CustomKeywordsConfig, TextAlignment, RenderSectionType } from "@/lib/types";
-import { BUILT_IN_PROFILES, applyProfileToConfig } from "@/lib/directive-profiles";
+import { BUILT_IN_PROFILES, applyProfileToConfig, isBuiltInProfile } from "@/lib/directive-profiles";
+import type { DirectiveProfile } from "@/lib/directive-profiles";
 import { STRUCTURAL_BLUEPRINTS } from "@/lib/structural-blueprints";
+import type { StructuralBlueprint, ResumeSectionStructure } from "@/lib/structural-blueprints";
 
 // Canonical resume sections available for per-section text-alignment overrides.
 const ALIGNMENT_SECTIONS: Array<{ key: RenderSectionType; label: string }> = [
@@ -28,14 +31,60 @@ const ALIGNMENT_SECTIONS: Array<{ key: RenderSectionType; label: string }> = [
   { key: "additionalInformation", label: "Additional info" },
 ];
 
+// Canonical section ids a StructuralBlueprint section row can target.
+const BLUEPRINT_SECTION_IDS: Array<{ id: ResumeSectionStructure["id"]; label: string }> = [
+  { id: "contact", label: "Contact Information" },
+  { id: "headline", label: "Professional Headline" },
+  { id: "summary", label: "Summary" },
+  { id: "experience", label: "Experience" },
+  { id: "education", label: "Education" },
+  { id: "skills", label: "Skills" },
+  { id: "languages", label: "Languages" },
+  { id: "additional", label: "Additional Information" },
+];
+
+function slugifyProfileId(name: string): string {
+  const slug = name.toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+  return slug ? `custom-${slug}` : `custom-profile-${Date.now()}`;
+}
+
+function cloneBlueprint(bp: StructuralBlueprint): StructuralBlueprint {
+  return JSON.parse(JSON.stringify(bp)) as StructuralBlueprint;
+}
+
 export function OptimizerDirective() {
   const config = useApp((s) => s.optimizerDirective);
   const update = useApp((s) => s.updateOptimizerDirective);
   const reset = useApp((s) => s.resetOptimizerDirective);
+  const customProfiles = useApp((s) => s.customDirectiveProfiles);
+  const saveCustomProfiles = useApp((s) => s.saveCustomDirectiveProfiles);
+  const customBlueprints = useApp((s) => s.customStructuralBlueprints);
+  const saveCustomBlueprints = useApp((s) => s.saveCustomStructuralBlueprints);
 
   // Local draft so the user can edit multiple fields then save all at once
   const [draft, setDraft] = useState<OptimizerDirectiveConfig>(config);
   const [dirty, setDirty] = useState(false);
+
+  // === Directive Profile editor state ===
+  const [profileFormOpen, setProfileFormOpen] = useState(false);
+  const [profileForm, setProfileForm] = useState({ overwriteId: "__new__", name: "", description: "", tags: "" });
+
+  // === Structural Blueprint editor state ===
+  const [bpEditor, setBpEditor] = useState<StructuralBlueprint | null>(null);
+  const [bpOverridesBuiltIn, setBpOverridesBuiltIn] = useState(false);
+
+  // Merged registries — a custom entry whose id equals a built-in id SHADOWS it.
+  const mergedProfiles = useMemo(() => {
+    const map: Record<string, DirectiveProfile> = { ...BUILT_IN_PROFILES };
+    for (const p of customProfiles) map[p.id] = p;
+    return Object.values(map);
+  }, [customProfiles]);
+
+  const mergedBlueprints = useMemo(() => {
+    const map: Record<string, StructuralBlueprint> = { ...STRUCTURAL_BLUEPRINTS };
+    for (const bp of customBlueprints) map[bp.id] = bp;
+    return Object.values(map);
+  }, [customBlueprints]);
 
   const patch = (p: Partial<OptimizerDirectiveConfig>) => {
     setDraft((d) => ({ ...d, ...p }));
@@ -60,6 +109,142 @@ export function OptimizerDirective() {
     setDraft(config);
     setDirty(false);
     toast.info("Changes discarded.");
+  };
+
+  // ======================================================================
+  // Directive Profile editor actions
+  // ======================================================================
+
+  const openSaveProfileDialog = () => {
+    setProfileForm({ overwriteId: "__new__", name: "", description: "", tags: "" });
+    setProfileFormOpen(true);
+  };
+
+  const saveAsProfile = () => {
+    const name = profileForm.name.trim();
+    if (!name) {
+      toast.error("Profile name is required.");
+      return;
+    }
+    const overwriteId = profileForm.overwriteId;
+    const id = overwriteId !== "__new__" ? overwriteId : slugifyProfileId(name);
+    const profile: DirectiveProfile = {
+      id,
+      name: overwriteId !== "__new__" ? (mergedProfiles.find((p) => p.id === id)?.name || name) : name,
+      description: profileForm.description.trim() || "User-saved snapshot of the current Optimizer Directive settings.",
+      tags: profileForm.tags.split(",").map((t) => t.trim()).filter(Boolean),
+      // Snapshot the ENTIRE current draft so applying this profile restores
+      // every optimization parameter (agentDirectives are deep-merged by
+      // applyProfileToConfig; scalars are replaced).
+      overrides: JSON.parse(JSON.stringify(draft)) as Partial<OptimizerDirectiveConfig>,
+    };
+    const next = [...customProfiles.filter((p) => p.id !== id), profile];
+    saveCustomProfiles(next);
+    setProfileFormOpen(false);
+    toast.success(`Profile "${profile.name}" saved${isBuiltInProfile(id) ? " (overrides the built-in)" : ""}. Apply it from the grid.`);
+  };
+
+  const deleteProfile = (id: string) => {
+    const wasBuiltIn = isBuiltInProfile(id);
+    if (!confirm(wasBuiltIn
+      ? "Restore this built-in profile to its factory definition? Your customization will be removed."
+      : "Delete this custom profile? This cannot be undone.")) return;
+    saveCustomProfiles(customProfiles.filter((p) => p.id !== id));
+    toast.success(wasBuiltIn ? "Built-in profile restored to factory definition." : "Custom profile deleted.");
+  };
+
+  // ======================================================================
+  // Structural Blueprint editor actions
+  // ======================================================================
+
+  const openNewBlueprint = () => {
+    setBpOverridesBuiltIn(false);
+    setBpEditor({
+      id: `custom_bp_${Date.now()}`,
+      name: "",
+      description: "",
+      sections: [
+        { id: "contact", name: "Contact Information", required: true, hints: [] },
+        { id: "summary", name: "Professional Summary", required: true, hints: [] },
+        { id: "experience", name: "Work Experience", required: true, hints: [], maxEntries: 3, maxBulletsPerEntry: 4 },
+        { id: "education", name: "Education", required: true, hints: [], maxEntries: 2 },
+        { id: "skills", name: "Skills", required: true, hints: [], maxEntries: 10 },
+      ],
+      formattingHints: { datesFormat: "", bulletStyle: "", entityOrder: "" },
+    });
+  };
+
+  const openEditBlueprint = (bp: StructuralBlueprint) => {
+    const builtIn = Object.prototype.hasOwnProperty.call(STRUCTURAL_BLUEPRINTS, bp.id);
+    const customized = customBlueprints.some((c) => c.id === bp.id);
+    setBpOverridesBuiltIn(builtIn);
+    setBpEditor(cloneBlueprint(bp));
+    if (builtIn && !customized) {
+      toast.info(`Customizing built-in "${bp.name}" — saving overrides the factory definition (restorable).`);
+    }
+  };
+
+  const duplicateBlueprint = (bp: StructuralBlueprint) => {
+    setBpOverridesBuiltIn(false);
+    setBpEditor({
+      ...cloneBlueprint(bp),
+      id: `custom_bp_${Date.now()}`,
+      name: `${bp.name} (Copy)`,
+    });
+    toast.info("Duplicated — adjust and save to add it to the library.");
+  };
+
+  const saveBlueprintEditor = () => {
+    if (!bpEditor) return;
+    const name = bpEditor.name.trim();
+    if (!name) {
+      toast.error("Blueprint name is required.");
+      return;
+    }
+    if (bpEditor.sections.length === 0) {
+      toast.error("Add at least one section.");
+      return;
+    }
+    const ids = bpEditor.sections.map((s) => s.id);
+    if (new Set(ids).size !== ids.length) {
+      toast.error("Duplicate section entries — each section can appear only once.");
+      return;
+    }
+    const cleaned: StructuralBlueprint = {
+      ...bpEditor,
+      id: bpEditor.id.trim(),
+      name,
+      description: bpEditor.description.trim(),
+      sections: bpEditor.sections.map((s) => ({
+        ...s,
+        name: s.name.trim() || BLUEPRINT_SECTION_IDS.find((b) => b.id === s.id)?.label || s.id,
+        hints: (s.hints || []).map((h) => h.trim()).filter(Boolean),
+      })),
+      formattingHints: {
+        datesFormat: bpEditor.formattingHints.datesFormat.trim(),
+        bulletStyle: bpEditor.formattingHints.bulletStyle.trim(),
+        entityOrder: bpEditor.formattingHints.entityOrder.trim(),
+      },
+    };
+    const next = [...customBlueprints.filter((c) => c.id !== cleaned.id), cleaned];
+    saveCustomBlueprints(next);
+    // Select the blueprint so the user sees it take effect immediately.
+    patch({ selectedStructuralBlueprintId: cleaned.id });
+    setBpEditor(null);
+    toast.success(`Blueprint "${cleaned.name}" saved and selected${bpOverridesBuiltIn ? " (overrides the built-in)" : ""}. Save the directive to apply.`);
+  };
+
+  const deleteBlueprint = (id: string) => {
+    const wasBuiltIn = Object.prototype.hasOwnProperty.call(STRUCTURAL_BLUEPRINTS, id);
+    if (!confirm(wasBuiltIn
+      ? "Restore this built-in blueprint to its factory definition? Your customization will be removed."
+      : "Delete this custom blueprint? This cannot be undone.")) return;
+    saveCustomBlueprints(customBlueprints.filter((c) => c.id !== id));
+    if ((draft.selectedStructuralBlueprintId || "infohas_aviation") === id) {
+      const fallback = wasBuiltIn ? id : "infohas_aviation";
+      patch({ selectedStructuralBlueprintId: fallback });
+    }
+    toast.success(wasBuiltIn ? "Built-in blueprint restored to factory definition." : "Custom blueprint deleted.");
   };
 
   return (
@@ -96,38 +281,69 @@ export function OptimizerDirective() {
         </div>
       )}
 
-      {/* DIRECTIVE PROFILE SELECTOR */}
+      {/* DIRECTIVE PROFILE SELECTOR + EDITOR */}
       <Card>
         <CardHeader>
           <CardTitle className="text-lg flex items-center gap-2"><Icon name="Layers" className="w-4 h-4 text-brand" /> Directive Profile</CardTitle>
           <CardDescription>
             Select a pre-built directive profile to instantly configure all optimization parameters for a specific use case. 
-            This is the recommended way to tune optimization behavior — no manual settings required.
+            This is the recommended way to tune optimization behavior — no manual settings required. Save your current
+            settings as a custom profile, or customize any built-in.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">
+          <div className="flex justify-end">
+            <Button variant="outline" onClick={openSaveProfileDialog} className="gap-2">
+              <Icon name="Save" className="w-4 h-4" /> Save current settings as profile
+            </Button>
+          </div>
           <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
-            {Object.values(BUILT_IN_PROFILES).map((profile) => (
-              <button
-                key={profile.id}
-                onClick={() => {
-                  const merged = applyProfileToConfig(draft, profile);
-                  if (merged) {
-                    setDraft(merged);
-                    setDirty(true);
-                    toast.info(`Profile "${profile.name}" applied — review and save changes.`);
-                  }
-                }}
-                className="relative flex flex-col items-start p-3 rounded-lg border border-input bg-background hover:bg-secondary/40 hover:border-brand/40 transition-all text-left"
-              >
-                <span className="text-sm font-semibold">{profile.name}</span>
-                <span className="text-[10px] text-muted-foreground mt-0.5">{profile.tags.join(", ")}</span>
-                <span className="text-xs text-muted-foreground mt-1 line-clamp-2">{profile.description}</span>
-              </button>
-            ))}
+            {mergedProfiles.map((profile) => {
+              const customized = customProfiles.some((c) => c.id === profile.id);
+              const builtIn = isBuiltInProfile(profile.id);
+              return (
+                <div key={profile.id} className="relative flex flex-col items-start p-3 rounded-lg border border-input bg-background hover:bg-secondary/40 hover:border-brand/40 transition-all text-left">
+                  <button
+                    onClick={() => {
+                      const merged = applyProfileToConfig(draft, profile);
+                      if (merged) {
+                        setDraft(merged);
+                        setDirty(true);
+                        toast.info(`Profile "${profile.name}" applied — review and save changes.`);
+                      }
+                    }}
+                    className="w-full text-left"
+                  >
+                    <span className="text-sm font-semibold pr-12">{profile.name}</span>
+                    <span className="text-[10px] text-muted-foreground mt-0.5 block">
+                      {profile.tags?.length ? profile.tags.join(", ") : "custom"}
+                    </span>
+                    <span className="text-xs text-muted-foreground mt-1 line-clamp-2 block">{profile.description}</span>
+                  </button>
+                  <div className="absolute top-2 right-2 flex items-center gap-1">
+                    {customized && (
+                      <Badge variant="outline" className="text-[9px] px-1.5 py-0">
+                        {builtIn ? "Modified" : "Custom"}
+                      </Badge>
+                    )}
+                    {customized && (
+                      <button
+                        onClick={() => deleteProfile(profile.id)}
+                        title={builtIn ? "Restore factory definition" : "Delete custom profile"}
+                        className="h-6 w-6 grid place-items-center rounded hover:bg-destructive/10 text-muted-foreground hover:text-destructive"
+                      >
+                        <Icon name="RotateCcw" className="w-3.5 h-3.5" />
+                      </button>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
           </div>
           <p className="text-xs text-muted-foreground">
             Selecting a profile modifies all applicable fields above. You can then fine-tune individual settings before saving.
+            "Save current settings as profile" snapshots EVERYTHING (agents, limits, layout) into a reusable profile; saving over a
+            built-in's name in the overwrite list customizes it while keeping the factory definition recoverable.
           </p>
         </CardContent>
       </Card>
@@ -140,43 +356,87 @@ export function OptimizerDirective() {
           </CardTitle>
           <CardDescription>
             Select a target layout blueprint. Optimization agents and the Supervisor will automatically format, reorder sections, and enforce strict limits matching this exact structural blueprint.
+            Edit any blueprint, duplicate a built-in as a starting point, or create a new one from scratch.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
+          <div className="flex justify-end">
+            <Button variant="outline" onClick={openNewBlueprint} className="gap-2">
+              <Icon name="Plus" className="w-4 h-4" /> New blueprint
+            </Button>
+          </div>
           <div className="grid md:grid-cols-3 gap-3">
-            {Object.values(STRUCTURAL_BLUEPRINTS).map((bp) => {
+            {mergedBlueprints.map((bp) => {
               const isSelected = (draft.selectedStructuralBlueprintId || "infohas_aviation") === bp.id;
+              const builtIn = Object.prototype.hasOwnProperty.call(STRUCTURAL_BLUEPRINTS, bp.id);
+              const customized = customBlueprints.some((c) => c.id === bp.id);
               return (
-                <button
+                <div
                   key={bp.id}
+                  role="button"
+                  tabIndex={0}
                   onClick={() => {
                     patch({ selectedStructuralBlueprintId: bp.id });
                     toast.info(`Target blueprint switched to "${bp.name}" — save changes to apply.`);
                   }}
-                  className={`relative flex flex-col items-start p-3.5 rounded-lg border text-left transition-all ${
+                  onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); patch({ selectedStructuralBlueprintId: bp.id }); } }}
+                  className={`relative flex flex-col items-start p-3.5 rounded-lg border text-left transition-all cursor-pointer ${
                     isSelected
                       ? "border-brand bg-brand/5 dark:bg-brand/10 ring-1 ring-brand"
                       : "border-input bg-background hover:bg-secondary/40 hover:border-brand/40"
                   }`}
                 >
-                  <div className="flex items-center justify-between w-full">
-                    <span className="text-sm font-semibold">{bp.name}</span>
+                  <div className="flex items-center justify-between w-full gap-2">
+                    <span className="text-sm font-semibold pr-1">{bp.name}</span>
                     {isSelected && (
-                      <span className="flex h-2 w-2 relative">
+                      <span className="flex h-2 w-2 relative shrink-0">
                         <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-brand opacity-75"></span>
                         <span className="relative inline-flex rounded-full h-2 w-2 bg-brand"></span>
                       </span>
                     )}
                   </div>
                   <span className="text-xs text-muted-foreground mt-1 line-clamp-2">{bp.description}</span>
-                </button>
+                  <div className="flex items-center gap-1.5 mt-2.5">
+                    {customized && (
+                      <Badge variant="outline" className="text-[9px] px-1.5 py-0">
+                        {builtIn ? "Modified" : "Custom"}
+                      </Badge>
+                    )}
+                    <span className="text-[10px] text-muted-foreground">{bp.sections.length} sections</span>
+                    <span className="flex-1" />
+                    <button
+                      onClick={(e) => { e.stopPropagation(); openEditBlueprint(bp); }}
+                      title={builtIn ? "Customize built-in" : "Edit blueprint"}
+                      className="h-6 w-6 grid place-items-center rounded hover:bg-secondary text-muted-foreground hover:text-foreground"
+                    >
+                      <Icon name="Pencil" className="w-3.5 h-3.5" />
+                    </button>
+                    <button
+                      onClick={(e) => { e.stopPropagation(); duplicateBlueprint(bp); }}
+                      title="Duplicate as new custom blueprint"
+                      className="h-6 w-6 grid place-items-center rounded hover:bg-secondary text-muted-foreground hover:text-foreground"
+                    >
+                      <Icon name="Copy" className="w-3.5 h-3.5" />
+                    </button>
+                    {customized && (
+                      <button
+                        onClick={(e) => { e.stopPropagation(); deleteBlueprint(bp.id); }}
+                        title={builtIn ? "Restore factory definition" : "Delete custom blueprint"}
+                        className="h-6 w-6 grid place-items-center rounded hover:bg-destructive/10 text-muted-foreground hover:text-destructive"
+                      >
+                        <Icon name="RotateCcw" className="w-3.5 h-3.5" />
+                      </button>
+                    )}
+                  </div>
+                </div>
               );
             })}
           </div>
 
           {/* Blueprint Details */}
           {(() => {
-            const activeBp = STRUCTURAL_BLUEPRINTS[draft.selectedStructuralBlueprintId || "infohas_aviation"];
+            const activeId = draft.selectedStructuralBlueprintId || "infohas_aviation";
+            const activeBp = mergedBlueprints.find((b) => b.id === activeId);
             if (!activeBp) return null;
             return (
               <div className="rounded-lg bg-muted/40 border p-4 space-y-3 text-xs leading-normal">
@@ -217,6 +477,296 @@ export function OptimizerDirective() {
           })()}
         </CardContent>
       </Card>
+
+      {/* SAVE-CURRENT-SETTINGS-AS-PROFILE DIALOG */}
+      <Dialog open={profileFormOpen} onOpenChange={setProfileFormOpen}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2"><Icon name="Save" className="w-4 h-4 text-brand" /> Save current settings as profile</DialogTitle>
+            <DialogDescription>
+              Snapshots EVERYTHING currently in this editor (agents, limits, layout, blueprint selection) into a reusable
+              one-click profile. Choose "New profile" or overwrite an existing one (overwriting a built-in keeps its factory
+              definition restorable).
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div>
+              <Label htmlFor="profile-overwrite">Target</Label>
+              <select
+                id="profile-overwrite"
+                value={profileForm.overwriteId}
+                onChange={(e) => {
+                  const v = e.target.value;
+                  if (v === "__new__") {
+                    setProfileForm((f) => ({ ...f, overwriteId: v }));
+                  } else {
+                    const existing = mergedProfiles.find((p) => p.id === v);
+                    setProfileForm((f) => ({
+                      ...f,
+                      overwriteId: v,
+                      name: existing?.name ?? "",
+                      description: existing?.description ?? "",
+                      tags: existing?.tags?.join(", ") ?? "",
+                    }));
+                  }
+                }}
+                className="w-full h-9 px-3 rounded-md border border-input bg-background text-sm mt-1"
+              >
+                <option value="__new__">New profile…</option>
+                {mergedProfiles.map((p) => (
+                  <option key={p.id} value={p.id}>{p.name}{isBuiltInProfile(p.id) ? " (built-in)" : ""}</option>
+                ))}
+              </select>
+            </div>
+            {profileForm.overwriteId === "__new__" && (
+              <div>
+                <Label htmlFor="profile-name">Profile name *</Label>
+                <Input
+                  id="profile-name"
+                  value={profileForm.name}
+                  onChange={(e) => setProfileForm((f) => ({ ...f, name: e.target.value }))}
+                  placeholder="e.g. Qatar Airways Cabin Crew — Premium"
+                  className="mt-1"
+                />
+              </div>
+            )}
+            <div>
+              <Label htmlFor="profile-desc">Description</Label>
+              <Textarea
+                id="profile-desc"
+                value={profileForm.description}
+                onChange={(e) => setProfileForm((f) => ({ ...f, description: e.target.value }))}
+                placeholder="What is this profile tuned for?"
+                rows={2}
+                className="mt-1"
+              />
+            </div>
+            <div>
+              <Label htmlFor="profile-tags">Tags (comma-separated)</Label>
+              <Input
+                id="profile-tags"
+                value={profileForm.tags}
+                onChange={(e) => setProfileForm((f) => ({ ...f, tags: e.target.value }))}
+                placeholder="aviation, premium, ats"
+                className="mt-1"
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setProfileFormOpen(false)}>Cancel</Button>
+            <Button onClick={saveAsProfile} className="bg-brand hover:bg-brand-dark text-white gap-2">
+              <Icon name="Check" className="w-4 h-4" /> Save profile
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* STRUCTURAL BLUEPRINT EDITOR DIALOG */}
+      <Dialog open={!!bpEditor} onOpenChange={(open) => { if (!open) setBpEditor(null); }}>
+        <DialogContent className="max-w-3xl max-h-[85vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Icon name="GitBranch" className="w-4 h-4 text-brand" />
+              {bpOverridesBuiltIn ? "Customize built-in blueprint" : "Blueprint editor"}
+            </DialogTitle>
+            <DialogDescription>
+              {bpOverridesBuiltIn
+                ? "Saving overrides the factory definition of this built-in blueprint (restorable via the restore button on its card)."
+                : "Define the section skeleton, ordering limits, and formatting hints the optimization agents must follow."}
+            </DialogDescription>
+          </DialogHeader>
+          {bpEditor && (
+            <div className="space-y-4">
+              <div className="grid sm:grid-cols-2 gap-3">
+                <div>
+                  <Label htmlFor="bp-name">Blueprint name *</Label>
+                  <Input
+                    id="bp-name"
+                    value={bpEditor.name}
+                    onChange={(e) => setBpEditor({ ...bpEditor, name: e.target.value })}
+                    placeholder="e.g. Emirates Cabin Crew Premium"
+                    className="mt-1"
+                  />
+                </div>
+                <div>
+                  <Label htmlFor="bp-desc">Description</Label>
+                  <Input
+                    id="bp-desc"
+                    value={bpEditor.description}
+                    onChange={(e) => setBpEditor({ ...bpEditor, description: e.target.value })}
+                    placeholder="Who is this layout for?"
+                    className="mt-1"
+                  />
+                </div>
+              </div>
+
+              <div className="rounded-lg border p-3 space-y-2">
+                <span className="text-xs font-semibold text-muted-foreground uppercase">Formatting Hints</span>
+                <div className="grid sm:grid-cols-3 gap-3">
+                  <div>
+                    <Label htmlFor="bp-dates">Dates format</Label>
+                    <Input
+                      id="bp-dates"
+                      value={bpEditor.formattingHints.datesFormat}
+                      onChange={(e) => setBpEditor({ ...bpEditor, formattingHints: { ...bpEditor.formattingHints, datesFormat: e.target.value } })}
+                      placeholder="YYYY-MM"
+                      className="mt-1"
+                    />
+                  </div>
+                  <div>
+                    <Label htmlFor="bp-bullets">Bullet style</Label>
+                    <Input
+                      id="bp-bullets"
+                      value={bpEditor.formattingHints.bulletStyle}
+                      onChange={(e) => setBpEditor({ ...bpEditor, formattingHints: { ...bpEditor.formattingHints, bulletStyle: e.target.value } })}
+                      placeholder="Quantified action verb bullets"
+                      className="mt-1"
+                    />
+                  </div>
+                  <div>
+                    <Label htmlFor="bp-order">Entity order</Label>
+                    <Input
+                      id="bp-order"
+                      value={bpEditor.formattingHints.entityOrder}
+                      onChange={(e) => setBpEditor({ ...bpEditor, formattingHints: { ...bpEditor.formattingHints, entityOrder: e.target.value } })}
+                      placeholder="Degrees -> Experience"
+                      className="mt-1"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-semibold text-muted-foreground uppercase">Sections ({bpEditor.sections.length})</span>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="gap-1 h-7 text-xs"
+                    onClick={() => {
+                      const used = new Set(bpEditor.sections.map((s) => s.id));
+                      const free = BLUEPRINT_SECTION_IDS.find((b) => !used.has(b.id));
+                      if (!free) {
+                        toast.info("All canonical sections are already present.");
+                        return;
+                      }
+                      setBpEditor({
+                        ...bpEditor,
+                        sections: [...bpEditor.sections, { id: free.id, name: free.label, required: true, hints: [] }],
+                      });
+                    }}
+                  >
+                    <Icon name="Plus" className="w-3.5 h-3.5" /> Add section
+                  </Button>
+                </div>
+                {bpEditor.sections.map((sec, idx) => (
+                  <div key={`${sec.id}-${idx}`} className="rounded-lg border p-3 space-y-2">
+                    <div className="grid sm:grid-cols-[1fr_1fr_auto_auto_auto] gap-2 items-end">
+                      <div>
+                        <Label className="text-[10px] text-muted-foreground">Section</Label>
+                        <select
+                          value={sec.id}
+                          onChange={(e) => {
+                            const id = e.target.value as ResumeSectionStructure["id"];
+                            const sections = [...bpEditor.sections];
+                            sections[idx] = { ...sec, id };
+                            setBpEditor({ ...bpEditor, sections });
+                          }}
+                          className="w-full h-9 px-2 rounded-md border border-input bg-background text-sm mt-1"
+                        >
+                          {BLUEPRINT_SECTION_IDS.map((b) => (
+                            <option key={b.id} value={b.id}>{b.label}</option>
+                          ))}
+                        </select>
+                      </div>
+                      <div>
+                        <Label className="text-[10px] text-muted-foreground">Display name</Label>
+                        <Input
+                          value={sec.name}
+                          onChange={(e) => {
+                            const sections = [...bpEditor.sections];
+                            sections[idx] = { ...sec, name: e.target.value };
+                            setBpEditor({ ...bpEditor, sections });
+                          }}
+                          className="mt-1"
+                        />
+                      </div>
+                      <div className="w-20">
+                        <Label className="text-[10px] text-muted-foreground">Max entries</Label>
+                        <Input
+                          type="number" min={0}
+                          value={sec.maxEntries ?? ""}
+                          onChange={(e) => {
+                            const v = e.target.value === "" ? undefined : Math.max(0, parseInt(e.target.value, 10) || 0);
+                            const sections = [...bpEditor.sections];
+                            sections[idx] = { ...sec, maxEntries: v };
+                            setBpEditor({ ...bpEditor, sections });
+                          }}
+                          className="mt-1"
+                        />
+                      </div>
+                      <div className="w-20">
+                        <Label className="text-[10px] text-muted-foreground">Max bullets</Label>
+                        <Input
+                          type="number" min={0}
+                          value={sec.maxBulletsPerEntry ?? ""}
+                          onChange={(e) => {
+                            const v = e.target.value === "" ? undefined : Math.max(0, parseInt(e.target.value, 10) || 0);
+                            const sections = [...bpEditor.sections];
+                            sections[idx] = { ...sec, maxBulletsPerEntry: v };
+                            setBpEditor({ ...bpEditor, sections });
+                          }}
+                          className="mt-1"
+                        />
+                      </div>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="h-9 w-9 p-0 text-destructive hover:text-destructive"
+                        onClick={() => setBpEditor({ ...bpEditor, sections: bpEditor.sections.filter((_, i) => i !== idx) })}
+                        title="Remove section"
+                      >
+                        <Icon name="Trash2" className="w-4 h-4" />
+                      </Button>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Switch
+                        checked={sec.required}
+                        onCheckedChange={(v) => {
+                          const sections = [...bpEditor.sections];
+                          sections[idx] = { ...sec, required: v };
+                          setBpEditor({ ...bpEditor, sections });
+                        }}
+                      />
+                      <Label className="text-xs text-muted-foreground">Required section</Label>
+                    </div>
+                    <div>
+                      <Label className="text-[10px] text-muted-foreground">Hints (one per line)</Label>
+                      <Textarea
+                        value={(sec.hints || []).join("\n")}
+                        onChange={(e) => {
+                          const sections = [...bpEditor.sections];
+                          sections[idx] = { ...sec, hints: e.target.value.split("\n") };
+                          setBpEditor({ ...bpEditor, sections });
+                        }}
+                        rows={2}
+                        className="mt-1 text-xs"
+                        placeholder={"Max 80 words\nFocus on guest relations"}
+                      />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setBpEditor(null)}>Cancel</Button>
+            <Button onClick={saveBlueprintEditor} className="bg-brand hover:bg-brand-dark text-white gap-2">
+              <Icon name="Check" className="w-4 h-4" /> Save blueprint
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* PAGE FORMAT */}
       <Card>

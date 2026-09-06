@@ -83,3 +83,50 @@ export const STRUCTURAL_BLUEPRINTS: Record<string, StructuralBlueprint> = {
     }
   }
 };
+
+// ============================================================================
+// CUSTOM BLUEPRINT REGISTRY (Task 15 — Blueprint/Profile Editor)
+//
+// Custom + modified blueprints are user-owned data persisted to D1 (branding
+// admin-settings blob) and hydrated into this in-memory registry by the store
+// (admin-slice / syncAllFromCloud). A custom entry whose id EQUALS a built-in
+// id SHADOWS it ("edit the built-in in place"); a custom entry with a new id
+// is an additional blueprint. The pipeline resolves ids through
+// getBlueprintById(), so custom blueprints participate in
+// alignResumeToBlueprint exactly like built-ins.
+// ============================================================================
+
+let customBlueprints: Record<string, StructuralBlueprint> = {};
+
+/** Replace the in-memory custom registry (called on store hydration + save). */
+export function registerCustomBlueprints(list: StructuralBlueprint[] | undefined | null): void {
+  customBlueprints = {};
+  if (!Array.isArray(list)) return;
+  for (const bp of list) {
+    if (bp && bp.id && Array.isArray(bp.sections)) {
+      customBlueprints[bp.id] = bp;
+    }
+  }
+}
+
+/** Resolve a blueprint by id — custom (incl. built-in overrides) first. */
+export function getBlueprintById(id: string | undefined | null): StructuralBlueprint | undefined {
+  if (!id) return undefined;
+  return customBlueprints[id] ?? STRUCTURAL_BLUEPRINTS[id];
+}
+
+/** Merged library: built-ins with any custom same-id overrides applied, then pure customs. */
+export function getAllBlueprints(): StructuralBlueprint[] {
+  const merged: Record<string, StructuralBlueprint> = { ...STRUCTURAL_BLUEPRINTS, ...customBlueprints };
+  return Object.values(merged);
+}
+
+/** True when id refers to a SHIPPED built-in (even if currently shadowed). */
+export function isBuiltInBlueprint(id: string): boolean {
+  return Object.prototype.hasOwnProperty.call(STRUCTURAL_BLUEPRINTS, id);
+}
+
+/** True when id has a user-custom/override definition. */
+export function isCustomizedBlueprint(id: string): boolean {
+  return Object.prototype.hasOwnProperty.call(customBlueprints, id);
+}

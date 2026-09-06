@@ -12,6 +12,10 @@ import type {
   InterviewScenario
 } from "../types";
 import type { InterviewPersona } from "../interview/personas";
+import type { DirectiveProfile } from "../directive-profiles";
+import { registerCustomProfiles } from "../directive-profiles";
+import type { StructuralBlueprint } from "../structural-blueprints";
+import { registerCustomBlueprints } from "../structural-blueprints";
 import type {
   PipelineProfile, AgentConfig, PromptVersion
 } from "../pipeline-orchestration-types";
@@ -88,6 +92,10 @@ export interface AdminSlice {
   scenarios: InterviewScenario[];
   /** Interviewer personas (Super Admin → Persona Management) — persisted to D1. */
   interviewPersonas: InterviewPersona[];
+  /** User-saved directive profiles (Optimizer Directive → Profile editor) — persisted to D1. */
+  customDirectiveProfiles: DirectiveProfile[];
+  /** User-created/modified structural blueprints (Optimizer Directive → Blueprint editor) — persisted to D1. */
+  customStructuralBlueprints: StructuralBlueprint[];
 
   addProvider: (p: AIProvider) => void;
   updateProvider: (id: string, patch: Partial<AIProvider>) => void;
@@ -105,6 +113,10 @@ export interface AdminSlice {
   saveScenarios: (list: InterviewScenario[]) => void;
   /** Replace the whole persona list and persist it to D1 (survives refresh). */
   saveInterviewPersonas: (list: InterviewPersona[]) => void;
+  /** Replace the whole custom directive profile list, persist to D1 + hydrate the profile registry. */
+  saveCustomDirectiveProfiles: (list: DirectiveProfile[]) => void;
+  /** Replace the whole custom structural blueprint list, persist to D1 + hydrate the blueprint registry. */
+  saveCustomStructuralBlueprints: (list: StructuralBlueprint[]) => void;
   addPrompt: (p: PromptTemplate) => void;
   updatePrompt: (id: string, patch: Partial<PromptTemplate>) => void;
   removePrompt: (id: string) => void;
@@ -162,6 +174,8 @@ export const createAdminSlice: StateCreator<AppState, [], [], AdminSlice> = (set
   optimizerDirective: SEED_OPTIMIZER_DIRECTIVE,
   scenarios: SEED_SCENARIOS,
   interviewPersonas: INTERVIEW_PERSONAS.map((p) => ({ ...p })),
+  customDirectiveProfiles: [],
+  customStructuralBlueprints: [],
 
   addProvider: (p) => {
     set((s) => ({ providers: [...s.providers, p] }));
@@ -369,7 +383,20 @@ export const createAdminSlice: StateCreator<AppState, [], [], AdminSlice> = (set
   saveInterviewPersonas: (list) => {
     set({ interviewPersonas: list });
     cloudApiSafe(cloudApi.updateBranding as any)({ interviewPersonas: list }).catch((e) => { console.warn("[store] Cloud sync failed:", e); });
-    get().log({ actor: get().user?.email ?? "admin", action: "Interview personas saved", category: "admin", details: `${list.length} persona(s) persisted to D1`, severity: "info" });
+  },
+
+  saveCustomDirectiveProfiles: (list) => {
+    set({ customDirectiveProfiles: list });
+    registerCustomProfiles(list);
+    cloudApiSafe(cloudApi.updateBranding as any)({ customDirectiveProfiles: list }).catch((e) => { console.warn("[store] Cloud sync failed:", e); });
+    get().log({ actor: get().user?.email ?? "admin", action: "Custom directive profiles saved", category: "admin", details: `${list.length} profile(s) persisted to D1`, severity: "info" });
+  },
+
+  saveCustomStructuralBlueprints: (list) => {
+    set({ customStructuralBlueprints: list });
+    registerCustomBlueprints(list);
+    cloudApiSafe(cloudApi.updateBranding as any)({ customStructuralBlueprints: list }).catch((e) => { console.warn("[store] Cloud sync failed:", e); });
+    get().log({ actor: get().user?.email ?? "admin", action: "Custom structural blueprints saved", category: "admin", details: `${list.length} blueprint(s) persisted to D1`, severity: "info" });
   },
 
   addPrompt: (p) => {

@@ -183,18 +183,44 @@ export const BUILT_IN_PROFILES: Record<string, DirectiveProfile> = {
 };
 
 /**
- * Get all available profiles (built-in + user-saved).
- * TODO: Merge with user-saved profiles from D1.
+ * Get all available profiles — built-ins merged with user-saved custom
+ * profiles (Task 15). A custom profile whose id EQUALS a built-in id shadows
+ * it ("edit the built-in in place"); a custom profile with a new id is an
+ * additional profile.
  */
 export function getAllProfiles(): DirectiveProfile[] {
-  return Object.values(BUILT_IN_PROFILES);
+  const merged: Record<string, DirectiveProfile> = { ...BUILT_IN_PROFILES, ...customProfiles };
+  return Object.values(merged);
 }
 
-/**
- * Get a profile by ID.
- */
+/** Get a profile by ID — custom (incl. built-in overrides) first. */
 export function getProfile(id: string): DirectiveProfile | undefined {
-  return BUILT_IN_PROFILES[id];
+  return customProfiles[id] ?? BUILT_IN_PROFILES[id];
+}
+
+/** True when id refers to a SHIPPED built-in (even if currently shadowed). */
+export function isBuiltInProfile(id: string): boolean {
+  return Object.prototype.hasOwnProperty.call(BUILT_IN_PROFILES, id);
+}
+
+// ============================================================================
+// CUSTOM PROFILE REGISTRY (Task 15 — Directive Profile Editor)
+//
+// User-saved profiles are persisted to D1 (branding admin-settings blob) and
+// hydrated here by the store (admin-slice / syncAllFromCloud).
+// ============================================================================
+
+let customProfiles: Record<string, DirectiveProfile> = {};
+
+/** Replace the in-memory custom registry (called on store hydration + save). */
+export function registerCustomProfiles(list: DirectiveProfile[] | undefined | null): void {
+  customProfiles = {};
+  if (!Array.isArray(list)) return;
+  for (const p of list) {
+    if (p && p.id && p.name) {
+      customProfiles[p.id] = p;
+    }
+  }
 }
 
 /**

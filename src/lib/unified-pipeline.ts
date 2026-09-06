@@ -22,7 +22,7 @@ import type { ResumeData } from "./types";
 import { cleanupResumeGrammar, stripMarkdown, repairMalformedJSON, filterForbiddenSkills, isForbiddenSkill } from "./ai-response-processor";
 import { extractJSON } from "./ai";
 import { extractLockedFacts, computeFactDiff, computeFactualIntegrityScore } from "./locked-facts";
-import { STRUCTURAL_BLUEPRINTS } from "./structural-blueprints";
+import { STRUCTURAL_BLUEPRINTS, getBlueprintById, registerCustomBlueprints } from "./structural-blueprints";
 import {
   findMatchingSourceEducation,
   findMatchingSourceLanguage,
@@ -849,9 +849,17 @@ export function finalizeResume(optimizedResume: ResumeData, sourceResume: Resume
     if (typeof window !== "undefined") {
       const useAppGlobal = (window as any).useApp;
       if (useAppGlobal) {
-        const storeBlueprintId = useAppGlobal.getState()?.optimizerDirective?.selectedStructuralBlueprintId;
+        const directiveState = useAppGlobal.getState()?.optimizerDirective;
+        const storeBlueprintId = directiveState?.selectedStructuralBlueprintId;
         if (storeBlueprintId) {
           blueprintId = storeBlueprintId;
+        }
+        // Belt-and-braces: hydrate the custom-blueprint registry straight from
+        // the store so user-created/modified blueprints always resolve even if
+        // syncAllFromCloud has not run/finished yet.
+        const customs = useAppGlobal.getState()?.customStructuralBlueprints;
+        if (Array.isArray(customs) && customs.length > 0) {
+          registerCustomBlueprints(customs);
         }
       }
     }
@@ -874,7 +882,9 @@ export function finalizeResume(optimizedResume: ResumeData, sourceResume: Resume
 
 export function alignResumeToBlueprint(resume: ResumeData, blueprintId?: string): ResumeData {
   const bid = blueprintId || "infohas_aviation";
-  const blueprint = STRUCTURAL_BLUEPRINTS[bid] || STRUCTURAL_BLUEPRINTS.infohas_aviation;
+  // Custom registry aware: resolves user-created/modified blueprints too,
+  // falling back to the built-in head when the id is unknown.
+  const blueprint = getBlueprintById(bid) || STRUCTURAL_BLUEPRINTS.infohas_aviation;
   const result = JSON.parse(JSON.stringify(resume)) as ResumeData;
 
   // 1. Align Education:
