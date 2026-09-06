@@ -18,6 +18,26 @@ import { findSeedProvider, isWebSessionIntegration, mergeProviderWithSeed } from
 import { SEED_PROVIDERS } from "../../mock-data";
 import type { AIProvider } from "../../types";
 
+// Debug-simplification pass: the Z.ai Web seed was REMOVED from the runtime
+// SEED_PROVIDERS registry (the web-session integration kept failing over in
+// production). The provider-sync isolation contracts below still hold, so the
+// tests run against a local fixture replicating the exact seed shape.
+const ZAI_WEB_SEED_FIXTURE = {
+  id: "p_zai_web",
+  name: "Z.ai Web",
+  type: "zai-web",
+  integrationType: "web-session",
+  baseUrl: "",
+  enabledModels: [],
+  modelName: "",
+  isActive: false,
+  isBuiltIn: false,
+  timeout: 60000,
+  apiKey: "",
+} as unknown as AIProvider;
+
+const TEST_SEEDS: AIProvider[] = [ZAI_WEB_SEED_FIXTURE, ...SEED_PROVIDERS];
+
 const TOKEN = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJ6YWkifQ.signature-part-000000";
 
 function zaiWebProvider(over: Partial<AIProvider> = {}): AIProvider {
@@ -149,13 +169,13 @@ describe("ZaiWebSessionAdapter — chat + normalization", () => {
 describe("provider-sync — web-session isolation (Task 29 rules extended)", () => {
   it("matches the zai-web seed by ID only — never by name/substring", () => {
     const d1 = zaiWebProvider({ id: "p_custom_abc", name: "Z.ai Web Account", type: "zai-web" });
-    expect(findSeedProvider(d1, SEED_PROVIDERS)).toBeUndefined();
-    expect(findSeedProvider(zaiWebProvider(), SEED_PROVIDERS)?.id).toBe("p_zai_web");
+    expect(findSeedProvider(d1, TEST_SEEDS)).toBeUndefined();
+    expect(findSeedProvider(zaiWebProvider(), TEST_SEEDS)?.id).toBe("p_zai_web");
   });
 
   it("never force-restores a REST Base URL onto a web-session record and never unions seed models", () => {
     const d1 = zaiWebProvider({ enabledModels: ["glm-4.6"] });
-    const merged = mergeProviderWithSeed(d1, SEED_PROVIDERS.find((p) => p.id === "p_zai_web"));
+    const merged = mergeProviderWithSeed(d1, TEST_SEEDS.find((p) => p.id === "p_zai_web"));
     expect(merged.baseUrl).toBe("");
     expect(merged.enabledModels).toEqual(["glm-4.6"]);
   });

@@ -548,56 +548,6 @@ const NVIDIA_PROVIDER: AIProvider = {
   health: { consecutiveFailures: 0, consecutiveSuccesses: 0 },
 };
 
-// === Antigravity CLI Provider ===
-const ANTIGRAVITY_SEED: AIProvider = {
-  id: "p_antigravity",
-  name: "Antigravity CLI",
-  type: "antigravity",
-  // Task 29 — CLI integration identity: authenticated via Google sign-in /
-  // CLI token, NO REST Base URL (Base URL renders as N/A in the UI). This is
-  // NOT the Google Gemini API provider (that is p_gemini / p_google_gemini
-  // with baseUrl generativelanguage.googleapis.com).
-  integrationType: "cli",
-  providerCategory: "api",
-  supportsServerSide: true,
-  supportsClientSide: true,
-  supportsStreaming: true,
-  supportsFunctionCalling: true,
-  supportsJsonMode: true,
-  requiresBrowserAuth: false,
-  requiresApiKey: true,
-  apiUrl: "https://cloudcode-pa.googleapis.com",
-  baseUrl: "https://cloudcode-pa.googleapis.com",
-  apiKey: process.env.NEXT_PUBLIC_ANTIGRAVITY_API_KEY ?? "",
-  priority: 3,
-  isActive: !!(process.env.NEXT_PUBLIC_ANTIGRAVITY_API_KEY),
-  isDefault: false,
-  isBuiltIn: false,
-  allowedForRegularUsers: true,
-  timeout: 30000,
-  maxTokens: 4096,
-  temperature: 0.7,
-  retryAttempts: 2,
-  rateLimitPerMinute: 60,
-  // Antigravity CLI exposes Claude/GPT/DeepSeek models (not Gemini). The Worker
-  // proxy transparently remaps claude-sonnet-4 → gemini-2.5-flash for the actual
-  // Google Cloud Code Assist call, so the CLI-facing model id stays claude-sonnet-4.
-  modelName: "claude-sonnet-4",
-  enabledModels: [
-    "claude-sonnet-4",
-    "gpt-4.1",
-    "deepseek-v4",
-    "gemini-2.5-pro",
-  ],
-  streamingEnabled: true,
-  authType: "bearer",
-  costPerInputToken: 0,
-  costPerOutputToken: 0,
-  status: "untested",
-  usage: { requests: 0, tokens: 0, errors: 0, avgLatencyMs: 0, cost: 0 },
-  health: { consecutiveFailures: 0, consecutiveSuccesses: 0 },
-};
-
 // === Mistral provider (Mistral Small / Ministral 3B) ===
 // User-configured with their Mistral API key
 const MISTRAL_PROVIDER: AIProvider = {
@@ -867,53 +817,14 @@ const PERPLEXITY_PROVIDER: AIProvider = {
   health: { consecutiveFailures: 0, consecutiveSuccesses: 0 },
 };
 
-// Insert NVIDIA + Mistral + Antigravity + new free-tier providers into the providers list
-SEED_PROVIDERS.push(NVIDIA_PROVIDER, MISTRAL_PROVIDER, ANTIGRAVITY_SEED, CEREBRAS_PROVIDER, HUGGINGFACE_PROVIDER, TOGETHER_PROVIDER, SAMBANOVA_PROVIDER, PERPLEXITY_PROVIDER);
-
-// === Task 30 — Z.ai Web (authenticated chat.z.ai browser session) ===
-// A SEPARATE integration from the internal z-ai-fallback (server-route API):
-// credential_type = zai_web_session, discovered via the user-initiated
-// same-origin browser bridge, validated against the live web contract.
-// GLM-family model names discovered here belong to THIS provider — the same
-// model name may exist under an official Z.ai API integration separately.
-const ZAI_WEB_SEED: AIProvider = {
-  id: "p_zai_web",
-  name: "Z.ai Web",
-  type: "zai-web",
-  integrationType: "web-session",
-  providerCategory: "api",
-  supportsServerSide: false,
-  supportsClientSide: true,
-  supportsStreaming: true,
-  supportsFunctionCalling: false,
-  supportsJsonMode: false,
-  requiresBrowserAuth: true,
-  requiresApiKey: false, // web-session credential — never an API key
-  baseUrl: "", // N/A: web-session integration (chat.z.ai origin is internal to the adapter)
-  apiKey: "",
-  priority: 9,
-  isActive: false, // becomes active after a VALIDATED web session import
-  isDefault: false,
-  isBuiltIn: false,
-  allowedForRegularUsers: false,
-  timeout: 60000,
-  maxTokens: 8192,
-  temperature: 0.7,
-  retryAttempts: 2,
-  rateLimitPerMinute: 60,
-  modelName: "",
-  enabledModels: [],
-  streamingEnabled: true,
-  authType: "bearer",
-  costPerInputToken: 0,
-  costPerOutputToken: 0,
-  status: "untested",
-  usage: { requests: 0, tokens: 0, errors: 0, avgLatencyMs: 0, cost: 0 },
-  health: { consecutiveFailures: 0, consecutiveSuccesses: 0 },
-};
-
-SEED_PROVIDERS.push(ZAI_WEB_SEED);
-
+// Insert NVIDIA + Mistral + new free-tier providers into the providers list.
+// NOTE (debug-simplification pass): ANTIGRAVITY_SEED and ZAI_WEB_SEED were
+// REMOVED from the runtime seed registry at the owner's request — both
+// integrations kept failing/falling over in the provider chain (Antigravity
+// CLI was DOWN in production, Z.ai Web sessions are fragile), which made the
+// providers/pipelines/server-routes debugging noisy. The adapters remain in
+// the codebase (dormant) and can be re-seeded deliberately if ever needed.
+SEED_PROVIDERS.push(NVIDIA_PROVIDER, MISTRAL_PROVIDER, CEREBRAS_PROVIDER, HUGGINGFACE_PROVIDER, TOGETHER_PROVIDER, SAMBANOVA_PROVIDER, PERPLEXITY_PROVIDER);
 
 export const SEED_PROVIDER_LOGS: AIProviderLog[] = [
   {
