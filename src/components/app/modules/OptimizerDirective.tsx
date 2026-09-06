@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useMemo } from "react";
+import { useState, useRef, useMemo, type ReactNode } from "react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -52,6 +52,107 @@ function cloneBlueprint(bp: StructuralBlueprint): StructuralBlueprint {
   return JSON.parse(JSON.stringify(bp)) as StructuralBlueprint;
 }
 
+// ============================================================================
+// Profile Parameter Editor — generic config field rendering helpers
+// ============================================================================
+
+const humanizeParam = (key: string) =>
+  key.replace(/([A-Z])/g, " $1").replace(/^./, (c) => c.toUpperCase()).replace(/\bAts\b/g, "ATS");
+
+/** Immutably set a nested value inside a config object at the given key path. */
+function patchAt(obj: any, path: string[], value: any): any {
+  if (path.length === 0) return value;
+  const [head, ...rest] = path;
+  return { ...obj, [head]: patchAt(obj?.[head], rest, value) };
+}
+
+/**
+ * Render editable rows for every scalar (boolean/number/string) inside a
+ * config fragment; nested plain objects become titled sub-boxes. Arrays and
+ * unknown shapes are left to the main form below.
+ */
+function renderParamFields(
+  value: Record<string, unknown> | undefined | null,
+  path: string[],
+  onChange: (path: string[], v: unknown) => void,
+): ReactNode[] {
+  if (!value || typeof value !== "object") return [];
+  return Object.entries(value).flatMap(([key, v]) => {
+    const p = [...path, key];
+    const id = p.join(".");
+    if (v === null || typeof v !== "object") {
+      if (key === "pageSize") {
+        return [(
+          <div key={id} className="flex items-center justify-between gap-2 py-1">
+            <span className="text-xs text-foreground">Page size</span>
+            <select
+              value={String(v ?? "A4")}
+              onChange={(e) => onChange(p, e.target.value)}
+              className="h-7 w-24 rounded-md border border-input bg-background text-xs px-1.5"
+            >
+              <option value="A4">A4</option>
+              <option value="Letter">Letter</option>
+            </select>
+          </div>
+        )];
+      }
+      if (key === "customDirectiveOverride") {
+        return [(
+          <div key={id} className="py-1">
+            <span className="text-xs text-foreground block mb-1">{humanizeParam(key)} (replaces the generated directive text entirely)</span>
+            <Textarea value={String(v ?? "")} onChange={(e) => onChange(p, e.target.value)} rows={3} className="text-xs font-mono" />
+          </div>
+        )];
+      }
+      if (typeof v === "boolean") {
+        return [(
+          <div key={id} className="flex items-center justify-between gap-2 py-1">
+            <span className="text-xs text-foreground">{humanizeParam(key)}</span>
+            <Switch checked={v as boolean} onCheckedChange={(c) => onChange(p, c)} />
+          </div>
+        )];
+      }
+      if (typeof v === "number") {
+        return [(
+          <div key={id} className="flex items-center justify-between gap-2 py-1">
+            <span className="text-xs text-foreground">{humanizeParam(key)}</span>
+            <Input
+              type="number"
+              value={String(v)}
+              onChange={(e) => { const n = Number(e.target.value); if (Number.isFinite(n)) onChange(p, n); }}
+              className="h-7 w-24 text-xs"
+            />
+          </div>
+        )];
+      }
+      return [(
+        <div key={id} className="flex items-center justify-between gap-2 py-1">
+          <span className="text-xs text-foreground">{humanizeParam(key)}</span>
+          <Input value={String(v ?? "")} onChange={(e) => onChange(p, e.target.value)} className="h-7 w-32 text-xs" />
+        </div>
+      )];
+    }
+    if (Array.isArray(v)) return []; // arrays (section order, etc.) stay in the main form
+    const kids = renderParamFields(v as Record<string, unknown>, p, onChange);
+    if (kids.length === 0) return [];
+    return [(
+      <div key={id} className="rounded-md border p-2.5">
+        <span className="text-[10px] uppercase font-bold tracking-wide text-muted-foreground">{humanizeParam(key)}</span>
+        {kids}
+      </div>
+    )];
+  });
+}
+
+/** Curated top-level scalar groups for the Profile Parameter Editor dialog. */
+const PROFILE_EDITOR_GROUPS: Array<{ title: string; keys: string[] }> = [
+  { title: "Page & layout", keys: ["enforceOnePage", "minFontSizePt", "marginTopMm", "marginBottomMm", "marginLeftMm", "marginRightMm", "lineHeight", "sectionGapMm", "bulletIndentMm"] },
+  { title: "Fonts & colors", keys: ["fontFamily", "bodyFontSizePt", "sectionTitleSizePt", "nameSizePt", "nameColor", "sectionTitleColor", "bodyTextColor"] },
+  { title: "Photo", keys: ["photoEnabled", "showPlaceholderIfNoPhoto", "photoWidthMm", "photoHeightMm"] },
+  { title: "Content limits", keys: ["summaryMinWords", "summaryMaxWords", "skillsMaxGroups", "experienceMaxEntries", "experienceBulletsPerEntry", "educationMaxEntries", "languagesMaxEntries"] },
+  { title: "Compliance engine", keys: ["complianceThreshold", "strictAgentLock", "enforceComplianceOnAllAgents", "forceDirectiveOnRetry"] },
+];
+
 export function OptimizerDirective() {
   const config = useApp((s) => s.optimizerDirective);
   const update = useApp((s) => s.updateOptimizerDirective);
@@ -76,6 +177,16 @@ export function OptimizerDirective() {
   // Profile currently being EDITED — its settings live in the draft below;
   // "Update profile" snapshots the draft back into it (in place).
   const [editingProfileId, setEditingProfileId] = useState<string | null>(null);
+
+  // Profile Parameter Editor dialog — shows/edits a profile's full parameter set
+  const [profileEditor, setProfileEditor] = useState<{
+    id: string;
+    isBuiltIn: boolean;
+    name: string;
+    description: string;
+    tags: string;
+    config: OptimizerDirectiveConfig;
+  } | null>(null);
 
   // Merged registries — a custom entry whose id equals a built-in id SHADOWS it.
   const mergedProfiles = useMemo(() => {
@@ -162,12 +273,57 @@ export function OptimizerDirective() {
     toast.success(wasBuiltIn ? "Built-in profile restored to factory definition." : "Custom profile deleted.");
   };
 
-  /** EDIT — load a profile's effective configuration into the draft for fine-tuning. */
-  const editProfile = (profile: DirectiveProfile) => {
-    setDraft(applyProfileToConfig(SEED_OPTIMIZER_DIRECTIVE, profile));
+  /** EDIT — open the parameter editor dialog for a profile. */
+  const openProfileEditor = (profile: DirectiveProfile) => {
+    setProfileEditor({
+      id: profile.id,
+      isBuiltIn: isBuiltInProfile(profile.id),
+      name: profile.name,
+      description: profile.description,
+      tags: (profile.tags ?? []).join(", "),
+      // Effective configuration: built-in partials merged onto the factory
+      // seed; custom full snapshots round-trip exactly.
+      config: applyProfileToConfig(SEED_OPTIMIZER_DIRECTIVE, profile),
+    });
+  };
+
+  const patchProfileEditorParam = (path: string[], v: unknown) => {
+    setProfileEditor((pe) => (pe ? { ...pe, config: patchAt(pe.config, path, v) as OptimizerDirectiveConfig } : pe));
+  };
+
+  /** UPDATE — persist the edited parameters + metadata back into the profile. */
+  const saveProfileEditor = () => {
+    if (!profileEditor) return;
+    const name = profileEditor.name.trim();
+    if (!name) {
+      toast.error("Profile name is required.");
+      return;
+    }
+    if (!confirm(profileEditor.isBuiltIn
+      ? `Customize built-in profile "${profileEditor.name}" with these parameters? Its factory definition stays recoverable via the restore icon on the card.`
+      : `Update custom profile "${profileEditor.name}" with these parameters? Its previous configuration will be replaced.`)) return;
+    const profile: DirectiveProfile = {
+      id: profileEditor.id,
+      name,
+      description: profileEditor.description.trim() || "User-saved snapshot of the current Optimizer Directive settings.",
+      tags: profileEditor.tags.split(",").map((t) => t.trim()).filter(Boolean),
+      overrides: JSON.parse(JSON.stringify(profileEditor.config)) as Partial<OptimizerDirectiveConfig>,
+    };
+    const next = [...customProfiles.filter((p) => p.id !== profileEditor.id), profile];
+    saveCustomProfiles(next);
+    setProfileEditor(null);
+    setEditingProfileId(null);
+    toast.success(`Profile "${name}" updated${profileEditor.isBuiltIn ? " (overrides the built-in — factory definition recoverable)" : ""}. Apply it from the grid.`);
+  };
+
+  /** APPLY — load the edited parameters into the main draft for fine-tuning. */
+  const applyProfileEditorToDraft = () => {
+    if (!profileEditor) return;
+    setDraft(JSON.parse(JSON.stringify(profileEditor.config)) as OptimizerDirectiveConfig);
     setDirty(true);
-    setEditingProfileId(profile.id);
-    toast.info(`Editing profile "${profile.name}" — adjust any settings below, then click "Update profile" to save back into it, or "Save current settings as profile" to fork your changes into a new one.`);
+    setEditingProfileId(profileEditor.id);
+    setProfileEditor(null);
+    toast.info(`Profile "${profileEditor.name}" loaded into the form below — fine-tune, then "Update profile" to save back into it or "Save directive" to keep as your directive.`);
   };
 
   /** SAVE — snapshot the current draft back into an existing profile, in place. */
@@ -394,8 +550,8 @@ export function OptimizerDirective() {
                   <div className="w-full flex items-center gap-1 mt-2 pt-2 border-t border-border/60">
                     <span className="text-[10px] uppercase font-bold tracking-wide text-muted-foreground mr-auto">{beingEdited ? "Editing" : builtIn ? "Built-in" : "Custom"}</span>
                     <button
-                      onClick={() => editProfile(profile)}
-                      title="Edit profile — load its settings into the form below for fine-tuning"
+                      onClick={() => openProfileEditor(profile)}
+                      title="Edit profile — open the parameter editor"
                       className="h-6 w-6 grid place-items-center rounded hover:bg-secondary text-muted-foreground hover:text-foreground"
                     >
                       <Icon name="Pencil" className="w-3.5 h-3.5" />
@@ -635,6 +791,129 @@ export function OptimizerDirective() {
             <Button variant="outline" onClick={() => setProfileFormOpen(false)}>Cancel</Button>
             <Button onClick={saveAsProfile} className="bg-brand hover:bg-brand-dark text-white gap-2">
               <Icon name="Check" className="w-4 h-4" /> Save profile
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* PROFILE PARAMETER EDITOR DIALOG — opened via the pencil on a profile card */}
+      <Dialog open={!!profileEditor} onOpenChange={(open) => { if (!open) setProfileEditor(null); }}>
+        <DialogContent className="max-w-3xl max-h-[85vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Icon name="Pencil" className="w-4 h-4 text-brand" />
+              Edit profile: {profileEditor?.name}
+              {profileEditor?.isBuiltIn && <Badge variant="outline" className="text-[9px] px-1.5 py-0">Built-in</Badge>}
+            </DialogTitle>
+            <DialogDescription>
+              Every parameter this profile applies, in one view. Update profile saves them back into the profile
+              (customizing a built-in keeps its factory definition recoverable); Apply to directive loads them into the
+              form below without saving the profile. Tone, keyword and alignment fine-tuning live in the main form.
+            </DialogDescription>
+          </DialogHeader>
+          {profileEditor && (
+            <div className="space-y-4">
+              {/* Metadata */}
+              <div className="grid sm:grid-cols-2 gap-3">
+                <div>
+                  <Label htmlFor="pe-name">Profile name *</Label>
+                  <Input
+                    id="pe-name"
+                    value={profileEditor.name}
+                    onChange={(e) => setProfileEditor({ ...profileEditor, name: e.target.value })}
+                    className="mt-1"
+                  />
+                </div>
+                <div>
+                  <Label htmlFor="pe-tags">Tags (comma-separated)</Label>
+                  <Input
+                    id="pe-tags"
+                    value={profileEditor.tags}
+                    onChange={(e) => setProfileEditor({ ...profileEditor, tags: e.target.value })}
+                    className="mt-1"
+                  />
+                </div>
+                <div className="sm:col-span-2">
+                  <Label htmlFor="pe-desc">Description</Label>
+                  <Input
+                    id="pe-desc"
+                    value={profileEditor.description}
+                    onChange={(e) => setProfileEditor({ ...profileEditor, description: e.target.value })}
+                    placeholder="What is this profile tuned for?"
+                    className="mt-1"
+                  />
+                </div>
+              </div>
+
+              {/* Target blueprint */}
+              <div className="rounded-lg border p-3">
+                <span className="text-xs font-semibold text-muted-foreground uppercase">Target blueprint</span>
+                <select
+                  value={profileEditor.config.selectedStructuralBlueprintId || "infohas_aviation"}
+                  onChange={(e) => patchProfileEditorParam(["selectedStructuralBlueprintId"], e.target.value)}
+                  className="w-full h-8 px-2 rounded-md border border-input bg-background text-sm mt-2"
+                >
+                  {mergedBlueprints.map((bp) => (
+                    <option key={bp.id} value={bp.id}>{bp.name}{bp.id.startsWith("custom_bp_") ? " (custom)" : ""}</option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Curated scalar groups */}
+              <div className="grid sm:grid-cols-2 gap-3">
+                {PROFILE_EDITOR_GROUPS.map((group) => {
+                  const fragment = Object.fromEntries(
+                    group.keys.map((k) => [k, (profileEditor.config as unknown as Record<string, unknown>)[k]]).filter(([, v]) => v !== undefined),
+                  );
+                  const rows = renderParamFields(fragment, [], patchProfileEditorParam);
+                  if (rows.length === 0) return null;
+                  return (
+                    <div key={group.title} className="rounded-lg border p-3">
+                      <span className="text-xs font-semibold text-muted-foreground uppercase">{group.title}</span>
+                      <div className="mt-1">{rows}</div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* Section character limits (nested min/max per section) */}
+              {profileEditor.config.sectionLimits && (
+                <div className="rounded-lg border p-3">
+                  <span className="text-xs font-semibold text-muted-foreground uppercase">Section character limits (min / max)</span>
+                  <div className="grid sm:grid-cols-2 gap-2 mt-2 items-start">
+                    {renderParamFields(profileEditor.config.sectionLimits as unknown as Record<string, unknown>, ["sectionLimits"], patchProfileEditorParam)}
+                  </div>
+                </div>
+              )}
+
+              {/* Per-agent directives */}
+              {profileEditor.config.agentDirectives && (
+                <div className="rounded-lg border p-3">
+                  <span className="text-xs font-semibold text-muted-foreground uppercase">Agent directives (injected into every agent's prompt)</span>
+                  <div className="grid sm:grid-cols-2 gap-2 mt-2 items-start">
+                    {renderParamFields(profileEditor.config.agentDirectives as unknown as Record<string, unknown>, ["agentDirectives"], patchProfileEditorParam)}
+                  </div>
+                </div>
+              )}
+
+              {/* Advanced: custom directive override */}
+              {typeof profileEditor.config.customDirectiveOverride === "string" && (
+                <div className="rounded-lg border p-3">
+                  <span className="text-xs font-semibold text-muted-foreground uppercase">Advanced</span>
+                  <div className="mt-1">
+                    {renderParamFields({ customDirectiveOverride: profileEditor.config.customDirectiveOverride }, [], patchProfileEditorParam)}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setProfileEditor(null)}>Cancel</Button>
+            <Button variant="outline" onClick={applyProfileEditorToDraft} className="gap-2">
+              <Icon name="ArrowDown" className="w-4 h-4" /> Apply to directive
+            </Button>
+            <Button onClick={saveProfileEditor} className="bg-brand hover:bg-brand-dark text-white gap-2">
+              <Icon name="Save" className="w-4 h-4" /> Update profile
             </Button>
           </DialogFooter>
         </DialogContent>
