@@ -4,6 +4,7 @@
 // cacheEnabled, are served from the Cloudflare edge cache — zero upstream calls, zero provider quota.
 import { NextRequest, NextResponse } from "next/server";
 import { chatCacheKey, matchCachedChat, putCachedChat } from "@/lib/ai/providers/chat-proxy-cache";
+import { isWorkersAIQuotaError, runWorkersAIChat } from "@/lib/ai/providers/workers-ai-core";
 
 export const runtime = "edge";
 
@@ -50,6 +51,119 @@ export async function POST(req: NextRequest) {
     const raw = await req.text().catch(() => "");
     const body = raw ? JSON.parse(raw) : {};
     let { baseUrl, apiKey, authType, headersJson, model, messages, maxTokens, temperature, topP, responsePath, timeoutMs } = body;
+
+    // ========================================================================
+    // WORKERS AI NATIVE PATH — in-account inference via the [ai] binding.
+    // No upstream URL exists: the edge runtime itself is the inference
+    // endpoint (getRequestContext().env.AI). Bypasses SSRF/baseUrl checks,
+    // WAF/bot-management, and every third-party per-IP quota — the classes of
+    // failure that kill external free engines (opencode-zen 429).
+    // ========================================================================
+    if (body.workersAI === true) {
+      const waiCacheKey = body.cacheEnabled === true
+        ? await chatCacheKey({ baseUrl: "workers-ai://native", model, messages, maxTokens, temperature, topP })
+        : null;
+      if (waiCacheKey) {
+        const cached = await matchCachedChat(waiCacheKey);
+        if (cached) return NextResponse.json(cached, { headers: { "X-Cache": "HIT" } });
+      }
+      let aiBinding: any;
+      try {
+        const { getRequestContext } = await import("@cloudflare/next-on-pages");
+        aiBinding = (getRequestContext() as any)?.env?.AI;
+      } catch {
+        aiBinding = undefined; // not running under next-on-pages (local dev/test)
+      }
+
+      // Preferred transport: local [ai] binding on the Pages project. When it
+      // is not configured, forward to the Workers API (resumeai-pro-api) which
+      // owns the [ai] binding — a SAME-ACCOUNT Cloudflare-internal hop, not a
+      // third-party egress: no WAF/bot-management, no per-IP quota.
+      if (!aiBinding?.run) {
+        const workerBase = "https://resumeai-pro-api.rachidelsabah.workers.dev";
+        const sharedSecret = process.env.WORKERSAI_SHARED_SECRET || "";
+        if (!sharedSecret) {
+          return NextResponse.json({
+            ok: false,
+            error: "Workers AI is not reachable: no [ai] binding on Pages and no WORKERSAI_SHARED_SECRET for the Workers API relay.",
+          }, { status: 501 });
+        }
+        const fwdTimeoutMs = typeof timeoutMs === "number" && timeoutMs > 0 ? Math.min(timeoutMs, 180_000) : 120_000;
+        proxyTimeoutMs = fwdTimeoutMs;
+        const t0f = performance.now();
+        try {
+          const fwdRes = await fetch(`${workerBase}/api/ai/workers-ai`, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "X-WorkersAI-Secret": sharedSecret,
+            },
+            body: JSON.stringify({ model, messages, maxTokens, temperature, topP, timeoutMs: fwdTimeoutMs }),
+            signal: AbortSignal.timeout(fwdTimeoutMs + 5000),
+          });
+          const fwdData = (await fwdRes.json().catch(() => ({}))) as any;
+          if (!fwdRes.ok || !fwdData.ok) {
+            const retryAfter = Number(fwdData?.retryAfterSeconds);
+            return NextResponse.json({
+              ok: false, success: false,
+              error: fwdData?.error || `Workers AI relay returned HTTP ${fwdRes.status}`,
+              message: fwdData?.message || fwdData?.error,
+              latencyMs: Math.round(performance.now() - t0f),
+              isTimeout: fwdData?.isTimeout === true,
+              ...(Number.isFinite(retryAfter) && retryAfter > 0 ? { retryAfterSeconds: retryAfter } : {}),
+            }, { status: fwdRes.status });
+          }
+          const successBodyF: Record<string, unknown> = {
+            ok: true,
+            latencyMs: Math.round(performance.now() - t0f),
+            text: fwdData.text,
+            inputTokens: fwdData.inputTokens,
+            outputTokens: fwdData.outputTokens,
+          };
+          if (waiCacheKey) await putCachedChat(waiCacheKey, successBodyF);
+          return NextResponse.json(successBodyF, { headers: { "X-Cache": waiCacheKey ? "MISS" : "BYPASS" } });
+        } catch (fwdErr: any) {
+          const fIsTimeout = fwdErr?.name === "AbortError" || /timed out/i.test(String(fwdErr?.message ?? ""));
+          return NextResponse.json({
+            ok: false, success: false,
+            error: fIsTimeout ? `Workers AI relay timed out after ${fwdTimeoutMs / 1000}s` : `Workers AI relay unreachable: ${String(fwdErr?.message ?? fwdErr).slice(0, 200)}`,
+            message: fIsTimeout ? `Workers AI relay timed out after ${fwdTimeoutMs / 1000}s` : `Workers AI relay unreachable`,
+            latencyMs: Math.round(performance.now() - t0f),
+            isTimeout: fIsTimeout,
+          }, { status: fIsTimeout ? 504 : 502 });
+        }
+      }
+      const clientTimeoutMs2 = typeof timeoutMs === "number" && timeoutMs > 0 ? Math.min(timeoutMs, 180_000) : 120_000;
+      proxyTimeoutMs = clientTimeoutMs2;
+      const t0w = performance.now();
+      try {
+        const result = await runWorkersAIChat(aiBinding, { model, messages, maxTokens, temperature, topP, timeoutMs: clientTimeoutMs2 });
+        if (!result.text) {
+          return NextResponse.json({ ok: false, latencyMs: Math.round(performance.now() - t0w), error: "Workers AI returned an empty response" }, { status: 502 });
+        }
+        const successBodyW: Record<string, unknown> = {
+          ok: true,
+          latencyMs: Math.round(performance.now() - t0w),
+          text: result.text,
+          inputTokens: result.inputTokens,
+          outputTokens: result.outputTokens,
+        };
+        if (waiCacheKey) await putCachedChat(waiCacheKey, successBodyW);
+        return NextResponse.json(successBodyW, { headers: { "X-Cache": waiCacheKey ? "MISS" : "BYPASS" } });
+      } catch (waiErr: any) {
+        const wIsTimeout = waiErr?.name === "AbortError" || /timed out/i.test(String(waiErr?.message ?? ""));
+        const wQuota = isWorkersAIQuotaError(waiErr);
+        const wMsg = wQuota
+          ? `Workers AI daily neurons exhausted (free tier). It will recover after the UTC reset — failover to the next provider. Detail: ${String(waiErr?.message ?? waiErr).slice(0, 200)}`
+          : String(waiErr?.message ?? waiErr).slice(0, 300);
+        return NextResponse.json({
+          ok: false, success: false,
+          error: wMsg, message: wMsg,
+          latencyMs: Math.round(performance.now() - t0w),
+          isTimeout: wIsTimeout,
+        }, { status: wIsTimeout ? 504 : wQuota ? 429 : 500 });
+      }
+    }
 
     if (!baseUrl) {
       return NextResponse.json({ ok: false, error: "baseUrl is required" }, { status: 400 });

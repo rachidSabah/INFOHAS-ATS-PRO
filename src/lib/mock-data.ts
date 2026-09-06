@@ -593,6 +593,49 @@ const MISTRAL_PROVIDER: AIProvider = {
   health: { consecutiveFailures: 0, consecutiveSuccesses: 0 },
 };
 
+// === Workers AI (Cloudflare-native rescue tier — in-account [ai] binding) ===
+// Emergency-only (see EMERGENCY_ONLY_PROVIDERS): free neurons/day quota is
+// RESERVED for failover — never selected as a primary engine, but present in
+// fallback chains right after the routed puter and before paid fallbacks.
+const WORKERS_AI_PROVIDER: AIProvider = {
+  id: "p_workersai",
+  name: "Workers AI (native, free rescue)",
+  type: "workers-ai",
+  providerCategory: "api",
+  supportsServerSide: true,
+  supportsClientSide: false,
+  supportsStreaming: false,
+  supportsFunctionCalling: false,
+  supportsJsonMode: true,
+  requiresBrowserAuth: false,
+  requiresApiKey: false,
+  apiUrl: "", // no REST upstream — the edge runtime IS the inference endpoint (env.AI)
+  baseUrl: "",
+  apiKey: "",
+  priority: 5,
+  isActive: true,
+  isDefault: false,
+  isFallback: true,
+  isBuiltIn: true,
+  allowedForRegularUsers: true,
+  timeout: 120000,
+  maxTokens: 4096,
+  temperature: 0.7,
+  retryAttempts: 1,
+  rateLimitPerMinute: 30,
+  modelName: "@cf/meta/llama-3.3-70b-instruct-fp8-fast",
+  enabledModels: [
+    "@cf/meta/llama-3.3-70b-instruct-fp8-fast",
+    "@cf/meta/llama-3.1-8b-instruct-fp8",
+    "@cf/deepseek-ai/deepseek-r1-distill-qwen-32b"
+  ],
+  streamingEnabled: false,
+  authType: "none",
+  status: "untested",
+  usage: { requests: 0, tokens: 0, errors: 0, avgLatencyMs: 0, cost: 0 },
+  health: { consecutiveFailures: 0, consecutiveSuccesses: 0 },
+};
+
 // === Cerebras Cloud (free tier — no card required) ===
 const CEREBRAS_PROVIDER: AIProvider = {
   id: "p_cerebras",
@@ -824,7 +867,7 @@ const PERPLEXITY_PROVIDER: AIProvider = {
 // CLI was DOWN in production, Z.ai Web sessions are fragile), which made the
 // providers/pipelines/server-routes debugging noisy. The adapters remain in
 // the codebase (dormant) and can be re-seeded deliberately if ever needed.
-SEED_PROVIDERS.push(NVIDIA_PROVIDER, MISTRAL_PROVIDER, CEREBRAS_PROVIDER, HUGGINGFACE_PROVIDER, TOGETHER_PROVIDER, SAMBANOVA_PROVIDER, PERPLEXITY_PROVIDER);
+SEED_PROVIDERS.push(NVIDIA_PROVIDER, MISTRAL_PROVIDER, CEREBRAS_PROVIDER, HUGGINGFACE_PROVIDER, TOGETHER_PROVIDER, SAMBANOVA_PROVIDER, PERPLEXITY_PROVIDER, WORKERS_AI_PROVIDER);
 
 export const SEED_PROVIDER_LOGS: AIProviderLog[] = [
   {

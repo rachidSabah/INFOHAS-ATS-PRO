@@ -1386,6 +1386,8 @@ export function withAttemptDeadline(req: ChatRequest, timeoutMs: number): ChatRe
 export function hasValidApiKey(p: any): boolean {
   if (!p) return false;
   if (p.type === "puter" || p.type === "local") return true;
+  // Workers AI native binding needs NO API key — auth is the account itself.
+  if (p.type === "workers-ai") return true;
   if (p.type === "opencode") return true;
   if (p.type === "custom" && p.authType === "none") return true;
   if (p.requiresApiKey === false) return true;

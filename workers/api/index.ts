@@ -17,6 +17,13 @@ export interface Env {
   // When set, the worker verifies JWTs cryptographically instead of
   // trusting the X-User-Id header.
   NEXTAUTH_SECRET?: string;
+  // Workers AI native binding (wrangler.toml [ai] binding = "AI") — the
+  // Cloudflare-native rescue tier engine.
+  AI?: any;
+  // Injected at deploy time via `wrangler deploy --var
+  // WORKERSAI_SHARED_SECRET:${{ secrets.WORKERSAI_SHARED_SECRET }}` (kept out
+  // of this public repo). /api/ai/workers-ai rejects unauthenticated calls.
+  WORKERSAI_SHARED_SECRET?: string;
 }
 
 const app = new Hono<{ Bindings: Env }>();
@@ -440,6 +447,89 @@ app.get("/api/health", async (c) => {
     db: dbCheck.ok ? "connected" : "error",
     dbError: dbCheck.error,
   });
+});
+
+// ============================================================================
+// WORKERS AI NATIVE ROUTE — Task 16 rescue-tier engine.
+// In-account inference through the [ai] binding: zero external egress, no
+// WAF/bot-management, no per-IP third-party quota (the classes of failure
+// that kill the OpenCode Zen free tier). Shared-secret gated so the public
+// workers.dev URL cannot be used as an open LLM relay; the ONLY legitimate
+// caller is the Pages chat proxy (/api/providers/chat workersAI branch).
+// ============================================================================
+const WORKERSAI_DEFAULT_MODEL = "@cf/meta/llama-3.3-70b-instruct-fp8-fast";
+
+app.post("/api/ai/workers-ai", async (c) => {
+  const provided = c.req.header("X-WorkersAI-Secret") || "";
+  const expected = c.env.WORKERSAI_SHARED_SECRET || "";
+  if (!expected || !provided || provided !== expected) {
+    return c.json({ ok: false, error: "Unauthorized" }, 401);
+  }
+  const ai = (c.env as any).AI;
+  if (!ai?.run) {
+    return c.json({ ok: false, error: "Workers AI binding (AI) is not configured on this Worker." }, 501);
+  }
+  let body: any;
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json({ ok: false, error: "Invalid JSON body" }, 400);
+  }
+  const model = typeof body?.model === "string" && body.model.trim() ? body.model.trim() : WORKERSAI_DEFAULT_MODEL;
+  if (!model.startsWith("@cf/") && !model.startsWith("@hf/")) {
+    return c.json({ ok: false, error: `Invalid Workers AI model "${model}" — expected an @cf/ or @hf/ model id.` }, 400);
+  }
+  const rawMsgs: any[] = Array.isArray(body?.messages) ? body.messages : [];
+  const messages = rawMsgs
+    .filter((m) => typeof m?.content === "string" && m.content.length > 0)
+    .map((m) => ({
+      role: m.role === "system" || m.role === "user" ? m.role : "assistant",
+      content: m.content,
+    }));
+  if (messages.length === 0) messages.push({ role: "user", content: "Hello" });
+  const maxTokens = Math.max(1, Math.min(8192, Math.floor(Number(body?.maxTokens) || 4096)));
+  const temperature = Math.max(0, Math.min(2, Number(body?.temperature) || 0.7));
+  const topP = Number(body?.topP) > 0 ? Math.min(1, Number(body.topP)) : undefined;
+  const timeoutMs = Math.max(1000, Math.min(180_000, Number(body?.timeoutMs) || 120_000));
+
+  const input: any = { messages, max_tokens: maxTokens, temperature };
+  if (topP) input.top_p = topP;
+
+  const t0 = Date.now();
+  try {
+    const result: any = await Promise.race([
+      ai.run(model, input),
+      new Promise<never>((_, reject) =>
+        setTimeout(() => reject(Object.assign(new Error(`Workers AI timed out after ${Math.round(timeoutMs / 1000)}s`), { name: "AbortError" })), timeoutMs),
+      ),
+    ]);
+    let text = "";
+    if (typeof result?.response === "string") text = result.response;
+    else if (typeof result?.data?.response === "string") text = result.data.response;
+    else if (typeof result?.result?.response === "string") text = result.result.response;
+    else if (Array.isArray(result?.content)) text = result.content.map((p: any) => (typeof p?.text === "string" ? p.text : "")).join("");
+    else if (typeof result?.text === "string") text = result.text;
+    text = text.replace(/<think>[\s\S]*?<\/think>/gi, "").trim();
+    if (!text) {
+      return c.json({ ok: false, latencyMs: Date.now() - t0, error: "Workers AI returned an empty response" }, 502);
+    }
+    const usage = result?.usage ?? result?.data?.usage;
+    return c.json({
+      ok: true,
+      latencyMs: Date.now() - t0,
+      text,
+      model,
+      inputTokens: Number.isFinite(usage?.prompt_tokens) ? Number(usage.prompt_tokens) : undefined,
+      outputTokens: Number.isFinite(usage?.completion_tokens) ? Number(usage.completion_tokens) : undefined,
+    });
+  } catch (e: any) {
+    const isTimeout = e?.name === "AbortError" || /timed out/i.test(String(e?.message ?? ""));
+    const quota = /neuron|quota|daily limit|exceeded|429/i.test(String(e?.message ?? e ?? ""));
+    const msg = quota
+      ? `Workers AI daily neurons exhausted (free tier). It will recover after the UTC reset — failover to the next provider. Detail: ${String(e?.message ?? e).slice(0, 200)}`
+      : String(e?.message ?? e).slice(0, 300);
+    return c.json({ ok: false, success: false, error: msg, message: msg, latencyMs: Date.now() - t0, isTimeout }, isTimeout ? 504 : quota ? 429 : 500);
+  }
 });
 
 // ============ SCHEMA MIGRATION CHECK ============

@@ -6,6 +6,7 @@ import { claudeProvider } from "../providers/claude";
 import { geminiProvider } from "../providers/gemini";
 import { ollamaProvider } from "../providers/ollama";
 import { puterProvider } from "../providers/puter";
+import { workersAIProvider } from "../providers/workers-ai";
 import { customProvider } from "../providers/custom";
 import { zaiFallbackProvider } from "../providers/zai-fallback";
 
@@ -38,6 +39,9 @@ const REGISTRY: Record<string, AIProviderAdapter> = {
   gemini: geminiProvider,
   ollama: ollamaProvider,
   puter: puterProvider,
+  // Workers AI — Cloudflare-native rescue tier (in-account [ai] binding, free
+  // neurons/day quota → reserved as failover, never a primary engine).
+  "workers-ai": workersAIProvider,
   custom: customProvider,
   bedrock: customProvider,
   "z-ai-fallback": zaiFallbackProvider,

@@ -21,6 +21,7 @@ export type ProviderCatalogEntry = {
 
 export const PROVIDER_CATALOG: ProviderCatalogEntry[] = [
   { type: "puter", label: "Puter.js (Free)", icon: "Sparkles", defaultUrl: "https://api.puter.com", defaultModel: "claude-sonnet-4", authType: "none" },
+  { type: "workers-ai", label: "Workers AI (native, free)", icon: "Cloud", defaultUrl: "", defaultModel: "@cf/meta/llama-3.3-70b-instruct-fp8-fast", authType: "none" },
   { type: "opencode", label: "OpenCode Zen (Free models)", icon: "Gift", defaultUrl: "https://opencode.ai/zen/v1", defaultModel: "nemotron-3-ultra-free", authType: "bearer" },
   { type: "opencode-zen", label: "OpenCode Zen (Free)", icon: "Gift", defaultUrl: "https://opencode.ai/zen/v1", defaultModel: "nemotron-3-ultra-free", authType: "bearer" },
   { type: "nvidia", label: "NVIDIA NIM (Free)", icon: "Bot", defaultUrl: "https://integrate.api.nvidia.com/v1", defaultModel: "nvidia/nemotron-3-super-120b-a12b", authType: "bearer" },

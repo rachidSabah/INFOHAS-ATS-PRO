@@ -31,10 +31,15 @@ const UNHEALTHY_THRESHOLD = 3;     // 3 consecutive failures → unhealthy
 const HEALTHY_RESET = 2;            // 2 consecutive successes → healthy
 
 /**
- * Providers that are emergency-only (Puter).
+ * Providers that are emergency-only (Puter, Workers AI).
  * These providers are NEVER selected normally; only used as absolute last resort.
+ * - puter: browser-auth free engine — reserved for explicit routes + rescue.
+ * - workers-ai / p_workersai: Cloudflare-native binding with a small FREE
+ *   neurons/day quota — reserved so primary calls never burn it (rescue tier
+ *   between the routed puter and paid fallbacks; still present in fallback
+ *   chains built by FallbackManager.buildChain, which filters only isActive).
  */
-export const EMERGENCY_ONLY_PROVIDERS = new Set(["puter", "p_puter"]);
+export const EMERGENCY_ONLY_PROVIDERS = new Set(["puter", "p_puter", "workers-ai", "p_workersai"]);
 
 /** In-memory circuit breaker state (resets on page reload) */
 const circuitState = new Map<string, ProviderStatus>();

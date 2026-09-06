@@ -19,6 +19,12 @@ database_id = "4485ee27-7fec-4077-a39d-c5cc4b1b9167"
 binding = "CACHE"
 id = "4521e79873524900bb373a245d095fcf"
 
+# Workers AI — Cloudflare-native rescue tier (free neurons/day, in-account
+# inference, no egress). Bound ONLY to the Workers API; the Pages frontend
+# reaches it through POST /api/ai/workers-ai (shared-secret gated).
+[ai]
+binding = "AI"
+
 [vars]
 APP_NAME = "ResumeAI Pro"
 APP_URL = "https://resumeai-pro.pages.dev"
@@ -26,6 +32,9 @@ APP_URL = "https://resumeai-pro.pages.dev"
 # preview deployments which have dynamic URLs like bcf5bbd9.resumeai-pro.pages.dev).
 # For production with a custom domain, set to "https://yourdomain.com".
 CORS_ORIGIN = "*"
+# WORKERSAI_SHARED_SECRET is injected at deploy time from the GitHub Actions
+# secret of the same name (NOT stored in this public file):
+#   deploy command: wrangler deploy --var WORKERSAI_SHARED_SECRET:${{ secrets.WORKERSAI_SHARED_SECRET }}
 
 [observability]
 enabled = true

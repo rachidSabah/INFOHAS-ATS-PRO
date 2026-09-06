@@ -186,7 +186,10 @@ jobs:
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          command: deploy
+          # --var injects the Workers AI shared secret at deploy time (kept out
+          # of this public repo); the Workers API route /api/ai/workers-ai
+          # rejects calls that do not present it in the X-WorkersAI-Secret header.
+          command: deploy --var WORKERSAI_SHARED_SECRET:${{ secrets.WORKERSAI_SHARED_SECRET }}
 
   # ----------------------------------------------------------
   # 5. Run D1 migrations (state-tracked, idempotent)

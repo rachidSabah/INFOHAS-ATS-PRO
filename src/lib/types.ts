@@ -427,6 +427,7 @@ export type AIProviderType =
   | "antigravity"
   | "zai-web"
   | "puter"
+  | "workers-ai"
   | "openai"
   | "gemini"
   | "claude"
