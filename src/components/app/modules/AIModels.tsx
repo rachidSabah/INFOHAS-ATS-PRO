@@ -15,7 +15,6 @@ import { ProviderManager } from "@/lib/ai/services";
 import { toast } from "sonner";
 import { ProviderHealthPanel } from "./ProviderHealthPanel";
 import { UnsavedBanner } from "./unsaved-changes";
-import { isCliIntegration, isWebSessionIntegration } from "@/lib/provider-sync";
 
 // Common models per provider type — used to populate the model picker
 const MODEL_CATALOG: Record<string, { name: string; contextWindow: string; inputCost?: number; outputCost?: number; tags?: string[] }[]> = {
@@ -143,13 +142,6 @@ const MODEL_CATALOG: Record<string, { name: string; contextWindow: string; input
     { name: "ministral-8b-latest", contextWindow: "32K", tags: ["free", "fastest"] },
     { name: "pixtral-large-latest", contextWindow: "32K", tags: ["free", "vision"] },
     { name: "open-mistral-nemo", contextWindow: "128K", tags: ["free"] },
-  ],
-  antigravity: [
-    { name: "gemini-2.5-flash", contextWindow: "1M", tags: ["free", "fast"] },
-    { name: "gemini-2.5-pro", contextWindow: "2M", tags: ["free", "reasoning"] },
-    { name: "claude-sonnet-4", contextWindow: "200K", tags: ["free", "flagship"] },
-    { name: "gpt-4.1", contextWindow: "128K", tags: ["free"] },
-    { name: "deepseek-v4", contextWindow: "64K", tags: ["free"] },
   ],
   cerebras: [
     { name: "qwen-3-235b", contextWindow: "128K", tags: ["free", "flagship"] },
@@ -392,20 +384,9 @@ export function AIModels() {
                   <div>
                     <div className="font-semibold flex items-center gap-2">
                       {selected.name}
-                      {/* Task 29 — integration identity tag: a CLI integration (Antigravity)
-                          keeps Google-family model ids it synced, but they remain CLI-owned
-                          models — ownership is the integration, never the model name. */}
-                      {isCliIntegration(selected) ? (
-                        <span title="CLI integration — models here belong to the CLI integration (provider_id = antigravity), even when ids look like Google models.">
-                          <Badge variant="outline" className="text-[10px] font-semibold">CLI</Badge>
-                        </span>
-                      ) : isWebSessionIntegration(selected) ? (
-                        <span title="Web-session integration — models here belong to the Z.ai Web session (provider_id = zai-web). The same GLM model may exist separately under an official Z.ai API integration.">
-                          <Badge variant="outline" className="text-[10px] font-semibold">WEB SESSION</Badge>
-                        </span>
-                      ) : (
-                        <Badge variant="outline" className="capitalize text-[10px]">{selected.type.replace("-", " ")}</Badge>
-                      )}
+                      {/* Integration identity badges (CLI / WEB SESSION) removed along with
+                          the Antigravity CLI and Z.ai Web integrations. */}
+                      <Badge variant="outline" className="capitalize text-[10px]">{selected.type.replace("-", " ")}</Badge>
                     </div>
                     <div className="text-xs text-muted-foreground mt-0.5">
                       Default model: <span className="font-mono">{selected.modelName || "—"}</span> · {enabledModels.length} models enabled

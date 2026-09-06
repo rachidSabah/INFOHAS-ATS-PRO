@@ -1,10 +1,11 @@
 // ResumeAI Pro — OAuth AI Provider Interface
 // Common abstraction for all OAuth-capable AI providers.
-// PuterProvider and ZaiProvider implement this interface,
+// PuterProvider implements this interface,
 // making future additions (OpenCode Auth, Claude Web, etc.) trivial.
+// NOTE: the Antigravity provider was removed from the product.
 
 export interface ProviderSession {
-  provider: "puter" | "antigravity";
+  provider: "puter";
   authenticated: boolean;
   email: string | null;
   userId: string | null;
@@ -58,7 +59,7 @@ export interface ProviderAuthError {
  */
 export interface OAuthAIProvider {
   /** Unique provider identifier */
-  readonly id: "puter" | "antigravity";
+  readonly id: "puter";
   /** Human-readable provider name */
   readonly name: string;
 

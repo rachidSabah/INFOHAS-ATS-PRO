@@ -13,7 +13,6 @@ import { api as cloudApi } from "@/lib/cloud-api";
 import { ProviderManager } from "@/lib/ai/services";
 import { toast } from "sonner";
 import type { AIProvider } from "@/lib/types";
-import { isCliIntegration, isWebSessionIntegration } from "@/lib/provider-sync";
 import { isOpenCodeZenFree } from "@/lib/provider-capabilities";
 import { getProviderConcurrencySnapshot, resetProviderAdaptiveCap, ADAPTIVE_CAP_RECOVER_THRESHOLD } from "@/lib/provider-concurrency";
 import { getProviderCooldownSnapshot, formatCooldownRemaining, clearProviderCooldownOnSuccess, type ProviderCooldownClass } from "@/lib/provider-cooldown";
@@ -25,8 +24,6 @@ import { TestConnectionModal } from "./TestConnectionModal";
 import { ProviderHealthPanel } from "./ProviderHealthPanel";
 import { ProviderHealer } from "@/lib/ai/healing/provider-healer";
 import { PuterAuthCard } from "./PuterAuthCard";
-import { ConnectAntigravityDialog } from "./ConnectAntigravityDialog";
-import { ConnectZaiWebDialog } from "./ConnectZaiWebDialog";
 import { getPuterProvider } from "@/lib/providers";
 import type { ProviderAuthStatus } from "@/lib/providers/interface";
 import { PROVIDER_CATALOG, type ProviderCatalogEntry } from "@/lib/ai/provider-catalog";
@@ -425,28 +422,13 @@ export function AIProviders() {
                             </div>
                           </div>
                         </td>
-                        {/* Task 29 — integration identity: a CLI integration (Antigravity)
-                            is a different MECHANISM from a REST API provider, even when
-                            it exposes Google-family model names. Type cell shows the
-                            integration, not just the vendor-ish type string. */}
+                        {/* Integration identity (CLI / web-session) removed — the Antigravity CLI
+                            and Z.ai Web integrations were fully removed from the product. */}
                         <td className={`px-3 py-3 ${TD_VIS.type}`}>
-                          {isCliIntegration(p) ? (
-                            <span title="CLI integration — authenticated via Google sign-in / CLI token. Google sign-in is an auth mechanism, NOT the Google Gemini API.">
-                              <Badge variant="outline" className="text-[10px] font-semibold">CLI</Badge>
-                            </span>
-                          ) : isWebSessionIntegration(p) ? (
-                            <span title="Web-session integration — authenticated chat.z.ai browser session (credential_type = zai_web_session). Separate from the official Z.ai API.">
-                              <Badge variant="outline" className="text-[10px] font-semibold">WEB SESSION</Badge>
-                            </span>
-                          ) : (
-                            <Badge variant="outline" className="text-[10px] capitalize">{p.type.replace("-", " ")}</Badge>
-                          )}
+                          <Badge variant="outline" className="text-[10px] capitalize">{p.type.replace("-", " ")}</Badge>
                         </td>
-                        {/* Task 29 — CLI integrations have NO Base URL (N/A). Rendering the
-                            internal cloudcode-pa.googleapis.com host here falsely implied a
-                            REST API configuration. */}
-                        <td className={`px-3 py-3 text-xs text-muted-foreground font-mono truncate ${TD_VIS.baseUrl}`} title={isCliIntegration(p) ? "Base URL: not applicable — CLI integration (inference runs through the Antigravity CLI runtime; Google sign-in is only the authentication mechanism)." : isWebSessionIntegration(p) ? "Base URL: not applicable — web-session integration (the adapter speaks to the authenticated chat.z.ai web session; api.z.ai belongs to the official Z.ai API integration)." : (p.baseUrl || p.apiUrl || "")}>
-                          {isCliIntegration(p) ? <span className="italic text-muted-foreground/70" title="Base URL: not applicable — CLI integration">N/A · CLI</span> : isWebSessionIntegration(p) ? <span className="italic text-muted-foreground/70" title="Base URL: not applicable — web-session integration">N/A · Web Session</span> : (p.baseUrl || p.apiUrl || "—")}
+                        <td className={`px-3 py-3 text-xs text-muted-foreground font-mono truncate ${TD_VIS.baseUrl}`} title={p.baseUrl || p.apiUrl || ""}>
+                          {p.baseUrl || p.apiUrl || "—"}
                         </td>
                         <td className="px-3 py-3 text-xs font-mono truncate" title={p.modelName || "—"}>{p.modelName || "—"}</td>
                         <td className="px-3 py-3"><Badge variant={statusColor as any} className="capitalize text-[10px]">{p.status}</Badge></td>
@@ -558,10 +540,6 @@ export function AIProviders() {
           <div className="grid gap-4 md:grid-cols-2">
             {/* Puter.js Auth (Multi-Account) */}
             <PuterAuthCard status={puterStatus} onRefreshStatus={refreshAuthStatus} />
-            {/* Antigravity CLI Auth (Device Flow) */}
-            <ConnectAntigravityDialog />
-            {/* Task 30 — Z.ai Web (authenticated chat.z.ai browser session) */}
-            <ConnectZaiWebDialog />
           </div>
 
           {/* Auth info box */}

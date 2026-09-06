@@ -4,7 +4,6 @@
 "use client";
 
 import { useApp, uid } from "../../store";
-import { isCliIntegration, isNonRestIntegration, isWebSessionIntegration } from "../../provider-sync";
 import { resolveTestTimeoutMs } from "../test-timeout";
 import { ProviderRouter } from "./router";
 import { ProviderFactory } from "./factory";
@@ -243,55 +242,9 @@ export class ProviderManager {
       };
     }
 
-    // === NON-REST INTEGRATIONS (Task 29b CLI + Task 30 web-session): model
-    // discovery is an integration-runtime concern, NOT a REST
-    // {baseUrl}/models proxy call. CLI providers (Antigravity) and
-    // web-session providers (Z.ai Web) legitimately have NO Base URL
-    // ("N/A") — the generic proxy rejects the request with "baseUrl is
-    // required". Ownership rule: models discovered here belong to the
-    // integration that synced them (provider_id antigravity / zai-web),
-    // never to any same-name-family API provider.
-    if (isNonRestIntegration(provider)) {
-      try {
-        const adapter = ProviderFactory.get(provider.type);
-        const models = await adapter.listModels?.(toProviderConfig(provider));
-        if (models && models.length > 0) return { ok: true, models };
-      } catch {
-        // Not connected (or discovery failed) — fall through to the synced catalog.
-      }
-      const stored = (provider.enabledModels || []).filter(
-        (m) => typeof m === "string" && m.trim() !== "",
-      );
-      if (stored.length > 0) return { ok: true, models: [...stored] };
-      // Integration-aware guidance (Task 30): the message must name the
-      // integration the user is actually connecting — never a wrong one.
-      const connectHint = isWebSessionIntegration(provider)
-        ? "Z.ai Web is not connected and has no synced models yet. Open Z.ai, sign in with Google, run the Z.ai → ATS Pro bridge, then Sync Models. (Web-session integration — no Base URL is used.)"
-        : "Antigravity CLI is not connected and has no synced models yet. Connect via Google sign-in or paste a CLI token, then run Sync Models. (CLI integration — no Base URL is used.)";
-      return { ok: false, models: [], error: connectHint };
-    }
-
-    // === ANTIGRAVITY: add common models to fallback list if API fetch fails ===
-    // Antigravity often has SSL 525 issues on some networks/workers,
-    // so providing a base list helps the user.
-    if (provider.baseUrl?.includes("antigravity.io")) {
-      const result = await this.fetchModelsForConfig(provider);
-      if (!result.ok || result.models.length === 0) {
-        return {
-          ok: true,
-          models: [
-            "claude-3-5-sonnet-20241022",
-            "claude-3-5-sonnet",
-            "claude-3-opus",
-            "gpt-4o",
-            "gpt-4o-mini",
-            "deepseek-chat",
-            "deepseek-coder",
-          ],
-        };
-      }
-      return result;
-    }
+    // NOTE: the NON-REST integration branches (Antigravity CLI + Z.ai Web,
+    // Task 29b/30) were removed along with those integrations. Fetch-models
+    // now always goes through the generic REST {baseUrl}/models proxy path.
     return this.fetchModelsForConfig(provider);
   }
 

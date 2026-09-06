@@ -14,7 +14,7 @@ const ALLOWED_PROVIDER_HOSTS = new Set([
   "openrouter.ai", "api.opencode.com", "opencode.ai",
   "api.perplexity.ai", "api.mistral.ai", "api.cohere.com",
   "api.together.xyz", "api.z.ai", "api.aimlapi.com", "api.azure.com",
-  "api-inference.huggingface.co", "api.puter.com", "api.antigravity.io", "cloudcode-pa.googleapis.com", "api.cohere.ai",
+  "api-inference.huggingface.co", "api.puter.com",
   "bedrock-runtime.us-east-1.amazonaws.com", "bedrock-runtime.us-west-2.amazonaws.com",
   // New free-tier providers
   "api.cerebras.ai", "api.sambanova.ai",
@@ -48,11 +48,6 @@ export async function POST(req: NextRequest) {
 
     if (!baseUrl) {
       return NextResponse.json({ error: "baseUrl is required" }, { status: 400 });
-    }
-
-    // Rewrite Antigravity CLI to Google Cloud Code Assist endpoint
-    if (baseUrl.includes("api.antigravity.io")) {
-      baseUrl = "https://cloudcode-pa.googleapis.com/v1";
     }
 
     if (!isAllowedProviderUrl(baseUrl)) {

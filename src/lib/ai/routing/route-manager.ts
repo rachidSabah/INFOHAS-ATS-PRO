@@ -106,7 +106,7 @@ export function modelSupportsCapability(provider: ProviderLike, canonicalModelId
       // Browser-auth providers and OpenAI-compatible APIs support streaming.
       return !["image", "ocr"].includes(type);
     case "reasoning":
-      return /(^|[-_/])(o1|o3|o4|r1|reasoner|thinking|deepseek-reasoner|qwq)/.test(m) || type === "antigravity";
+      return /(^|[-_/])(o1|o3|o4|r1|reasoner|thinking|deepseek-reasoner|qwq)/.test(m);
     case "structured_output":
     case "json_mode":
       // JSON mode is broadly supported by OpenAI-compatible + major APIs.
@@ -134,7 +134,7 @@ function pricingOf(explicit: "free" | "paid" | "unknown" | undefined, provider: 
   // Do NOT infer pricing from a $0.000000 display (directive #33). Only the
   // provider catalog's explicit free-tier markers count.
   const type = (provider.type || "").toLowerCase();
-  if (["puter", "zai-web", "antigravity", "opencode", "opencode-zen", "zencode"].includes(type)) return "free";
+  if (["puter", "opencode", "opencode-zen", "zencode"].includes(type)) return "free";
   return "unknown";
 }
 

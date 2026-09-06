@@ -8,8 +8,6 @@ import { ollamaProvider } from "../providers/ollama";
 import { puterProvider } from "../providers/puter";
 import { customProvider } from "../providers/custom";
 import { zaiFallbackProvider } from "../providers/zai-fallback";
-import { antigravityAdapter } from "../providers/antigravity-adapter";
-import { zaiWebSessionAdapter } from "../providers/zai-web-adapter";
 
 // OpenCode Zen uses the OpenAI-compatible API schema
 const opencodeProvider = new OpenAICompatibleProvider("opencode");
@@ -20,16 +18,8 @@ const githubProvider = new OpenAICompatibleProvider("github");
 
 const REGISTRY: Record<string, AIProviderAdapter> = {
   openai: openaiProvider,
-  // Task 29 — Antigravity CLI routes through its DEDICATED adapter (CLI
-  // integration). Before this entry, get("antigravity") silently fell back to
-  // the custom adapter, disconnecting routing/benchmark/health from the
-  // Antigravity integration stack entirely.
-  antigravity: antigravityAdapter,
-  // Task 30 — Z.ai Web routes through its DEDICATED web-session adapter.
-  // Entirely separate from z-ai-fallback (the internal server-route API
-  // integration): the web adapter speaks to the authenticated chat.z.ai
-  // web session, never to the official API endpoints.
-  "zai-web": zaiWebSessionAdapter,
+  // NOTE: the Antigravity CLI and Z.ai Web integrations were fully removed
+  // from the product — their dedicated adapters and registry entries are gone.
   opencode: opencodeProvider,   // OpenCode Zen — OpenAI-compatible, free models
   "opencode-zen": opencodeZenProvider,
   zencode: zencodeProvider,
