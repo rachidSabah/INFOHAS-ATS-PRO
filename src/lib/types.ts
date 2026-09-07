@@ -1560,6 +1560,8 @@ export interface RenderContactBlock {
   dateOfBirth?: string;
   /** Structured personal details rendered as label-value pairs */
   personalDetails?: Record<string, string>;
+  /** Photo data URI — passed through to PDF/DOCX renderers */
+  photoUrl?: string;
 }
 
 export interface RenderDocument {

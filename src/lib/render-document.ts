@@ -68,6 +68,7 @@ function buildContactBlock(resume: ResumeData): RenderDocument["contact"] {
     location: resume.contact.location,
     dateOfBirth: resume.dateOfBirth,
     personalDetails: resume.contact.personalDetails,
+    photoUrl: resume.photoUrl,
   };
 }
 

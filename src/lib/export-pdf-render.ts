@@ -152,6 +152,23 @@ export async function exportResumePDFRenderDoc(
       }
     };
 
+    // ===== Photo (top-right) — rendered before contact text so contentW can be narrowed =====
+    const hasPhoto = !!(rd.contact.photoUrl && rd.contact.photoUrl.startsWith("data:image"));
+    const photoW = L.photoWidthMm ?? 28;
+    const photoH = L.photoHeightMm ?? 32;
+    const photoLeft = right - photoW;
+    const photoTop = L.marginTopMm;
+    if (hasPhoto && rd.contact.photoUrl) {
+      try {
+        doc.addImage(rd.contact.photoUrl, "JPEG", photoLeft, photoTop, photoW, photoH, undefined, "FAST");
+      } catch (photoErr) {
+        console.warn("[export-pdf-render] Photo rendering failed (non-fatal):", photoErr instanceof Error ? (photoErr as Error).message : photoErr);
+      }
+    }
+    // When photo is present, reserve right-hand margin so contact text doesn't overlap
+    const textRight = hasPhoto ? photoLeft - 4 : right;
+    const activeContentW = textRight - left;
+
     // Render Contact block
     doc.setFont(fontName, "bold");
     doc.setFontSize(currentNameSize);
@@ -163,7 +180,8 @@ export async function exportResumePDFRenderDoc(
       doc.setFont(fontName, "normal");
       doc.setFontSize(currentBodyFontSize);
       doc.setTextColor(bodyRgb[0], bodyRgb[1], bodyRgb[2]);
-      doc.text(rd.contact.headline, left, textY(currentBodyFontSize));
+      const headlineLines = doc.splitTextToSize(rd.contact.headline, activeContentW);
+      doc.text(headlineLines[0] ?? "", left, textY(currentBodyFontSize));
       advanceLine();
     }
 
@@ -180,7 +198,9 @@ export async function exportResumePDFRenderDoc(
         doc.setTextColor(contactRgb[0], contactRgb[1], contactRgb[2]);
         doc.setFont(fontName, "normal");
         doc.setFontSize(currentBodyFontSize);
-        doc.text(contactParts.join(" | "), left, textY(currentBodyFontSize));
+        const joined = contactParts.join(" | ");
+        const contactLines = doc.splitTextToSize(joined, activeContentW);
+        doc.text(contactLines[0] ?? joined, left, textY(currentBodyFontSize));
         advanceLine();
       }
     } else {
@@ -211,7 +231,15 @@ export async function exportResumePDFRenderDoc(
       }
     }
 
+    // If photo is taller than the contact text block, pad y down past the photo
+    if (hasPhoto) {
+      const photoBottom = photoTop + photoH + 2;
+      if (y < photoBottom) y = photoBottom;
+    }
+
     advanceMm(1.5);
+
+
 
     // Render sections
     for (const section of rd.sections) {

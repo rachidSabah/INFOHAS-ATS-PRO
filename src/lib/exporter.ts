@@ -1644,19 +1644,13 @@ export function exportCoverLetterPDF(cl: CoverLetter, opts: { accentColor?: stri
   doc.setFillColor(accent[0], accent[1], accent[2]);
   doc.rect(0, 0, pageW, 4, "F");
 
-  doc.setFont("helvetica", "bold");
-  doc.setTextColor(11, 31, 58);
-  doc.setFontSize(11);
-  doc.text(cl.title || "Cover Letter", left, y + 4);
-  y += 12;
-
   if (cl.company || cl.role) {
     doc.setFont("helvetica", "normal");
     doc.setTextColor(accent[0], accent[1], accent[2]);
     doc.setFontSize(10);
     const sub = [cl.role, cl.company].filter(Boolean).join(" at ");
-    doc.text(sub, left, y);
-    y += 8;
+    doc.text(sub, left, y + 4);
+    y += 12;
   }
 
   // Date
@@ -1688,14 +1682,13 @@ export function exportCoverLetterPDF(cl: CoverLetter, opts: { accentColor?: stri
 }
 
 export function exportCoverLetterTXT(cl: CoverLetter) {
-  const header = [cl.title, cl.role && cl.company ? `${cl.role} at ${cl.company}` : cl.role || cl.company, ""].filter(Boolean).join("\n");
-  const blob = new Blob([header + "\n\n" + cl.content], { type: "text/plain;charset=utf-8" });
+  const header = [cl.role && cl.company ? `${cl.role} at ${cl.company}` : cl.role || cl.company, ""].filter(Boolean).join("\n");
+  const blob = new Blob([header + (header ? "\n\n" : "") + cl.content], { type: "text/plain;charset=utf-8" });
   saveAs(blob, (cl.title || "cover_letter").replace(/\s+/g, "_") + ".txt");
 }
 
 export async function exportCoverLetterDOCX(cl: CoverLetter) {
   const children: Paragraph[] = [];
-  children.push(new Paragraph({ children: [new TextRun({ text: cl.title || "Cover Letter", bold: true, size: 26, color: "0B1F3A" })], spacing: { after: 80 } }));
   if (cl.role || cl.company) {
     children.push(new Paragraph({ children: [new TextRun({ text: [cl.role, cl.company].filter(Boolean).join(" at "), size: 20, color: "1154A3" })], spacing: { after: 80 } }));
   }
