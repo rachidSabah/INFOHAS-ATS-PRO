@@ -105,15 +105,30 @@ export function normalizeSkillName(n: string): string {
 }
 
 /**
+ * Strip common language proficiency descriptors to extract the underlying language name.
+ * e.g. "Fluent in English" → "english", "English (Native)" → "english",
+ * "Conversational Spanish" → "spanish", "Professional working English" → "english"
+ */
+export function cleanLanguageToken(s: string): string {
+  return (s || "")
+    .toLowerCase()
+    .replace(/\s*\([^)]*\)/g, "") // remove (parentheses) like "(fluent)" or "(native)"
+    .replace(/\b(?:fluent|fluency|proficient|proficiency|conversational|native|bilingual|multilingual|trilingual|spoken|written|oral|verbal|reading|writing|level|beginner|intermediate|advanced|basic|elementary|working|professional|mother\s+tongue|first\s+language|second\s+language|command\s+of|good\s+knowledge\s+of|knowledge\s+of)\b/gi, "")
+    .replace(/\b(?:in|with|language|languages|skills?)\b/gi, "")
+    .replace(/[:\-\/•|]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/**
  * Source-skill preservation check (Fix 8). Returns the names of source skills
  * considered REMOVED from the assembled resume.
  *
  * Relocation-aware: the assembler legitimately MOVES language-category
  * entries from skills[] to languages[] (language separation). A moved skill
  * is preserved, not removed — so the check searches assembled skills AND
- * assembled languages (including every comma-part, since "English, French"
- * may be split into individual language entries). A skill absent from both
- * is still reported.
+ * assembled languages (including every comma/conjunction part and proficiency variations
+ * like "Fluent in English" matching "English"). A skill absent from both is still reported.
  */
 export function findRemovedSourceSkills(
   sourceSkills: Array<string | { name?: string }>,
@@ -129,21 +144,58 @@ export function findRemovedSourceSkills(
   const assembledLangNames = new Set(
     assembledLanguages.map((s) => nameOf(s).trim().toLowerCase()).filter(Boolean),
   );
+  const assembledLangCleaned = new Set(
+    assembledLanguages.map((s) => cleanLanguageToken(nameOf(s))).filter(Boolean),
+  );
+
   for (const srcSkill of sourceSkills || []) {
     const skillName = nameOf(srcSkill);
     if (!skillName) continue;
     const srcNorm = normalizeSkillName(skillName);
-    const found = (assembledSkills || []).some((as) => {
+
+    // 1. Direct match in assembled skills
+    const foundInSkills = (assembledSkills || []).some((as) => {
       const asName = nameOf(as);
       if (!asName) return false;
       const asNorm = normalizeSkillName(asName);
       return asName.toLowerCase() === skillName.toLowerCase() || asNorm === srcNorm;
     });
-    if (found) continue;
-    const parts = skillName.split(/[,;]/).map((p) => normalizeSkillName(p)).filter(Boolean);
-    const relocated = parts.length > 0 && parts.every(
-      (p) => assembledLangNames.has(p) || assembledSkillNames.has(p),
-    );
+    if (foundInSkills) continue;
+
+    // 2. Section header that leaked into source skills (e.g. "Languages" or "Languages:")
+    if (/^languages?(?:\s*:)?$/i.test(skillName.trim()) && assembledLanguages.length > 0) {
+      continue;
+    }
+
+    // 3. Relocation check — split compound entries by comma, semicolon, slash, bullet, or 'and'
+    const parts = skillName.split(/[,;/•|]|\band\b|&/i).map((p) => normalizeSkillName(p)).filter(Boolean);
+    const relocated = parts.length > 0 && parts.every((p) => {
+      // In assembled skills?
+      if (assembledSkillNames.has(p)) return true;
+      // In assembled languages directly?
+      if (assembledLangNames.has(p)) return true;
+      // In assembled languages after cleaning proficiency qualifiers (e.g. "fluent in english" -> "english")?
+      const cleanedPart = cleanLanguageToken(p);
+      if (cleanedPart && (assembledLangCleaned.has(cleanedPart) || assembledLangNames.has(cleanedPart))) {
+        return true;
+      }
+      // Check if any assembled language is contained within the part or vice versa
+      const matchesAnyLang = assembledLanguages.some((al) => {
+        const langRaw = nameOf(al).trim().toLowerCase();
+        const langClean = cleanLanguageToken(langRaw);
+        if (!langRaw && !langClean) return false;
+        return (
+          (langClean && cleanedPart.includes(langClean)) ||
+          (langClean && langClean.includes(cleanedPart)) ||
+          (langRaw && p.includes(langRaw)) ||
+          (langRaw && langRaw.includes(p))
+        );
+      });
+      if (matchesAnyLang) return true;
+
+      return false;
+    });
+
     if (!relocated) removed.push(skillName);
   }
   return removed;
@@ -441,29 +493,36 @@ export function assembleResume(
   // Initialize languages from source FIRST (immutable baseline)
   const languages: ResumeLanguage[] = sourceResume.languages.map((l) => ({ ...l }));
 
-  // Extract Languages skill group and move to languages array
-  const langSkillIdx = skills.findIndex(s => /^languages?(?:\s*:)?$/i.test(s.category || s.name) || /^languages?\s*:/i.test((s.category || s.name)?.replace(/[,;].*/, "")));
-  if (langSkillIdx >= 0) {
-    const langEntry = skills[langSkillIdx];
-    const langNames = langEntry.name.split(/[,;]/).map(l => l.trim()).filter(Boolean);
-    for (const name of langNames) {
-      if (!languages.some(l => l.name.toLowerCase() === name.toLowerCase())) {
-        languages.push({ id: uid("l"), name } as ResumeLanguage);
+  // Extract all Languages skill groups and move to languages array
+  const remainingSkills: ResumeSkill[] = [];
+  for (const s of skills) {
+    const isLangSkill = /^languages?(?:\s*:)?$/i.test(s.category || s.name) ||
+      /^languages?\s*:/i.test((s.category || s.name)?.replace(/[,;].*/, ""));
+    if (isLangSkill) {
+      const rawText = s.name.replace(/^languages?\s*:\s*/i, "");
+      const langNames = rawText.split(/[,;/•|]|\band\b|&/i).map(l => l.trim()).filter(Boolean);
+      for (const name of langNames) {
+        const cleanName = name.replace(/^languages?\s*:\s*/i, "").trim();
+        if (cleanName && !languages.some(l => l.name.toLowerCase() === cleanName.toLowerCase())) {
+          languages.push({ id: uid("l"), name: cleanName } as ResumeLanguage);
+        }
       }
+      warnings.push("Extracted languages from skills: " + (langNames.join(", ") || s.name));
+    } else {
+      remainingSkills.push(s);
     }
-    skills.splice(langSkillIdx, 1);
-    warnings.push("Extracted languages from skills: " + langNames.join(", "));
   }
+  skills = remainingSkills;
 
-// Recover languages from source skills if parser missed them
-const sourceLangSkill = sourceResume.skills?.find(s => /^languages?$/i.test(s.category || s.name));
-if (sourceLangSkill && languages.length === 0) {
-  const langNames = sourceLangSkill.name.split(/[,;]/).map(l => l.trim()).filter(Boolean);
-  for (const name of langNames) {
-    languages.push({ id: uid("l"), name } as ResumeLanguage);
+  // Recover languages from source skills if parser missed them
+  const sourceLangSkill = sourceResume.skills?.find(s => /^languages?$/i.test(s.category || s.name));
+  if (sourceLangSkill && languages.length === 0) {
+    const langNames = sourceLangSkill.name.replace(/^languages?\s*:\s*/i, "").split(/[,;/•|]|\band\b|&/i).map(l => l.trim()).filter(Boolean);
+    for (const name of langNames) {
+      if (name) languages.push({ id: uid("l"), name } as ResumeLanguage);
+    }
+    warnings.push("Recovered languages from source skills: " + langNames.join(", "));
   }
-  warnings.push("Recovered languages from source skills: " + langNames.join(", "));
-}
 
   // ========================================================================
   // 5. EDUCATION — ALWAYS from source (immutable)

@@ -219,7 +219,9 @@ export class ProviderManager {
       // direct probe already failed with a CORS/network error (remembered in
       // localStorage, TTL 24h) so the browser's own CORS console noise fires
       // at most once per host per window.
-      if (data?.rateLimited && typeof window !== "undefined" && provider.baseUrl && !provider.baseUrl.includes("localhost")) {
+      // Additionally skip opencode.ai immediately to prevent browser CORS console errors.
+      const hasNoBrowserCors = provider.baseUrl.includes("opencode.ai");
+      if (data?.rateLimited && typeof window !== "undefined" && provider.baseUrl && !provider.baseUrl.includes("localhost") && !hasNoBrowserCors) {
         const probeStorage = safeLocalStorage();
         const probeAllowed = shouldAttemptDirectProbe({
           rateLimited: true,

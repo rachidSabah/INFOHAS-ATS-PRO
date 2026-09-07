@@ -51,6 +51,38 @@ describe("skill relocation preservation (Fix 8)", () => {
     )).toEqual([]);
   });
 
+  it("accepts language proficiency qualifiers (e.g. 'Fluent in English' matching 'English')", () => {
+    expect(findRemovedSourceSkills(
+      [{ name: "Fluent in English" }],
+      [],
+      [{ name: "English" }],
+    )).toEqual([]);
+  });
+
+  it("accepts parenthetical proficiency (e.g. 'English (Fluent)' matching 'English')", () => {
+    expect(findRemovedSourceSkills(
+      [{ name: "English (Fluent)" }],
+      [],
+      [{ name: "English" }],
+    )).toEqual([]);
+  });
+
+  it("accepts natural language conjunctions (e.g. 'Fluent in English and French')", () => {
+    expect(findRemovedSourceSkills(
+      [{ name: "Fluent in English and French" }],
+      [],
+      [{ name: "English" }, { name: "French" }],
+    )).toEqual([]);
+  });
+
+  it("accepts leaked 'Languages:' category header as preserved when languages exist", () => {
+    expect(findRemovedSourceSkills(
+      [{ name: "Languages:" }],
+      [],
+      [{ name: "English" }],
+    )).toEqual([]);
+  });
+
   it("keeps the category-prefix normalization working", () => {
     expect(findRemovedSourceSkills(
       [{ name: "Active Listening" }],
