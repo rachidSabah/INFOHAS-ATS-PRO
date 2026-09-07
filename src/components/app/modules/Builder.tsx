@@ -1641,57 +1641,53 @@ ${resumeContext}
   const handleAutoShrink = () => {
     setShrinking(true);
     let attempts = 0;
+    // Safety cap — the font floor below terminates the loop in ~5 steps;
+    // this only guards against a pathological store that never updates.
+    const MAX_ATTEMPTS = 15;
+    // Floor: 8pt — the smallest size that stays legible in print.
+    // bodyFontSizePt is the ONE knob that both the preview (A4Preview shrink
+    // zoom) and the PDF/DOCX export (applyUserLayoutOverrides) honor
+    // identically, so shrinking this single knob keeps the preview and the
+    // downloaded document consistent. Under the preview zoom, fonts, line
+    // boxes, paddings, margins, and section gaps all scale together.
+    const MIN_BODY_PT = 8;
+    const STEP_PT = 0.5;
     const runStep = () => {
       const el = previewRef.current;
-      if (!el || attempts >= 10) {
+      if (!el) {
         setShrinking(false);
         return;
       }
       const a4HeightPx = 297 * 3.7795275591;
       const actualHeight = el.scrollHeight || el.clientHeight || el.offsetHeight;
-      
-      if (actualHeight > a4HeightPx + 2) {
-        const directive = useApp.getState().optimizerDirective;
-        const currentFontSize = directive.bodyFontSizePt ?? 10.5;
-        const currentLineHeight = directive.lineHeight ?? 1.2;
-        const currentSectionGap = directive.sectionGapMm ?? 3;
-        const currentMarginTop = directive.marginTopMm ?? 6.35;
-        const currentMarginBottom = directive.marginBottomMm ?? 6.35;
-        const currentMarginLeft = directive.marginLeftMm ?? 8.89;
-        const currentMarginRight = directive.marginRightMm ?? 8.89;
-        
-        let changed = false;
-        const nextPatch: any = {};
-        if (currentFontSize > 9) {
-          nextPatch.bodyFontSizePt = Math.max(9, currentFontSize - 0.5);
-          changed = true;
-        }
-        if (currentLineHeight > 1.05) {
-          nextPatch.lineHeight = Math.max(1.05, currentLineHeight - 0.05);
-          changed = true;
-        }
-        if (currentSectionGap > 1.5) {
-          nextPatch.sectionGapMm = Math.max(1.5, currentSectionGap - 0.5);
-          changed = true;
-        }
-        if (currentMarginTop > 4.5) {
-          nextPatch.marginTopMm = Math.max(4.5, currentMarginTop - 0.5);
-          nextPatch.marginBottomMm = Math.max(4.5, currentMarginBottom - 0.5);
-          nextPatch.marginLeftMm = Math.max(6.35, currentMarginLeft - 0.5);
-          nextPatch.marginRightMm = Math.max(6.35, currentMarginRight - 0.5);
-          changed = true;
-        }
-        
-        if (changed) {
-          updateOptimizerDirective(nextPatch);
-          attempts++;
-          setTimeout(runStep, 80); // Wait for React render cycle
-        } else {
-          setShrinking(false);
-        }
-      } else {
+
+      if (actualHeight <= a4HeightPx + 2) {
         setShrinking(false);
-        toast.success("Resume shrunk to fit one page successfully!");
+        if (attempts > 0) {
+          toast.success("Resume shrunk to fit one page successfully!");
+        } else {
+          toast.info("Resume already fits on one A4 page — no shrinking needed.");
+        }
+        return;
+      }
+
+      if (attempts >= MAX_ATTEMPTS) {
+        setShrinking(false);
+        toast.error("Content is too long to fit one page even at minimum sizing. Trim bullets or condense sections, then try again.", { duration: 6000 });
+        return;
+      }
+
+      const directive = useApp.getState().optimizerDirective;
+      const currentFontSize = directive?.bodyFontSizePt ?? 10.5;
+
+      if (currentFontSize > MIN_BODY_PT) {
+        updateOptimizerDirective({ bodyFontSizePt: Math.max(MIN_BODY_PT, currentFontSize - STEP_PT) });
+        attempts++;
+        setTimeout(runStep, 90); // Wait for the React render + zoom layout to settle
+      } else {
+        // Every shrink step is exhausted and the content still overflows.
+        setShrinking(false);
+        toast.error("Content is too long to fit one page even at minimum sizing. Trim bullets or condense sections, then try again.", { duration: 6000 });
       }
     };
     runStep();

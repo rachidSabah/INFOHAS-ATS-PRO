@@ -7,6 +7,7 @@ import { RenderDocumentPreview } from "./RenderDocumentPreview";
 import { toRenderDocument } from "@/lib/render-document";
 
 import { renderHighlightedText, safeRender } from "@/lib/ats-highlighter";
+import { computeShrinkZoom } from "@/lib/preview-shrink";
 
 interface A4PreviewProps {
   resume: ResumeData;
@@ -42,7 +43,13 @@ export const A4Preview = forwardRef<HTMLDivElement, A4PreviewProps>(function A4P
 ) {
   const accent = resume.accentColor || "#1154A3";
   const Template = TEMPLATE_MAP[resume.template] ?? ATSProfessionalTemplate;
-  
+
+  // Auto Shrink to Fit (1 Page): subscribe to the optimizer directive so a
+  // directive patch re-renders the preview. Only the legacy per-template
+  // path needs the zoom translation — infohas-pro reads the directive
+  // natively and the RenderDocument pipeline already matches export.
+  const directiveConfig = useApp((s) => s.optimizerDirective);
+
   const atsReports = useApp((s) => s.atsReports);
   const latestReport = atsReports.find((r) => r.resumeId === resume.id);
 
@@ -81,6 +88,17 @@ export const A4Preview = forwardRef<HTMLDivElement, A4PreviewProps>(function A4P
     return <RenderDocumentA4Preview resume={resume} scale={scale} className={className} ref={ref} />;
   }
 
+  // Auto Shrink to Fit (1 Page) — translate the directive's bodyFontSizePt
+  // knob into a uniform zoom for every template that does not natively
+  // consume the directive (all but infohas-pro). zoom: 1 renders no wrapper
+  // style at all, so untouched directives keep the preview pixel-identical.
+  // The zoom wrapper scales fonts, line boxes, paddings, margins, and section
+  // gaps proportionally — the exact contract of the Auto Shrink button — and
+  // the width compensation (100 / zoom %) preserves line-wrapping so the
+  // preview reflows like the exported document (export honors the same knob
+  // via applyUserLayoutOverrides).
+  const shrinkZoom = resume.template === "infohas-pro" ? 1 : computeShrinkZoom(directiveConfig, resume.template);
+
   // Helper to attach forwarded ref + local measuring ref
   const handleRef = (node: HTMLDivElement | null) => {
     (innerRef as any).current = node;
@@ -113,7 +131,13 @@ export const A4Preview = forwardRef<HTMLDivElement, A4PreviewProps>(function A4P
           left: 0,
         }}
       >
-        <Template resume={resume} accent={accent} showHeatmap={showHeatmap} latestReport={latestReport} />
+        {shrinkZoom !== 1 ? (
+          <div style={{ zoom: shrinkZoom, width: `${100 / shrinkZoom}%` } as React.CSSProperties}>
+            <Template resume={resume} accent={accent} showHeatmap={showHeatmap} latestReport={latestReport} />
+          </div>
+        ) : (
+          <Template resume={resume} accent={accent} showHeatmap={showHeatmap} latestReport={latestReport} />
+        )}
 
         {/* ============ Page-Break Indicator Line ============ */}
         {overflows && (
