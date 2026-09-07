@@ -27,6 +27,13 @@ export interface User {
   };
 }
 
+/**
+ * Target market for regional resume norms. Selecting a region turns on
+ * region-specific personal-field guidance and ATS warnings (e.g. a photo is
+ * expected on Gulf CVs but strongly discouraged on North American ones).
+ */
+export type ResumeRegion = "na" | "eu" | "gulf";
+
 export interface ContactInfo {
   email?: string;
   phone?: string;
@@ -39,6 +46,13 @@ export interface ContactInfo {
    *  (e.g. nationality, driving licence, passport, visa, address, marital status, availability).
    *  Stored alongside the free-text additionalInfo field for structured rendering. */
   personalDetails?: Record<string, string>;
+  /**
+   * Regional norms profile for this resume. Stored INSIDE contact_json (not a
+   * dedicated D1 column) so the value round-trips through cloud sync with zero
+   * schema migration — ALTER TABLE on resumes has a broken-CI history (see
+   * migrations/0018). Semantically it is personal context, like personalDetails.
+   */
+  region?: ResumeRegion;
 }
 
 export interface ResumeExperience {

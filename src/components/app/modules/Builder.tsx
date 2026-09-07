@@ -129,6 +129,7 @@ import { TEMPLATES } from "@/lib/brand";
 import { SmartTextarea } from "@/components/shared/SmartTextarea";
 import { SpellCheckPanel } from "@/components/shared/SpellCheckPanel";
 import { AtsMatchDashboard } from "@/components/shared/AtsMatchDashboard";
+import { RegionalNormsPanel } from "@/components/shared/RegionalNormsPanel";
 import { scanResume, totalMisspelled } from "@/lib/spellchecker";
 import { UndoRedoPanel } from "@/components/shared/UndoRedoPanel";
 import { ATSScoreInline } from "@/components/shared/ATSScorePreview";
@@ -2162,6 +2163,8 @@ ${resumeContext}
                     <Field label="LinkedIn"><Input value={resume.contact.linkedin ?? ""} onChange={(e) => patch({ contact: { ...resume.contact, linkedin: e.target.value } })} placeholder="linkedin.com/in/..." /></Field>
                     <Field label="GitHub"><Input value={resume.contact.github ?? ""} onChange={(e) => patch({ contact: { ...resume.contact, github: e.target.value } })} placeholder="github.com/..." /></Field>
                   </div>
+                  {/* Regional norms — target-market selector + personal-data compliance */}
+                  <RegionalNormsPanel resume={resume} onPatch={patch} variant="full" />
                   <Field label="Professional summary">
                     <SmartTextarea
                       value={resume.summary ?? ""}
@@ -2576,6 +2579,9 @@ ${resumeContext}
                     {auditIssues.filter(i => i.severity === "warning").length} Warnings
                   </Badge>
                 </div>
+
+                {/* Regional format strip — market-specific personal-data compliance */}
+                <RegionalNormsPanel resume={resume} onPatch={patch} variant="compact" onOpenBasics={() => setTab("basics")} />
 
                 {!activeJD ? (
                   <div className="rounded-xl border border-dashed border-border p-5 text-center space-y-3 bg-secondary/20">
