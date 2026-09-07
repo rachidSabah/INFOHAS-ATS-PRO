@@ -86,7 +86,12 @@ export async function exportResumePDFRenderDoc(
     };
 
     const drawWrapped = (text: string, w: number, align: TextAlignment = "justify") => {
-      text = (text || "").replace(/\*\*|\*/g, "");
+      text = (text || "")
+        .replace(/\*\*|\*/g, "")
+        .replace(/^%Ï\s*/g, "")
+        .replace(/%Ï/g, " ")
+        .replace(/^[●•*-\s]+/, "")
+        .replace(/●/g, "");
       doc.setFont(fontName, "normal");
       doc.setFontSize(currentBodyFontSize);
       doc.setTextColor(bodyRgb[0], bodyRgb[1], bodyRgb[2]);
@@ -110,7 +115,12 @@ export async function exportResumePDFRenderDoc(
     };
 
     const drawBulletLine = (text: string, w: number, indent = 0, align: TextAlignment = "justify") => {
-      text = (text || "").replace(/\*\*|\*/g, "");
+      text = (text || "")
+        .replace(/\*\*|\*/g, "")
+        .replace(/^%Ï\s*/g, "")
+        .replace(/%Ï/g, " ")
+        .replace(/^[●•*-\s]+/, "")
+        .replace(/●/g, "");
       doc.setFont(fontName, "normal");
       doc.setFontSize(currentBodyFontSize);
       doc.setTextColor(bodyRgb[0], bodyRgb[1], bodyRgb[2]);

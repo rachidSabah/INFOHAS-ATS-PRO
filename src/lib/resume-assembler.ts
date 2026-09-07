@@ -315,17 +315,16 @@ export function assembleResume(
   }
 
   // ========================================================================
-  // 2. SUMMARY — from optimizer (bullet format, expanded to 250+ chars)
+  // 2. SUMMARY — from optimizer (clean paragraph, expanded to 250+ chars)
   // ========================================================================
   let summary: string = (sourceResume.summary as string) || "";
   if (optimizerOutput.summary) {
-    const bulletPrefix = optimizerOutput.summary.startsWith("●") ? "" : "● ";
-    let optimizedSummary = optimizerOutput.summary;
-    // Ensure minimum length (250 chars) + bullet format
+    let optimizedSummary = optimizerOutput.summary.trim().replace(/^[●•*-\s]+/, "").trim();
+    // Ensure minimum length (250 chars)
     if (optimizedSummary.length < 250) {
-      optimizedSummary = `${optimizedSummary.trim()}\n● Expanded summary with additional detail to meet ATS formatting and readability standards.`;
+      optimizedSummary = `${optimizedSummary}\nExpanded summary with additional detail to meet ATS formatting and readability standards.`;
     }
-    summary = `${bulletPrefix}${optimizedSummary}`;
+    summary = optimizedSummary;
   }
 
   // Check minimum character length (was 30 chars ≈ 6 words)

@@ -178,6 +178,12 @@ ${jd.rawText ?? JSON.stringify({ title: jd.title, company: jd.company, responsib
 
 ${intelligenceContext}
 
+CRITICAL FACTUAL INTEGRITY INSTRUCTIONS:
+1. NEVER invent duties or operational responsibilities from the target job description (e.g. airport baggage handling, airside operations) and insert them into unrelated past roles (e.g. medical biology laboratory or retail).
+2. Bullets for each experience entry MUST strictly describe realistic duties for that specific company and job title, rewritten with active verbs and strong professional language.
+3. NEVER invent fake percentages or metrics (like "100% accuracy" or "achieving 100% improvement").
+4. Keep the exact number of bullets as provided in the source for each experience entry.
+
 Return ONLY the JSON object with this EXACT shape:
 {
   "summary": "...",

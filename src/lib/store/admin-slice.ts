@@ -45,6 +45,25 @@ const {
 // ----------------------------------------------------------------------------
 const PROVIDER_ACTIVE_KEY = "resumeai-provider-active";
 const PROMPT_ACTIVE_KEY = "resumeai-prompt-active";
+const CUSTOM_PROVIDERS_KEY = "resumeai-custom-providers";
+
+function loadCustomProviders(): AIProvider[] {
+  if (typeof localStorage === "undefined") return [];
+  try {
+    const raw = localStorage.getItem(CUSTOM_PROVIDERS_KEY);
+    return raw ? (JSON.parse(raw) as AIProvider[]) : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveCustomProviders(providers: AIProvider[]): void {
+  if (typeof localStorage === "undefined") return;
+  try {
+    const custom = providers.filter((p) => !p.isBuiltIn && !SEED_PROVIDERS.some((sp) => sp.id === p.id));
+    localStorage.setItem(CUSTOM_PROVIDERS_KEY, JSON.stringify(custom));
+  } catch {}
+}
 
 function loadActiveOverrides(key: string): Record<string, boolean> {
   if (typeof localStorage === "undefined") return {};
@@ -146,8 +165,17 @@ export interface AdminSlice {
   resetPipelineOrchestration: () => void;
 }
 
-export const createAdminSlice: StateCreator<AppState, [], [], AdminSlice> = (set, get) => ({
-  providers: applyActiveOverrides(SEED_PROVIDERS, loadActiveOverrides(PROVIDER_ACTIVE_KEY)),
+export const createAdminSlice: StateCreator<AppState, [], [], AdminSlice> = (set, get) => {
+  const initialCustomProviders = loadCustomProviders();
+  const baseProviders = [...SEED_PROVIDERS];
+  for (const cp of initialCustomProviders) {
+    if (!baseProviders.some((bp) => bp.id === cp.id)) {
+      baseProviders.push(cp);
+    }
+  }
+
+  return {
+  providers: applyActiveOverrides(baseProviders, loadActiveOverrides(PROVIDER_ACTIVE_KEY)),
   providerLogs: SEED_PROVIDER_LOGS,
   providerSettings: (() => {
     if (typeof localStorage === "undefined") return SEED_PROVIDER_SETTINGS;
@@ -178,7 +206,11 @@ export const createAdminSlice: StateCreator<AppState, [], [], AdminSlice> = (set
   customStructuralBlueprints: [],
 
   addProvider: (p) => {
-    set((s) => ({ providers: [...s.providers, p] }));
+    set((s) => {
+      const updated = [...s.providers, p];
+      saveCustomProviders(updated);
+      return { providers: updated };
+    });
     // Persist active-toggle so it survives refresh.
     try {
       const current = loadActiveOverrides(PROVIDER_ACTIVE_KEY);
@@ -197,6 +229,7 @@ export const createAdminSlice: StateCreator<AppState, [], [], AdminSlice> = (set
           const currentJson = JSON.stringify(currentProviders);
           if (currentJson !== syncedJson) {
             set({ providers: syncedProviders, _lastProviderHash: calculateProviderHash(syncedProviders) });
+            saveCustomProviders(syncedProviders);
           }
         }
       }).catch(() => {});
@@ -204,7 +237,11 @@ export const createAdminSlice: StateCreator<AppState, [], [], AdminSlice> = (set
   },
 
   updateProvider: (id, patch) => {
-    set((s) => ({ providers: s.providers.map((p) => (p.id === id ? { ...p, ...patch, updatedAt: new Date().toISOString() } : p)) }));
+    set((s) => {
+      const updated = s.providers.map((p) => (p.id === id ? { ...p, ...patch, updatedAt: new Date().toISOString() } : p));
+      saveCustomProviders(updated);
+      return { providers: updated };
+    });
     cloudApiSafe(cloudUpdateProvider)(id, patch).catch((e) => { console.warn("[store] Cloud sync failed:", e); });
     // Persist active-toggle so it survives refresh.
     if (patch.isActive !== undefined) {
@@ -225,6 +262,7 @@ export const createAdminSlice: StateCreator<AppState, [], [], AdminSlice> = (set
           const currentJson = JSON.stringify(currentProviders);
           if (currentJson !== syncedJson) {
             set({ providers: syncedProviders, _lastProviderHash: calculateProviderHash(syncedProviders) });
+            saveCustomProviders(syncedProviders);
             if (result.repaired > 0 || result.backfilled > 0) {
               console.info(`[PROVIDER SYNC] Provider updated. ${result.repaired} repaired, ${result.backfilled} backfilled.`);
             }
@@ -246,15 +284,19 @@ export const createAdminSlice: StateCreator<AppState, [], [], AdminSlice> = (set
         saveActiveOverrides(PROVIDER_ACTIVE_KEY, activeMap);
       } catch (e) { console.warn("[store] Failed to save deleted provider to localStorage:", e); }
     }
-    set((s) => ({
-      providers: s.providers.filter((p) => p.id !== id),
-      providerLogs: s.providerLogs.filter((l) => l.providerId !== id),
-      providerSettings: {
-        ...s.providerSettings,
-        defaultProviderId: s.providerSettings.defaultProviderId === id ? null : s.providerSettings.defaultProviderId,
-        fallbackProviderIds: s.providerSettings.fallbackProviderIds.filter((fid) => fid !== id),
-      },
-    }));
+    set((s) => {
+      const remaining = s.providers.filter((p) => p.id !== id);
+      saveCustomProviders(remaining);
+      return {
+        providers: remaining,
+        providerLogs: s.providerLogs.filter((l) => l.providerId !== id),
+        providerSettings: {
+          ...s.providerSettings,
+          defaultProviderId: s.providerSettings.defaultProviderId === id ? null : s.providerSettings.defaultProviderId,
+          fallbackProviderIds: s.providerSettings.fallbackProviderIds.filter((fid) => fid !== id),
+        },
+      };
+    });
     cloudApiSafe(deleteProvider)(id).catch((e) => { console.warn("[store] Cloud sync failed:", e); });
   },
 
@@ -273,7 +315,11 @@ export const createAdminSlice: StateCreator<AppState, [], [], AdminSlice> = (set
       usage: { requests: 0, tokens: 0, errors: 0, avgLatencyMs: 0, cost: 0 },
       lastUsedAt: undefined,
     };
-    set((s) => ({ providers: [...s.providers, copy] }));
+    set((s) => {
+      const updated = [...s.providers, copy];
+      saveCustomProviders(updated);
+      return { providers: updated };
+    });
     cloudApiSafe(createProvider)(copy).catch((e) => { console.warn("[store] Cloud sync failed:", e); });
     return newId;
   },
@@ -589,4 +635,5 @@ export const createAdminSlice: StateCreator<AppState, [], [], AdminSlice> = (set
     }).catch((e) => { console.warn("[store] Cloud sync failed:", e); });
     get().log({ actor: get().user?.email ?? "admin", action: "Pipeline orchestration reset to defaults", category: "admin", details: "All profiles, agents, and prompts restored to factory defaults", severity: "warning" });
   },
-});
+  };
+};

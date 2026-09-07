@@ -353,16 +353,29 @@ export async function syncAllFromCloud(store: any): Promise<void> {
         } catch (err) { console.warn("[cloudApi] ATS reports backup restore failed:", err instanceof Error ? err.message : err); }
       }
     }
-    // [PROVIDER SYNC] Synchronize D1 providers with seed defaults.
-    // This merges API keys (from env vars), fixes invalid model names,
-    // restores missing timeouts/maxTokens, and backfills missing providers.
+    // [PROVIDER SYNC] Synchronize D1 providers with seed defaults and custom providers.
+    // Restore custom providers saved in localStorage so unauthenticated / locally added providers survive refresh.
+    let effectiveProviders = [...providers];
+    if (typeof localStorage !== "undefined") {
+      try {
+        const customProviders = JSON.parse(localStorage.getItem("resumeai-custom-providers") || "[]");
+        for (const cp of customProviders) {
+          if (!effectiveProviders.some((p: any) => p.id === cp.id)) {
+            effectiveProviders.push(cp);
+          }
+        }
+      } catch (err) {
+        console.warn("[cloudApi] Failed to restore custom providers from localStorage:", err);
+      }
+    }
+
     const { syncProviderConfigs, calculateProviderHash } = await import("./provider-sync");
     
     // === HASH GUARD: Skip sync entirely if provider state is unchanged ===
-    const providerHash = calculateProviderHash(providers);
+    const providerHash = calculateProviderHash(effectiveProviders);
     const lastHash = store.getState()._lastProviderHash || "";
     if (providerHash !== lastHash) {
-      const { providers: syncedProviders, result: syncResult } = syncProviderConfigs(providers as any);
+      const { providers: syncedProviders, result: syncResult } = syncProviderConfigs(effectiveProviders as any);
       
       // Persist backfilled providers to D1 so they survive refresh
       if (syncResult.backfilled > 0) {

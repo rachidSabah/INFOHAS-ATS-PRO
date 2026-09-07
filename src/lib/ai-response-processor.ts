@@ -832,8 +832,11 @@ export function cleanupGrammar(text: string): string {
   // If the text ends with a preposition/article and no period, remove the trailing fragment
   result = result.replace(/\s+(?:of|in|on|at|with|for|and|the|a|an|to|by|from)\s*$/i, "");
 
-  // Fix duplicate consecutive words ("the the" → "the")
-  result = result.replace(/\b(\w+)\s+\1\b/gi, "$1");
+  // Strip fabricated robotic metric suffixes (e.g., ", achieving 100% improvement.", ", resulting in 100% efficiency.")
+  result = result.replace(/,\s*(?:achieving|resulting in|driving)\s+100%(?:\s+improvement|\s+accuracy|\s+efficiency)?\.?/gi, ".");
+
+  // Fix double punctuation like ".," or ",." or ".."
+  result = result.replace(/[.,;]\s*[.,;]+/g, ".");
 
   return result.trim();
 }

@@ -114,11 +114,12 @@ ${JSON.stringify({
 })}
 
 EXPANSION INSTRUCTIONS:
-1. Add 1-3 new quantified bullet points to each experience entry.
-2. Expand summary to 5-6 powerful sentences.
-3. Ensure education entries have 8-12 comprehensive, comma-separated module highlights.
-4. Keep all existing company names, degree titles, and employment dates UNCHANGED.
-5. Return ONLY a valid JSON object matching this schema:
+1. Deepen and enrich existing experience bullets by articulating candidate accomplishments and impact based STRICTLY on their actual role and company. NEVER invent duties or responsibilities from the job description (e.g. do not add airport ground handling duties to a medical laboratory or retail role).
+2. NEVER invent fake percentages, metrics, or numbers unless already in the candidate's bullets.
+3. Expand summary to 4-5 well-structured, factual sentences aligning candidate skills with the target domain.
+4. Ensure education entries have comprehensive module highlights relevant to the candidate's actual field of study.
+5. Keep all existing company names, degree titles, and employment dates strictly UNCHANGED.
+6. Return ONLY a valid JSON object matching this schema:
 {
   "summary": "expanded summary text...",
   "experience": [{"id":"...","bullets":["...","..."]}],

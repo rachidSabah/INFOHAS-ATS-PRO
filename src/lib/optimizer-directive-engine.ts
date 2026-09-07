@@ -183,11 +183,12 @@ CRITICAL RULES:
 
 1. EXPERIENCE IDs: You MUST echo back the exact same experience IDs from the source resume. Do NOT change them, do NOT remove them, do NOT add new ones.
 
-2. ZERO-HALLUCINATION POLICY:
+2. ZERO-HALLUCINATION & DOMAIN-TRUTH POLICY:
    - NEVER invent employers, job titles, schools, degrees, certifications, locations, or languages.
-   - NEVER add percentages, metrics, dollar amounts, or time savings unless explicitly present in the source.
-   - NEVER fabricate skills, software, or tools you are not 100% certain the candidate used.
-   - If the source resume says nothing about a particular skill, DO NOT add it.
+   - NEVER transplant duties from the target job description into unrelated past employers (e.g. NEVER give airport baggage handling, airside operations, or aviation tasks to a medical laboratory assistant, fashion retailer, or office receptionist). Bullets for each company MUST truthfully reflect what a person in THAT company and THAT job title actually did.
+   - NEVER fabricate metrics, percentages (e.g. "achieving 100% accuracy", "improving efficiency by 20%"), dollar amounts, or time savings unless explicitly present in the source resume.
+   - NEVER fabricate tools, systems, or equipment (e.g. HHT, PDA, ULD, BRS) for an employer unless the candidate mentioned them in the source.
+   - If the source resume says nothing about a particular duty or metric, DO NOT invent it. Rewrite candidate accomplishments for impact, clarity, and active verbs without fabricating facts.
 
 3. BULLET RULES:
    - Each bullet: 80-120 characters, one line.

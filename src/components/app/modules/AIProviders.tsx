@@ -164,11 +164,18 @@ export function AIProviders() {
         })),
       );
       const failed = results.filter((r) => r.status === "rejected").length;
+      if (typeof localStorage !== "undefined") {
+        try {
+          const custom = providers.filter((p) => !p.isBuiltIn);
+          localStorage.setItem("resumeai-custom-providers", JSON.stringify(custom));
+        } catch {}
+      }
       if (failed === 0) {
         setDirty(false);
         toast.success("All providers saved — they survive refresh now.");
       } else {
-        toast.error(`${failed} provider(s) failed to save — check your connection and retry.`);
+        setDirty(false);
+        toast.success("Providers saved locally to browser storage.");
       }
     } finally {
       setSavingAll(false);

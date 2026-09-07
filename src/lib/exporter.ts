@@ -39,7 +39,13 @@ function headlineIsDuplicateContact(headline: string, contact: ResumeData["conta
 export function sanitizeResumeData(resume: ResumeData): ResumeData {
   const cleanStr = (s: any): any => {
     if (typeof s === "string") {
-      return s.replace(/\u2011/g, "-").replace(/\u00a0/g, " ");
+      return s
+        .replace(/\u2011/g, "-")
+        .replace(/\u00a0/g, " ")
+        .replace(/^%Ï\s*/g, "")
+        .replace(/%Ï/g, " ")
+        .replace(/^[●•*-\s]+/, "")
+        .replace(/●/g, "");
     }
     if (Array.isArray(s)) {
       return s.map(cleanStr);

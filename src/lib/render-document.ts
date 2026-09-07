@@ -73,11 +73,18 @@ function buildContactBlock(resume: ResumeData): RenderDocument["contact"] {
 
 function buildProfessionalProfile(resume: ResumeData): RenderDocumentSection | null {
   if (!resume.summary) return null;
+  const cleanedSummary = resume.summary
+    .replace(/^%Ï\s*/g, "")
+    .replace(/%Ï/g, " ")
+    .replace(/^[●•*-\s]+/, "")
+    .replace(/●/g, "")
+    .trim();
+  if (!cleanedSummary) return null;
   return {
     type: "professionalProfile",
     title: SECTION_TITLES.professionalProfile,
     items: [
-      { kind: "text", text: resume.summary },
+      { kind: "text", text: cleanedSummary },
     ],
   };
 }
