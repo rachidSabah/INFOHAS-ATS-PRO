@@ -364,8 +364,13 @@ export async function syncAllFromCloud(store: any): Promise<void> {
             effectiveProviders.push(cp);
           }
         }
+        const overrides = JSON.parse(localStorage.getItem("resumeai-provider-overrides") || "{}");
+        effectiveProviders = effectiveProviders.map((p: any) => {
+          const ov = overrides[p.id];
+          return ov ? { ...p, ...ov } : p;
+        });
       } catch (err) {
-        console.warn("[cloudApi] Failed to restore custom providers from localStorage:", err);
+        console.warn("[cloudApi] Failed to restore custom providers or overrides from localStorage:", err);
       }
     }
 

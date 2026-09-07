@@ -113,33 +113,66 @@ export class PuterProvider implements OAuthAIProvider {
 
   async loadAccounts(): Promise<void> {
     try {
-      // First try API
       let data: any = null;
-      try {
-        const res = await fetch("/api/providers/puter/accounts");
-        if (res.ok) {
-          const apiData = (await res.json()) as any;
-          if (apiData.accounts) {
-            data = apiData;
+
+      // 1. Check localStorage first (canonical client-side store for browser-auth sessions)
+      if (typeof window !== "undefined") {
+        try {
+          const raw = localStorage.getItem("puter_sessions");
+          if (raw) {
+            const parsed = JSON.parse(raw);
+            if (parsed && Array.isArray(parsed.accounts) && parsed.accounts.length > 0) {
+              data = parsed;
+            } else if (parsed) {
+              if (parsed.autoRotate !== undefined) this.autoRotate = parsed.autoRotate;
+              if (parsed.useGlobally !== undefined) this.useGlobally = parsed.useGlobally;
+            }
           }
+        } catch (e) {
+          console.warn("Failed to load puter accounts from localStorage:", e);
         }
-      } catch (e) {
-        console.warn("Failed to load puter accounts from API, falling back to localStorage:", e);
       }
 
+      // 2. If no accounts found in localStorage, try cloud API
       if (!data) {
-        const raw = localStorage.getItem("puter_sessions");
-        if (raw) data = JSON.parse(raw);
+        try {
+          const res = await fetch("/api/providers/puter/accounts");
+          if (res.ok) {
+            const apiData = (await res.json()) as any;
+            if (apiData && Array.isArray(apiData.accounts) && apiData.accounts.length > 0) {
+              data = apiData;
+            } else if (apiData) {
+              if (apiData.autoRotate !== undefined) this.autoRotate = apiData.autoRotate;
+              if (apiData.useGlobally !== undefined) this.useGlobally = apiData.useGlobally;
+            }
+          }
+        } catch (e) {
+          console.warn("Failed to load puter accounts from API:", e);
+        }
       }
 
       if (data && Array.isArray(data.accounts)) {
-        this.accounts = await Promise.all(data.accounts.map(async (a: any) => ({
-          ...a,
-          accessToken: await decryptValue(a.accessToken),
-          refreshToken: await decryptValue(a.refreshToken),
-        })));
-        this.autoRotate = data.autoRotate ?? true;
-        this.useGlobally = data.useGlobally ?? false;
+        this.accounts = await Promise.all(data.accounts.map(async (a: any) => {
+          let decryptedAccess: string | null = null;
+          let decryptedRefresh: string | null = null;
+          try {
+            decryptedAccess = a.accessToken ? await decryptValue(a.accessToken) : null;
+          } catch {
+            decryptedAccess = a.accessToken;
+          }
+          try {
+            decryptedRefresh = a.refreshToken ? await decryptValue(a.refreshToken) : null;
+          } catch {
+            decryptedRefresh = a.refreshToken;
+          }
+          return {
+            ...a,
+            accessToken: decryptedAccess ?? a.accessToken,
+            refreshToken: decryptedRefresh ?? a.refreshToken,
+          };
+        }));
+        if (data.autoRotate !== undefined) this.autoRotate = data.autoRotate;
+        if (data.useGlobally !== undefined) this.useGlobally = data.useGlobally;
       }
     } catch (e) {
       console.error("Failed to load Puter accounts:", e);
@@ -218,21 +251,30 @@ export class PuterProvider implements OAuthAIProvider {
   async syncActiveAccountToSession(): Promise<void> {
     const active = this.accounts.find(a => a.active);
     if (active) {
-      // Inject token into window.puter if supported.
-      // Guard with a ready-check to avoid triggering Puter's internal socket
-      // reconnect while it's already connecting — this causes the
-      // "WebSocket closed before connection established" race.
+      // Inject token into window.puter and localStorage if available
       try {
-        if (typeof window !== "undefined" && window.puter) {
-          // Only call setAuthToken / assign authToken if Puter is fully loaded.
-          // Puter sets window.puter.ready when initialisation is complete.
-          const puterReady = (window.puter as any).ready !== false;
-          if (puterReady) {
-            if (typeof window.puter.setAuthToken === "function") {
-              window.puter.setAuthToken(active.accessToken);
-            } else {
+        if (typeof window !== "undefined") {
+          if (window.puter) {
+            const puterReady = (window.puter as any).ready !== false;
+            if (puterReady) {
+              if (typeof window.puter.setAuthToken === "function") {
+                window.puter.setAuthToken(active.accessToken);
+              }
+              if (typeof window.puter.auth?.setAuthToken === "function") {
+                window.puter.auth.setAuthToken(active.accessToken);
+              }
               window.puter.authToken = active.accessToken;
+              if (window.puter.auth) {
+                window.puter.auth.token = active.accessToken;
+                window.puter.auth.authToken = active.accessToken;
+              }
             }
+          }
+          if (active.accessToken) {
+            try {
+              localStorage.setItem("puter.auth.token", active.accessToken);
+              localStorage.setItem("puter_auth_token", active.accessToken);
+            } catch (_) {}
           }
         }
       } catch (e) {
@@ -340,12 +382,22 @@ export class PuterProvider implements OAuthAIProvider {
   }
 
   async refresh(): Promise<ProviderSession> {
-    if (typeof window === "undefined" || !window.puter) {
+    if (typeof window === "undefined") {
       throw new ProviderAuthenticationError(
         "not_configured",
-        "Puter.js is not loaded.",
+        "Puter.js requires a browser environment",
         "puter",
       );
+    }
+
+    // Ensure Puter script is loaded before checking sign-in status
+    if (!window.puter?.auth) {
+      try {
+        await loadPuterScript();
+      } catch (err) {
+        console.warn("[PuterProvider] Puter script not ready during refresh:", err);
+        return this.session;
+      }
     }
 
     try {
@@ -355,10 +407,7 @@ export class PuterProvider implements OAuthAIProvider {
         : false;
 
       if (!isSignedIn) {
-        // DO NOT call signIn() here — it opens a popup which will be blocked
-        // by popup blockers when called from a non-user-gesture context (like
-        // a background refresh). Instead, mark as unauthenticated and require
-        // the user to explicitly sign in again.
+        // Only mark unauthenticated if window.puter explicitly said false
         this.session = createEmptySession("puter");
         this.session.authenticated = false;
         await saveSession(this.session);
@@ -370,7 +419,7 @@ export class PuterProvider implements OAuthAIProvider {
       }
 
       // Extend the session
-      const user = await window.puter.auth.getUser();
+      const user = await window.puter.auth.getUser().catch(() => null);
       this.session.authenticated = true;
       this.session.email = user?.email || this.session.email;
       this.session.expiresAt = Date.now() + SESSION_TTL_MS;
@@ -430,9 +479,9 @@ export class PuterProvider implements OAuthAIProvider {
         return refreshed;
       } catch (err) {
         console.warn("[puterProvider] Session refresh failed:", err instanceof Error ? err.message : err);
-        // Refresh failed — mark active account as expired
+        // Only mark active account as expired if Puter explicitly confirmed session expiration
         const active = this.accounts.find(a => a.active);
-        if (active) {
+        if (active && (err as any)?.code === "session_expired") {
            active.status = "expired";
            await this.saveAccounts();
            await this.syncActiveAccountToSession();
@@ -575,13 +624,29 @@ export class PuterProvider implements OAuthAIProvider {
           latencyMs: Math.round(performance.now() - t0),
         };
       } catch (e: any) {
-        const msg = e?.message || String(e);
-        if (/429|quota|rate limit|usage exhausted/i.test(msg)) {
-           console.log("[PUTER]\nRate limit detected.");
+        const msg = (e?.message || String(e ?? "")).toLowerCase();
+        const isQuotaOrRateLimit =
+          e?.statusCode === 429 ||
+          e?.status === 429 ||
+          /429/.test(msg) ||
+          /no usage left/i.test(msg) ||
+          /usage.?limit/i.test(msg) ||
+          /quota/i.test(msg) ||
+          /rate.?limit/i.test(msg) ||
+          /daily.?limit/i.test(msg) ||
+          /monthly.?limit/i.test(msg) ||
+          /too many requests/i.test(msg) ||
+          /insufficient.?credits?/i.test(msg) ||
+          /credits?.?exhausted/i.test(msg) ||
+          /usage.?exhausted/i.test(msg) ||
+          /freeusagelimit/i.test(msg);
+
+        if (isQuotaOrRateLimit) {
+           console.log("[PUTER]\nRate limit or quota exhaustion detected:", msg);
            const active = this.accounts.find(a => a.active);
            if (active) {
              active.status = "rate_limited";
-             // Use exponential backoff: 1h cooldown, capped at 2h on repeated hits
+             // 1h cooldown before considering this account healthy again
              const baseCooldownMs = 60 * 60 * 1000;
              active.cooldownUntil = Date.now() + baseCooldownMs;
              await this.saveAccounts();
@@ -590,12 +655,23 @@ export class PuterProvider implements OAuthAIProvider {
            const rotated = await this.rotateToNextHealthyAccount();
            if (rotated) {
              attempts++;
+             const nextActive = this.accounts.find(a => a.active);
+             console.log(`[PUTER] Successfully auto-rotated to next account: ${nextActive?.email}`);
+             if (typeof window !== "undefined") {
+               window.dispatchEvent(new CustomEvent("puter:rotated", {
+                 detail: {
+                   fromEmail: active?.email,
+                   toEmail: nextActive?.email,
+                   reason: msg,
+                 }
+               }));
+             }
              continue; // Retry with next account
            }
            // No healthy account found — break the loop and throw quota exhausted
            throw new ProviderAuthenticationError(
              "quota_exhausted",
-             "All Puter accounts have exhausted their quota or reached rate limits. Please wait before retrying.",
+             "All Puter accounts have exhausted their quota or reached rate limits. Please add another account or wait before retrying.",
              "puter"
            );
         }
@@ -673,15 +749,24 @@ export class PuterProvider implements OAuthAIProvider {
 
   private async extractAccessToken(): Promise<string | null> {
     try {
-      // Puter doesn't expose a traditional access token,
-      // but we can get a session token for API calls
-      if (typeof window !== "undefined" && window.puter?.auth?.getUser) {
-        const user = await window.puter.auth.getUser();
-        return user?.token || user?.accessToken || null;
+      if (typeof window !== "undefined") {
+        if (window.puter?.auth?.getUser) {
+          const user = await window.puter.auth.getUser().catch(() => null);
+          if (user?.token || user?.accessToken) return user.token || user.accessToken;
+        }
+        if ((window.puter as any)?.authToken) return (window.puter as any).authToken;
+        if ((window.puter as any)?.token) return (window.puter as any).token;
+        if ((window.puter as any)?.auth?.token) return (window.puter as any).auth.token;
+        if ((window.puter as any)?.auth?.authToken) return (window.puter as any).auth.authToken;
+        const storedToken =
+          localStorage.getItem("puter.auth.token") ||
+          localStorage.getItem("puter_auth_token") ||
+          localStorage.getItem("puter-auth-token") ||
+          localStorage.getItem("token");
+        if (storedToken) return storedToken;
       }
     } catch (err) {
       console.warn("[puterProvider] Token extraction failed:", err instanceof Error ? err.message : err);
-      // Token extraction is best-effort
     }
     return null;
   }

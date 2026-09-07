@@ -46,6 +46,39 @@ const {
 const PROVIDER_ACTIVE_KEY = "resumeai-provider-active";
 const PROMPT_ACTIVE_KEY = "resumeai-prompt-active";
 const CUSTOM_PROVIDERS_KEY = "resumeai-custom-providers";
+const PROVIDER_OVERRIDES_KEY = "resumeai-provider-overrides";
+
+function loadProviderOverrides(): Record<string, Partial<AIProvider>> {
+  if (typeof localStorage === "undefined") return {};
+  try {
+    const raw = localStorage.getItem(PROVIDER_OVERRIDES_KEY);
+    return raw ? (JSON.parse(raw) as Record<string, Partial<AIProvider>>) : {};
+  } catch {
+    return {};
+  }
+}
+
+function saveProviderOverride(id: string, patch: Partial<AIProvider>): void {
+  if (typeof localStorage === "undefined") return;
+  try {
+    const current = loadProviderOverrides();
+    current[id] = { ...(current[id] || {}), ...patch };
+    localStorage.setItem(PROVIDER_OVERRIDES_KEY, JSON.stringify(current));
+  } catch {
+    /* ignore quota */
+  }
+}
+
+function removeProviderOverride(id: string): void {
+  if (typeof localStorage === "undefined") return;
+  try {
+    const current = loadProviderOverrides();
+    delete current[id];
+    localStorage.setItem(PROVIDER_OVERRIDES_KEY, JSON.stringify(current));
+  } catch {
+    /* ignore quota */
+  }
+}
 
 function loadCustomProviders(): AIProvider[] {
   if (typeof localStorage === "undefined") return [];
@@ -167,10 +200,15 @@ export interface AdminSlice {
 
 export const createAdminSlice: StateCreator<AppState, [], [], AdminSlice> = (set, get) => {
   const initialCustomProviders = loadCustomProviders();
-  const baseProviders = [...SEED_PROVIDERS];
+  const providerOverrides = loadProviderOverrides();
+  const baseProviders = SEED_PROVIDERS.map((sp) => {
+    const ov = providerOverrides[sp.id];
+    return ov ? { ...sp, ...ov } : sp;
+  });
   for (const cp of initialCustomProviders) {
     if (!baseProviders.some((bp) => bp.id === cp.id)) {
-      baseProviders.push(cp);
+      const ov = providerOverrides[cp.id];
+      baseProviders.push(ov ? { ...cp, ...ov } : cp);
     }
   }
 
@@ -237,6 +275,7 @@ export const createAdminSlice: StateCreator<AppState, [], [], AdminSlice> = (set
   },
 
   updateProvider: (id, patch) => {
+    saveProviderOverride(id, patch);
     set((s) => {
       const updated = s.providers.map((p) => (p.id === id ? { ...p, ...patch, updatedAt: new Date().toISOString() } : p));
       saveCustomProviders(updated);
@@ -273,6 +312,7 @@ export const createAdminSlice: StateCreator<AppState, [], [], AdminSlice> = (set
   },
 
   removeProvider: (id) => {
+    removeProviderOverride(id);
     if (typeof window !== "undefined") {
       try {
         const deleted = JSON.parse(localStorage.getItem("resumeai-deleted-providers") || "[]");

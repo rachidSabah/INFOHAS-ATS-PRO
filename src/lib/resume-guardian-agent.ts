@@ -21,6 +21,7 @@ import { validateLayout } from "./layout-validator";
 import type { OptimizationPolicy } from "./directive-policy";
 import { checkPolicyCompliance } from "./directive-policy";
 import { checkSectionPreservation, extractSectionsFromResume } from "./dynamic-section-engine";
+import { cleanLanguageToken } from "./resume-assembler";
 
 // ============================================================================
 // Types
@@ -786,19 +787,52 @@ export function checkSkillCategoriesPreserved(optimized: ResumeData, source: Res
   // from skills[]). A category whose every source skill survives in
   // optimized.languages counts as preserved, not missing — otherwise the two
   // gates are mutually unsatisfiable and every attempt BLOCKs identically.
-  const optLangNames = new Set(
-    (optimized.languages || [])
-      .map((l) => ((typeof l === "string" ? l : l?.name) || "").trim().toLowerCase())
-      .filter(Boolean),
+  //
+  // ALIGNMENT: this must mirror the assembler's own extraction
+  // (resume-assembler.ts: split on [,;/•|] + "and"/"&", cleanLanguageToken
+  // for proficiency qualifiers, bare "Languages" header skip, and substring
+  // fallback) — the previous exact-match-only version vetoed valid resumes
+  // whenever a skill used "and", carried "(Fluent)", or was a bare header.
+  const optLangRaw = (optimized.languages || [])
+    .map((l) => ((typeof l === "string" ? l : l?.name) || "").trim().toLowerCase())
+    .filter(Boolean);
+  const optLangNames = new Set(optLangRaw);
+  const optLangCleaned = new Set(
+    optLangRaw.map((n) => cleanLanguageToken(n)).filter(Boolean),
   );
+  const langMatches = (part: string): boolean => {
+    if (optLangNames.has(part)) return true;
+    const cleanedPart = cleanLanguageToken(part);
+    if (cleanedPart && (optLangCleaned.has(cleanedPart) || optLangNames.has(cleanedPart))) {
+      return true;
+    }
+    return optLangRaw.some((langRaw) => {
+      const langClean = cleanLanguageToken(langRaw);
+      if (!langRaw && !langClean) return false;
+      return (
+        (langClean && cleanedPart && (cleanedPart.includes(langClean) || langClean.includes(cleanedPart))) ||
+        (langRaw && (part.includes(langRaw) || langRaw.includes(part)))
+      );
+    });
+  };
   Array.from(srcCategories).forEach((srcCat) => {
     if (optCategories.has(srcCat)) return;
     const catSkills = source.skills.filter(
       (s) => (s.category || "").trim().toLowerCase() === srcCat,
     );
     const allRelocated = catSkills.length > 0 && catSkills.every((s) => {
-      const parts = (s.name || "").split(/[,;]/).map((p) => p.trim().toLowerCase()).filter(Boolean);
-      return parts.length > 0 && parts.every((p) => optLangNames.has(p));
+      const name = (s.name || "").trim();
+      // A bare "Languages"/"Languages:" entry is a section header the parser
+      // leaked into skills — not data. It is preserved iff any language
+      // survives (mirrors findRemovedSourceSkills in resume-assembler.ts).
+      if (/^languages?(?:\s*:)?$/i.test(name)) {
+        return optLangRaw.length > 0;
+      }
+      const parts = name
+        .split(/[,;/•|]|\band\b|&/i)
+        .map((p) => p.trim().toLowerCase())
+        .filter(Boolean);
+      return parts.length > 0 && parts.every(langMatches);
     });
     if (!allRelocated) {
       missing.push(srcCat);

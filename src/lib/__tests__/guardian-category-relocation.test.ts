@@ -53,4 +53,51 @@ describe("guardian skill-category relocation", () => {
     expect(check.passed).toBe(false);
     expect(check.detail).toContain("soft");
   });
+
+  it('passes when one "English and French" skill is split into two languages by the assembler', () => {
+    const andSource = {
+      ...source,
+      skills: [
+        { id: "s1", name: "English and French", category: "Languages" },
+        { id: "s2", name: "Customer Service", category: "Soft" },
+      ],
+    } as unknown as ResumeData;
+    const asm = assembleResume(andSource, {
+      summary: "Crew member.",
+      skills: [{ name: "Customer Service", category: "Soft" }],
+      experiences: [{ id: "e1", bullets: ["Helped guests daily"] }],
+    } as never, {} as never);
+    expect(asm.resume.languages.map((l: any) => l.name)).toEqual(
+      expect.arrayContaining(["English", "French"]),
+    );
+    expect(checkSkillCategoriesPreserved(asm.resume, andSource).passed).toBe(true);
+  });
+
+  it("passes when proficiency qualifiers differ between skill and language entries", () => {
+    const optimized = {
+      ...source,
+      skills: [{ id: "s2", name: "Customer Service", category: "Soft" }],
+      languages: [{ id: "l1", name: "English (Fluent)" }],
+    } as unknown as ResumeData;
+    // source.skills[0] is "Fluent in English" / Languages; "English (Fluent)"
+    // is the same language with a different qualifier shape.
+    expect(checkSkillCategoriesPreserved(optimized, source).passed).toBe(true);
+  });
+
+  it('passes when the source "languages" skill is a bare section header and languages[] is populated', () => {
+    const headerSource = {
+      ...source,
+      skills: [
+        { id: "s1", name: "Languages", category: "Languages" },
+        { id: "s2", name: "Customer Service", category: "Soft" },
+      ],
+      languages: [{ id: "l1", name: "English" }],
+    } as unknown as ResumeData;
+    const optimized = {
+      ...headerSource,
+      skills: [{ id: "s2", name: "Customer Service", category: "Soft" }],
+      languages: [{ id: "l1", name: "English" }],
+    } as unknown as ResumeData;
+    expect(checkSkillCategoriesPreserved(optimized, headerSource).passed).toBe(true);
+  });
 });

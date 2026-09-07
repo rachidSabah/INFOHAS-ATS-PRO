@@ -260,6 +260,14 @@ export async function runLockedPipeline(
   let attempts = 0;
   const attemptErrors: string[] = [];
   let lastKeywordCoverage: KeywordCoverageReport | undefined;
+  // STALL BREAKER: a Guardian BLOCK whose failing-check signature is
+  // byte-identical across attempts is a deterministic gate mismatch (e.g.
+  // assembler-owned categories), not LLM variance — retrying the LLM cannot
+  // fix it and only burns provider quota (observed: identical BLOCK x4 +
+  // 429 storm). After 3 identical verdicts the loop exits early with an
+  // honest UNRECOVERABLE instead of burning attempts 4-6.
+  let lastGuardianSig: string | null = null;
+  let guardianSigStreak = 0;
   // TRUTHFUL DIAGNOSIS: when the P4 salvage path produced the output and the
   // validator rejects it, the per-stage failure reasons (timeout / 429 / parse)
   // are the REAL cause behind the "incomplete coverage" symptom — capture them
@@ -762,6 +770,10 @@ export async function runLockedPipeline(
         nodeRuns.push({ node: "guardian", attempt: attempts, status: "completed", durationMs: 0, detail: `verdict: ${guardianVerdict.status}` });
         if (guardianVerdict.status === "BLOCKED") {
           const criticalFailures = guardianVerdict.checks.filter(c => c.critical && !c.passed).map(c => c.detail);
+          const failedNames = guardianVerdict.checks.filter(c => c.critical && !c.passed).map(c => c.name).sort();
+          const sig = failedNames.join("|");
+          guardianSigStreak = sig === lastGuardianSig ? guardianSigStreak + 1 : 1;
+          lastGuardianSig = sig;
           // Directive §23 — Guardian-class failures MUST feed the retry.
           // Without this the next attempt reruns an IDENTICAL prompt and
           // deterministically fails the same way (observed in production:
@@ -777,6 +789,12 @@ export async function runLockedPipeline(
           ].filter(Boolean).join("\n");
           const errObj: any = new Error(`Guardian BLOCKED: ${criticalFailures.join("; ")}`);
           errObj.provider = optimizerResult.provider;
+          if (guardianSigStreak >= 3) {
+            // Deterministic gate — further LLM retries are futile. Flag the
+            // catch block to exhaust the attempt budget immediately.
+            errObj.guardianStalled = true;
+            errObj.message += ` (identical Guardian verdict x${guardianSigStreak} — deterministic gate mismatch, not LLM variance; stopping retries to preserve provider quota)`;
+          }
           throw errObj;
         }
       } catch (gErr: any) {
@@ -930,6 +948,11 @@ export async function runLockedPipeline(
       attemptErrors.push(err?.message || String(err));
       if (err.provider) {
         excludeProviderIds.push(err.provider);
+      }
+      if (err?.guardianStalled) {
+        // Stall breaker: the Guardian verdict is deterministic — skip any
+        // remaining attempts instead of burning quota on identical retries.
+        attempts = maxAttempts;
       }
       // Directive §7 — FAILURE → CLASSIFY → AUTO-HEAL → RETRY (bounded by
       // maxAttempts; never infinite). Provider-class failures trigger ONE safe

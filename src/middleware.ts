@@ -13,8 +13,16 @@ import { isAllowedProviderUrl } from "@/lib/ssrf-allowlist";
 const rateLimitMap = new Map<string, { count: number; resetAt: number }>();
 const RATE_LIMIT_WINDOW_MS = 60_000; // 1 minute
 const RATE_LIMIT_MAX_REQUESTS = 30; // 30 requests per minute per IP
+// The same-origin AI chat proxy fans out legitimately: one optimization runs
+// a multi-provider chain with key/model rotations, plus arena parallelism and
+// bounded pipeline retries — easily 60+ sub-requests/minute on one IP. The
+// proxy is already gated by provider quotas + router cooldowns, so it gets a
+// higher edge budget instead of self-429ing (which the router previously
+// misread as provider quota and amplified with key rotations).
+const CHAT_PROXY_RATE_LIMIT_MAX_REQUESTS = 120;
+const CHAT_PROXY_PREFIXES = ["/api/providers/chat", "/api/providers/test", "/api/providers/models"];
 
-function checkRateLimit(ip: string): boolean {
+function checkRateLimit(ip: string, maxRequests: number = RATE_LIMIT_MAX_REQUESTS): boolean {
   const now = Date.now();
   
   // Lazy cleanup
@@ -34,7 +42,7 @@ function checkRateLimit(ip: string): boolean {
   }
 
   entry.count++;
-  if (entry.count > RATE_LIMIT_MAX_REQUESTS) {
+  if (entry.count > maxRequests) {
     return false; // Rate limited
   }
   return true;
@@ -75,7 +83,8 @@ export function middleware(request: NextRequest) {
       request.headers.get("x-real-ip") ||
       "unknown";
 
-    if (!checkRateLimit(ip)) {
+    const isChatProxy = CHAT_PROXY_PREFIXES.some((p) => pathname.startsWith(p));
+    if (!checkRateLimit(`${ip}:${isChatProxy ? "chat" : "api"}`, isChatProxy ? CHAT_PROXY_RATE_LIMIT_MAX_REQUESTS : RATE_LIMIT_MAX_REQUESTS)) {
       return NextResponse.json(
         { error: "Rate limit exceeded. Please try again later." },
         { status: 429, headers: { "Retry-After": "60" } },

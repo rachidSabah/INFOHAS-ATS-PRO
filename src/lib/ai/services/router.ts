@@ -869,6 +869,19 @@ export class ProviderRouter {
   }
 
   /**
+   * Detects OUR OWN edge self-throttle (middleware.ts rate limiter on
+   * /api/*, currently "Rate limit exceeded. Please try again later.").
+   * A self-throttle is NOT provider quota: rotating API keys / tokens just
+   * re-hits the same per-IP edge limiter and turns one 429 into a retry
+   * storm. Self-throttles must fail over (cooldown + next provider), never
+   * rotate. Exported for unit tests.
+   */
+  static isSelfThrottleError(e: any): boolean {
+    const msg = e?.message || String(e ?? "");
+    return /rate limit exceeded\. please try again later/i.test(msg);
+  }
+
+  /**
    * Classify whether an error is worth rotating credentials/models for.
    *
    * Deliberately NARROW. The previous matcher treated ANY error message
@@ -888,6 +901,11 @@ export class ProviderRouter {
    *                   failover — never by blind model-name rotation.
    */
   private static classifyRotationError(e: any): { keyRotation: boolean; modelRotation: boolean } {
+    // Self-throttle (our own edge limiter) must NEVER rotate: a different key
+    // does not change the per-IP limit, so rotation only amplifies the storm.
+    if (ProviderRouter.isSelfThrottleError(e)) {
+      return { keyRotation: false, modelRotation: false };
+    }
     const statusCode = e?.statusCode || e?.status || 0;
     const eMsg = e?.message || String(e ?? "");
     const keyRotation =

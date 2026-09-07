@@ -150,6 +150,7 @@ export function AIProviders() {
         providers.map((p) => cloudApi.updateProvider(p.id, {
           name: p.name, type: p.type, baseUrl: p.baseUrl || p.apiUrl || "",
           modelName: p.modelName, enabledModels: p.enabledModels,
+          apiKey: p.apiKey, alternateApiKeys: p.alternateApiKeys,
           priority: p.priority, isActive: p.isActive, isDefault: p.isDefault,
           isFallback: p.isFallback, timeout: p.timeout, maxTokens: p.maxTokens,
           temperature: p.temperature, retryAttempts: p.retryAttempts,
@@ -168,6 +169,20 @@ export function AIProviders() {
         try {
           const custom = providers.filter((p) => !p.isBuiltIn);
           localStorage.setItem("resumeai-custom-providers", JSON.stringify(custom));
+          const overrides: Record<string, any> = {};
+          for (const p of providers) {
+            overrides[p.id] = {
+              apiKey: p.apiKey,
+              alternateApiKeys: p.alternateApiKeys,
+              modelName: p.modelName,
+              enabledModels: p.enabledModels,
+              baseUrl: p.baseUrl,
+              apiUrl: p.apiUrl,
+              isActive: p.isActive,
+              priority: p.priority,
+            };
+          }
+          localStorage.setItem("resumeai-provider-overrides", JSON.stringify(overrides));
         } catch {}
       }
       if (failed === 0) {

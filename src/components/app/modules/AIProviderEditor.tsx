@@ -246,6 +246,16 @@ export function ProviderEditor({ provider, onClose, onSave }: {
                 disabled={isPuter}
                 className="w-full h-16 px-3 py-2 rounded-md border border-input bg-background text-sm font-mono resize-y"
               />
+              {!isPuter && ((form as any).alternateApiKeys || []).length > 0 ? (
+                <p className="text-[11px] text-emerald-600 dark:text-emerald-400 mt-1 font-medium flex items-center gap-1">
+                  <Icon name="CheckCircle2" className="w-3.5 h-3.5" />
+                  {((form as any).alternateApiKeys || []).length} alternate key(s) configured. On HTTP 429/quota limit, the router immediately fails over to the next key and swaps it into the active slot.
+                </p>
+              ) : !isPuter ? (
+                <p className="text-[11px] text-muted-foreground mt-1">
+                  Optional backup keys. Rotated automatically on HTTP 429 / rate limits before falling back to other providers.
+                </p>
+              ) : null}
             </Field>
             <Field label="Auth type">
               <select value={form.authType} onChange={(e) => setForm({ ...form, authType: e.target.value as any })} className="w-full h-9 px-3 rounded-md border border-input bg-background text-sm">

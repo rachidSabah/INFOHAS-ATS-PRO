@@ -44,6 +44,57 @@ export function TestConnectionModal({ provider, onClose }: { provider: AIProvide
     setStatus("done");
   };
 
+  const hasAlternateKeys = (provider.alternateApiKeys || []).length > 0;
+
+  const runTestWithRotation = async () => {
+    setStatus("running");
+    setSteps([]);
+    setResult(null);
+
+    setSteps((s) => [...s, `Testing primary key: ${provider.apiKey ? `${provider.apiKey.slice(0, 8)}…` : "(empty)"}`]);
+    const res = await ProviderManager.testConnection(provider);
+    if (res.ok) {
+      setSteps((s) => [...s, `Primary key succeeded in ${res.latencyMs}ms.`]);
+      setResult(res);
+      setStatus("done");
+      return;
+    }
+
+    setSteps((s) => [...s, `Primary key returned: ${res.message}`]);
+    const altKeys = provider.alternateApiKeys || [];
+    if (altKeys.length === 0) {
+      setSteps((s) => [...s, "No alternate keys configured to rotate to."]);
+      setResult(res);
+      setStatus("done");
+      return;
+    }
+
+    setSteps((s) => [...s, `Triggering rotation simulation: trying ${altKeys.length} alternate key(s)...`]);
+    let rotatedSuccess = false;
+    for (let i = 0; i < altKeys.length; i++) {
+      const altKey = altKeys[i];
+      setSteps((s) => [...s, `Testing Alternate Key #${i + 1}: ${altKey.slice(0, 8)}…`]);
+      const altRes = await ProviderManager.testConnection({ ...provider, apiKey: altKey });
+      if (altRes.ok) {
+        setSteps((s) => [...s, `✓ Alternate Key #${i + 1} succeeded in ${altRes.latencyMs}ms! Rotation is operational.`]);
+        setResult({
+          ok: true,
+          latencyMs: altRes.latencyMs,
+          message: `Rotation verified: Primary key failed (${res.message}), but Alternate Key #${i + 1} succeeded!`,
+          response: altRes.response,
+        });
+        rotatedSuccess = true;
+        break;
+      } else {
+        setSteps((s) => [...s, `✗ Alternate Key #${i + 1} failed: ${altRes.message}`]);
+      }
+    }
+    if (!rotatedSuccess) {
+      setResult(res);
+    }
+    setStatus("done");
+  };
+
   return (
     <motion.div
       initial={{ opacity: 0 }}
@@ -99,19 +150,40 @@ export function TestConnectionModal({ provider, onClose }: { provider: AIProvide
           </div>
 
           {/* Run button */}
-          <Button
-            onClick={runTest}
-            disabled={status === "running"}
-            className="w-full bg-brand hover:bg-brand-dark text-white gap-2"
-          >
-            {status === "running" ? (
-              <><Icon name="Loader2" className="w-4 h-4 animate-spin" /> Running test…</>
-            ) : (
-              <><Icon name="Play" className="w-4 h-4" /> Run test connection</>
+          <div className="flex flex-col sm:flex-row gap-2">
+            <Button
+              onClick={runTest}
+              disabled={status === "running"}
+              className="flex-1 bg-brand hover:bg-brand-dark text-white gap-2"
+            >
+              {status === "running" ? (
+                <><Icon name="Loader2" className="w-4 h-4 animate-spin" /> Running test…</>
+              ) : (
+                <><Icon name="Play" className="w-4 h-4" /> Run test connection</>
+              )}
+            </Button>
+            {hasAlternateKeys && (
+              <Button
+                onClick={runTestWithRotation}
+                disabled={status === "running"}
+                variant="outline"
+                className="gap-2 border-brand/40 hover:bg-brand/10 text-brand dark:text-brand-light"
+              >
+                <Icon name="RotateCw" className="w-4 h-4" />
+                Test With Key Rotation ({(provider.alternateApiKeys || []).length} alts)
+              </Button>
             )}
-          </Button>
+          </div>
           <p className="text-[11px] text-muted-foreground leading-relaxed">
-            This test sends a single raw request with exactly this provider&apos;s key, model and base URL — no retries or rotation — so you see the provider&apos;s true response. Regular chats go through the rotator: on 429 they retry, rotate alternate keys/models, and fail over to your fallback providers.
+            {hasAlternateKeys ? (
+              <span>
+                <strong>{(provider.alternateApiKeys || []).length} alternate API key(s) configured.</strong> During live chat or resume generation, if the primary key hits HTTP 429 or quota limits, the router automatically fails over to the alternate keys in sequence and swaps the winning key into the primary slot. Use &quot;Test With Key Rotation&quot; above to simulate and verify this failover.
+              </span>
+            ) : (
+              <span>
+                This test sends a single raw request with exactly this provider&apos;s key, model and base URL — no retries or rotation — so you see the provider&apos;s true response. Regular chats go through the rotator: on 429 they retry, rotate alternate keys/models, and fail over to your fallback providers.
+              </span>
+            )}
           </p>
 
           {/* Steps log */}
