@@ -738,7 +738,7 @@ function checkEducationHighlightsPreserved(
  * optimized output. This prevents the LLM from dropping entire competency
  * categories during skills optimization.
  */
-function checkSkillCategoriesPreserved(optimized: ResumeData, source: ResumeData): GuardianCheck {
+export function checkSkillCategoriesPreserved(optimized: ResumeData, source: ResumeData): GuardianCheck {
   if (source.skills.length === 0) {
     return {
       name: "skill_categories_preserved",
@@ -781,8 +781,26 @@ function checkSkillCategoriesPreserved(optimized: ResumeData, source: ResumeData
   }
 
   const missing: string[] = [];
+  // Relocation-aware: the assembler legitimately MOVES language-category
+  // skills into languages[] (and checkLanguagesNotInSkills strips stragglers
+  // from skills[]). A category whose every source skill survives in
+  // optimized.languages counts as preserved, not missing — otherwise the two
+  // gates are mutually unsatisfiable and every attempt BLOCKs identically.
+  const optLangNames = new Set(
+    (optimized.languages || [])
+      .map((l) => ((typeof l === "string" ? l : l?.name) || "").trim().toLowerCase())
+      .filter(Boolean),
+  );
   Array.from(srcCategories).forEach((srcCat) => {
-    if (!optCategories.has(srcCat)) {
+    if (optCategories.has(srcCat)) return;
+    const catSkills = source.skills.filter(
+      (s) => (s.category || "").trim().toLowerCase() === srcCat,
+    );
+    const allRelocated = catSkills.length > 0 && catSkills.every((s) => {
+      const parts = (s.name || "").split(/[,;]/).map((p) => p.trim().toLowerCase()).filter(Boolean);
+      return parts.length > 0 && parts.every((p) => optLangNames.has(p));
+    });
+    if (!allRelocated) {
       missing.push(srcCat);
     }
   });
