@@ -1644,13 +1644,17 @@ export function exportCoverLetterPDF(cl: CoverLetter, opts: { accentColor?: stri
   doc.setFillColor(accent[0], accent[1], accent[2]);
   doc.rect(0, 0, pageW, 4, "F");
 
+  // NOTE: the internal title ("Cover Letter — <Company>") is deliberately NOT
+  // rendered — it is a file label only. A cover letter is a business letter;
+  // printing the title in the document header was reported as a bug.
+
   if (cl.company || cl.role) {
-    doc.setFont("helvetica", "normal");
+    doc.setFont("helvetica", "bold");
     doc.setTextColor(accent[0], accent[1], accent[2]);
     doc.setFontSize(10);
     const sub = [cl.role, cl.company].filter(Boolean).join(" at ");
     doc.text(sub, left, y + 4);
-    y += 12;
+    y += 10;
   }
 
   // Date
@@ -1682,15 +1686,18 @@ export function exportCoverLetterPDF(cl: CoverLetter, opts: { accentColor?: stri
 }
 
 export function exportCoverLetterTXT(cl: CoverLetter) {
+  // Internal title is a file label only — never printed in the letter body.
   const header = [cl.role && cl.company ? `${cl.role} at ${cl.company}` : cl.role || cl.company, ""].filter(Boolean).join("\n");
-  const blob = new Blob([header + (header ? "\n\n" : "") + cl.content], { type: "text/plain;charset=utf-8" });
+  const blob = new Blob([(header ? header + "\n\n" : "") + cl.content], { type: "text/plain;charset=utf-8" });
   saveAs(blob, (cl.title || "cover_letter").replace(/\s+/g, "_") + ".txt");
 }
 
 export async function exportCoverLetterDOCX(cl: CoverLetter) {
   const children: Paragraph[] = [];
+  // NOTE: internal title ("Cover Letter — <Company>") is a file label only —
+  // deliberately NOT rendered in the document (user-reported bug).
   if (cl.role || cl.company) {
-    children.push(new Paragraph({ children: [new TextRun({ text: [cl.role, cl.company].filter(Boolean).join(" at "), size: 20, color: "1154A3" })], spacing: { after: 80 } }));
+    children.push(new Paragraph({ children: [new TextRun({ text: [cl.role, cl.company].filter(Boolean).join(" at "), bold: true, size: 20, color: "1154A3" })], spacing: { after: 80 } }));
   }
   for (const p of cl.content.split(/\n\s*\n/)) {
     children.push(new Paragraph({ children: [new TextRun({ text: p.trim(), size: 22, color: "1F2937" })], spacing: { after: 160 } }));

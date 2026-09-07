@@ -456,9 +456,11 @@ Return ONLY valid JSON.`,
             <div className="rounded-xl bg-secondary/60 p-4 max-h-[calc(100vh-160px)] overflow-y-auto">
               <div className="a4-page !w-full !min-h-0 !max-h-none p-[16mm]" style={{ transformOrigin: "top" }}>
                 <div className="text-[10pt] leading-relaxed text-slate-800" style={{ fontFamily: "'Inter', sans-serif" }}>
+                  {/* Header mirrors the export: role @ company + date. The
+                      internal title ("Cover Letter — <Company>") is a file
+                      label only and is deliberately NOT rendered. */}
                   <div className="border-b-2 pb-3 mb-4" style={{ borderColor: "#1154A3" }}>
-                    <div className="text-[14pt] font-bold text-slate-900">{active.title}</div>
-                    {active.role && active.company && <div className="text-[10pt] text-slate-600 mt-0.5">{active.role} at {active.company}</div>}
+                    {active.role && active.company && <div className="text-[10pt] font-bold text-slate-900">{active.role} at {active.company}</div>}
                     <div className="text-[9pt] text-slate-500 mt-1" suppressHydrationWarning>{new Date().toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" })}</div>
                   </div>
                   {active.content.split(/\n\s*\n/).map((p, i) => (

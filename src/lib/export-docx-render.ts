@@ -12,6 +12,12 @@ import {
   TabStopType,
   convertInchesToTwip,
   Packer,
+  Table,
+  TableRow,
+  TableCell,
+  WidthType,
+  BorderStyle,
+  ShadingType,
 } from "docx";
 import type {
   ResumeData,
@@ -25,6 +31,27 @@ import { resolveSectionAlignment } from "./types";
 import { getDefaultResumeLayout } from "./exporter";
 
 type DocxTabStop = { type: typeof TabStopType; position: number };
+
+/**
+ * Templates whose signature design is a full-height accent sidebar carrying
+ * name/contact/skills/languages/certifications (mirrors the A4Preview HTML
+ * components and the PDF sidebar renderer). These are exported as a
+ * borderless two-column table with a shaded sidebar cell instead of the
+ * classic single-column flow — otherwise the downloaded file loses the
+ * template design the user picked in the Builder.
+ */
+const DOCX_SIDEBAR_TEMPLATES = new Set(["modern", "creative"]);
+
+/** Section types rendered inside the shaded sidebar cell. */
+const DOCX_SIDEBAR_SECTION_TYPES = new Set(["skills", "languages", "certifications"]);
+
+/** Borderless table/cell border set. */
+const NO_BORDERS = {
+  top: { style: BorderStyle.NONE, size: 0, color: "auto" },
+  bottom: { style: BorderStyle.NONE, size: 0, color: "auto" },
+  left: { style: BorderStyle.NONE, size: 0, color: "auto" },
+  right: { style: BorderStyle.NONE, size: 0, color: "auto" },
+};
 
 /** Map a layout alignment to a docx paragraph alignment. */
 function toDocxAlignment(a: TextAlignment): (typeof AlignmentType)[keyof typeof AlignmentType] {
@@ -51,6 +78,120 @@ export async function exportResumeDOCXRenderDoc(
   const rightTabPosition = marginTwip(210 - L.marginLeftMm - L.marginRightMm);
   const docxTabStops = [{ type: TabStopType.RIGHT, position: rightTabPosition }];
 
+  // ===== SIDEBAR TEMPLATES (modern / creative) =====
+  // Two-column borderless table: shaded accent sidebar (name, contact,
+  // skills, languages, certifications in white) + main column (all other
+  // sections). Mirrors the Builder preview and the PDF sidebar renderer.
+  if (DOCX_SIDEBAR_TEMPLATES.has(String(rd.template || ""))) {
+    const white = "FFFFFF";
+    const sidebarChildren: Paragraph[] = [];
+    const mainChildren: Paragraph[] = [];
+
+    // --- Sidebar: name + headline ---
+    sidebarChildren.push(new Paragraph({
+      spacing: { after: 60 },
+      children: [new TextRun({ text: (rd.contact.name || "YOUR NAME").toUpperCase(), bold: true, size: Math.min(L.nameSizePt, 20) * 2, font: L.fontFamily, color: white })],
+    }));
+    if (rd.contact.headline) {
+      sidebarChildren.push(new Paragraph({
+        spacing: { after: 120 },
+        children: [new TextRun({ text: rd.contact.headline, size: L.bodyFontSizePt * 2, font: L.fontFamily, color: white })],
+      }));
+    }
+
+    // --- Sidebar: contact ---
+    const contactLines = [
+      rd.contact.location,
+      rd.contact.phone,
+      rd.contact.email,
+      rd.contact.dateOfBirth ? `DOB: ${rd.contact.dateOfBirth}` : "",
+    ].filter(Boolean) as string[];
+    if (contactLines.length) {
+      sidebarChildren.push(new Paragraph({
+        spacing: { before: 120, after: 60 },
+        children: [new TextRun({ text: "CONTACT", bold: true, size: (L.sectionTitleSizePt || 11) * 2, font: L.fontFamily, color: white })],
+      }));
+      for (const line of contactLines) {
+        sidebarChildren.push(new Paragraph({
+          spacing: { after: 30 },
+          children: [new TextRun({ text: line, size: L.bodyFontSizePt * 2, font: L.fontFamily, color: white })],
+        }));
+      }
+    }
+
+    // --- Sidebar: skills / languages / certifications (white styling) ---
+    for (const section of rd.sections) {
+      if (!DOCX_SIDEBAR_SECTION_TYPES.has(section.type)) continue;
+      sidebarChildren.push(new Paragraph({
+        spacing: { before: 160, after: 60 },
+        children: [new TextRun({ text: section.title.toUpperCase(), bold: true, size: (L.sectionTitleSizePt || 11) * 2, font: L.fontFamily, color: white })],
+      }));
+      for (const item of section.items) {
+        renderSidebarContentItem(item, sidebarChildren, L, white);
+      }
+    }
+
+    // --- Main: every non-sidebar section ---
+    const mainAddSection = (title: string) => {
+      mainChildren.push(new Paragraph({
+        spacing: { before: 120, after: 30, line: 240 },
+        children: [new TextRun({ text: title, bold: true, size: (L.sectionTitleSizePt || 11.5) * 2, font: L.fontFamily, color: accentHex })],
+      }));
+    };
+    for (const section of rd.sections) {
+      if (DOCX_SIDEBAR_SECTION_TYPES.has(section.type)) continue;
+      mainAddSection(section.title);
+      const sectionAlign = resolveSectionAlignment(L, section.type);
+      for (const item of section.items) {
+        renderContentItem(item, mainChildren, L, bodyHex, docxTabStops, sectionAlign);
+      }
+    }
+
+    const twoCol = new Table({
+      width: { size: 100, type: WidthType.PERCENTAGE },
+      borders: NO_BORDERS,
+      rows: [
+        new TableRow({
+          children: [
+            new TableCell({
+              width: { size: 34, type: WidthType.PERCENTAGE },
+              borders: NO_BORDERS,
+              shading: { fill: accentHex, type: ShadingType.CLEAR, color: "auto" },
+              margins: { top: 200, bottom: 400, left: 200, right: 200 },
+              children: sidebarChildren,
+            }),
+            new TableCell({
+              width: { size: 66, type: WidthType.PERCENTAGE },
+              borders: NO_BORDERS,
+              margins: { top: 200, bottom: 400, left: 260, right: 120 },
+              children: mainChildren,
+            }),
+          ],
+        }),
+      ],
+    });
+
+    const doc = new Document({
+      styles: { default: { document: { run: { font: L.fontFamily, size: L.bodyFontSizePt * 2 } } } },
+      sections: [{
+        properties: {
+          page: {
+            margin: {
+              top: marginTwip(L.marginTopMm),
+              bottom: marginTwip(L.marginBottomMm),
+              left: marginTwip(L.marginLeftMm),
+              right: marginTwip(L.marginRightMm),
+            },
+          },
+        },
+        children: [twoCol],
+      }],
+    });
+
+    return await Packer.toBlob(doc);
+  }
+
+  // ===== CLASSIC SINGLE-COLUMN FLOW (all other templates) =====
   // ===== CONTACT BLOCK (rendered ONCE) =====
   // Name
   children.push(new Paragraph({
@@ -267,5 +408,71 @@ function renderNestedBullets(
         }),
       ],
     }));
+  }
+}
+
+/**
+ * Sidebar variant of renderContentItem — renders items in white text without
+ * bullets markers heavier than plain dots, for the shaded sidebar cell.
+ */
+function renderSidebarContentItem(
+  item: RenderContentItem,
+  children: Paragraph[],
+  L: ResumeLayoutModel,
+  whiteHex: string,
+): void {
+  switch (item.kind) {
+    case "text":
+      children.push(new Paragraph({
+        spacing: { after: 40 },
+        children: parseMarkdownToTextRuns(item.text, {
+          size: L.bodyFontSizePt * 2,
+          font: L.fontFamily,
+          color: whiteHex,
+        }),
+      }));
+      break;
+
+    case "bullets":
+      for (const b of item.bullets) {
+        children.push(new Paragraph({
+          spacing: { after: 20 },
+          children: parseMarkdownToTextRuns(`\u2022 ${b.replace(/^[\u2022\u25CF\u2023\u2043\u2219\u00B7*\-\s]+/, "")}`, {
+            size: L.bodyFontSizePt * 2,
+            font: L.fontFamily,
+            color: whiteHex,
+          }),
+        }));
+      }
+      break;
+
+    case "nested-bullets":
+      for (const group of item.groups) {
+        children.push(new Paragraph({
+          spacing: { after: 20 },
+          children: [
+            new TextRun({ text: `${group.label}: `, bold: true, size: L.bodyFontSizePt * 2, font: L.fontFamily, color: whiteHex }),
+            ...parseMarkdownToTextRuns(group.items.join(", "), {
+              size: L.bodyFontSizePt * 2,
+              font: L.fontFamily,
+              color: whiteHex,
+            }),
+          ],
+        }));
+      }
+      break;
+
+    case "table-row": {
+      const leftText = item.cells.find((c) => c.align === "left" || !c.align)?.text ?? "";
+      const rightCell = item.cells.find((c) => c.align === "right");
+      children.push(new Paragraph({
+        spacing: { after: 20 },
+        children: [
+          ...parseMarkdownToTextRuns(leftText, { size: L.bodyFontSizePt * 2, font: L.fontFamily, color: whiteHex, bold: true }),
+          ...(rightCell?.text ? parseMarkdownToTextRuns(` \u00B7 ${rightCell.text}`, { size: L.bodyFontSizePt * 2, font: L.fontFamily, color: whiteHex }) : []),
+        ],
+      }));
+      break;
+    }
   }
 }
