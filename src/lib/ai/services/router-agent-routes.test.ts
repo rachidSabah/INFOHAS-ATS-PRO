@@ -57,6 +57,14 @@ describe("selectProviderForAgent — explicit agent routes", () => {
     const p = await selectProviderForAgent("optimizer", []);
     expect(p?.id).toBe("p_mistral");
   });
+
+  it("applies model override when agentModelRoutes is set for an agent role", async () => {
+    settings.agentRoutes = { optimizer: "p_puter" };
+    (settings as any).agentModelRoutes = { optimizer: "claude-sonnet-4-5" };
+    const p = await selectProviderForAgent("optimizer", []);
+    expect(p?.id).toBe("p_puter");
+    expect(p?.modelName).toBe("claude-sonnet-4-5");
+  });
 });
 
 describe("selectProviderForAgent — emergency rescue", () => {

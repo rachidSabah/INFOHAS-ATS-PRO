@@ -11,6 +11,7 @@ import { useApp } from "@/lib/store";
 import { ProviderManager } from "@/lib/ai/services";
 import { toast } from "sonner";
 import { chainLinkDisplay, type ChainLinkTestResult } from "./routing-chain-diagnostics";
+import { PUTER_CURATED_MODEL_IDS } from "@/lib/puter-models";
 
 export function AIProviderSettings() {
   const settings = useApp((s) => s.providerSettings);
@@ -33,6 +34,39 @@ export function AIProviderSettings() {
   // Model prefetch state
   const [fetchingModels, setFetchingModels] = useState(false);
   const [liveModels, setLiveModels] = useState<string[]>([]);
+  const [agentModels, setAgentModels] = useState<Record<string, string[]>>(() => {
+    const init: Record<string, string[]> = {};
+    const puter = providers.find(p => p.type === "puter");
+    if (puter) {
+      init[puter.id] = [...PUTER_CURATED_MODEL_IDS];
+    }
+    return init;
+  });
+  const [fetchingAgentModels, setFetchingAgentModels] = useState<Record<string, boolean>>({});
+
+  // Ensure Puter models are always ready immediately for selection
+  useEffect(() => {
+    const puter = providers.find(p => p.type === "puter");
+    if (puter && (!agentModels[puter.id] || agentModels[puter.id].length === 0)) {
+      setAgentModels(prev => ({
+        ...prev,
+        [puter.id]: [...PUTER_CURATED_MODEL_IDS],
+      }));
+    }
+  }, [providers]);
+
+  const fetchModelsForAgentProvider = async (targetProvider: typeof providers[0]) => {
+    if (!targetProvider) return;
+    setFetchingAgentModels(prev => ({ ...prev, [targetProvider.id]: true }));
+    const result = await ProviderManager.fetchModels(targetProvider as any);
+    setFetchingAgentModels(prev => ({ ...prev, [targetProvider.id]: false }));
+    if (result.ok && result.models.length > 0) {
+      setAgentModels(prev => ({ ...prev, [targetProvider.id]: result.models }));
+      toast.success(`Loaded ${result.models.length} models for ${targetProvider.name}`);
+    } else {
+      toast.error(result.error || `Failed to fetch models for ${targetProvider.name}`);
+    }
+  };
 
   // Chain diagnostics state — Task 28: full per-link result is preserved
   // (failure latency + rateLimited flag + provider message), no more zeroed
@@ -420,27 +454,107 @@ export function AIProviderSettings() {
               { key: "assembler", label: "Structure Assembler Agent", desc: "Compiles section outputs, removes duplicates, and standardizes layout." }
             ].map((agent) => {
               const currentRoute = form.agentRoutes?.[agent.key] ?? "default";
+              const currentModel = form.agentModelRoutes?.[agent.key] ?? "";
+              const routedProvider = providers.find((p) => p.id === currentRoute);
+              const isPuter = routedProvider?.type === "puter";
+              const cachedModels = agentModels[currentRoute] || [];
+              const isFetching = !!fetchingAgentModels[currentRoute];
+
               return (
-                <div key={agent.key} className="p-3 border border-border rounded-lg space-y-2 bg-secondary/5">
+                <div key={agent.key} className="p-3 border border-border rounded-lg space-y-2.5 bg-secondary/5">
                   <div>
                     <Label htmlFor={`route_${agent.key}`} className="font-semibold text-sm">{agent.label}</Label>
                     <p className="text-[10px] text-muted-foreground leading-normal mt-0.5">{agent.desc}</p>
                   </div>
-                  <select
-                    id={`route_${agent.key}`}
-                    value={currentRoute}
-                    onChange={(e) => {
-                      const nextRoutes = { ...(form.agentRoutes || {}) };
-                      nextRoutes[agent.key] = e.target.value;
-                      update({ agentRoutes: nextRoutes });
-                    }}
-                    className="w-full h-9 px-2 rounded-md border border-input bg-background text-xs mt-1"
-                  >
-                    <option value="default">Default Fallback Chain (Tier-Limited)</option>
-                    {providers.map((p) => (
-                      <option key={p.id} value={p.id}>{p.name} ({p.modelName || p.type})</option>
-                    ))}
-                  </select>
+                  <div className="space-y-2">
+                    <div>
+                      <Label className="text-[11px] uppercase tracking-wide text-muted-foreground">Provider</Label>
+                      <select
+                        id={`route_${agent.key}`}
+                        value={currentRoute}
+                        onChange={(e) => {
+                          const nextRoutes = { ...(form.agentRoutes || {}) };
+                          const nextProviderId = e.target.value;
+                          nextRoutes[agent.key] = nextProviderId;
+
+                          // If switching away or to default, clear custom model route unless new provider has existing model
+                          const nextModelRoutes = { ...(form.agentModelRoutes || {}) };
+                          if (nextProviderId === "default") {
+                            delete nextModelRoutes[agent.key];
+                          } else {
+                            const newProv = providers.find(p => p.id === nextProviderId);
+                            nextModelRoutes[agent.key] = newProv?.modelName || "";
+                            // Automatically trigger model fetch if not already loaded
+                            if (newProv && !agentModels[newProv.id]) {
+                              fetchModelsForAgentProvider(newProv);
+                            }
+                          }
+                          update({ agentRoutes: nextRoutes, agentModelRoutes: nextModelRoutes });
+                        }}
+                        className="w-full h-9 px-2 rounded-md border border-input bg-background text-xs mt-1"
+                      >
+                        <option value="default">Default Fallback Chain (Tier-Limited)</option>
+                        {providers.map((p) => (
+                          <option key={p.id} value={p.id}>{p.name} ({p.modelName || p.type})</option>
+                        ))}
+                      </select>
+                    </div>
+
+                    {currentRoute !== "default" && routedProvider && (
+                      <div>
+                        <div className="flex items-center justify-between">
+                          <Label className="text-[11px] uppercase tracking-wide text-muted-foreground">Assigned Model</Label>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            type="button"
+                            onClick={() => fetchModelsForAgentProvider(routedProvider)}
+                            disabled={isFetching}
+                            className="h-5 px-1.5 text-[10px] text-brand hover:text-brand-dark gap-1"
+                          >
+                            {isFetching ? <Icon name="Loader2" className="w-2.5 h-2.5 animate-spin" /> : <Icon name="RefreshCw" className="w-2.5 h-2.5" />}
+                            {isPuter ? "Fetch Puter models" : "Fetch models"}
+                          </Button>
+                        </div>
+                        <div className="flex gap-1.5 mt-1">
+                          {cachedModels.length > 0 ? (
+                            <select
+                              value={currentModel || routedProvider.modelName || ""}
+                              onChange={(e) => {
+                                const nextModelRoutes = { ...(form.agentModelRoutes || {}) };
+                                nextModelRoutes[agent.key] = e.target.value;
+                                update({ agentModelRoutes: nextModelRoutes });
+                              }}
+                              className="w-full h-8 px-2 rounded-md border border-input bg-background text-xs"
+                            >
+                              {!cachedModels.includes(currentModel) && currentModel && (
+                                <option value={currentModel}>{currentModel} (current)</option>
+                              )}
+                              {cachedModels.map((m) => (
+                                <option key={m} value={m}>{m}</option>
+                              ))}
+                            </select>
+                          ) : (
+                            <Input
+                              value={currentModel || routedProvider.modelName || ""}
+                              onChange={(e) => {
+                                const nextModelRoutes = { ...(form.agentModelRoutes || {}) };
+                                nextModelRoutes[agent.key] = e.target.value;
+                                update({ agentModelRoutes: nextModelRoutes });
+                              }}
+                              placeholder={routedProvider.modelName || "model-name"}
+                              className="w-full h-8 text-xs"
+                            />
+                          )}
+                        </div>
+                        {cachedModels.length > 0 && (
+                          <p className="text-[9px] text-muted-foreground mt-0.5">
+                            {cachedModels.length} models available from {routedProvider.name}
+                          </p>
+                        )}
+                      </div>
+                    )}
+                  </div>
                 </div>
               );
             })}

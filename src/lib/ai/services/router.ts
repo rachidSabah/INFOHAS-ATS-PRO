@@ -1636,6 +1636,10 @@ export async function selectProviderForAgent(
     // the emergency-only gate and the optimizer fell through to priority
     // order — dead opencode-zen first — and Step 5 failed at ~50%.
     if (routedProvider && isAvailableForSelection(routedProvider, excludeIds, { allowEmergency: true })) {
+      const modelOverride = settings?.agentModelRoutes?.[agentType];
+      if (modelOverride && modelOverride.trim()) {
+        return { ...routedProvider, modelName: modelOverride.trim() };
+      }
       return routedProvider;
     }
   }

@@ -592,6 +592,7 @@ export interface AIProviderSettings {
    *  are reported and the user must click HEAL PROVIDERS manually. */
   autoHealProviders?: boolean;
   agentRoutes?: Record<string, string>;
+  agentModelRoutes?: Record<string, string>;
 }
 
 // ============================================================================

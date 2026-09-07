@@ -359,6 +359,10 @@ export class ProviderManager {
    */
   static async fetchModelsForConfig(config: Partial<AIProvider>): Promise<{ ok: boolean; models: string[]; error?: string }> {
     try {
+      if (config.type === "puter") {
+        return this.fetchPuterModelsLive();
+      }
+
       // 1. Try primary key first
       const res = await fetch("/api/providers/models", {
         method: "POST",
