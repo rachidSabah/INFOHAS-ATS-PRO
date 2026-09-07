@@ -12,6 +12,18 @@ import type { AIProvider, AIProviderLog, AIProviderSettings } from "../../types"
 // Puter curated ids — SINGLE SOURCE OF TRUTH (src/lib/puter-models.ts).
 // Pure module, import-safe outside the browser.
 import { PUTER_CURATED_MODEL_IDS } from "../../puter-models";
+// Direct client IP probe policy — gates the browser-direct fallback fetch
+// (Task 17): never for demoted providers, and never twice for a host whose
+// upstream sends no CORS headers (every failed preflight is logged by the
+// browser itself and cannot be suppressed from JS).
+import {
+  shouldAttemptDirectProbe,
+  extractProbeHost,
+  safeLocalStorage,
+  loadBlockedProbeHosts,
+  rememberBlockedProbeHost,
+  clearBlockedProbeHost,
+} from "./direct-probe-policy";
 
 // ============================================================================
 // PUTER LIVE MODEL CATALOG (prefetch fix)
@@ -202,38 +214,59 @@ export class ProviderManager {
 
       // If server proxy returned 429 rate limit and we are in a browser,
       // try direct client-side probe (which uses user's residential IP rather than Cloudflare's flagged server IP)
+      // Task 17 — the probe is gated by DirectProbePolicy: skipped entirely
+      // for demoted (isActive = false) providers, and skipped for hosts whose
+      // direct probe already failed with a CORS/network error (remembered in
+      // localStorage, TTL 24h) so the browser's own CORS console noise fires
+      // at most once per host per window.
       if (data?.rateLimited && typeof window !== "undefined" && provider.baseUrl && !provider.baseUrl.includes("localhost")) {
-        try {
-          const directStartTime = performance.now();
-          const directUrl = `${provider.baseUrl.replace(/\/$/, "")}/chat/completions`;
-          const directHeaders: Record<string, string> = { "Content-Type": "application/json" };
-          if (provider.apiKey) directHeaders["Authorization"] = `Bearer ${provider.apiKey}`;
-          const directRes = await fetch(directUrl, {
-            method: "POST",
-            headers: directHeaders,
-            body: JSON.stringify({
-              model: provider.modelName,
-              messages: [{ role: "user", content: "Reply with exactly: OK" }],
-              max_tokens: 10,
-            }),
-            signal: AbortSignal.timeout(
-              // Task 24① — reasoning-aware direct probe (was fixed 10s).
-              resolveTestTimeoutMs({ modelName: provider.modelName, providerTimeoutMs: provider.timeout, fastCapMs: 10000 })
-            ),
-          });
-          if (directRes.ok) {
-            const directJson = (await directRes.json()) as any;
-            const text = directJson?.choices?.[0]?.message?.content || "OK";
-            data = {
-              ok: true,
-              latencyMs: Math.round(performance.now() - directStartTime),
-              message: `OK (via Direct Client IP) — ${provider.modelName}`,
-              response: text,
-              rateLimited: false,
-            };
+        const probeStorage = safeLocalStorage();
+        const probeAllowed = shouldAttemptDirectProbe({
+          rateLimited: true,
+          providerIsActive: (provider as AIProvider).isActive !== false,
+          baseUrl: provider.baseUrl,
+          isBrowser: true,
+          blockedHosts: loadBlockedProbeHosts(probeStorage),
+        });
+        if (probeAllowed) {
+          const probeHost = extractProbeHost(provider.baseUrl);
+          try {
+            const directStartTime = performance.now();
+            const directUrl = `${provider.baseUrl.replace(/\/$/, "")}/chat/completions`;
+            const directHeaders: Record<string, string> = { "Content-Type": "application/json" };
+            if (provider.apiKey) directHeaders["Authorization"] = `Bearer ${provider.apiKey}`;
+            const directRes = await fetch(directUrl, {
+              method: "POST",
+              headers: directHeaders,
+              body: JSON.stringify({
+                model: provider.modelName,
+                messages: [{ role: "user", content: "Reply with exactly: OK" }],
+                max_tokens: 10,
+              }),
+              signal: AbortSignal.timeout(
+                // Task 24① — reasoning-aware direct probe (was fixed 10s).
+                resolveTestTimeoutMs({ modelName: provider.modelName, providerTimeoutMs: provider.timeout, fastCapMs: 10000 })
+              ),
+            });
+            if (directRes.ok) {
+              // Probe succeeded — the host speaks CORS; forget past failures.
+              clearBlockedProbeHost(probeStorage, probeHost || "");
+              const directJson = (await directRes.json()) as any;
+              const text = directJson?.choices?.[0]?.message?.content || "OK";
+              data = {
+                ok: true,
+                latencyMs: Math.round(performance.now() - directStartTime),
+                message: `OK (via Direct Client IP) — ${provider.modelName}`,
+                response: text,
+                rateLimited: false,
+              };
+            }
+          } catch {
+            // Direct fetch failed (CORS or network) — remember the host so the
+            // browser's unavoidable CORS console error happens at most once per
+            // TTL window, and preserve the proxy's diagnostic response.
+            rememberBlockedProbeHost(probeStorage, probeHost || "");
           }
-        } catch {
-          // Direct fetch failed (CORS or network) — preserve the proxy's diagnostic response
         }
       }
 

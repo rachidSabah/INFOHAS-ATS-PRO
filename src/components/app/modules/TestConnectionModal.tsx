@@ -69,6 +69,16 @@ export function TestConnectionModal({ provider, onClose }: { provider: AIProvide
         </div>
 
         <div className="p-5 space-y-4">
+          {/* Demoted provider banner (Task 17) — set expectations before the user reads a 429 verdict */}
+          {provider.isActive === false && (
+            <div className="rounded-lg bg-amber-100 dark:bg-amber-400/10 border border-amber-300 p-3 text-xs text-amber-800 dark:text-amber-300 flex gap-2">
+              <Icon name="PauseCircle" className="w-4 h-4 mt-0.5 shrink-0" />
+              <span>
+                This provider is <strong>demoted</strong> (isActive = 0) — it is excluded from the live routing chain, so normal chats never send it traffic. Diagnostics still run so you can inspect its raw upstream response. Note: its free-tier quota is per-IP on shared egress infrastructure, so a &quot;Rate-limited&quot; verdict here does not mean you exhausted it yourself.
+              </span>
+            </div>
+          )}
+
           {/* Provider summary */}
           <div className="rounded-lg bg-secondary/50 p-3 grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
             <div><div className="text-muted-foreground">Type</div><div className="font-medium capitalize">{provider.type.replace("-", " ")}</div></div>

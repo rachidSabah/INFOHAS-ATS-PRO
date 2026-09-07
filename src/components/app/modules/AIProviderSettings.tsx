@@ -145,10 +145,15 @@ export function AIProviderSettings() {
     setTestingChain(true);
     setChainResults({});
     
+    // Task 17 — mirror the runtime chain: demoted (isActive = false) links are
+    // excluded by the router's chain builder, so diagnostics skip them too.
+    // Probing them only produces misleading 429s (shared-egress quota) and, on
+    // CORS-hostile upstreams, browser-direct probe noise.
     const providersToTest = [
       defaultProvider,
       ...fallbackProviders
-    ].filter(Boolean) as typeof providers;
+    ].filter(Boolean)
+      .filter((p) => p && p.isActive !== false) as typeof providers;
 
     for (const p of providersToTest) {
       setChainResults(prev => ({ ...prev, [p.id]: { ok: false, latencyMs: 0, phase: "testing" } }));
@@ -326,7 +331,9 @@ export function AIProviderSettings() {
                 <span className="text-muted-foreground font-mono">({form.defaultModel || "no model"})</span>
               </div>
               <div className="flex flex-col items-end gap-0.5">
-                {chainResults[defaultProvider.id] ? (
+                {defaultProvider.isActive === false ? (
+                  <span className="text-amber-500 font-medium" title="Demoted providers are excluded from the live routing chain — the router never sends them traffic.">Demoted — excluded from live chain</span>
+                ) : chainResults[defaultProvider.id] ? (
                   <ChainLinkStatus result={chainResults[defaultProvider.id]} />
                 ) : (
                   <span className="text-muted-foreground">Not tested</span>
@@ -342,7 +349,9 @@ export function AIProviderSettings() {
                 <span className="text-muted-foreground font-mono">({p.modelName || "no model"})</span>
               </div>
               <div className="flex flex-col items-end gap-0.5">
-                {chainResults[p.id] ? (
+                {p.isActive === false ? (
+                  <span className="text-amber-500 font-medium" title="Demoted providers are excluded from the live routing chain — the router never sends them traffic.">Demoted — excluded from live chain</span>
+                ) : chainResults[p.id] ? (
                   <ChainLinkStatus result={chainResults[p.id]} />
                 ) : (
                   <span className="text-muted-foreground">Not tested</span>
