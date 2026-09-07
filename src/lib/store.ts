@@ -7,6 +7,7 @@
 import { create } from "zustand";
 import { createAuthSlice, type AuthSlice } from "./store/auth-slice";
 import { createResumesSlice, type ResumesSlice } from "./store/resumes-slice";
+import { createApplicationsSlice, type ApplicationsSlice } from "./store/applications-slice";
 import { createAdminSlice, type AdminSlice } from "./store/admin-slice";
 import { createDevWorkspaceSlice, type DevWorkspaceSlice } from "./store/dev-workspace-slice";
 import { createFlightSlice, type FlightSlice } from "./store/flight-slice";
@@ -15,11 +16,12 @@ import { registerHook } from "./ai/hooks";
 import { BRAND } from "./brand";
 import { uid } from "./store/helpers";
 
-export type AppState = AuthSlice & ResumesSlice & AdminSlice & DevWorkspaceSlice & FlightSlice;
+export type AppState = AuthSlice & ResumesSlice & ApplicationsSlice & AdminSlice & DevWorkspaceSlice & FlightSlice;
 
 export const useApp = create<AppState>()((set, get, store) => ({
   ...createAuthSlice(set, get, store),
   ...createResumesSlice(set, get, store),
+  ...createApplicationsSlice(set, get, store),
   ...createAdminSlice(set, get, store),
   ...createDevWorkspaceSlice(set, get, store),
   ...createFlightSlice(set, get, store),

@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Icon, Badge, ScoreRing } from "@/components/shared";
 import { useApp } from "@/lib/store";
 import { TEMPLATES } from "@/lib/brand";
+import { dueFollowUps } from "@/lib/applications-logic";
 
 export function Dashboard() {
   const user = useApp((s) => s.user);
@@ -14,16 +15,19 @@ export function Dashboard() {
   const coverLetters = useApp((s) => s.coverLetters);
   const interviews = useApp((s) => s.interviews);
   const atsReports = useApp((s) => s.atsReports);
+  const applications = useApp((s) => s.applications);
   const setView = useApp((s) => s.setView);
   const setActiveResume = useApp((s) => s.setActiveResume);
   const providers = useApp((s) => s.providers);
 
   const latestReport = atsReports[0];
   const activeProviders = providers.filter((p) => p.isActive).length;
+  const followUps = dueFollowUps(applications);
 
   const stats = [
     { label: "Resumes", value: resumes.length, icon: "FileText", color: "#1154A3", action: () => setView("resumes") },
     { label: "ATS checks", value: atsReports.length, icon: "ScanText", color: "#10B981", action: () => setView("ats-checker") },
+    { label: "Applications", value: applications.length, icon: "KanbanSquare", color: "#0EA5E9", action: () => setView("app-tracker") },
     { label: "Cover letters", value: coverLetters.length, icon: "Mail", color: "#F59E0B", action: () => setView("cover-letter") },
     { label: "Interview preps", value: interviews.length, icon: "MessagesSquare", color: "#8B5CF6", action: () => setView("interview") },
   ];
@@ -34,6 +38,7 @@ export function Dashboard() {
     { title: "Optimize for a job", desc: "Match your resume to a job description with AI.", icon: "Wand2", color: "#F59E0B", action: () => setView("optimizer") },
     { title: "Generate cover letter", desc: "Modern, traditional, executive, or email.", icon: "Mail", color: "#8B5CF6", action: () => setView("cover-letter") },
     { title: "Prep for interviews", desc: "Get STAR-method answers for your target role.", icon: "MessagesSquare", color: "#EC4899", action: () => setView("interview") },
+    { title: "Track applications", desc: "Organize your pipeline from wishlist to offer — with follow-up reminders.", icon: "KanbanSquare", color: "#0EA5E9", action: () => setView("app-tracker") },
     { title: "Scrape a job posting", desc: "Extract keywords from any URL.", icon: "Search", color: "#0EA5E9", action: () => setView("jd-scraper") },
   ];
 
@@ -65,6 +70,28 @@ export function Dashboard() {
           </div>
         </div>
       </motion.div>
+
+      {/* Follow-ups due — application tracker reminders */}
+      {followUps.length > 0 && (
+        <motion.button
+          initial={{ opacity: 0, y: 8 }}
+          animate={{ opacity: 1, y: 0 }}
+          onClick={() => setView("app-tracker")}
+          className="w-full text-left rounded-xl border border-amber-300 bg-amber-50 dark:border-amber-900 dark:bg-amber-950/40 p-4 flex items-center gap-3 hover:shadow-sm transition-shadow"
+        >
+          <Icon name="BellRing" className="w-5 h-5 text-amber-600 shrink-0" />
+          <span className="min-w-0">
+            <span className="block text-sm font-medium text-amber-900 dark:text-amber-200">
+              {followUps.length} application follow-up{followUps.length > 1 ? "s" : ""} due
+            </span>
+            <span className="block text-xs text-amber-800 dark:text-amber-300 truncate">
+              Next up: {followUps[0].role || "Untitled role"} @ {followUps[0].company || "—"}
+              {followUps.length > 1 ? ` · +${followUps.length - 1} more` : ""}
+            </span>
+          </span>
+          <Icon name="ChevronRight" className="w-4 h-4 text-amber-600 ml-auto shrink-0" />
+        </motion.button>
+      )}
 
       {/* Stats */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">

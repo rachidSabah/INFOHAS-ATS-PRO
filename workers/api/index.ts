@@ -425,6 +425,10 @@ const requireAuth = async (c: any, next: any) => {
 
 // Apply auth middleware to all write routes (POST, PUT, PATCH, DELETE)
 app.use("/api/resumes/*", requireAuth);
+// Applications (job application tracker) are per-user business data — protect
+// the collection and the :id subpaths exactly like resumes/interviews.
+app.use("/api/applications", requireAuth);
+app.use("/api/applications/*", requireAuth);
 app.use("/api/cover-letters/*", requireAuth);
 app.use("/api/interviews/*", requireAuth);
 app.use("/api/ats-reports/*", requireAuth);
@@ -1041,6 +1045,150 @@ app.delete("/api/interviews/:id", async (c) => {
   if (!userId) return c.json(AUTH_REQUIRED_JSON, 401);
   await c.env.DB.prepare("DELETE FROM interview_packages WHERE id = ? AND user_id = ?").bind(c.req.param("id"), userId).run();
   return c.json({ ok: true });
+});
+
+// ============ APPLICATIONS (job application tracker) ============
+// Per-user Kanban CRM rows. ISOLATION CONTRACT (same as resumes/interviews):
+// every query filters by user_id; PUT/DELETE operate on
+// `WHERE id = ? AND user_id = ?` so one user can never read or mutate
+// another user's applications (IDOR).
+//
+// The table is created lazily on first use (same pattern as
+// provider_sessions) so deploys never need a manual migration step.
+
+async function ensureApplicationsTable(db: D1Database): Promise<void> {
+  await db.batch([
+    db.prepare(
+      `CREATE TABLE IF NOT EXISTS applications (
+        id TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL,
+        company TEXT,
+        role TEXT,
+        status TEXT,
+        source TEXT,
+        url TEXT,
+        location TEXT,
+        salary TEXT,
+        resume_id TEXT,
+        notes TEXT,
+        applied_at TEXT,
+        next_action_at TEXT,
+        next_action_note TEXT,
+        history_json TEXT,
+        created_at TEXT,
+        updated_at TEXT
+      )`
+    ),
+    db.prepare(
+      `CREATE INDEX IF NOT EXISTS applications_user_idx ON applications (user_id, updated_at)`
+    ),
+  ]);
+}
+
+app.get("/api/applications", async (c) => {
+  const userId = handlerUserId(c);
+  if (!userId) return c.json({ applications: [] });
+  try {
+    await ensureApplicationsTable(c.env.DB);
+    const { results } = await c.env.DB.prepare(
+      "SELECT * FROM applications WHERE user_id = ? ORDER BY updated_at DESC"
+    ).bind(userId).all();
+    return c.json({ applications: results || [] });
+  } catch (e: any) {
+    console.error("[Applications GET Error]", e?.message);
+    return c.json({ applications: [] });
+  }
+});
+
+app.post("/api/applications", async (c) => {
+  const userId = getUserId(c.req.raw) || "anonymous";
+  await ensureUserExists(c.env.DB, userId);
+  const body = await parseBody(c.req.raw);
+  const id = body?.id || uuid("app");
+  const now = new Date().toISOString();
+  try {
+    await ensureApplicationsTable(c.env.DB);
+    // Try INSERT first, fall back to UPDATE (UPSERT pattern — same as resumes).
+    await c.env.DB.prepare(
+      `INSERT INTO applications (id, user_id, company, role, status, source, url, location, salary, resume_id, notes, applied_at, next_action_at, next_action_note, history_json, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).bind(
+      id, userId,
+      body?.company || "", body?.role || "", body?.status || "wishlist",
+      body?.source || "", body?.url || "", body?.location || "", body?.salary || "",
+      body?.resumeId || null, body?.notes || "",
+      body?.appliedAt || null, body?.nextActionAt || null, body?.nextActionNote || "",
+      JSON.stringify(Array.isArray(body?.history) ? body.history : []),
+      body?.createdAt || now, now
+    ).run();
+  } catch (insertErr: any) {
+    console.warn("[Workers] Application INSERT failed, trying UPDATE:", insertErr?.message || insertErr);
+    await c.env.DB.prepare(
+      `UPDATE applications SET company = ?, role = ?, status = ?, source = ?, url = ?, location = ?, salary = ?, resume_id = ?, notes = ?, applied_at = ?, next_action_at = ?, next_action_note = ?, history_json = ?, updated_at = ?
+       WHERE id = ? AND user_id = ?`
+    ).bind(
+      body?.company || "", body?.role || "", body?.status || "wishlist",
+      body?.source || "", body?.url || "", body?.location || "", body?.salary || "",
+      body?.resumeId || null, body?.notes || "",
+      body?.appliedAt || null, body?.nextActionAt || null, body?.nextActionNote || "",
+      JSON.stringify(Array.isArray(body?.history) ? body.history : []),
+      now, id, userId
+    ).run();
+  }
+  return c.json({ ok: true, application: { ...body, id } });
+});
+
+app.put("/api/applications/:id", async (c) => {
+  // ISOLATION: never let one user modify another user's row (IDOR).
+  const userId = handlerUserId(c);
+  if (!userId) return c.json(AUTH_REQUIRED_JSON, 401);
+  const id = c.req.param("id");
+  const body = await parseBody(c.req.raw);
+  const now = new Date().toISOString();
+  const fields: Record<string, string> = {
+    company: "company", role: "role", status: "status", source: "source",
+    url: "url", location: "location", salary: "salary", notes: "notes",
+    resumeId: "resume_id", appliedAt: "applied_at",
+    nextActionAt: "next_action_at", nextActionNote: "next_action_note",
+  };
+  try {
+    await ensureApplicationsTable(c.env.DB);
+    const updates: string[] = ["updated_at = ?"];
+    const values: any[] = [now];
+    for (const [bodyKey, dbCol] of Object.entries(fields)) {
+      if (body?.[bodyKey] !== undefined) {
+        updates.push(`${dbCol} = ?`);
+        values.push(body[bodyKey] === null ? null : body[bodyKey]);
+      }
+    }
+    if (body?.history !== undefined) {
+      updates.push("history_json = ?");
+      values.push(JSON.stringify(Array.isArray(body.history) ? body.history : []));
+    }
+    values.push(id);
+    values.push(userId);
+    await c.env.DB.prepare(
+      `UPDATE applications SET ${updates.join(", ")} WHERE id = ? AND user_id = ?`
+    ).bind(...values).run();
+    return c.json({ ok: true });
+  } catch (e: any) {
+    console.error("[Applications PUT Error]", e?.message);
+    return c.json({ ok: false, error: e?.message || "Failed to update application" }, 500);
+  }
+});
+
+app.delete("/api/applications/:id", async (c) => {
+  const userId = handlerUserId(c);
+  if (!userId) return c.json(AUTH_REQUIRED_JSON, 401);
+  const id = c.req.param("id");
+  try {
+    await ensureApplicationsTable(c.env.DB);
+    await c.env.DB.prepare("DELETE FROM applications WHERE id = ? AND user_id = ?").bind(id, userId).run();
+    return c.json({ ok: true });
+  } catch (e: any) {
+    console.error("[Applications DELETE Error]", e?.message);
+    return c.json({ ok: false, error: e?.message || "Failed to delete application" }, 500);
+  }
 });
 
 // ============ ATS REPORTS ============

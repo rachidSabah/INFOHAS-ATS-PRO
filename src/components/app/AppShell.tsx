@@ -46,11 +46,12 @@ import { ScenarioManagement } from "./modules/ScenarioManagement";
 import { PersonaManagement } from "./modules/PersonaManagement";
 import {
   LinkedinImport, ResumeVersioning, MultiLanguage, ResumeSharing, AbTesting,
-  BulkGenerator, ResumeAnalytics, AppTracker, SalaryInsights, SkillGap,
+  BulkGenerator, ResumeAnalytics, SalaryInsights, SkillGap,
   CareerPath, CompanyResearch, JobAlerts, CertTracker, Networking,
   AiCoach, AiMockInterview, AiSalaryCoach, AiEmailWriter,
   AiJobMatch, AiAchievement, Integrations,
 } from "./modules/CareerTools";
+import { ApplicationTracker } from "./modules/ApplicationTracker";
 import { ResumeReviewPlatform } from "./modules/ResumeReviewPlatform";
 import { BatchOptimizer } from "./modules/BatchOptimizer";
 import { SafeRender } from "./SafeRender";
@@ -100,7 +101,7 @@ const VIEW_COMPONENTS: Record<ViewKey, React.FC> = {
   "ab-testing": AbTesting,
   "bulk-generator": BulkGenerator,
   "resume-analytics": ResumeAnalytics,
-  "app-tracker": AppTracker,
+  "app-tracker": ApplicationTracker,
   "salary-insights": SalaryInsights,
   "skill-gap": SkillGap,
   "career-path": CareerPath,

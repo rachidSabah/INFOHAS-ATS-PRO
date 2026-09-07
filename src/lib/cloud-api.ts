@@ -2,6 +2,8 @@
 // All data flows through this client → Cloudflare Worker → D1
 // The browser is NEVER the permanent storage location for business data.
 
+import { parseDbApplication } from "./applications-logic";
+
 // Defensive JD normalization — same impl as store.ts (imported lazily to avoid
 // a circular dependency). Guarantees every JD has all expected array fields
 // as real arrays so downstream React renders and scoreATS() never crash on
@@ -222,6 +224,12 @@ export const api = {
   getATSReports: () => apiFetch<{ atsReports: any[] }>("/api/ats-reports"),
   createATSReport: (report: any) => apiFetch("/api/ats-reports", { method: "POST", body: JSON.stringify(report) }),
 
+  // Applications (job application tracker) — per-user Kanban CRM rows
+  getApplications: () => apiFetch<{ applications: any[] }>("/api/applications"),
+  createApplication: (a: any) => apiFetch("/api/applications", { method: "POST", body: JSON.stringify(a) }),
+  updateApplication: (id: string, patch: any) => apiFetch(`/api/applications/${id}`, { method: "PUT", body: JSON.stringify(patch) }),
+  deleteApplication: (id: string) => apiFetch(`/api/applications/${id}`, { method: "DELETE" }),
+
   // Users
   getUsers: () => apiFetch<{ users: any[] }>("/api/users"),
   createUser: (user: any) => apiFetch("/api/users", { method: "POST", body: JSON.stringify(user) }),
@@ -321,12 +329,13 @@ export function cloudApiSafe<T extends (...args: any[]) => Promise<any>>(
 // On app load, sync all data from D1 to the Zustand store
 export async function syncAllFromCloud(store: any): Promise<void> {
   try {
-    const [resumesRes, clsRes, jdsRes, ivsRes, atsRes, providersRes, promptsRes, logsRes, brandingRes, flagsRes, usersRes] = await Promise.all([
+    const [resumesRes, clsRes, jdsRes, ivsRes, atsRes, appsRes, providersRes, promptsRes, logsRes, brandingRes, flagsRes, usersRes] = await Promise.all([
       api.getResumes().catch(() => ({ resumes: [] })),
       api.getCoverLetters().catch(() => ({ coverLetters: [] })),
       api.getJobDescriptions().catch(() => ({ jobDescriptions: [] })),
       api.getInterviews().catch(() => ({ interviews: [] })),
       api.getATSReports().catch(() => ({ atsReports: [] })),
+      api.getApplications().catch(() => ({ applications: [] })),
       api.getProviders().catch(() => ({ providers: [] })),
       api.getPrompts().catch(() => ({ prompts: [] })),
       api.getAuditLogs().catch(() => ({ logs: [] })),
@@ -341,6 +350,7 @@ export async function syncAllFromCloud(store: any): Promise<void> {
     const jobDescriptions = (jdsRes.jobDescriptions || []).map(parseDbJD).map(normalizeJD);
     const interviews = (ivsRes.interviews || []).map(parseDbInterview);
     const atsReports = (atsRes.atsReports || []).map(parseDbATS);
+    const applications = (appsRes.applications || []).map(parseDbApplication);
     const providers = (providersRes.providers || []).map(parseDbProvider);
     const prompts = (promptsRes.prompts || []).map(parseDbPrompt);
     const logs = logsRes.logs || [];
@@ -407,6 +417,19 @@ export async function syncAllFromCloud(store: any): Promise<void> {
           const backup = JSON.parse(localStorage.getItem(userScopedKey("resumeai-ats-backup")) || "[]");
           if (backup.length > 0) store.setState({ atsReports: backup });
         } catch (err) { console.warn("[cloudApi] ATS reports backup restore failed:", err instanceof Error ? err.message : err); }
+      }
+    }
+    // Applications (job application tracker) — cloud first, user-scoped backup
+    // fallback (never restores ANOTHER user's tracker rows after an account
+    // switch; keys are namespaced via userScopedKey).
+    if (applications.length) {
+      store.setState({ applications });
+    } else {
+      if (typeof localStorage !== "undefined") {
+        try {
+          const backup = JSON.parse(localStorage.getItem(userScopedKey("resumeai-applications-backup")) || "[]");
+          if (backup.length > 0) store.setState({ applications: backup });
+        } catch (err) { console.warn("[cloudApi] Applications backup restore failed:", err instanceof Error ? err.message : err); }
       }
     }
     // [PROVIDER SYNC] Synchronize D1 providers with seed defaults and custom providers.

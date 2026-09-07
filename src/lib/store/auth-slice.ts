@@ -36,6 +36,7 @@ function resetUserDataForSignIn(set: (partial: Partial<AppState>) => void) {
     atsReports: [],
     reviewReports: [],
     careerMaterials: [],
+    applications: [],
     activeResumeId: null,
     activeJdId: null,
     activeCoverLetterId: null,
@@ -160,6 +161,7 @@ export const createAuthSlice: StateCreator<AppState, [], [], AuthSlice> = (set, 
       interviewSessions: [],
       atsReports: [],
       reviewReports: [],
+      applications: [],
     });
   },
 
