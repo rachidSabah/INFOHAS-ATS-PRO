@@ -96,6 +96,60 @@ export interface AssembleResult {
 }
 
 /**
+ * Normalize a skill/language name by stripping a leading "Category: " prefix
+ * that some AI providers leak into the `name` field (e.g.
+ * "General: Active Listening" should match source "Active Listening").
+ */
+export function normalizeSkillName(n: string): string {
+  return (n || "").replace(/^\s*[^:]{1,30}:\s*/, "").trim().toLowerCase();
+}
+
+/**
+ * Source-skill preservation check (Fix 8). Returns the names of source skills
+ * considered REMOVED from the assembled resume.
+ *
+ * Relocation-aware: the assembler legitimately MOVES language-category
+ * entries from skills[] to languages[] (language separation). A moved skill
+ * is preserved, not removed — so the check searches assembled skills AND
+ * assembled languages (including every comma-part, since "English, French"
+ * may be split into individual language entries). A skill absent from both
+ * is still reported.
+ */
+export function findRemovedSourceSkills(
+  sourceSkills: Array<string | { name?: string }>,
+  assembledSkills: Array<string | { name?: string }>,
+  assembledLanguages: Array<string | { name?: string }>,
+): string[] {
+  const removed: string[] = [];
+  const nameOf = (s: string | { name?: string }): string =>
+    (typeof s === "string" ? s : s?.name) || "";
+  const assembledSkillNames = new Set(
+    assembledSkills.map((s) => nameOf(s).trim().toLowerCase()).filter(Boolean),
+  );
+  const assembledLangNames = new Set(
+    assembledLanguages.map((s) => nameOf(s).trim().toLowerCase()).filter(Boolean),
+  );
+  for (const srcSkill of sourceSkills || []) {
+    const skillName = nameOf(srcSkill);
+    if (!skillName) continue;
+    const srcNorm = normalizeSkillName(skillName);
+    const found = (assembledSkills || []).some((as) => {
+      const asName = nameOf(as);
+      if (!asName) return false;
+      const asNorm = normalizeSkillName(asName);
+      return asName.toLowerCase() === skillName.toLowerCase() || asNorm === srcNorm;
+    });
+    if (found) continue;
+    const parts = skillName.split(/[,;]/).map((p) => normalizeSkillName(p)).filter(Boolean);
+    const relocated = parts.length > 0 && parts.every(
+      (p) => assembledLangNames.has(p) || assembledSkillNames.has(p),
+    );
+    if (!relocated) removed.push(skillName);
+  }
+  return removed;
+}
+
+/**
  * Assemble the final resume from source (immutable) + optimizer output (mutable).
  *
  * This is the ONLY function that constructs the final ResumeData.

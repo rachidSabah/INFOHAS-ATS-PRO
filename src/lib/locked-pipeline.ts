@@ -23,7 +23,7 @@
 
 import type { ResumeData, JobDescription, AgentDirectives, OptimizerDirectiveConfig } from "./types";
 import { runBulletOnlyOptimizer, buildOptimizerInput } from "./bullet-only-optimizer";
-import { assembleResume } from "./resume-assembler";
+import { assembleResume, findRemovedSourceSkills, normalizeSkillName } from "./resume-assembler";
 import { runStructureGuardian, sanitizeSkillsAgainstJd } from "./structure-guardian";
 import { validateExperienceFingerprints } from "./experience-fingerprint";
 import { ensureExperienceIds } from "./entity-lock";
@@ -640,29 +640,14 @@ export async function runLockedPipeline(
       }
 
       // === Fix 8: Skills/Languages structural immutability ===
-      // Normalize a skill/language name by stripping a leading "Category: "
-      // prefix that some AI providers leak into the `name` field (e.g.
-      // "General: Active Listening" should match source "Active Listening").
-      // Without this, the immutability check spuriously reports the skill as
-      // "removed" and forces 3 doomed retries → degraded-optimization return.
-      const normalizeName = (n: string): string =>
-        n.replace(/^\s*[^:]{1,30}:\s*/, "").trim().toLowerCase();
-
-      const srcSkills = sourceResume.skills || [];
-      const assembledSkills = assembleResult.resume.skills || [];
-      for (const srcSkill of srcSkills) {
-        const skillName = typeof srcSkill === "string" ? srcSkill : (srcSkill as any).name;
-        if (!skillName) continue;
-        const srcNorm = normalizeName(skillName);
-        const found = assembledSkills.some((as: any) => {
-          const asName = typeof as === "string" ? as : as.name;
-          if (!asName) return false;
-          const asNorm = normalizeName(asName);
-          return asName.toLowerCase() === skillName.toLowerCase() || asNorm === srcNorm;
-        });
-        if (!found) {
-          contentViolations.push(`Skill "${skillName}" was removed from assembled resume`);
-        }
+      // Relocation-aware (see findRemovedSourceSkills): skills the assembler
+      // legitimately MOVED to languages[] count as preserved, not removed.
+      for (const skillName of findRemovedSourceSkills(
+        sourceResume.skills || [],
+        assembleResult.resume.skills || [],
+        assembleResult.resume.languages || [],
+      )) {
+        contentViolations.push(`Skill "${skillName}" was removed from assembled resume`);
       }
 
       const srcLangs = sourceResume.languages || [];
@@ -670,11 +655,11 @@ export async function runLockedPipeline(
       for (const srcLang of srcLangs) {
         const langName = typeof srcLang === "string" ? srcLang : (srcLang as any).name;
         if (!langName) continue;
-        const srcNorm = normalizeName(langName);
+        const srcNorm = normalizeSkillName(langName);
         const found = assembledLangs.some((al: any) => {
           const alName = typeof al === "string" ? al : al.name;
           if (!alName) return false;
-          const alNorm = normalizeName(alName);
+          const alNorm = normalizeSkillName(alName);
           return alName.toLowerCase() === langName.toLowerCase() || alNorm === srcNorm;
         });
         if (!found) {
