@@ -138,6 +138,19 @@ export function parseAgentJSON<T = unknown>(raw: string, schema?: SchemaSpec): P
 
   try {
     data = extractJSON<unknown>(text);
+
+    // If extractJSON succeeded, check if the raw input actually had unbalanced brackets/braces
+    // (meaning the Stream JSON Balancer auto-closed/repaired it).
+    const ob = (text.match(/\{/g) || []).length;
+    const cb = (text.match(/\}/g) || []).length;
+    const obr = (text.match(/\[/g) || []).length;
+    const cbr = (text.match(/\]/g) || []).length;
+    if (ob > cb) {
+      repairs.push(`Added ${ob - cb} missing closing brace(s)`);
+    }
+    if (obr > cbr) {
+      repairs.push(`Added ${obr - cbr} missing closing bracket(s)`);
+    }
   } catch (extractErr) {
     // Truncated / unbalanced output — attempt deterministic repair.
     const repaired = repairMalformedJSON(text);

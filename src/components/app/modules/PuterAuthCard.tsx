@@ -11,18 +11,36 @@ export function PuterAuthCard({ status, onRefreshStatus }: { status: any, onRefr
   const [loading, setLoading] = useState(false);
   const puter = getPuterProvider();
 
-  // Listen to live auto-rotation events
+  // Listen to live auto-rotation and status-change events
   useEffect(() => {
     const handleRotated = (e: any) => {
       const { fromEmail, toEmail, reason } = e?.detail || {};
       toast.info(`[Puter] Auto-rotated from ${fromEmail || "previous"} to ${toEmail || "next"} (${reason || "quota limit"})`);
       onRefreshStatus();
     };
+    const handleStatusChange = (e: any) => {
+      const restored = e?.detail?.restored ?? 0;
+      if (restored > 0) {
+        toast.success(`[Puter] Proactive probe: ${restored} account(s) recovered to healthy status!`);
+        onRefreshStatus();
+      }
+    };
     if (typeof window !== "undefined") {
       window.addEventListener("puter:rotated", handleRotated);
-      return () => window.removeEventListener("puter:rotated", handleRotated);
+      window.addEventListener("puter:status_change", handleStatusChange);
+
+      // Periodically probe rate-limited accounts (every 5 minutes)
+      const probeInterval = setInterval(() => {
+        puter.probeRateLimitedAccounts().catch(() => {});
+      }, 5 * 60 * 1000);
+
+      return () => {
+        window.removeEventListener("puter:rotated", handleRotated);
+        window.removeEventListener("puter:status_change", handleStatusChange);
+        clearInterval(probeInterval);
+      };
     }
-  }, [onRefreshStatus]);
+  }, [onRefreshStatus, puter]);
   
   const handleAddAccount = async () => {
     setLoading(true);

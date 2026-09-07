@@ -162,6 +162,16 @@ export function PipelineTrajectoryPanel() {
                     </span>
                     <span className="font-semibold">{e.agent}</span>
                     <span className="font-mono text-[10px] text-muted-foreground">{e.action}</span>
+                    {meta?.provider ? (
+                      <Badge variant="outline" className="text-[9px] px-1 py-0 h-4 border-brand/30 text-brand bg-brand/5">
+                        {String(meta.provider)}
+                      </Badge>
+                    ) : null}
+                    {meta?.model ? (
+                      <Badge variant="outline" className="text-[9px] px-1 py-0 h-4 text-muted-foreground border-border">
+                        {String(meta.model)}
+                      </Badge>
+                    ) : null}
                     {skip && (
                       <span className="text-[10px] text-amber-600 dark:text-amber-400 font-medium">
                         {describeSkipReason(e)}

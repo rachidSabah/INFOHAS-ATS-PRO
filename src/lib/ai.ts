@@ -219,6 +219,42 @@ export function extractJSON<T = any>(raw: string): T {
     }
   }
 
+  // === Stream JSON Balancer & Auto-Closer ===
+  // When an LLM (especially free/token-capped models) truncates output mid-stream,
+  // attempt structural auto-closure before failing so downstream callers recover partial data.
+  if (firstBrace !== -1 || firstBracket !== -1) {
+    try {
+      const startIndex = firstBrace !== -1 && firstBracket !== -1 ? Math.min(firstBrace, firstBracket) : firstBrace !== -1 ? firstBrace : firstBracket;
+      let partial = cleaned.slice(startIndex).trim();
+
+      // 1. If cut inside an unclosed string, close the quote
+      const quotes = (partial.match(/(?<!\\)"/g) || []).length;
+      if (quotes % 2 !== 0) {
+        partial += '"';
+      }
+
+      // 2. Remove dangling trailing commas or incomplete keys/values (e.g. `,"skill": ` or `,"`)
+      partial = partial.replace(/,\s*(?:(?:"[^"]*")?\s*:\s*)?$/, "");
+
+      // 3. Count open vs closed structures
+      const ob = (partial.match(/\{/g) || []).length;
+      const cb = (partial.match(/\}/g) || []).length;
+      const obr = (partial.match(/\[/g) || []).length;
+      const cbr = (partial.match(/\]/g) || []).length;
+
+      // Close missing brackets and braces in logical reverse order
+      if (obr > cbr) partial += "]".repeat(obr - cbr);
+      if (ob > cb) partial += "}".repeat(ob - cb);
+
+      const recovered = JSON.parse(partial);
+      if (recovered && (typeof recovered === "object" || Array.isArray(recovered))) {
+        return recovered as T;
+      }
+    } catch {
+      // If auto-balancer cannot produce valid JSON, proceed to standard actionable error
+    }
+  }
+
   const preview = cleaned.slice(0, 80).replace(/\n/g, " ");
   throw new Error(
     `AI did not return valid JSON. Response started with: "${preview}${cleaned.length > 80 ? "..." : ""}". ` +

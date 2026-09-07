@@ -121,6 +121,15 @@ This resume is already strong — just add the missing keywords above.`;
     expect(result.missing_keywords).toEqual(["Go", "Kubernetes"]);
     expect(result.optimized_content).toContain("<h1>");
   });
+
+  it("recovers truncated JSON from streaming LLMs with unclosed structures", () => {
+    const truncatedInput = '{\n  "requiredSkills": [\n    "promote and sell Al Maha Services and lounges",\n    "customer service"';
+    const recovered = extractJSON<any>(truncatedInput);
+    expect(recovered).toBeDefined();
+    expect(Array.isArray(recovered.requiredSkills)).toBe(true);
+    expect(recovered.requiredSkills.length).toBe(2);
+    expect(recovered.requiredSkills[0]).toContain("Al Maha Services");
+  });
 });
 
 describe("getPuterStatus", () => {

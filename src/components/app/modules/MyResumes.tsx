@@ -150,7 +150,28 @@ export function MyResumes() {
                   <Button size="sm" variant="outline" className="flex-1" onClick={() => { setActiveResume(r.id); setView("builder"); }}>
                     <Icon name="Pencil" className="w-3.5 h-3.5 mr-1" /> Edit
                   </Button>
-                  <Button size="sm" variant="outline" onClick={() => { setActiveResume(r.id); setView("ats-checker"); }}>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    title="Duplicate as Tailored Variant"
+                    onClick={() => {
+                      const variant: ResumeData = {
+                        ...r,
+                        id: uid("res"),
+                        name: `${r.name} (Tailored Variant)`,
+                        headline: r.headline ? `${r.headline} - Tailored` : "Tailored Variant",
+                        source: "ai-optimized" as const,
+                        createdAt: new Date().toISOString(),
+                        updatedAt: new Date().toISOString(),
+                      };
+                      addResume(variant);
+                      setActiveResume(variant.id);
+                      toast.success(`Created tailored variant: "${variant.name}"`);
+                    }}
+                  >
+                    <Icon name="Copy" className="w-3.5 h-3.5" />
+                  </Button>
+                  <Button size="sm" variant="outline" title="Run ATS Check" onClick={() => { setActiveResume(r.id); setView("ats-checker"); }}>
                     <Icon name="ScanText" className="w-3.5 h-3.5" />
                   </Button>
                   <Button size="sm" variant="ghost" className="text-destructive hover:text-destructive hover:bg-destructive/10" onClick={() => { removeResume(r.id); toast.success("Resume deleted"); }}>

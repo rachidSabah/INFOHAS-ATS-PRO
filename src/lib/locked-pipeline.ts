@@ -886,6 +886,65 @@ export async function runLockedPipeline(
       }
 
       // ========================================================================
+      // Step 8b: Monotonic ATS Quality Safeguard (No Score Regression)
+      // If optimized ATS score drops below the source resume score (e.g. due to
+      // weak verbs or excessive length on newly added content), run a deterministic
+      // cleanup on weak bullets and section lengths to preserve or exceed baseline score.
+      // ========================================================================
+      try {
+        const { scoreATS } = await import("./ats");
+        const baseAtsReport = scoreATS(sourceResume, jd);
+        const optAtsReport = scoreATS(assembleResult.resume, jd);
+        const baseScore = baseAtsReport.scores.ats;
+        const optScore = optAtsReport.scores.ats;
+
+        if (optScore < baseScore) {
+          // Identify weak verbs and strengthen them
+          const WEAK_REPLACEMENTS: Record<string, string> = {
+            "responsible for": "Spearheaded",
+            "worked on": "Executed",
+            "helped": "Facilitated",
+            "duties included": "Delivered",
+            "tasked with": "Orchestrated",
+          };
+
+          let healedResume = { ...assembleResult.resume };
+          let bulletsRepaired = 0;
+
+          healedResume.experience = (healedResume.experience || []).map((exp) => ({
+            ...exp,
+            bullets: (exp.bullets || []).map((b) => {
+              let trimmed = b.trim();
+              const lower = trimmed.toLowerCase();
+              for (const [weakPhrase, strongVerb] of Object.entries(WEAK_REPLACEMENTS)) {
+                if (lower.startsWith(weakPhrase)) {
+                  bulletsRepaired++;
+                  return strongVerb + trimmed.slice(weakPhrase.length);
+                }
+              }
+              return trimmed;
+            }),
+          }));
+
+          // If summary was bloated beyond 500 chars (triggering ATS length penalty), trim lightly
+          if (healedResume.summary && healedResume.summary.length > 500 && sourceResume.summary && sourceResume.summary.length <= 500) {
+            const sentences = healedResume.summary.split(/(?<=[.!?])\s+/);
+            if (sentences.length > 3) {
+              healedResume.summary = sentences.slice(0, 3).join(" ");
+            }
+          }
+
+          const reScored = scoreATS(healedResume, jd);
+          if (reScored.scores.ats >= baseScore || reScored.scores.ats > optScore) {
+            assembleResult.resume = healedResume;
+            warnings.push(`Monotonic ATS Safeguard: score protected (${optScore} → ${reScored.scores.ats}, baseline was ${baseScore}). Strengthened ${bulletsRepaired} bullet(s).`);
+          }
+        }
+      } catch (atsGuardErr) {
+        console.warn("[Locked Pipeline ATS Safeguard] Non-fatal check error:", atsGuardErr);
+      }
+
+      // ========================================================================
       // Step 9: Return result
       // ========================================================================
       const result: LockedPipelineResult = {

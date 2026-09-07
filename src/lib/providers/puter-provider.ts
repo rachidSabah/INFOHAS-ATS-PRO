@@ -807,9 +807,52 @@ export class PuterProvider implements OAuthAIProvider {
     await this.saveAccounts();
   }
 
+  /**
+   * Proactively checks rate-limited Puter accounts with a lightweight check.
+   * If quota has replenished, restores status to "healthy" automatically.
+   */
+  async probeRateLimitedAccounts(): Promise<number> {
+    if (typeof window === "undefined" || !window.puter?.ai?.chat) return 0;
+    const rateLimited = this.accounts.filter(a => a.status === "rate_limited");
+    if (rateLimited.length === 0) return 0;
+
+    let restored = 0;
+    const currentActiveId = this.accounts.find(a => a.active)?.id;
+
+    for (const acct of rateLimited) {
+      try {
+        if (acct.accessToken && typeof window.puter.setAuthToken === "function") {
+          window.puter.setAuthToken(acct.accessToken);
+        }
+        // Lightweight probe
+        await window.puter.ai.chat("ping", { model: "gpt-5-nano", test: true });
+        acct.status = "healthy";
+        acct.cooldownUntil = undefined;
+        restored++;
+      } catch (e: any) {
+        // Still rate-limited or error; keep cooldown
+      }
+    }
+
+    // Restore active account session
+    if (currentActiveId) {
+      const active = this.accounts.find(a => a.id === currentActiveId);
+      if (active?.accessToken && typeof window.puter?.setAuthToken === "function") {
+        window.puter.setAuthToken(active.accessToken);
+      }
+    }
+
+    if (restored > 0) {
+      await this.saveAccounts();
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(new CustomEvent("puter:status_change", { detail: { restored } }));
+      }
+    }
+
+    return restored;
+  }
+
   // Private helpers
-
-
   private async extractAccessToken(): Promise<string | null> {
     try {
       if (typeof window !== "undefined") {

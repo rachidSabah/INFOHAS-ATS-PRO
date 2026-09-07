@@ -263,15 +263,76 @@ export function ATSChecker() {
                   };
                   const c = cfg[rec.severity] ?? cfg.info;
                   return (
-                    <div key={rec.id} className="rounded-xl border border-border p-4 flex gap-3">
-                      <div className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0" style={{ background: c.bg, color: c.color }}>
-                        <Icon name={c.icon} className="w-4 h-4" />
+                    <div key={rec.id} className="rounded-xl border border-border p-4 flex flex-col justify-between gap-3 bg-card hover:shadow-sm transition">
+                      <div className="flex gap-3">
+                        <div className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0" style={{ background: c.bg, color: c.color }}>
+                          <Icon name={c.icon} className="w-4 h-4" />
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <div className="text-sm font-semibold">{rec.title}</div>
+                          <div className="text-xs text-muted-foreground mt-0.5 text-pretty">{rec.description}</div>
+                          {rec.fix && <div className="text-xs text-foreground/80 mt-2"><span className="font-semibold">Fix:</span> {rec.fix}</div>}
+                        </div>
                       </div>
-                      <div className="min-w-0">
-                        <div className="text-sm font-semibold">{rec.title}</div>
-                        <div className="text-xs text-muted-foreground mt-0.5 text-pretty">{rec.description}</div>
-                        {rec.fix && <div className="text-xs text-foreground/80 mt-2"><span className="font-semibold">Fix:</span> {rec.fix}</div>}
-                      </div>
+                      {resume && rec.category && (
+                        <div className="pt-2 border-t border-border/50 flex justify-end">
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="h-7 text-xs gap-1.5 hover:bg-brand/10 hover:text-brand border-brand/30"
+                            onClick={() => {
+                              const updateResume = useApp.getState().updateResume;
+                              if (!resume) return;
+                              let modified = { ...resume };
+
+                              if (rec.category === "Content" || rec.title.toLowerCase().includes("bullet")) {
+                                const WEAK_REPLACEMENTS: Record<string, string> = {
+                                  "responsible for": "Spearheaded",
+                                  "worked on": "Executed",
+                                  "helped": "Facilitated",
+                                  "duties included": "Delivered",
+                                  "tasked with": "Orchestrated",
+                                };
+                                modified.experience = modified.experience.map(e => ({
+                                  ...e,
+                                  bullets: e.bullets.map(b => {
+                                    const l = b.toLowerCase();
+                                    for (const [k, v] of Object.entries(WEAK_REPLACEMENTS)) {
+                                      if (l.startsWith(k)) return v + b.slice(k.length);
+                                    }
+                                    return b;
+                                  })
+                                }));
+                                updateResume(resume.id, modified);
+                                toast.success("Power verbs applied to bullets!");
+                                run();
+                              } else if (rec.category === "Summary" || rec.title.toLowerCase().includes("summary")) {
+                                if (modified.summary && modified.summary.length > 500) {
+                                  const sentences = modified.summary.split(/(?<=[.!?])\s+/);
+                                  modified.summary = sentences.slice(0, 3).join(" ");
+                                  updateResume(resume.id, modified);
+                                  toast.success("Summary trimmed to concise 3 sentences!");
+                                  run();
+                                } else {
+                                  toast.info("Summary is already optimal length.");
+                                }
+                              } else if (rec.category === "Formatting" && rec.title.toLowerCase().includes("phone")) {
+                                if (modified.contact?.phone) {
+                                  modified.contact.phone = modified.contact.phone.replace(/[\(\)\s-]/g, "").replace(/^(\+?\d{1,3})?(\d{3})(\d{3})(\d{4})$/, "+$1 $2-$3-$4").trim();
+                                  updateResume(resume.id, modified);
+                                  toast.success("Phone format standardized!");
+                                  run();
+                                }
+                              } else {
+                                toast.info("Suggested fix can be tuned in the Resume Builder.");
+                                setView("builder");
+                              }
+                            }}
+                          >
+                            <Icon name="Wand2" className="w-3.5 h-3.5 text-brand" /> Auto-Apply Fix
+                          </Button>
+                        </div>
+                      )}
                     </div>
                   );
                 })}
