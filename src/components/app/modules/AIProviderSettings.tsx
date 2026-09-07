@@ -494,9 +494,12 @@ export function AIProviderSettings() {
                         className="w-full h-9 px-2 rounded-md border border-input bg-background text-xs mt-1"
                       >
                         <option value="default">Default Fallback Chain (Tier-Limited)</option>
-                        {providers.map((p) => (
-                          <option key={p.id} value={p.id}>{p.name} ({p.modelName || p.type})</option>
-                        ))}
+                        {providers.map((p) => {
+                          const activeModelForAgent = (p.id === currentRoute && currentModel) ? currentModel : (p.modelName || p.type);
+                          return (
+                            <option key={p.id} value={p.id}>{p.name} ({activeModelForAgent})</option>
+                          );
+                        })}
                       </select>
                     </div>
 
