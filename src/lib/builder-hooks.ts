@@ -9,6 +9,7 @@
 
 import { useEffect, useRef, useState, useCallback } from "react";
 import type { ResumeData, JobDescription } from "@/lib/types";
+import { computeATSDashboard, type ATSDashboard } from "@/lib/ats-match";
 import {
   type AutoSaveEntry,
   saveAutoSave,
@@ -268,4 +269,49 @@ export function useLiveATSScore(resume: ResumeData | undefined, jd: JobDescripti
   }, [resume, jd]);
 
   return score;
+}
+
+// ============================================================================
+// Match Dashboard hook — debounced priority-aware JD match computation
+// ============================================================================
+export interface MatchDashboardState {
+  dashboard: ATSDashboard | null;
+  /** True while the user is still typing (computation debounced) */
+  stale: boolean;
+  hasJD: boolean;
+}
+
+/**
+ * Debounced (350ms) live computation of the priority-aware JD match
+ * dashboard (required skills / core technologies / preferred / keywords +
+ * per-section coverage). Returns null dashboard when no resume or no JD.
+ */
+export function useMatchDashboard(
+  resume: ResumeData | undefined,
+  jd: JobDescription | undefined | null,
+  debounceMs = 350,
+): MatchDashboardState {
+  const [dashboard, setDashboard] = useState<ATSDashboard | null>(null);
+  const [stale, setStale] = useState(false);
+
+  useEffect(() => {
+    if (!resume || !jd) {
+      setDashboard(null);
+      setStale(false);
+      return;
+    }
+    setStale(true);
+    const timer = setTimeout(() => {
+      try {
+        setDashboard(computeATSDashboard(resume, jd));
+      } catch (e) {
+        console.warn("[useMatchDashboard] computation failed:", e);
+        setDashboard(null);
+      }
+      setStale(false);
+    }, debounceMs);
+    return () => clearTimeout(timer);
+  }, [resume, jd, debounceMs]);
+
+  return { dashboard, stale, hasJD: !!resume && !!jd };
 }

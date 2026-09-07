@@ -124,10 +124,11 @@ function renderMarkdown(text: string): React.ReactNode[] {
 }
 
 import { useApp, uid } from "@/lib/store";
-import { useAutoSave, useUndoRedo, useLiveATSScore } from "@/lib/builder-hooks";
+import { useAutoSave, useUndoRedo, useLiveATSScore, useMatchDashboard } from "@/lib/builder-hooks";
 import { TEMPLATES } from "@/lib/brand";
 import { SmartTextarea } from "@/components/shared/SmartTextarea";
 import { SpellCheckPanel } from "@/components/shared/SpellCheckPanel";
+import { AtsMatchDashboard } from "@/components/shared/AtsMatchDashboard";
 import { scanResume, totalMisspelled } from "@/lib/spellchecker";
 import { UndoRedoPanel } from "@/components/shared/UndoRedoPanel";
 import { ATSScoreInline } from "@/components/shared/ATSScorePreview";
@@ -360,6 +361,7 @@ export function Builder() {
   // to eliminate two diverging IndexedDB-persisted stacks and a doubled auto-save write load.
   const activeJD = useMemo(() => jobDescriptions.find(j => j.id === activeJdId), [jobDescriptions, activeJdId]);
   const atsScore = useLiveATSScore(resume, activeJD);
+  const matchDashboard = useMatchDashboard(resume, activeJD);
   const sectionScores = useSectionCompleteness(resume);
 
   // Real-time keyword alignment checks
@@ -395,7 +397,7 @@ export function Builder() {
   const importFileRef = useRef<HTMLInputElement>(null);
 
   const [shrinking, setShrinking] = useState(false);
-  const [rightPanelTab, setRightPanelTab] = useState<"preview" | "copilot" | "audit">("preview");
+  const [rightPanelTab, setRightPanelTab] = useState<"preview" | "copilot" | "audit" | "match">("preview");
   const [showHeatmap, setShowHeatmap] = useState(false);
   const [translateLang, setTranslateLang] = useState("en");
   const [translating, setTranslating] = useState(false);
@@ -637,6 +639,45 @@ Return ONLY a valid JSON array of string bullets, NO formatting, NO markdown, NO
     } catch (err: any) {
       toast.error(`Failed to apply keyword fix: ${err?.message}`, { id: toastId });
     }
+  };
+
+  // ─── ATS Match Dashboard actions ───
+  const [weavingTerm, setWeavingTerm] = useState<string | null>(null);
+
+  const weaveTerm = async (term: string, target: "summary" | "experience") => {
+    setWeavingTerm(term);
+    try {
+      await fixKeywordWithAI(term, target);
+    } finally {
+      setWeavingTerm(null);
+    }
+  };
+
+  const addSkillTerm = (term: string) => {
+    if (!resume) return;
+    const clean = cleanStringField(term) || term;
+    if (resume.skills.some((s) => s.name.toLowerCase() === clean.toLowerCase())) {
+      toast.info(`"${clean}" is already in your skills list.`);
+      return;
+    }
+    patch({ skills: [...resume.skills, { id: uid("s"), name: clean, category: "Core Competencies" }] });
+    toast.success(`Added "${clean}" to your skills!`);
+  };
+
+  const addMustHaveSkills = (terms: string[]) => {
+    if (!resume || terms.length === 0) return;
+    const existing = new Set(resume.skills.map((s) => s.name.toLowerCase()));
+    const fresh = terms
+      .map((t) => cleanStringField(t) || t)
+      .filter((t) => t && !existing.has(t.toLowerCase()));
+    if (fresh.length === 0) {
+      toast.info("All must-have terms are already in your skills.");
+      return;
+    }
+    patch({
+      skills: [...resume.skills, ...fresh.map((name) => ({ id: uid("s"), name, category: "Core Competencies" }))],
+    });
+    toast.success(`Added ${fresh.length} must-have skill${fresh.length > 1 ? "s" : ""}!`);
   };
 
   const [messages, setMessages] = useState<Array<{ role: "user" | "assistant"; content: string }>>([
@@ -1901,9 +1942,15 @@ ${resumeContext}
           <p className="text-sm text-muted-foreground mt-1 hidden sm:block">Edit on the left, see the live A4 preview on the right. Always one page.</p>
           <div className="flex items-center gap-2 mt-1.5 flex-wrap">
             {atsScore && (
-              <Badge variant={atsScore.overall >= 60 ? "default" : atsScore.overall >= 30 ? "default" : "danger"} className="text-[10px] gap-1">
-                <Icon name="Target" className="w-3 h-3" /> ATS: {atsScore.overall}%
-              </Badge>
+              <button
+                onClick={() => setRightPanelTab("match")}
+                title="Open the ATS Match Dashboard"
+                className="cursor-pointer rounded-full focus:outline-none"
+              >
+                <Badge variant={atsScore.overall >= 60 ? "default" : atsScore.overall >= 30 ? "default" : "danger"} className="text-[10px] gap-1">
+                  <Icon name="Target" className="w-3 h-3" /> ATS: {atsScore.overall}%
+                </Badge>
+              </button>
             )}
             <Badge variant="outline" className="text-[10px] gap-1">
               <Icon name="Save" className="w-3 h-3" /> Saved {saveCount > 0 ? `(${saveCount})` : "now"}
@@ -2418,6 +2465,16 @@ ${resumeContext}
                 >
                   <Icon name="CheckSquare" className="w-3.5 h-3.5" /> ATS Audit
                 </button>
+                <button
+                  onClick={() => setRightPanelTab("match")}
+                  className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-semibold transition ${
+                    rightPanelTab === "match"
+                      ? "bg-card shadow-sm text-brand"
+                      : "text-muted-foreground hover:text-foreground"
+                  }`}
+                >
+                  <Icon name="Gauge" className="w-3.5 h-3.5" /> Match
+                </button>
               </div>
               {rightPanelTab === "preview" && (
                 <Badge variant={onePageStatus.ok ? "success" : "warning"} className="text-[10px]">
@@ -2471,6 +2528,43 @@ ${resumeContext}
               </>
             ) : rightPanelTab === "copilot" ? (
               renderCopilotChat("h-[calc(100vh-220px)]")
+            ) : rightPanelTab === "match" ? (
+              <AtsMatchDashboard
+                dashboard={matchDashboard.dashboard}
+                stale={matchDashboard.stale}
+                hasJD={matchDashboard.hasJD}
+                busyTerm={weavingTerm}
+                skillNamesLower={(resume.skills || []).map((s) => s.name.toLowerCase())}
+                onAddSkill={addSkillTerm}
+                onWeave={weaveTerm}
+                onAddMustHaves={addMustHaveSkills}
+                jdMeta={activeJD ? { title: activeJD.title, company: activeJD.company } : null}
+                jdPicker={
+                  <div className="space-y-2">
+                    <select
+                      value={activeJdId || ""}
+                      onChange={(e) => setActiveJD(e.target.value || null)}
+                      className="w-full h-8 px-2 rounded border border-input bg-background text-xs"
+                    >
+                      <option value="">Select a saved job...</option>
+                      {jobDescriptions.map((j) => (
+                        <option key={j.id} value={j.id}>{j.title} {j.company ? `— ${j.company}` : ""}</option>
+                      ))}
+                    </select>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => {
+                        const setView = useApp.getState().setView;
+                        setView("jd-scraper");
+                      }}
+                      className="w-full h-8 text-[11px] gap-1"
+                    >
+                      <Icon name="Search" className="w-3 h-3" /> Scrape New Job
+                    </Button>
+                  </div>
+                }
+              />
             ) : (
               /* ATS Audit panel UI */
               <div className="flex flex-col h-[calc(100vh-220px)] border border-border rounded-xl bg-card p-4 overflow-y-auto space-y-4 scrollbar-thin">
