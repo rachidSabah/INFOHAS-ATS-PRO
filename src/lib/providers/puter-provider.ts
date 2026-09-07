@@ -10,6 +10,9 @@ import { ProviderAuthenticationError, createEmptySession } from "./interface";
 import { saveSession, loadSession, clearSession, isSessionExpired, isSessionExpiringSoon, encryptValue, decryptValue } from "./session-manager";
 // Puter curated ids — SINGLE SOURCE OF TRUTH (src/lib/puter-models.ts).
 import { PUTER_CURATED_MODEL_IDS } from "../puter-models";
+// Per-user identity for the server-side account mirror — without this, ALL
+// users' Puter accounts landed in the same "anonymous" bucket on the API.
+import { getEffectiveUserId } from "../cloud-api";
 
 // Available models on Puter — derived from the shared curated catalog.
 const PUTER_MODELS: string[] = [...PUTER_CURATED_MODEL_IDS];
@@ -106,7 +109,7 @@ export class PuterProvider implements OAuthAIProvider {
     try {
       const res = await fetch("/api/providers/puter/accounts", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", "X-User-Id": getEffectiveUserId() },
         body: JSON.stringify({ accounts: encrypted, autoRotate: this.autoRotate, useGlobally: this.useGlobally }),
       });
       if (res.ok) {
@@ -152,7 +155,9 @@ export class PuterProvider implements OAuthAIProvider {
       let apiHadAccounts = false;
       if (!data) {
         try {
-          const res = await fetch("/api/providers/puter/accounts");
+          const res = await fetch("/api/providers/puter/accounts", {
+            headers: { "X-User-Id": getEffectiveUserId() },
+          });
           if (res.ok) {
             const apiData = (await res.json().catch(() => null)) as any;
             if (apiData && Array.isArray(apiData.accounts) && apiData.accounts.length > 0) {

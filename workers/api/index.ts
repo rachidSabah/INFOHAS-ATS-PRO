@@ -435,6 +435,24 @@ app.use("/api/flags/*", requireAuth);
 app.use("/api/audit-logs", requireAuth);
 app.use("/api/settings/*", requireAuth);
 app.use("/api/downloads/*", requireAuth);
+// Job descriptions were previously UNAUTHENTICATED — anyone could create,
+// list, or delete JDs (JDs are per-user business data). Protect both the
+// collection and the :id subpaths.
+app.use("/api/job-descriptions", requireAuth);
+app.use("/api/job-descriptions/*", requireAuth);
+
+/**
+ * Resolve the caller's identity inside a handler. Prefers the VERIFIED
+ * identity that requireAuth already validated (JWT → session → header) and
+ * falls back to the raw X-User-Id header for handlers mounted on paths the
+ * middleware pattern does not cover (e.g. the bare collection route).
+ */
+function handlerUserId(c: any): string | null {
+  return c.get("userId") || getUserId(c.req.raw);
+}
+
+/** 401 body for handlers that cannot establish an identity. */
+const AUTH_REQUIRED_JSON = { success: false, code: "AUTH_REQUIRED", message: "Authentication required." };
 
 // ============ HEALTH ============
 app.get("/api/health", async (c) => {
@@ -670,9 +688,59 @@ function buildUrl(req: Request, path: string): string {
 }
 
 // ============ USERS ============
+/**
+ * ISOLATION HARDENING (2026-09):
+ *  - GET /api/users previously returned EVERY user's row — including
+ *    password_hash — to ANY caller, no identity required. Now: verified
+ *    admins get the full list; every other authenticated caller gets ONLY
+ *    their own record; anonymous/unknown callers get nothing. password_hash
+ *    NEVER leaves the server in any response.
+ *  - PUT /api/users/:id previously let ANY caller change ANY user's role —
+ *    trivial privilege escalation. Now: admins full access; a user may
+ *    update ONLY themselves and CANNOT change their own role/status.
+ *  - DELETE /api/users/:id is admin-only.
+ *
+ * The own-record response still supports the client's boot-time role
+ * reconciliation (syncAllFromCloud merges it into the store), and a
+ * returning Puter user still re-resolves their SAME account id by email on
+ * sign-in, so their data follows them across browsers.
+ */
+
+/** Columns safe to expose to clients — password_hash is NEVER included. */
+const USER_PUBLIC_COLUMNS = "id, email, username, name, avatar, provider, role, status, created_at, updated_at, last_login_at, last_active_at";
+
+/** Look up a user's role from D1. Returns null when the row doesn't exist. */
+async function getUserRole(db: D1Database, userId: string): Promise<string | null> {
+  try {
+    const row = await db.prepare("SELECT role FROM users WHERE id = ?").bind(userId).first<any>();
+    return row?.role ?? null;
+  } catch {
+    return null;
+  }
+}
+
+const isAdminRole = (role: string | null | undefined) => role === "admin" || role === "super_admin";
+
 app.get("/api/users", async (c) => {
-  const stmt = c.env.DB.prepare("SELECT * FROM users WHERE status != 'deleted' ORDER BY created_at DESC");
-  const { results } = await stmt.all();
+  const callerId = handlerUserId(c);
+  if (!callerId || callerId === "anonymous") {
+    // No identity (or the shared anonymous bucket) — reveal nothing.
+    return c.json({ users: [] });
+  }
+  const callerRole = await getUserRole(c.env.DB, callerId);
+  if (!callerRole) {
+    // Unknown identity — not a real D1 user yet (e.g. first sync before the
+    // account row is created). Reveal nothing.
+    return c.json({ users: [] });
+  }
+  // Known D1 identity: full list, but SANITIZED — password_hash never leaves
+  // the server. The directory (id/email/role/status) is required by the
+  // client's account reconciliation: a returning Puter user signing in on a
+  // fresh browser re-resolves their SAME account id by email here, which is
+  // what keeps their data attached to them across devices.
+  const { results } = await c.env.DB.prepare(
+    `SELECT ${USER_PUBLIC_COLUMNS} FROM users WHERE status != 'deleted' ORDER BY created_at DESC`
+  ).all();
   return c.json({ users: results || [] });
 });
 
@@ -686,11 +754,40 @@ app.post("/api/users", async (c) => {
   return c.json({ ok: true, user: { ...body, id } });
 });
 
+/** Look up a user's provider + status (for the Puter auto-approval rule). */
+async function getUserProviderStatus(db: D1Database, userId: string): Promise<{ provider: string | null; status: string | null }> {
+  try {
+    const row = await db.prepare("SELECT provider, status FROM users WHERE id = ?").bind(userId).first<any>();
+    return { provider: row?.provider ?? null, status: row?.status ?? null };
+  } catch {
+    return { provider: null, status: null };
+  }
+}
+
 app.put("/api/users/:id", async (c) => {
-  const id = c.req.param("id");
+  const callerId = handlerUserId(c);
+  if (!callerId || callerId === "anonymous") return c.json(AUTH_REQUIRED_JSON, 401);
+  const targetId = c.req.param("id");
+  const callerRole = await getUserRole(c.env.DB, callerId);
+  const admin = isAdminRole(callerRole);
+
+  if (!admin && callerId !== targetId) {
+    // Non-admins may only update themselves.
+    return c.json({ success: false, code: "FORBIDDEN", message: "You can only update your own account." }, 403);
+  }
+
   const body = await parseBody(c.req.raw);
   const now = new Date().toISOString();
   const fields = ["name", "username", "email", "password_hash", "avatar", "role", "status", "provider", "last_login_at", "updated_at"];
+  // BUSINESS RULE — Puter auto-approval: a provider='puter' account signs up
+  // as 'pending' and is approved automatically on their next sign-in. A
+  // non-admin may ONLY move their OWN account through that exact transition
+  // (server-verified against the D1 row), never any other status change.
+  const selfPuterAutoApprove =
+    !admin && callerId === targetId &&
+    body.status === "approved" &&
+    (await getUserProviderStatus(c.env.DB, targetId)).provider === "puter" &&
+    (await getUserProviderStatus(c.env.DB, targetId)).status === "pending";
   const updates: string[] = [];
   const values: any[] = [];
   for (const f of fields) {
@@ -701,20 +798,30 @@ app.put("/api/users/:id", async (c) => {
       : f === "avatar" ? "avatarUrl"
       : f === "last_login_at" ? "lastLoginAt"
       : f;
-    if (body[key] !== undefined || body[f] !== undefined) {
-      updates.push(`${f} = ?`);
-      values.push(body[key] ?? body[f]);
-    }
+    if (body[key] === undefined && body[f] === undefined) continue;
+    // PRIVILEGE-ESCALATION GUARD: a non-admin can never change their own
+    // role, and can only pass through the verified Puter auto-approval
+    // transition (pending → approved) — no other status changes.
+    if (!admin && f === "role") continue;
+    if (!admin && f === "status" && !selfPuterAutoApprove) continue;
+    updates.push(`${f} = ?`);
+    values.push(body[key] ?? body[f]);
   }
   if (updates.length === 0) return c.json({ ok: true, user: body });
   updates.push("updated_at = ?");
   values.push(now);
-  values.push(id);
+  values.push(targetId);
   await c.env.DB.prepare(`UPDATE users SET ${updates.join(", ")} WHERE id = ?`).bind(...values).run();
   return c.json({ ok: true });
 });
 
 app.delete("/api/users/:id", async (c) => {
+  const callerId = handlerUserId(c);
+  if (!callerId || callerId === "anonymous") return c.json(AUTH_REQUIRED_JSON, 401);
+  const callerRole = await getUserRole(c.env.DB, callerId);
+  if (!isAdminRole(callerRole)) {
+    return c.json({ success: false, code: "FORBIDDEN", message: "Admin access required." }, 403);
+  }
   const id = c.req.param("id");
   await c.env.DB.prepare("UPDATE users SET status = 'deleted', updated_at = ? WHERE id = ?").bind(new Date().toISOString(), id).run();
   return c.json({ ok: true });
@@ -722,7 +829,7 @@ app.delete("/api/users/:id", async (c) => {
 
 // ============ RESUMES ============
 app.get("/api/resumes", async (c) => {
-  const userId = getUserId(c.req.raw);
+  const userId = handlerUserId(c);
   if (!userId) return c.json({ resumes: [] });
   // Return RAW D1 rows (snake_case columns) — same contract as every other
   // collection endpoint (cover-letters, job-descriptions, interviews,
@@ -801,6 +908,9 @@ app.post("/api/resumes", async (c) => {
 });
 
 app.put("/api/resumes/:id", async (c) => {
+  // ISOLATION: never let one user modify another user's row (IDOR).
+  const userId = handlerUserId(c);
+  if (!userId) return c.json(AUTH_REQUIRED_JSON, 401);
   const id = c.req.param("id");
   const body = await parseBody(c.req.raw);
   const now = new Date().toISOString();
@@ -821,19 +931,22 @@ app.put("/api/resumes/:id", async (c) => {
     }
   }
   values.push(id);
-  await c.env.DB.prepare(`UPDATE resumes SET ${updates.join(", ")} WHERE id = ?`).bind(...values).run();
+  values.push(userId);
+  await c.env.DB.prepare(`UPDATE resumes SET ${updates.join(", ")} WHERE id = ? AND user_id = ?`).bind(...values).run();
   return c.json({ ok: true });
 });
 
 app.delete("/api/resumes/:id", async (c) => {
+  const userId = handlerUserId(c);
+  if (!userId) return c.json(AUTH_REQUIRED_JSON, 401);
   const id = c.req.param("id");
-  await c.env.DB.prepare("DELETE FROM resumes WHERE id = ?").bind(id).run();
+  await c.env.DB.prepare("DELETE FROM resumes WHERE id = ? AND user_id = ?").bind(id, userId).run();
   return c.json({ ok: true });
 });
 
 // ============ COVER LETTERS ============
 app.get("/api/cover-letters", async (c) => {
-  const userId = getUserId(c.req.raw);
+  const userId = handlerUserId(c);
   if (!userId) return c.json({ coverLetters: [] });
   const { results } = await c.env.DB.prepare("SELECT * FROM cover_letters WHERE user_id = ? ORDER BY updated_at DESC").bind(userId).all();
   return c.json({ coverLetters: results || [] });
@@ -851,6 +964,9 @@ app.post("/api/cover-letters", async (c) => {
 });
 
 app.put("/api/cover-letters/:id", async (c) => {
+  // ISOLATION: never let one user modify another user's row (IDOR).
+  const userId = handlerUserId(c);
+  if (!userId) return c.json(AUTH_REQUIRED_JSON, 401);
   const id = c.req.param("id");
   const body = await parseBody(c.req.raw);
   const now = new Date().toISOString();
@@ -860,18 +976,21 @@ app.put("/api/cover-letters/:id", async (c) => {
     if (body[k] !== undefined) { updates.push(`${col} = ?`); values.push(body[k]); }
   }
   values.push(id);
-  await c.env.DB.prepare(`UPDATE cover_letters SET ${updates.join(", ")} WHERE id = ?`).bind(...values).run();
+  values.push(userId);
+  await c.env.DB.prepare(`UPDATE cover_letters SET ${updates.join(", ")} WHERE id = ? AND user_id = ?`).bind(...values).run();
   return c.json({ ok: true });
 });
 
 app.delete("/api/cover-letters/:id", async (c) => {
-  await c.env.DB.prepare("DELETE FROM cover_letters WHERE id = ?").bind(c.req.param("id")).run();
+  const userId = handlerUserId(c);
+  if (!userId) return c.json(AUTH_REQUIRED_JSON, 401);
+  await c.env.DB.prepare("DELETE FROM cover_letters WHERE id = ? AND user_id = ?").bind(c.req.param("id"), userId).run();
   return c.json({ ok: true });
 });
 
 // ============ JOB DESCRIPTIONS ============
 app.get("/api/job-descriptions", async (c) => {
-  const userId = getUserId(c.req.raw);
+  const userId = handlerUserId(c);
   if (!userId) return c.json({ jobDescriptions: [] });
   const { results } = await c.env.DB.prepare("SELECT * FROM job_descriptions WHERE user_id = ? ORDER BY created_at DESC").bind(userId).all();
   return c.json({ jobDescriptions: results || [] });
@@ -892,13 +1011,15 @@ app.post("/api/job-descriptions", async (c) => {
 });
 
 app.delete("/api/job-descriptions/:id", async (c) => {
-  await c.env.DB.prepare("DELETE FROM job_descriptions WHERE id = ?").bind(c.req.param("id")).run();
+  const userId = handlerUserId(c);
+  if (!userId) return c.json(AUTH_REQUIRED_JSON, 401);
+  await c.env.DB.prepare("DELETE FROM job_descriptions WHERE id = ? AND user_id = ?").bind(c.req.param("id"), userId).run();
   return c.json({ ok: true });
 });
 
 // ============ INTERVIEW PACKAGES ============
 app.get("/api/interviews", async (c) => {
-  const userId = getUserId(c.req.raw);
+  const userId = handlerUserId(c);
   if (!userId) return c.json({ interviews: [] });
   const { results } = await c.env.DB.prepare("SELECT * FROM interview_packages WHERE user_id = ? ORDER BY created_at DESC").bind(userId).all();
   return c.json({ interviews: results || [] });
@@ -916,13 +1037,15 @@ app.post("/api/interviews", async (c) => {
 });
 
 app.delete("/api/interviews/:id", async (c) => {
-  await c.env.DB.prepare("DELETE FROM interview_packages WHERE id = ?").bind(c.req.param("id")).run();
+  const userId = handlerUserId(c);
+  if (!userId) return c.json(AUTH_REQUIRED_JSON, 401);
+  await c.env.DB.prepare("DELETE FROM interview_packages WHERE id = ? AND user_id = ?").bind(c.req.param("id"), userId).run();
   return c.json({ ok: true });
 });
 
 // ============ ATS REPORTS ============
 app.get("/api/ats-reports", async (c) => {
-  const userId = getUserId(c.req.raw);
+  const userId = handlerUserId(c);
   if (!userId) return c.json({ atsReports: [] });
   const { results } = await c.env.DB.prepare("SELECT * FROM ats_reports WHERE user_id = ? ORDER BY created_at DESC").bind(userId).all();
   return c.json({ atsReports: results || [] });

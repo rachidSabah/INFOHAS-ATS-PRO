@@ -15,7 +15,7 @@ import {
   SEED_RESUMES, SEED_JDS, SEED_COVER_LETTERS, SEED_INTERVIEW, SEED_ATS_REPORTS
 } from "../mock-data";
 import { normalizeJD, persistSession } from "./helpers";
-import { api as cloudApi, cloudApiSafe } from "../cloud-api";
+import { api as cloudApi, cloudApiSafe, userScopedKey } from "../cloud-api";
 import { loadUserProfile, saveUserProfile } from "../agents/memory-agent";
 
 const {
@@ -129,8 +129,8 @@ export const createResumesSlice: StateCreator<AppState, [], [], ResumesSlice> = 
     cloudApiSafe(createResume)(r).catch((e) => { console.warn("[store] Cloud sync failed:", e); });
     if (typeof localStorage !== "undefined") {
       try {
-        const existing = JSON.parse(localStorage.getItem("resumeai-resumes-backup") || "[]");
-        localStorage.setItem("resumeai-resumes-backup", JSON.stringify([r, ...existing.filter((x: any) => x.id !== r.id)].slice(0, 50)));
+        const existing = JSON.parse(localStorage.getItem(userScopedKey("resumeai-resumes-backup")) || "[]");
+        localStorage.setItem(userScopedKey("resumeai-resumes-backup"), JSON.stringify([r, ...existing.filter((x: any) => x.id !== r.id)].slice(0, 50)));
       } catch (syncErr) { console.warn("[store] Operation failed:", syncErr); }
     }
   },
@@ -189,9 +189,9 @@ export const createResumesSlice: StateCreator<AppState, [], [], ResumesSlice> = 
     cloudApiSafe(cloudUpdateResume)(id, patch).catch((e) => { console.warn("[store] Cloud sync failed:", e); });
     if (typeof localStorage !== "undefined") {
       try {
-        const existing = JSON.parse(localStorage.getItem("resumeai-resumes-backup") || "[]");
+        const existing = JSON.parse(localStorage.getItem(userScopedKey("resumeai-resumes-backup")) || "[]");
         const updated = existing.map((r: any) => r.id === id ? { ...r, ...patch, updatedAt: new Date().toISOString() } : r);
-        localStorage.setItem("resumeai-resumes-backup", JSON.stringify(updated));
+        localStorage.setItem(userScopedKey("resumeai-resumes-backup"), JSON.stringify(updated));
       } catch (syncErr) { console.warn("[store] Operation failed:", syncErr); }
     }
   },
@@ -212,8 +212,8 @@ export const createResumesSlice: StateCreator<AppState, [], [], ResumesSlice> = 
     cloudApiSafe(createJobDescription)(safeJ).catch((e) => { console.warn("[store] Cloud sync failed:", e); });
     if (typeof localStorage !== "undefined") {
       try {
-        const existing = JSON.parse(localStorage.getItem("resumeai-jds-backup") || "[]");
-        localStorage.setItem("resumeai-jds-backup", JSON.stringify([safeJ, ...existing.filter((x: any) => x.id !== safeJ.id)].slice(0, 100)));
+        const existing = JSON.parse(localStorage.getItem(userScopedKey("resumeai-jds-backup")) || "[]");
+        localStorage.setItem(userScopedKey("resumeai-jds-backup"), JSON.stringify([safeJ, ...existing.filter((x: any) => x.id !== safeJ.id)].slice(0, 100)));
       } catch (syncErr) { console.warn("[store] Operation failed:", syncErr); }
     }
   },
@@ -226,8 +226,8 @@ export const createResumesSlice: StateCreator<AppState, [], [], ResumesSlice> = 
     cloudApiSafe(deleteJobDescription)(id).catch((e) => { console.warn("[store] Cloud sync failed:", e); });
     if (typeof localStorage !== "undefined") {
       try {
-        const existing = JSON.parse(localStorage.getItem("resumeai-jds-backup") || "[]");
-        localStorage.setItem("resumeai-jds-backup", JSON.stringify(existing.filter((x: any) => x.id !== id)));
+        const existing = JSON.parse(localStorage.getItem(userScopedKey("resumeai-jds-backup")) || "[]");
+        localStorage.setItem(userScopedKey("resumeai-jds-backup"), JSON.stringify(existing.filter((x: any) => x.id !== id)));
       } catch (syncErr) { console.warn("[store] Operation failed:", syncErr); }
     }
   },
@@ -239,8 +239,8 @@ export const createResumesSlice: StateCreator<AppState, [], [], ResumesSlice> = 
     cloudApiSafe(createCoverLetter)(c).catch((e) => { console.warn("[store] Cloud sync failed:", e); });
     if (typeof localStorage !== "undefined") {
       try {
-        const existing = JSON.parse(localStorage.getItem("resumeai-coverletters-backup") || "[]");
-        localStorage.setItem("resumeai-coverletters-backup", JSON.stringify([c, ...existing.filter((x: any) => x.id !== c.id)].slice(0, 50)));
+        const existing = JSON.parse(localStorage.getItem(userScopedKey("resumeai-coverletters-backup")) || "[]");
+        localStorage.setItem(userScopedKey("resumeai-coverletters-backup"), JSON.stringify([c, ...existing.filter((x: any) => x.id !== c.id)].slice(0, 50)));
       } catch (syncErr) { console.warn("[store] Operation failed:", syncErr); }
     }
   },
@@ -254,9 +254,9 @@ export const createResumesSlice: StateCreator<AppState, [], [], ResumesSlice> = 
     cloudApiSafe(cloudUpdateCoverLetter)(id, patch).catch((e) => { console.warn("[store] Cloud sync failed:", e); });
     if (typeof localStorage !== "undefined") {
       try {
-        const existing = JSON.parse(localStorage.getItem("resumeai-coverletters-backup") || "[]");
+        const existing = JSON.parse(localStorage.getItem(userScopedKey("resumeai-coverletters-backup")) || "[]");
         const updated = existing.map((x: any) => x.id === id ? { ...x, ...patch, updatedAt: new Date().toISOString() } : x);
-        localStorage.setItem("resumeai-coverletters-backup", JSON.stringify(updated));
+        localStorage.setItem(userScopedKey("resumeai-coverletters-backup"), JSON.stringify(updated));
       } catch (syncErr) { console.warn("[store] Operation failed:", syncErr); }
     }
   },
@@ -266,8 +266,8 @@ export const createResumesSlice: StateCreator<AppState, [], [], ResumesSlice> = 
     cloudApiSafe(deleteCoverLetter)(id).catch((e) => { console.warn("[store] Cloud sync failed:", e); });
     if (typeof localStorage !== "undefined") {
       try {
-        const existing = JSON.parse(localStorage.getItem("resumeai-coverletters-backup") || "[]");
-        localStorage.setItem("resumeai-coverletters-backup", JSON.stringify(existing.filter((x: any) => x.id !== id)));
+        const existing = JSON.parse(localStorage.getItem(userScopedKey("resumeai-coverletters-backup")) || "[]");
+        localStorage.setItem(userScopedKey("resumeai-coverletters-backup"), JSON.stringify(existing.filter((x: any) => x.id !== id)));
       } catch (syncErr) { console.warn("[store] Operation failed:", syncErr); }
     }
   },
@@ -279,8 +279,8 @@ export const createResumesSlice: StateCreator<AppState, [], [], ResumesSlice> = 
     cloudApiSafe(createInterview)(i).catch((e) => { console.warn("[store] Cloud sync failed:", e); });
     if (typeof localStorage !== "undefined") {
       try {
-        const existing = JSON.parse(localStorage.getItem("resumeai-interviews-backup") || "[]");
-        localStorage.setItem("resumeai-interviews-backup", JSON.stringify([i, ...existing.filter((x: any) => x.id !== i.id)].slice(0, 50)));
+        const existing = JSON.parse(localStorage.getItem(userScopedKey("resumeai-interviews-backup")) || "[]");
+        localStorage.setItem(userScopedKey("resumeai-interviews-backup"), JSON.stringify([i, ...existing.filter((x: any) => x.id !== i.id)].slice(0, 50)));
       } catch (syncErr) { console.warn("[store] Operation failed:", syncErr); }
     }
   },
@@ -290,8 +290,8 @@ export const createResumesSlice: StateCreator<AppState, [], [], ResumesSlice> = 
     cloudApiSafe(deleteInterview)(id).catch((e) => { console.warn("[store] Cloud sync failed:", e); });
     if (typeof localStorage !== "undefined") {
       try {
-        const existing = JSON.parse(localStorage.getItem("resumeai-interviews-backup") || "[]");
-        localStorage.setItem("resumeai-interviews-backup", JSON.stringify(existing.filter((x: any) => x.id !== id)));
+        const existing = JSON.parse(localStorage.getItem(userScopedKey("resumeai-interviews-backup")) || "[]");
+        localStorage.setItem(userScopedKey("resumeai-interviews-backup"), JSON.stringify(existing.filter((x: any) => x.id !== id)));
       } catch (syncErr) { console.warn("[store] Operation failed:", syncErr); }
     }
   },
@@ -302,8 +302,8 @@ export const createResumesSlice: StateCreator<AppState, [], [], ResumesSlice> = 
     set((st) => ({ interviewSessions: [s, ...st.interviewSessions] }));
     if (typeof localStorage !== "undefined") {
       try {
-        const existing = JSON.parse(localStorage.getItem("resumeai-interview-sessions-backup") || "[]");
-        localStorage.setItem("resumeai-interview-sessions-backup", JSON.stringify([s, ...existing.filter((x: any) => x.id !== s.id)].slice(0, 50)));
+        const existing = JSON.parse(localStorage.getItem(userScopedKey("resumeai-interview-sessions-backup")) || "[]");
+        localStorage.setItem(userScopedKey("resumeai-interview-sessions-backup"), JSON.stringify([s, ...existing.filter((x: any) => x.id !== s.id)].slice(0, 50)));
       } catch (syncErr) { console.warn("[store] Operation failed:", syncErr); }
     }
   },
@@ -316,9 +316,9 @@ export const createResumesSlice: StateCreator<AppState, [], [], ResumesSlice> = 
     }));
     if (typeof localStorage !== "undefined") {
       try {
-        const existing = JSON.parse(localStorage.getItem("resumeai-interview-sessions-backup") || "[]");
+        const existing = JSON.parse(localStorage.getItem(userScopedKey("resumeai-interview-sessions-backup")) || "[]");
         const updated = existing.map((x: any) => (x.id === id ? { ...x, ...patch } : x));
-        localStorage.setItem("resumeai-interview-sessions-backup", JSON.stringify(updated));
+        localStorage.setItem(userScopedKey("resumeai-interview-sessions-backup"), JSON.stringify(updated));
       } catch (syncErr) { console.warn("[store] Operation failed:", syncErr); }
     }
   },
@@ -327,8 +327,8 @@ export const createResumesSlice: StateCreator<AppState, [], [], ResumesSlice> = 
     set((st) => ({ interviewSessions: st.interviewSessions.filter((s) => s.id !== id) }));
     if (typeof localStorage !== "undefined") {
       try {
-        const existing = JSON.parse(localStorage.getItem("resumeai-interview-sessions-backup") || "[]");
-        localStorage.setItem("resumeai-interview-sessions-backup", JSON.stringify(existing.filter((x: any) => x.id !== id)));
+        const existing = JSON.parse(localStorage.getItem(userScopedKey("resumeai-interview-sessions-backup")) || "[]");
+        localStorage.setItem(userScopedKey("resumeai-interview-sessions-backup"), JSON.stringify(existing.filter((x: any) => x.id !== id)));
       } catch (syncErr) { console.warn("[store] Operation failed:", syncErr); }
     }
   },
@@ -338,8 +338,8 @@ export const createResumesSlice: StateCreator<AppState, [], [], ResumesSlice> = 
     cloudApiSafe(createATSReport)(r).catch((e) => { console.warn("[store] Cloud sync failed:", e); });
     if (typeof localStorage !== "undefined") {
       try {
-        const existing = JSON.parse(localStorage.getItem("resumeai-ats-backup") || "[]");
-        localStorage.setItem("resumeai-ats-backup", JSON.stringify([r, ...existing.filter((x: any) => x.id !== r.id)].slice(0, 50)));
+        const existing = JSON.parse(localStorage.getItem(userScopedKey("resumeai-ats-backup")) || "[]");
+        localStorage.setItem(userScopedKey("resumeai-ats-backup"), JSON.stringify([r, ...existing.filter((x: any) => x.id !== r.id)].slice(0, 50)));
       } catch (syncErr) { console.warn("[store] Operation failed:", syncErr); }
     }
   },
@@ -348,8 +348,8 @@ export const createResumesSlice: StateCreator<AppState, [], [], ResumesSlice> = 
     set((s) => ({ reviewReports: [r, ...s.reviewReports] }));
     if (typeof localStorage !== "undefined") {
       try {
-        const existing = JSON.parse(localStorage.getItem("resumeai-review-reports-backup") || "[]");
-        localStorage.setItem("resumeai-review-reports-backup", JSON.stringify([r, ...existing.filter((x: any) => x.id !== r.id)].slice(0, 30)));
+        const existing = JSON.parse(localStorage.getItem(userScopedKey("resumeai-review-reports-backup")) || "[]");
+        localStorage.setItem(userScopedKey("resumeai-review-reports-backup"), JSON.stringify([r, ...existing.filter((x: any) => x.id !== r.id)].slice(0, 30)));
       } catch (syncErr) { console.warn("[store] Operation failed:", syncErr); }
     }
   },
@@ -362,9 +362,9 @@ export const createResumesSlice: StateCreator<AppState, [], [], ResumesSlice> = 
     }));
     if (typeof localStorage !== "undefined") {
       try {
-        const existing = JSON.parse(localStorage.getItem("resumeai-review-reports-backup") || "[]");
+        const existing = JSON.parse(localStorage.getItem(userScopedKey("resumeai-review-reports-backup")) || "[]");
         const updated = existing.map((r: any) => r.id === id ? { ...r, ...patch, updatedAt: new Date().toISOString() } : r);
-        localStorage.setItem("resumeai-review-reports-backup", JSON.stringify(updated));
+        localStorage.setItem(userScopedKey("resumeai-review-reports-backup"), JSON.stringify(updated));
       } catch (syncErr) { console.warn("[store] Operation failed:", syncErr); }
     }
   },
@@ -373,8 +373,8 @@ export const createResumesSlice: StateCreator<AppState, [], [], ResumesSlice> = 
     set((s) => ({ reviewReports: s.reviewReports.filter((r) => r.id !== id) }));
     if (typeof localStorage !== "undefined") {
       try {
-        const existing = JSON.parse(localStorage.getItem("resumeai-review-reports-backup") || "[]");
-        localStorage.setItem("resumeai-review-reports-backup", JSON.stringify(existing.filter((x: any) => x.id !== id)));
+        const existing = JSON.parse(localStorage.getItem(userScopedKey("resumeai-review-reports-backup")) || "[]");
+        localStorage.setItem(userScopedKey("resumeai-review-reports-backup"), JSON.stringify(existing.filter((x: any) => x.id !== id)));
       } catch (syncErr) { console.warn("[store] Operation failed:", syncErr); }
     }
   },

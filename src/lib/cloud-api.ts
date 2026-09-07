@@ -34,22 +34,78 @@ function normalizeJD<T extends Record<string, any>>(jd: T): T {
 
 const API_BASE = "https://resumeai-pro-api.rachidelsabah.workers.dev";
 
-// Session user ID — stored in sessionStorage (temporary, not business data)
-function getUserId(): string {
+// Safe storage accessors — the browser exposes sessionStorage/localStorage as
+// globals, but some environments (tests, SSR shims) only provide them on
+// `window`. Resolve both patterns, never throw.
+function safeSessionStorage(): Storage | null {
+  try {
+    if (typeof sessionStorage !== "undefined") return sessionStorage;
+  } catch { /* blocked */ }
+  return (typeof window !== "undefined" ? (window as any).sessionStorage : null) ?? null;
+}
+function safeLocalStorage(): Storage | null {
+  try {
+    if (typeof localStorage !== "undefined") return localStorage;
+  } catch { /* blocked */ }
+  return (typeof window !== "undefined" ? (window as any).localStorage : null) ?? null;
+}
+
+// Session user ID — sessionStorage first (set by setUserId on sign-in), then
+// the persisted session in localStorage (same identity across new tabs and
+// browser restarts), then "anonymous".
+//
+// WHY the fallback matters: sessionStorage is PER-TAB. Every request made
+// before page.tsx's sync effect runs (or from a freshly opened tab) used to
+// go out as "anonymous" — and ALL anonymous browsers share one D1 user_id
+// bucket, which leaked data between users. Falling back to the persisted
+// session guarantees each signed-in user keeps their own identity everywhere.
+export function getEffectiveUserId(): string {
   if (typeof window === "undefined") return "anonymous";
-  return sessionStorage.getItem("resumeai-user-id") || "anonymous";
+  const sid = safeSessionStorage()?.getItem("resumeai-user-id");
+  if (sid) return sid;
+  try {
+    const raw = safeLocalStorage()?.getItem("resumeai-session");
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      const user = parsed?.user;
+      const notExpired = !parsed?.expiresAt || Date.now() <= parsed.expiresAt;
+      if (user?.id && notExpired) {
+        // Heal sessionStorage so subsequent reads are cheap and consistent.
+        safeSessionStorage()?.setItem("resumeai-user-id", user.id);
+        return user.id;
+      }
+    }
+  } catch {
+    /* corrupted session payload — treat as anonymous */
+  }
+  return "anonymous";
+}
+
+function getUserId(): string {
+  return getEffectiveUserId();
 }
 
 export function setUserId(id: string) {
-  if (typeof window !== "undefined") {
-    sessionStorage.setItem("resumeai-user-id", id);
-  }
+  safeSessionStorage()?.setItem("resumeai-user-id", id);
 }
 
 export function clearUserId() {
-  if (typeof window !== "undefined") {
-    sessionStorage.removeItem("resumeai-user-id");
-  }
+  safeSessionStorage()?.removeItem("resumeai-user-id");
+}
+
+/**
+ * Namespace a localStorage backup key by the effective user id.
+ *
+ * WHY: the crash-recovery backups (resumes / JDs / cover letters / …) used to
+ * live under SHARED keys. When a new user signed in on the same browser, the
+ * cloud returned an empty collection for them and the sync fallback restored
+ * the PREVIOUS user's backup into their session — cross-user data leak.
+ * Scoping the keys by user id keeps the same-user crash recovery intact while
+ * structurally making it impossible for one user's backup to surface in
+ * another user's session.
+ */
+export function userScopedKey(base: string): string {
+  return `${base}:${getEffectiveUserId()}`;
 }
 
 /**
@@ -296,7 +352,7 @@ export async function syncAllFromCloud(store: any): Promise<void> {
       // Fallback: restore from localStorage backup (in case cloud API was unreachable on previous session)
       if (typeof localStorage !== "undefined") {
         try {
-          const backup = JSON.parse(localStorage.getItem("resumeai-resumes-backup") || "[]");
+          const backup = JSON.parse(localStorage.getItem(userScopedKey("resumeai-resumes-backup")) || "[]");
           if (backup.length > 0) {
             store.setState({ resumes: backup });
           }
@@ -308,7 +364,7 @@ export async function syncAllFromCloud(store: any): Promise<void> {
       // Fallback: restore cover letters from localStorage backup
       if (typeof localStorage !== "undefined") {
         try {
-          const backup = JSON.parse(localStorage.getItem("resumeai-coverletters-backup") || "[]");
+          const backup = JSON.parse(localStorage.getItem(userScopedKey("resumeai-coverletters-backup")) || "[]");
           if (backup.length > 0) store.setState({ coverLetters: backup });
         } catch (err) { console.warn("[cloudApi] Cover letters backup restore failed:", err instanceof Error ? err.message : err); }
       }
@@ -321,7 +377,7 @@ export async function syncAllFromCloud(store: any): Promise<void> {
       // user-id mismatch, or D1 still seeding).
       if (typeof localStorage !== "undefined") {
         try {
-          const backup = JSON.parse(localStorage.getItem("resumeai-jds-backup") || "[]");
+          const backup = JSON.parse(localStorage.getItem(userScopedKey("resumeai-jds-backup")) || "[]");
           if (backup.length > 0) {
             // Normalize every JD so missing fields can never crash downstream
             // renders (e.g. Optimizer's jdParsed.keywords.length access).
@@ -339,7 +395,7 @@ export async function syncAllFromCloud(store: any): Promise<void> {
     else {
       if (typeof localStorage !== "undefined") {
         try {
-          const backup = JSON.parse(localStorage.getItem("resumeai-interviews-backup") || "[]");
+          const backup = JSON.parse(localStorage.getItem(userScopedKey("resumeai-interviews-backup")) || "[]");
           if (backup.length > 0) store.setState({ interviews: backup });
         } catch (err) { console.warn("[cloudApi] Interviews backup restore failed:", err instanceof Error ? err.message : err); }
       }
@@ -348,7 +404,7 @@ export async function syncAllFromCloud(store: any): Promise<void> {
     else {
       if (typeof localStorage !== "undefined") {
         try {
-          const backup = JSON.parse(localStorage.getItem("resumeai-ats-backup") || "[]");
+          const backup = JSON.parse(localStorage.getItem(userScopedKey("resumeai-ats-backup")) || "[]");
           if (backup.length > 0) store.setState({ atsReports: backup });
         } catch (err) { console.warn("[cloudApi] ATS reports backup restore failed:", err instanceof Error ? err.message : err); }
       }

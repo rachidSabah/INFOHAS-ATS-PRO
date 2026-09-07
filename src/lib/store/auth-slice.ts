@@ -15,8 +15,34 @@ import {
 } from "../auth-utils";
 import { getRoleForEmail } from "../brand";
 import {
-  setUserId, clearUserId, api as cloudApi, cloudApiSafe
+  setUserId, clearUserId, api as cloudApi, cloudApiSafe, userScopedKey
 } from "../cloud-api";
+import { ensurePuterLoaded } from "../puter-loader";
+
+/**
+ * Privacy barrier for identity switches: wipes the previous account's
+ * in-memory business data so a new sign-in NEVER starts from another user's
+ * session state. The signed-in user's own cloud sync (syncAllFromCloud) then
+ * repopulates the store. Crash-recovery backups on disk are user-scoped
+ * (userScopedKey), so a different user's backup can never be restored here.
+ */
+function resetUserDataForSignIn(set: (partial: Partial<AppState>) => void) {
+  set({
+    resumes: [],
+    jobDescriptions: [],
+    coverLetters: [],
+    interviews: [],
+    interviewSessions: [],
+    atsReports: [],
+    reviewReports: [],
+    careerMaterials: [],
+    activeResumeId: null,
+    activeJdId: null,
+    activeCoverLetterId: null,
+    activeInterviewId: null,
+    synced: false,
+  } as Partial<AppState>);
+}
 
 const { createUser, updateUser } = cloudApi;
 
@@ -63,7 +89,7 @@ export const createAuthSlice: StateCreator<AppState, [], [], AuthSlice> = (set, 
       }
       let restoredReports: any[] = [];
       try {
-        restoredReports = JSON.parse(localStorage.getItem("resumeai-review-reports-backup") || "[]");
+        restoredReports = JSON.parse(localStorage.getItem(userScopedKey("resumeai-review-reports-backup")) || "[]");
       } catch (parseErr) {
         console.warn("[store] Review reports backup parse failed:", parseErr);
         restoredReports = [];
@@ -93,6 +119,7 @@ export const createAuthSlice: StateCreator<AppState, [], [], AuthSlice> = (set, 
     setUserId(updatedUser.id);
     persistSession(updatedUser);
     get().fetchCareerMaterials();
+    resetUserDataForSignIn(set);
     set((s) => {
       const exists = s.users.find((u) => u.email === user.email);
       const users = exists
@@ -123,6 +150,16 @@ export const createAuthSlice: StateCreator<AppState, [], [], AuthSlice> = (set, 
       activeCoverLetterId: null,
       activeInterviewId: null,
       careerMaterials: [],
+      // Privacy: the signed-out browser must not retain any account's business
+      // data in memory. Backups on disk are user-scoped (userScopedKey), so a
+      // future sign-in cannot restore someone else's data either.
+      resumes: [],
+      jobDescriptions: [],
+      coverLetters: [],
+      interviews: [],
+      interviewSessions: [],
+      atsReports: [],
+      reviewReports: [],
     });
   },
 
@@ -143,6 +180,10 @@ export const createAuthSlice: StateCreator<AppState, [], [], AuthSlice> = (set, 
     }
     const now = new Date().toISOString();
     const updatedUser = { ...existing, lastLoginAt: now, lastActiveAt: now };
+    // Privacy: wipe any previous account's in-memory data BEFORE switching
+    // identity — each signed-in user starts from a clean slate and their own
+    // cloud sync repopulates the store (see syncAllFromCloud in page.tsx).
+    resetUserDataForSignIn(set);
     setUserId(updatedUser.id);
     persistSession(updatedUser);
     set((s) => ({
@@ -184,13 +225,30 @@ export const createAuthSlice: StateCreator<AppState, [], [], AuthSlice> = (set, 
     get().log({ actor: normalizedEmail, action: "User registered (pending approval)", category: "auth", details: `Name: ${newUser.name}`, severity: "warning" });
     setUserId(newUser.id);
     persistSession(newUser);
+    // Fresh account — make sure no previous session's data is visible.
+    resetUserDataForSignIn(set);
     set({ user: newUser, isAuthed: true, authOpen: false, view: "dashboard", synced: false });
     return { ok: true, user: newUser };
   },
 
   signInWithPuter: async () => {
-    if (typeof window === "undefined" || !window.puter?.auth) {
-      return { ok: false, error: "Puter.js is not loaded. Please refresh the page and try again." };
+    if (typeof window === "undefined") {
+      return { ok: false, error: "Puter sign-in requires a browser environment." };
+    }
+    // Puter.js is lazy-loaded (no eager SDK in layout), so on a first visit
+    // window.puter does not exist yet. Load it on demand instead of failing —
+    // the old code told users to "refresh and try again", but refreshing
+    // never loaded the SDK either, so the button was dead on first use.
+    if (!window.puter?.auth) {
+      try {
+        await ensurePuterLoaded("auth");
+      } catch (loadErr) {
+        console.warn("[store] Puter.js load failed:", loadErr);
+        return { ok: false, error: "Couldn't load Puter.js — check your internet connection and try again." };
+      }
+    }
+    if (!window.puter?.auth) {
+      return { ok: false, error: "Puter.js is unavailable right now. Please try again in a moment." };
     }
     try {
       await window.puter.auth.signIn();
@@ -204,6 +262,10 @@ export const createAuthSlice: StateCreator<AppState, [], [], AuthSlice> = (set, 
 
       const existing = get().users.find((u) => u.email.toLowerCase() === puterEmail.toLowerCase());
       const now = new Date().toISOString();
+
+      // Privacy: wipe any previous account's in-memory data BEFORE switching
+      // identity — each signed-in user gets their own data only.
+      resetUserDataForSignIn(set);
 
       if (existing) {
         if (existing.status === "suspended") {
