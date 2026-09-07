@@ -5,6 +5,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { Sidebar } from "./Sidebar";
 import { TopBar } from "./TopBar";
 import { useApp } from "@/lib/store";
+import { getPuterProvider } from "@/lib/providers/puter-provider";
 import { Dashboard } from "./modules/Dashboard";
 import { MyResumes } from "./modules/MyResumes";
 import { ATSChecker } from "./modules/ATSChecker";
@@ -192,6 +193,19 @@ export function AppShell() {
   const user = useApp((s) => s.user);
   const role = user?.role ?? "user";
   const fallbackOfferOpen = useApp((s) => s.fallbackOfferOpen);
+
+  // Task 19 — bootstrap Puter account restore.
+  // Accounts live in localStorage + the accounts API, but they were only
+  // reloaded when the AI Providers module mounted. After a page refresh on
+  // ANY other view the provider singleton started EMPTY, so Puter silently
+  // fell back to anonymous (heavily limited) mode — which made the optimizer
+  // exhaust the chain and die at the heavy Resume Optimizer step (~50%), and
+  // made "auto-rotate accounts" look broken (nothing to rotate).
+  useEffect(() => {
+    getPuterProvider().restore().catch((e) =>
+      console.warn("[AppShell] Puter account restore failed:", e instanceof Error ? e.message : e)
+    );
+  }, []);
 
   // Access control: if the current view requires a higher role than the user
   // has, redirect to the dashboard. This prevents non-superadmin users from

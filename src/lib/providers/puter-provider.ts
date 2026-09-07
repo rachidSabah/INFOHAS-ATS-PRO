@@ -85,6 +85,7 @@ export class PuterProvider implements OAuthAIProvider {
   readonly name = "Puter.js";
 
   private session: ProviderSession = createEmptySession("puter");
+  private restorePromise: Promise<ProviderSession | null> | null = null;
 
   /**
    * Sign in with Puter using the official puter.auth.signIn() API.
@@ -97,25 +98,38 @@ export class PuterProvider implements OAuthAIProvider {
       accessToken: await encryptValue(a.accessToken),
       refreshToken: await encryptValue(a.refreshToken),
     })));
-    localStorage.setItem("puter_sessions", JSON.stringify({ accounts: encrypted, autoRotate: this.autoRotate, useGlobally: this.useGlobally }));
-    
+    if (typeof localStorage !== "undefined") {
+      localStorage.setItem("puter_sessions", JSON.stringify({ accounts: encrypted, autoRotate: this.autoRotate, useGlobally: this.useGlobally }));
+    }
+
     // Attempt to sync to KV / D1 via API endpoint
     try {
-      await fetch("/api/providers/puter/accounts", {
+      const res = await fetch("/api/providers/puter/accounts", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ accounts: encrypted, autoRotate: this.autoRotate, useGlobally: this.useGlobally }),
       });
+      if (res.ok) {
+        const rd = (await res.json().catch(() => null)) as any;
+        if (rd?.ok === false) {
+          console.warn("[PuterProvider] Server account sync unavailable (" + (rd.error || "unknown") + ") — accounts persist locally only.");
+        }
+      }
     } catch (e) {
-      console.warn("Failed to sync puter accounts to API:", e);
+      console.warn("Failed to sync puter accounts to API:", e instanceof Error ? e.message : e);
     }
   }
 
   async loadAccounts(): Promise<void> {
     try {
       let data: any = null;
+      let localHadAccounts = false;
 
-      // 1. Check localStorage first (canonical client-side store for browser-auth sessions)
+      // 1. localStorage first (canonical client-side store for browser-auth sessions).
+      //    REGRESSION GUARD (Task 19): only a NON-empty accounts array is
+      //    trusted. The old code accepted ANY truthy `accounts` field —
+      //    including `[]` coming back from the server — which shadowed the
+      //    local copy and wiped persisted accounts on every page refresh.
       if (typeof window !== "undefined") {
         try {
           const raw = localStorage.getItem("puter_sessions");
@@ -123,35 +137,38 @@ export class PuterProvider implements OAuthAIProvider {
             const parsed = JSON.parse(raw);
             if (parsed && Array.isArray(parsed.accounts) && parsed.accounts.length > 0) {
               data = parsed;
+              localHadAccounts = true;
             } else if (parsed) {
               if (parsed.autoRotate !== undefined) this.autoRotate = parsed.autoRotate;
               if (parsed.useGlobally !== undefined) this.useGlobally = parsed.useGlobally;
             }
           }
         } catch (e) {
-          console.warn("Failed to load puter accounts from localStorage:", e);
+          console.warn("Failed to load puter accounts from localStorage:", e instanceof Error ? e.message : e);
         }
       }
 
-      // 2. If no accounts found in localStorage, try cloud API
+      // 2. If no accounts found in localStorage, try cloud API.
+      let apiHadAccounts = false;
       if (!data) {
         try {
           const res = await fetch("/api/providers/puter/accounts");
           if (res.ok) {
-            const apiData = (await res.json()) as any;
+            const apiData = (await res.json().catch(() => null)) as any;
             if (apiData && Array.isArray(apiData.accounts) && apiData.accounts.length > 0) {
               data = apiData;
+              apiHadAccounts = true;
             } else if (apiData) {
               if (apiData.autoRotate !== undefined) this.autoRotate = apiData.autoRotate;
               if (apiData.useGlobally !== undefined) this.useGlobally = apiData.useGlobally;
             }
           }
         } catch (e) {
-          console.warn("Failed to load puter accounts from API:", e);
+          console.warn("Failed to load puter accounts from API:", e instanceof Error ? e.message : e);
         }
       }
 
-      if (data && Array.isArray(data.accounts)) {
+      if (data && Array.isArray(data.accounts) && data.accounts.length > 0) {
         this.accounts = await Promise.all(data.accounts.map(async (a: any) => {
           let decryptedAccess: string | null = null;
           let decryptedRefresh: string | null = null;
@@ -173,9 +190,19 @@ export class PuterProvider implements OAuthAIProvider {
         }));
         if (data.autoRotate !== undefined) this.autoRotate = data.autoRotate;
         if (data.useGlobally !== undefined) this.useGlobally = data.useGlobally;
+
+        // 3. SELF-HEAL (Task 19) — the accounts came from the LOCAL copy while
+        //    the server copy was empty (KV binding missing, or the POST
+        //    silently no-op'd). Push the local copy up so the accounts also
+        //    survive on the server and reach other browsers of the same user.
+        if (localHadAccounts && !apiHadAccounts) {
+          this.saveAccounts().catch((e) =>
+            console.warn("[PuterProvider] Self-heal account sync to server failed:", e instanceof Error ? e.message : e)
+          );
+        }
       }
     } catch (e) {
-      console.error("Failed to load Puter accounts:", e);
+      console.error("Failed to load Puter accounts:", e instanceof Error ? e.message : e);
     }
   }
 
@@ -425,6 +452,17 @@ export class PuterProvider implements OAuthAIProvider {
       this.session.expiresAt = Date.now() + SESSION_TTL_MS;
       this.session.models = PUTER_MODELS;
 
+      // ROLL THE ACTIVE ACCOUNT'S EXPIRY TOO. The session is rebuilt from
+      // the account record on every page load (syncActiveAccountToSession),
+      // so a stale account.expiresAt made every refresh see "expired" again
+      // and could permanently mark a still-valid account as expired.
+      const activeAccount = this.accounts.find((a) => a.active);
+      if (activeAccount) {
+        activeAccount.expiresAt = this.session.expiresAt;
+        if (activeAccount.status === "expired") activeAccount.status = "healthy";
+        await this.saveAccounts();
+      }
+
       await saveSession(this.session);
 
       console.log("[PROVIDER AUTH] session refreshed");
@@ -463,6 +501,18 @@ export class PuterProvider implements OAuthAIProvider {
   }
 
   async restore(): Promise<ProviderSession | null> {
+    // Deduplicate concurrent restores — the app bootstrap AND the AI
+    // Providers module may both call restore() on mount; the account fetch
+    // and the (possible) SDK load + refresh should only run once.
+    if (!this.restorePromise) {
+      this.restorePromise = this.restoreInner().finally(() => {
+        this.restorePromise = null;
+      });
+    }
+    return this.restorePromise;
+  }
+
+  private async restoreInner(): Promise<ProviderSession | null> {
     await this.loadAccounts();
     await this.syncActiveAccountToSession();
     
@@ -472,6 +522,19 @@ export class PuterProvider implements OAuthAIProvider {
 
     // Check if session is expired
     if (isSessionExpired(this.session)) {
+      // The SDK must be loaded BEFORE refresh(): on a fresh page load
+      // window.puter does not exist yet, and refresh() would throw
+      // "Puter.js is not loaded" — which the old code treated as a dead
+      // session and marked the (perfectly valid) account as expired.
+      try {
+        await loadPuterScript();
+      } catch (scriptErr) {
+        // Offline / script blocked — keep the restored accounts as-is and
+        // let the first AI call surface the real error. Do NOT mark the
+        // account expired: we simply could not verify it right now.
+        console.warn("[PuterProvider] SDK unavailable during restore (offline?) — skipping refresh:", scriptErr instanceof Error ? scriptErr.message : scriptErr);
+        return this.session;
+      }
       // Try to refresh
       try {
         const refreshed = await this.refresh();
