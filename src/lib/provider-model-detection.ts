@@ -15,6 +15,13 @@
 "use client";
 
 import type { AIProvider } from "./types";
+// Task 18 — puter has no REST {baseUrl}/models surface (browser-auth SDK),
+// so the generic probe below would fall straight back to the provider's
+// configured model ("gpt-4o-mini") and hide the live catalog. Task 13's LIVE
+// puter catalog (api.puter.com/puterai/chat/models, vendor-normalized,
+// curated-first, 5-min cache) lives in ProviderManager — delegate to it so
+// every model picker (AI Workspace, AI Dev Agent) sees the same catalog.
+import { ProviderManager } from "./ai/services/manager";
 
 export interface DetectedModel {
   id: string;          // The model ID to use in API calls
@@ -42,6 +49,23 @@ export interface ModelDetectionResult {
 export async function fetchProviderModels(provider: AIProvider): Promise<ModelDetectionResult> {
   if (!provider) {
     return { models: [], source: "fallback", error: "No provider provided" };
+  }
+
+  // === PUTER: live catalog via ProviderManager (Task 18) ===
+  if (provider.type === "puter") {
+    const live = await ProviderManager.fetchPuterModelsLive();
+    if (live.ok && live.models.length > 0) {
+      console.info(`[ModelDetection] Puter live catalog: ${live.models.length} models (curated first)`);
+      return {
+        models: live.models.map((id) => ({ id, name: id, supportsStreaming: true })),
+        source: "api",
+      };
+    }
+    return {
+      models: getFallbackModels(provider),
+      source: "configured",
+      error: live.error || "Puter live catalog unavailable",
+    };
   }
 
   // Determine the base URL
