@@ -18,6 +18,7 @@
 "use client";
 
 import type { ResumeData } from "./types";
+import { canonicalSkillKey } from "./resume-assembler";
 import { computeExperienceFingerprint } from "./experience-fingerprint";
 
 export interface GuardianResult {
@@ -171,6 +172,14 @@ export function sanitizeSkillsAgainstJd(
       .map((s) => (s.name || "").trim().toLowerCase())
       .filter(Boolean),
   );
+  // Dash-canonical twin: the optimizer may have normalized PDF artifacts
+  // ("Passenger Check - in" → "Passenger Check-in") — the rewritten spelling
+  // is still user-authored data and must stay exempt from JD-entity removal.
+  const sourceNamesCanon = new Set(
+    (source.skills || [])
+      .map((s) => canonicalSkillKey(s.name || ""))
+      .filter(Boolean),
+  );
 
   const removedSkills: string[] = [];
   const filtered = optimized.skills.filter((skill) => {
@@ -178,7 +187,12 @@ export function sanitizeSkillsAgainstJd(
     if (!nameLower) return true;
     const isJdEntity = allJdEntities.some((n) => nameLower === n || nameLower.includes(n));
     if (!isJdEntity) return true;
-    if (sourceNames.has(nameLower)) return true; // user-authored in the source — keep
+    if (
+      sourceNames.has(nameLower) ||
+      sourceNamesCanon.has(canonicalSkillKey(nameLower))
+    ) {
+      return true; // user-authored in the source — keep
+    }
     removedSkills.push(skill.name);
     return false;
   });

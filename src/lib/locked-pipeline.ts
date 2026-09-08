@@ -23,7 +23,7 @@
 
 import type { ResumeData, JobDescription, AgentDirectives, OptimizerDirectiveConfig } from "./types";
 import { runBulletOnlyOptimizer, buildOptimizerInput } from "./bullet-only-optimizer";
-import { assembleResume, findRemovedSourceSkills, normalizeSkillName } from "./resume-assembler";
+import { assembleResume, canonicalSkillKey, findRemovedSourceSkills, normalizeSkillName } from "./resume-assembler";
 import { runStructureGuardian, sanitizeSkillsAgainstJd } from "./structure-guardian";
 import { validateExperienceFingerprints } from "./experience-fingerprint";
 import { ensureExperienceIds } from "./entity-lock";
@@ -719,11 +719,16 @@ export async function runLockedPipeline(
         const langName = typeof srcLang === "string" ? srcLang : (srcLang as any).name;
         if (!langName) continue;
         const srcNorm = normalizeSkillName(langName);
+        const srcLangCanon = canonicalSkillKey(langName);
         const found = assembledLangs.some((al: any) => {
           const alName = typeof al === "string" ? al : al.name;
           if (!alName) return false;
           const alNorm = normalizeSkillName(alName);
-          return alName.toLowerCase() === langName.toLowerCase() || alNorm === srcNorm;
+          return (
+            alName.toLowerCase() === langName.toLowerCase() ||
+            alNorm === srcNorm ||
+            canonicalSkillKey(alName) === srcLangCanon
+          );
         });
         if (!found) {
           contentViolations.push(`Language "${langName}" was removed from assembled resume`);

@@ -21,7 +21,7 @@ import { validateLayout } from "./layout-validator";
 import type { OptimizationPolicy } from "./directive-policy";
 import { checkPolicyCompliance } from "./directive-policy";
 import { checkSectionPreservation, extractSectionsFromResume } from "./dynamic-section-engine";
-import { cleanLanguageToken } from "./resume-assembler";
+import { cleanLanguageToken, canonicalSkillKey } from "./resume-assembler";
 
 // ============================================================================
 // Types
@@ -288,6 +288,11 @@ function checkLanguagesNotInSkills(optimized: ResumeData, source: ResumeData): G
 function checkSkillsPreserved(optimized: ResumeData, source: ResumeData): GuardianCheck {
   const srcSkills = source.skills.map((s) => (s.name || "").toLowerCase().trim()).filter(Boolean);
   const optSkillNames = optimized.skills.map((s) => (s.name || "").toLowerCase().trim()).filter(Boolean);
+  // Dash-canonical twin of the optimized names: the optimizer legitimately
+  // normalizes PDF artifacts ("Passenger Check - in" → "Passenger Check-in").
+  const optSkillCanon = new Set(
+    optimized.skills.map((s) => canonicalSkillKey(s.name || "")).filter(Boolean),
+  );
 
   if (srcSkills.length === 0) {
     return {
@@ -298,8 +303,10 @@ function checkSkillsPreserved(optimized: ResumeData, source: ResumeData): Guardi
     };
   }
 
-  // Check source skills still exist
-  const missingSkills = srcSkills.filter((ss) => !optSkillNames.includes(ss));
+  // Check source skills still exist (exact or dash-canonical)
+  const missingSkills = srcSkills.filter(
+    (ss) => !optSkillNames.includes(ss) && !optSkillCanon.has(canonicalSkillKey(ss)),
+  );
   if (missingSkills.length > 0) {
     return {
       name: "skills_preserved",

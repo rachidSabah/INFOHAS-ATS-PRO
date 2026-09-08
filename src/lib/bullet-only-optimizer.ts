@@ -31,7 +31,7 @@
 import type { ResumeData, ResumeSkill, JobDescription, AgentDirectives, OptimizerDirectiveConfig } from "./types";
 import { callAI, callAIStreamed, extractJSON, OPTIMIZER_CALL_TIMEOUT_MS } from "./ai";
 import { buildBulletDirective } from "./optimizer-directive-engine";
-import { cleanupGrammar, repairMalformedJSON, stripMarkdown } from "./ai-response-processor";
+import { cleanupGrammar, cleanupNameField, repairMalformedJSON, stripMarkdown } from "./ai-response-processor";
 import type { OptimizerOutput } from "./resume-assembler";
 import { validateOptimizerPatch } from "./optimizer-patch";
 import {
@@ -279,8 +279,12 @@ export function parseOptimizerOutput(rawResponse: string): { output: OptimizerOu
       ? parsed.skills
           .filter((s: any) => s && typeof s === "object" && typeof s.name === "string")
           .map((s: any) => ({
-            name: cleanupGrammar(s.name),
-            category: typeof s.category === "string" ? cleanupGrammar(s.category) : undefined,
+            // NAME-SAFE cleanup: the bullet-oriented trailing-preposition rule in
+            // cleanupGrammar corrupted skill names ("Passenger Check - in" →
+            // "Passenger Check -") and burned every optimization attempt against
+            // the Fix-8 preservation gate. Names are entity names, not sentences.
+            name: cleanupNameField(s.name),
+            category: typeof s.category === "string" ? cleanupNameField(s.category) : undefined,
           }))
       : undefined,
     experiences: Array.isArray(parsed.experiences)

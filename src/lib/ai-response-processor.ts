@@ -842,6 +842,44 @@ export function cleanupGrammar(text: string): string {
 }
 
 /**
+ * NAME-SAFE grammar cleanup for entity-name fields (skill names, language
+ * names, categories, degrees). Unlike cleanupGrammar (which is bullet/sentence
+ * oriented), this variant NEVER removes trailing "words" or filler phrases.
+ *
+ * Production incident (HEAD 21096df): the PDF parser emits spaced-hyphen
+ * artifacts like "Passenger Check - in"; cleanupGrammar's orphaned-trailing-
+ * preposition rule (\s+(?:of|in|on|at|...)$) ate the " in", renaming the skill
+ * to "Passenger Check -" — the Fix-8 preservation check then failed EVERY
+ * attempt ("Skill 'Passenger Check - in' was removed from assembled resume")
+ * and the optimization became unrecoverable.
+ */
+export function cleanupNameField(text: string): string {
+  if (!text) return text;
+  let result = text;
+
+  // Strip stray backticks (often leak from markdown code fences)
+  result = result.replace(/`/g, "");
+
+  // Fix double/triple periods
+  result = result.replace(/\.{2,}/g, ".");
+
+  // Fix space before period/comma
+  result = result.replace(/\s+\./g, ".");
+  result = result.replace(/\s+,/g, ",");
+
+  // Fix double punctuation like ".," or ",." or ".."
+  result = result.replace(/[.,;]\s*[.,;]+/g, ".");
+
+  // Clean up double spaces
+  result = result.replace(/\s{2,}/g, " ");
+
+  // Remove entries that are just punctuation
+  result = result.replace(/^[\s.,;:|-]+$/, "");
+
+  return result.trim();
+}
+
+/**
  * Clean up grammar in a parsed resume object.
  * Fixes double periods and filler phrases in all text fields.
  * Also strips stray backticks, normalizes whitespace, and removes
@@ -908,17 +946,21 @@ export function cleanupResumeGrammar<T>(data: T): T {
   }
 
   // Clean skills (strip backticks, fix whitespace, remove AI-generated label prefixes)
+  // NAME-SAFE cleanup (cleanupNameField) — the bullet-oriented trailing-word /
+  // filler rules in cleanupGrammar CORRUPT skill names ("Passenger Check - in"
+  // → "Passenger Check -"), which the Fix-8 preservation check then reports as
+  // a removed skill. See cleanupNameField docstring for the incident.
   if (Array.isArray(cleaned.skills)) {
     for (const skill of cleaned.skills) {
       if (skill.name) {
-        skill.name = cleanupGrammar(skill.name);
+        skill.name = cleanupNameField(skill.name);
         // Strip raw labels like "General:", "Job-Relevant:", "Transferable:"
         // that AI may prepend to skill names as pseudo-categories.
         // These are distinct from legitimate category:name patterns in the source.
         skill.name = skill.name.replace(/^(General|Job.Relevant|Transferable|Core|Technical)\s*:\s*/i, "").trim();
       }
       if (skill.category) {
-        skill.category = cleanupGrammar(skill.category);
+        skill.category = cleanupNameField(skill.category);
         // Remove meaningless AI-generated category labels
         if (/^(general|job.relevant|transferable)$/i.test(skill.category.trim())) {
           skill.category = "";
@@ -927,11 +969,11 @@ export function cleanupResumeGrammar<T>(data: T): T {
     }
   }
 
-  // Clean languages
+  // Clean languages (name-safe — language names are entity names, not sentences)
   if (Array.isArray(cleaned.languages)) {
     for (const lang of cleaned.languages) {
-      if (lang.name) lang.name = cleanupGrammar(lang.name);
-      if (lang.proficiency) lang.proficiency = cleanupGrammar(lang.proficiency);
+      if (lang.name) lang.name = cleanupNameField(lang.name);
+      if (lang.proficiency) lang.proficiency = cleanupNameField(lang.proficiency);
     }
   }
 

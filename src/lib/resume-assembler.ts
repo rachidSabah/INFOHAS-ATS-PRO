@@ -105,6 +105,24 @@ export function normalizeSkillName(n: string): string {
 }
 
 /**
+ * Dash/whitespace-insensitive canonical key for skill-name equality.
+ *
+ * PDF text extraction routinely emits spaced-hyphen artifacts ("Passenger
+ * Check - in" for "Passenger Check-in") and AI rewrites normalize them back —
+ * BOTH spellings denote the same skill and must never count as "removed".
+ * Only the DASH family (+ whitespace) is folded: "C++"/"C#" stay distinct
+ * from "C" because +/# are not dashes.
+ */
+export function canonicalSkillKey(n: string): string {
+  return normalizeSkillName(n)
+    // Unicode dash family (hyphen, non-breaking hyphen, figure/en/em/horizontal
+    // bar, minus) → space, so "check - in", "check–in", "check-in" all agree.
+    .replace(/[\u2010-\u2015\u2212-]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/**
  * Strip common language proficiency descriptors to extract the underlying language name.
  * e.g. "Fluent in English" → "english", "English (Native)" → "english",
  * "Conversational Spanish" → "spanish", "Professional working English" → "english"
@@ -144,6 +162,14 @@ export function findRemovedSourceSkills(
   const assembledLangNames = new Set(
     assembledLanguages.map((s) => nameOf(s).trim().toLowerCase()).filter(Boolean),
   );
+  // Canonical (dash/whitespace-insensitive) twins of the sets above — a PDF
+  // artifact spelling and the AI-normalized spelling are the same skill.
+  const assembledSkillCanon = new Set(
+    assembledSkills.map((s) => canonicalSkillKey(nameOf(s))).filter(Boolean),
+  );
+  const assembledLangCanon = new Set(
+    assembledLanguages.map((s) => canonicalSkillKey(nameOf(s))).filter(Boolean),
+  );
   const assembledLangCleaned = new Set(
     assembledLanguages.map((s) => cleanLanguageToken(nameOf(s))).filter(Boolean),
   );
@@ -153,12 +179,18 @@ export function findRemovedSourceSkills(
     if (!skillName) continue;
     const srcNorm = normalizeSkillName(skillName);
 
-    // 1. Direct match in assembled skills
+    // 1. Direct match in assembled skills (exact, category-prefix-stripped,
+    //    or dash/whitespace-canonical)
+    const srcCanon = canonicalSkillKey(skillName);
     const foundInSkills = (assembledSkills || []).some((as) => {
       const asName = nameOf(as);
       if (!asName) return false;
       const asNorm = normalizeSkillName(asName);
-      return asName.toLowerCase() === skillName.toLowerCase() || asNorm === srcNorm;
+      return (
+        asName.toLowerCase() === skillName.toLowerCase() ||
+        asNorm === srcNorm ||
+        canonicalSkillKey(asName) === srcCanon
+      );
     });
     if (foundInSkills) continue;
 
@@ -170,10 +202,11 @@ export function findRemovedSourceSkills(
     // 3. Relocation check — split compound entries by comma, semicolon, slash, bullet, or 'and'
     const parts = skillName.split(/[,;/•|]|\band\b|&/i).map((p) => normalizeSkillName(p)).filter(Boolean);
     const relocated = parts.length > 0 && parts.every((p) => {
-      // In assembled skills?
-      if (assembledSkillNames.has(p)) return true;
-      // In assembled languages directly?
-      if (assembledLangNames.has(p)) return true;
+      const pCanon = canonicalSkillKey(p);
+      // In assembled skills? (exact or dash-canonical)
+      if (assembledSkillNames.has(p) || (pCanon && assembledSkillCanon.has(pCanon))) return true;
+      // In assembled languages directly? (exact or dash-canonical)
+      if (assembledLangNames.has(p) || (pCanon && assembledLangCanon.has(pCanon))) return true;
       // In assembled languages after cleaning proficiency qualifiers (e.g. "fluent in english" -> "english")?
       const cleanedPart = cleanLanguageToken(p);
       if (cleanedPart && (assembledLangCleaned.has(cleanedPart) || assembledLangNames.has(cleanedPart))) {
@@ -445,12 +478,19 @@ export function assembleResume(
     // CRITICAL: Always merge source skills back in, regardless of count.
     // The optimizer may return more skills (adding JD-relevant ones) but must
     // NEVER drop source skills. This preserves 100% factual integrity.
+    // Dash-canonical awareness: "Passenger Check - in" (PDF artifact) and the
+    // optimizer's rewritten "Passenger Check-in" are the SAME skill — treat
+    // the optimizer's spelling as present instead of merging a lookalike
+    // duplicate that renders as a double entry on the final resume.
     const existingNames = new Set(filtered.map(s => s.name?.toLowerCase().trim()).filter(Boolean));
+    const existingCanon = new Set(filtered.map(s => canonicalSkillKey(s.name || "")).filter(Boolean));
     for (const srcSkill of sourceResume.skills || []) {
       const key = srcSkill.name?.toLowerCase().trim();
-      if (key && !existingNames.has(key)) {
+      const canon = canonicalSkillKey(srcSkill.name || "");
+      if (key && !existingNames.has(key) && !(canon && existingCanon.has(canon))) {
         skills.push({ ...srcSkill });
         existingNames.add(key);
+        if (canon) existingCanon.add(canon);
       }
     }
     const totalDropped = (sourceResume.skills?.length || 0) - existingNames.size;
@@ -463,18 +503,26 @@ export function assembleResume(
     // === SKILL CATEGORY RESTORATION ===
     // The optimizer often drops or mis-assigns categories (puts everything under
     // "General" except the first item per category). Merge source categories back.
+    // Canonical twin map: the optimizer may have normalized dashes ("Check-in"
+    // vs source "Check - in"), so exact-key lookup alone misses the source row.
     const sourceCategoryMap = new Map<string, string>();
+    const sourceCategoryCanon = new Map<string, string>();
     for (const src of sourceResume.skills) {
       const key = src.name.toLowerCase().trim();
       if (!sourceCategoryMap.has(key) && src.category) {
         sourceCategoryMap.set(key, src.category);
+      }
+      const canon = canonicalSkillKey(src.name || "");
+      if (canon && !sourceCategoryCanon.has(canon) && src.category) {
+        sourceCategoryCanon.set(canon, src.category);
       }
     }
     let categoryRestoreCount = 0;
     for (const skill of skills) {
       if (!skill.category || skill.category === "General") {
         const srcKey = skill.name.toLowerCase().trim();
-        const srcCat = sourceCategoryMap.get(srcKey);
+        const srcCat = sourceCategoryMap.get(srcKey)
+          ?? sourceCategoryCanon.get(canonicalSkillKey(skill.name || ""));
         if (srcCat) {
           skill.category = srcCat;
           categoryRestoreCount++;
