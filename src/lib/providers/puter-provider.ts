@@ -9,7 +9,11 @@ import type { OAuthAIProvider, ProviderSession, ProviderAuthStatus } from "./int
 import { ProviderAuthenticationError, createEmptySession } from "./interface";
 import { saveSession, loadSession, clearSession, isSessionExpired, isSessionExpiringSoon, encryptValue, decryptValue } from "./session-manager";
 // Puter curated ids — SINGLE SOURCE OF TRUTH (src/lib/puter-models.ts).
-import { PUTER_CURATED_MODEL_IDS } from "../puter-models";
+import {
+  PUTER_CURATED_MODEL_IDS,
+  sanitizePuterChatOpts,
+  isPuterTemperatureError,
+} from "../puter-models";
 // Per-user identity for the server-side account mirror — without this, ALL
 // users' Puter accounts landed in the same "anonymous" bucket on the API.
 import { getEffectiveUserId } from "../cloud-api";
@@ -643,23 +647,37 @@ export class PuterProvider implements OAuthAIProvider {
           ]
         : [{ role: "user", content: opts.userPrompt }];
 
-      const chatOpts: any = {
+      const chatOpts: any = sanitizePuterChatOpts({
         max_tokens: opts.maxTokens ?? 4096,
         temperature: opts.temperature ?? 0.7,
-      };
-      if (opts.model) {
-        chatOpts.model = opts.model;
-      }
+        ...(opts.model ? { model: opts.model } : {}),
+      });
 
       try {
         // Wrap puter.ai.chat in a 30s timeout to prevent it hanging forever
         // when the WebSocket connection stalls or the server is overloaded.
         const PUTER_CALL_TIMEOUT_MS = 30_000;
-        const chatPromise: Promise<any> = window.puter.ai.chat(messages, chatOpts);
-        const timeoutPromise: Promise<never> = new Promise((_, reject) =>
-          setTimeout(() => reject(new Error(`Puter.ai.chat timed out after ${PUTER_CALL_TIMEOUT_MS / 1000}s`)), PUTER_CALL_TIMEOUT_MS)
-        );
-        const resp: any = await Promise.race([chatPromise, timeoutPromise]);
+        const callChat = (options: any) => {
+          const chatPromise: Promise<any> = window.puter.ai.chat(messages, options);
+          const timeoutPromise: Promise<never> = new Promise((_, reject) =>
+            setTimeout(() => reject(new Error(`Puter.ai.chat timed out after ${PUTER_CALL_TIMEOUT_MS / 1000}s`)), PUTER_CALL_TIMEOUT_MS)
+          );
+          return Promise.race([chatPromise, timeoutPromise]);
+        };
+
+        let resp: any;
+        try {
+          resp = await callChat(chatOpts);
+        } catch (chatErr: any) {
+          if (isPuterTemperatureError(chatErr) && "temperature" in chatOpts) {
+            console.warn(`[Puter] Model ${opts.model || "default"} rejected temperature ${chatOpts.temperature}. Retrying without temperature.`);
+            const retryOpts = { ...chatOpts };
+            delete retryOpts.temperature;
+            resp = await callChat(retryOpts);
+          } else {
+            throw chatErr;
+          }
+        }
 
         // Parse the response
         let text = "";

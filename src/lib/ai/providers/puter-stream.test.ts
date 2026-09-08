@@ -70,4 +70,78 @@ describe("PuterProvider.stream", () => {
       )
     ).rejects.toThrow(/rate limited/);
   });
+
+  it("omits temperature for GPT-5 and reasoning models that reject custom temperatures", async () => {
+    const chatMock = vi.fn((_msgs?: any, _opts?: any) => fakePuterStream([{ type: "text", text: "result" }]));
+    (globalThis as any).window.puter.ai.chat = chatMock;
+
+    await puterAdapter.stream(
+      { messages: [{ role: "user", content: "hi" }], maxTokens: 100, temperature: 0.15 },
+      { id: "p", name: "Puter", type: "puter", modelName: "gpt-5.4-nano", timeout: 30000, maxTokens: 100, temperature: 0.15 } as any,
+      () => {},
+    );
+
+    expect(chatMock).toHaveBeenCalledTimes(1);
+    const calledOpts = chatMock.mock.calls[0]![1];
+    expect(calledOpts.model).toBe("gpt-5.4-nano");
+    expect(calledOpts.temperature).toBeUndefined();
+  });
+
+  it("omits temperature when model is omitted (Puter default is gpt-5-nano)", async () => {
+    const chatMock = vi.fn((_msgs?: any, _opts?: any) => fakePuterStream([{ type: "text", text: "result" }]));
+    (globalThis as any).window.puter.ai.chat = chatMock;
+
+    await puterAdapter.stream(
+      { messages: [{ role: "user", content: "hi" }], maxTokens: 100, temperature: 0.15 },
+      { id: "p", name: "Puter", type: "puter", timeout: 30000, maxTokens: 100 } as any,
+      () => {},
+    );
+
+    expect(chatMock).toHaveBeenCalledTimes(1);
+    const calledOpts = chatMock.mock.calls[0]![1];
+    expect(calledOpts.temperature).toBeUndefined();
+  });
+
+  it("passes temperature for models that support it (e.g. gpt-4o, claude)", async () => {
+    const chatMock = vi.fn((_msgs?: any, _opts?: any) => fakePuterStream([{ type: "text", text: "result" }]));
+    (globalThis as any).window.puter.ai.chat = chatMock;
+
+    await puterAdapter.stream(
+      { messages: [{ role: "user", content: "hi" }], maxTokens: 100, temperature: 0.3 },
+      { id: "p", name: "Puter", type: "puter", modelName: "gpt-4o", timeout: 30000, maxTokens: 100 } as any,
+      () => {},
+    );
+
+    expect(chatMock).toHaveBeenCalledTimes(1);
+    const calledOpts = chatMock.mock.calls[0]![1];
+    expect(calledOpts.temperature).toBe(0.3);
+  });
+
+  it("retries without temperature when puter.ai.chat throws a 400 temperature error", async () => {
+    let callCount = 0;
+    const chatMock = vi.fn((_msgs: any, _opts: any) => {
+      callCount++;
+      if (callCount === 1) {
+        throw new Error("400 Unsupported value: 'temperature' does not support 0.15 with this model. Only the default (1) value is supported.");
+      }
+      return fakePuterStream([{ type: "text", text: "recovered output" }]);
+    });
+    (globalThis as any).window.puter.ai.chat = chatMock;
+
+    const chunks: string[] = [];
+    // Force custom-model that wasn't caught by the regex initially
+    const res = await puterAdapter.stream(
+      { messages: [{ role: "user", content: "hi" }], maxTokens: 100, temperature: 0.15 },
+      { id: "p", name: "Puter", type: "puter", modelName: "custom-upstream-model", timeout: 30000, maxTokens: 100 } as any,
+      (c: string) => chunks.push(c),
+    );
+
+    expect(chatMock).toHaveBeenCalledTimes(2);
+    // First call had temperature
+    expect(chatMock.mock.calls[0]![1].temperature).toBe(0.15);
+    // Retry had temperature removed
+    expect(chatMock.mock.calls[1]![1].temperature).toBeUndefined();
+    expect(res.text).toBe("recovered output");
+    expect(chunks).toEqual(["recovered output"]);
+  });
 });

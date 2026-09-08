@@ -86,3 +86,48 @@ export const KNOWN_GOOD_PUTER_MODELS: PuterCuratedModel[] = [
   // Reka (video analysis)
   { id: "reka/reka-edge", label: "Reka Edge (Video)", provider: "Reka" },
 ];
+
+/**
+ * Check whether a Puter model supports custom temperature settings.
+ * OpenAI reasoning models (o1, o3, o4) and GPT-5 family models (gpt-5, gpt-5.4, gpt-5-nano)
+ * reject any temperature other than default (1) with:
+ * "400 Unsupported value: 'temperature' does not support X with this model. Only the default (1) value is supported."
+ * When no model is specified, Puter defaults to gpt-5-nano, so custom temperature is also unsupported.
+ */
+export function supportsCustomTemperature(modelId?: string | null): boolean {
+  if (!modelId || !modelId.trim()) return false;
+  const lower = modelId.toLowerCase().trim();
+  if (/^o[134](?:[.-]|$)/i.test(lower)) return false;
+  if (/^gpt-5(?:[.-]|$)/i.test(lower)) return false;
+  if (lower.includes("deepseek-r1") || lower.includes("reasoner")) return false;
+  return true;
+}
+
+/**
+ * Checks whether an error from Puter indicates that the requested model does not support
+ * a custom temperature value.
+ */
+export function isPuterTemperatureError(err: any): boolean {
+  if (!err) return false;
+  const msg = (err?.message || (typeof err === "string" ? err : String(err || ""))).toLowerCase();
+  return msg.includes("temperature") && (
+    msg.includes("support") ||
+    msg.includes("default") ||
+    msg.includes("unsupported") ||
+    msg.includes("invalid") ||
+    msg.includes("only the default")
+  );
+}
+
+/**
+ * Sanitize options for puter.ai.chat().
+ * Strips `temperature` if the model does not support custom temperatures.
+ */
+export function sanitizePuterChatOpts<T extends { model?: string; temperature?: number }>(opts: T): T {
+  const clean = { ...opts };
+  if ("temperature" in clean && !supportsCustomTemperature(clean.model)) {
+    delete clean.temperature;
+  }
+  return clean;
+}
+

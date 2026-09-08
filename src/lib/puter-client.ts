@@ -11,7 +11,11 @@
 "use client";
 
 // Curated Puter model catalog — SINGLE SOURCE OF TRUTH (src/lib/puter-models.ts).
-import { KNOWN_GOOD_PUTER_MODELS as _KNOWN_GOOD_PUTER_MODELS } from "./puter-models";
+import {
+  KNOWN_GOOD_PUTER_MODELS as _KNOWN_GOOD_PUTER_MODELS,
+  sanitizePuterChatOpts,
+  isPuterTemperatureError,
+} from "./puter-models";
 
 declare global {
   interface Window {
@@ -314,22 +318,40 @@ export async function puterChatStreamed(
   }
 
   const model = options.model || "gpt-5.4-nano";
-  const response: any = await window.puter.ai.chat(messages, {
+  const chatOpts: any = sanitizePuterChatOpts({
     model,
     max_tokens: options.maxTokens ?? 4096,
     temperature: options.temperature ?? 0.7,
     stream: true,
   });
 
-  let fullText = "";
-  for await (const part of response as AsyncIterable<any>) {
-    if (part?.type === "text" && part.text) {
-      fullText += part.text;
-      onChunk(part.text);
-    } else if (part?.type === "error") {
-      throw new Error(part.message || "Puter stream error");
+  const runStream = async (opts: any) => {
+    const response: any = await window.puter.ai.chat(messages, opts);
+    let fullText = "";
+    for await (const part of response as AsyncIterable<any>) {
+      if (part?.type === "text" && part.text) {
+        fullText += part.text;
+        onChunk(part.text);
+      } else if (part?.type === "error") {
+        throw new Error(part.message || "Puter stream error");
+      }
+      // 'compaction' and 'image' chunks are handled by the caller if needed
     }
-    // 'compaction' and 'image' chunks are handled by the caller if needed
+    return fullText;
+  };
+
+  let fullText = "";
+  try {
+    fullText = await runStream(chatOpts);
+  } catch (streamErr: any) {
+    if (isPuterTemperatureError(streamErr) && "temperature" in chatOpts && fullText.length === 0) {
+      console.warn(`[puterClient] Model ${model} rejected temperature ${chatOpts.temperature}. Retrying without temperature.`);
+      const retryOpts = { ...chatOpts };
+      delete retryOpts.temperature;
+      fullText = await runStream(retryOpts);
+    } else {
+      throw streamErr;
+    }
   }
 
   return fullText;
@@ -387,10 +409,26 @@ export async function testPuterConnection(model?: string): Promise<PuterTestResu
   // Step 3: Run a test prompt
   try {
     const testModel = model || "gpt-5.4-nano";
-    const response = await window.puter.ai.chat(
-      "Reply with exactly: PUTER_CONNECTION_OK",
-      { model: testModel, max_tokens: 20, temperature: 0 },
-    );
+    const testOpts: any = sanitizePuterChatOpts({
+      model: testModel,
+      max_tokens: 20,
+      temperature: 0,
+    });
+    const callTest = (opts: any) =>
+      window.puter.ai.chat("Reply with exactly: PUTER_CONNECTION_OK", opts);
+
+    let response: any;
+    try {
+      response = await callTest(testOpts);
+    } catch (testErr: any) {
+      if (isPuterTemperatureError(testErr) && "temperature" in testOpts) {
+        const retryOpts = { ...testOpts };
+        delete retryOpts.temperature;
+        response = await callTest(retryOpts);
+      } else {
+        throw testErr;
+      }
+    }
 
     const latencyMs = Date.now() - startTime;
     const text = extractPuterText(response);
@@ -454,11 +492,25 @@ export async function puterChat(
   }
 
   const model = options?.model || "gpt-5.4-nano";
-  const response = await window.puter.ai.chat(messages, {
+  const chatOpts: any = sanitizePuterChatOpts({
     model,
     max_tokens: options?.maxTokens ?? 4096,
     temperature: options?.temperature ?? 0.7,
   });
+
+  let response: any;
+  try {
+    response = await window.puter.ai.chat(messages, chatOpts);
+  } catch (chatErr: any) {
+    if (isPuterTemperatureError(chatErr) && "temperature" in chatOpts) {
+      console.warn(`[puterClient] Model ${model} rejected temperature ${chatOpts.temperature}. Retrying without temperature.`);
+      const retryOpts = { ...chatOpts };
+      delete retryOpts.temperature;
+      response = await window.puter.ai.chat(messages, retryOpts);
+    } else {
+      throw chatErr;
+    }
+  }
 
   const text = extractPuterText(response);
   return { text, model };

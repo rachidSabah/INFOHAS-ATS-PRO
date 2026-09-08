@@ -4,7 +4,12 @@ import type { AIProviderAdapter, ChatRequest, ChatResponse, ProviderConfig } fro
 // Curated fallback ids — SINGLE SOURCE OF TRUTH (src/lib/puter-models.ts).
 // The LIVE catalog is fetched via ProviderManager.fetchModels() →
 // /api/providers/models → api.puter.com/puterai/chat/models.
-import { PUTER_CURATED_MODEL_IDS } from "../../puter-models";
+import {
+  PUTER_CURATED_MODEL_IDS,
+  supportsCustomTemperature,
+  isPuterTemperatureError,
+  sanitizePuterChatOpts,
+} from "../../puter-models";
 // Shared lazy loader (singleton, readiness-polled). The SDK is intentionally
 // NOT loaded eagerly in layout — this is the single load path for AI calls.
 import { ensurePuterLoaded } from "../../puter-loader";
@@ -41,6 +46,7 @@ export class PuterProvider implements AIProviderAdapter {
     const t0 = performance.now();
     const { getPuterProvider } = await import("../../providers/puter-provider");
     const puter = getPuterProvider();
+    const model = req.model || config.modelName;
 
     // Delegate execution to the canonical Puter OAuth provider to reuse its
     // robust account rotation on 429, session checks, and anonymous fallback.
@@ -48,9 +54,9 @@ export class PuterProvider implements AIProviderAdapter {
       systemPrompt: req.messages.find((m) => m.role === "system")?.content,
       userPrompt: req.messages.find((m) => m.role === "user")?.content || "",
       maxTokens: req.maxTokens,
-      temperature: req.temperature,
+      temperature: supportsCustomTemperature(model) ? req.temperature : undefined,
       topP: req.topP,
-      model: req.model || config.modelName,
+      model: model,
     });
 
     return {
@@ -98,52 +104,74 @@ export class PuterProvider implements AIProviderAdapter {
     }
 
     const messages = req.messages;
-    const chatOpts: any = {
-      max_tokens: req.maxTokens ?? config.maxTokens,
-      temperature: req.temperature ?? config.temperature ?? 0.7,
-      stream: true,
-    };
     const model = req.model || config.modelName;
-    if (model) chatOpts.model = model;
+    const rawTemp = req.temperature ?? config.temperature ?? 0.7;
+    const chatOpts: any = sanitizePuterChatOpts({
+      max_tokens: req.maxTokens ?? config.maxTokens,
+      temperature: rawTemp,
+      stream: true,
+      ...(model ? { model } : {}),
+    });
 
-    let response: any = window.puter.ai.chat(messages as any, chatOpts);
-    // window.puter.ai.chat(..., {stream:true}) may return either:
-    //   (a) an AsyncIterable directly, or
-    //   (b) a Promise that resolves to an AsyncIterable, or
-    //   (c) a plain iterator object exposing a `.next()` method.
-    // Await if it's a thenable (case b) before the iterable check.
-    if (response && typeof response.then === "function") {
-      response = await response;
-    }
-    const isAsyncIterable =
-      response && typeof (response as any)[Symbol.asyncIterator] === "function";
-    const isIterator =
-      response && typeof (response as any).next === "function";
-    if (!response || (!isAsyncIterable && !isIterator)) {
-      throw new Error("Puter.js streaming response was not iterable.");
-    }
+    const runStream = async (opts: any) => {
+      let response: any = window.puter.ai.chat(messages as any, opts);
+      // window.puter.ai.chat(..., {stream:true}) may return either:
+      //   (a) an AsyncIterable directly, or
+      //   (b) a Promise that resolves to an AsyncIterable, or
+      //   (c) a plain iterator object exposing a `.next()` method.
+      // Await if it's a thenable (case b) before the iterable check.
+      if (response && typeof response.then === "function") {
+        response = await response;
+      }
+      const isAsyncIterable =
+        response && typeof (response as any)[Symbol.asyncIterator] === "function";
+      const isIterator =
+        response && typeof (response as any).next === "function";
+      if (!response || (!isAsyncIterable && !isIterator)) {
+        throw new Error("Puter.js streaming response was not iterable.");
+      }
+
+      let textAcc = "";
+      let sawError = "";
+      // Normalize to an AsyncIterable for the for-await loop.
+      const iterable: AsyncIterable<any> = isAsyncIterable
+        ? (response as AsyncIterable<any>)
+        : makeAsyncIterable(response);
+      for await (const part of iterable) {
+        if (part?.type === "text" && part.text) {
+          textAcc += part.text;
+          onChunk(part.text);
+        } else if (part?.type === "error") {
+          sawError = part.message || "Puter stream error";
+          break;
+        } else if (typeof part === "string") {
+          textAcc += part;
+          onChunk(part);
+        }
+      }
+
+      if (sawError) {
+        throw new Error(sawError);
+      }
+
+      return textAcc;
+    };
 
     let fullText = "";
-    let sawError = "";
-    // Normalize to an AsyncIterable for the for-await loop.
-    const iterable: AsyncIterable<any> = isAsyncIterable
-      ? (response as AsyncIterable<any>)
-      : makeAsyncIterable(response);
-    for await (const part of iterable) {
-      if (part?.type === "text" && part.text) {
-        fullText += part.text;
-        onChunk(part.text);
-      } else if (part?.type === "error") {
-        sawError = part.message || "Puter stream error";
-        break;
-      } else if (typeof part === "string") {
-        fullText += part;
-        onChunk(part);
+    try {
+      fullText = await runStream(chatOpts);
+    } catch (streamErr: any) {
+      // If error is about unsupported temperature and temperature was set, retry once without temperature
+      if (isPuterTemperatureError(streamErr) && "temperature" in chatOpts && fullText.length === 0) {
+        console.warn(
+          `[Puter Stream] Model ${model || "default"} rejected temperature ${chatOpts.temperature}. Retrying without temperature.`
+        );
+        const retryOpts = { ...chatOpts };
+        delete retryOpts.temperature;
+        fullText = await runStream(retryOpts);
+      } else {
+        throw streamErr;
       }
-    }
-
-    if (sawError) {
-      throw new Error(sawError);
     }
 
     return {
