@@ -121,11 +121,79 @@ export function userScopedKey(base: string): string {
  *   - 4xx client errors (400/401/403/404/422): NO RETRY (permanent — request is bad)
  *   - CORS errors: NO RETRY (permanent — server config issue)
  */
+// ============ 5XX CIRCUIT BREAKER ============
+// INCIDENT (2026-09-08): a D1 schema error made GET /api/users return 500 for
+// every signed-in caller, and the page kept issuing that request (every boot
+// sync / admin mount) — an effectively unbounded console error storm. Each
+// individual call site IS bounded (fetchWithRetry: ≤3 attempts with backoff),
+// but no layer globally capped the request RATE across invocations.
+//
+// This circuit breaker adds the missing cap: once ≥ BREAKER_THRESHOLD 5xx
+// attempts are recorded for the same method+path within the rolling window,
+// further calls for that path fail fast (zero network I/O) until the cooldown
+// elapses. Any non-5xx response (success OR 4xx — the server is reachable)
+// resets the counter. Network-level errors (CORS / offline) intentionally do
+// NOT trip the breaker: they are frequently permanent dev-time conditions
+// (e.g. local CORS misconfig) and failing them fast would hide the real bug.
+const BREAKER_THRESHOLD = 4; // one fully-retried invocation = 3 attempts; a 4th failure means a SECOND invocation hit the same 5xx
+const BREAKER_WINDOW_MS = 60_000; // rolling window for failure timestamps
+const BREAKER_COOLDOWN_MS = 60_000; // how long the circuit stays open
+
+interface BreakerEntry {
+  failures: number[]; // timestamps of recent 5xx attempts
+  openUntil: number; // epoch ms; circuit is open while openUntil > now
+}
+const breakerState = new Map<string, BreakerEntry>();
+
+/** Thrown instead of performing network I/O while a circuit is open. */
+export class CircuitOpenError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "CircuitOpenError";
+  }
+}
+
+function breakerKey(options: RequestInit, url: string): string {
+  return `${options.method || "GET"} ${url}`;
+}
+
+function isCircuitOpen(key: string, now: number): boolean {
+  const entry = breakerState.get(key);
+  return !!entry && entry.openUntil > now;
+}
+
+function recordFailure(key: string, now: number): void {
+  const entry = breakerState.get(key) ?? { failures: [], openUntil: 0 };
+  entry.failures = entry.failures.filter((t) => now - t < BREAKER_WINDOW_MS);
+  entry.failures.push(now);
+  if (entry.failures.length >= BREAKER_THRESHOLD) {
+    entry.openUntil = now + BREAKER_COOLDOWN_MS;
+  }
+  breakerState.set(key, entry);
+}
+
+function recordSuccess(key: string): void {
+  breakerState.delete(key);
+}
+
+/** Test hook — clears all breaker state so tests start from a clean slate. */
+export function __resetCircuitBreakerForTests(): void {
+  breakerState.clear();
+}
+
 async function fetchWithRetry(
   url: string,
   options: RequestInit,
   maxRetries = 2,
 ): Promise<Response> {
+  const breakerK = breakerKey(options, url);
+  // Fail fast while the circuit is open — the server is known to be erroring
+  // for this path and retrying would only feed an error loop.
+  if (isCircuitOpen(breakerK, Date.now())) {
+    throw new CircuitOpenError(
+      `Circuit open for ${breakerK} — repeated server errors; suppressing requests for ${BREAKER_COOLDOWN_MS / 1000}s`,
+    );
+  }
   let lastError: Error | null = null;
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     const controller = new AbortController();
@@ -144,8 +212,18 @@ async function fetchWithRetry(
 
       // Retry on 5xx server errors (transient) — UNLESS it's the last attempt.
       if (res.status >= 500 && attempt < maxRetries) {
+        recordFailure(breakerK, Date.now());
         await new Promise((r) => setTimeout(r, 1000 * Math.pow(2, attempt)));
         continue;
+      }
+
+      if (res.status >= 500) {
+        // Final-attempt 5xx: still counts toward the breaker before the
+        // caller sees the error response.
+        recordFailure(breakerK, Date.now());
+      } else {
+        // Server reachable and behaving (< 500, includes 4xx) — reset.
+        recordSuccess(breakerK);
       }
 
       // 4xx errors (400/401/403/404/422): permanent — do NOT retry.
@@ -187,6 +265,11 @@ async function apiFetch<T = any>(path: string, options: RequestInit = {}): Promi
     }
     return res.json();
   } catch (e: any) {
+    if (e?.name === "CircuitOpenError") {
+      // Circuit breaker: the API has 5xx'd repeatedly for this path. Surface a
+      // single friendly error instead of feeding the request storm.
+      throw new Error("Cloud API temporarily unavailable (repeated server errors) — data saved locally as backup.");
+    }
     // If the error is a network failure (not an API error), throw a
     // user-friendly message that the cloud is unreachable.
     if (e?.name === "AbortError" || e?.message?.includes("fetch")) {
