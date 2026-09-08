@@ -2,7 +2,7 @@
 export const runtime = "edge";
 
 import { useParams, useSearchParams } from "next/navigation";
-import { useEffect, useState, useMemo } from "react";
+import { useEffect, useState, useMemo, Suspense } from "react";
 import { useApp } from "@/lib/store";
 import { api as cloudApi } from "@/lib/cloud-api";
 import { A4Preview } from "@/components/resume/A4Preview";
@@ -19,6 +19,20 @@ import type { ResumeData } from "@/lib/types";
  *     lossy: no contact info, no bullets — superseded by path 2).
  */
 export default function PublicResumePage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+          <div className="animate-spin w-8 h-8 border-2 border-brand border-t-transparent rounded-full" />
+        </div>
+      }
+    >
+      <PublicResumeContent />
+    </Suspense>
+  );
+}
+
+function PublicResumeContent() {
   const params = useParams();
   const searchParams = useSearchParams();
   const resumeId = params.id as string;
