@@ -641,9 +641,10 @@ export function assembleResume(
         const lowerH = h.toLowerCase();
         // Remove if it exactly matches a section header keyword
         if (EDUCATION_SKILL_KEYWORDS.includes(lowerH.trim())) return false;
-        // Remove if it's a single short heading that matches a competency pattern
-        if (h.length < 50 && /^(guest service|professional presence|operational efficiency|teamwork|communication|customer service|leadership|management|technical|analytical|interpersonal)/i.test(h.trim()) && !h.includes(":")) {
-          warnings.push(`Education cleanup: removed highlight that looks like a skill category: "${h}"`);
+        // Only remove if it is an exact standalone section header (e.g. "Guest Service Excellence"),
+        // NEVER strip legitimate competency bullets like "Communication and teamwork" or "Leadership of club"
+        if (/^(guest service excellence|professional presence|operational efficiency|key competencies and skills)$/i.test(h.trim())) {
+          warnings.push(`Education cleanup: removed highlight that is a section header: "${h}"`);
           return false;
         }
         return true;

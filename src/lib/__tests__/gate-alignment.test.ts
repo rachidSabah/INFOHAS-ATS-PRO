@@ -182,4 +182,59 @@ describe("Guardian Agent engine-addition allowlist (gate alignment with page bal
     const bullets = verdict.checks.find((c) => c.name === "bullets_preserved");
     expect(bullets?.passed).toBe(false);
   });
+
+  it("allows engine-cleaned education highlights (6→5) when engineHighlightCounts matches", async () => {
+    const src = makeSource();
+    src.education[0].highlights = [
+      "Option: Mathématiques",
+      "Physique-Chimie",
+      "Mention Très Bien",
+      "Communication",
+      "Scientific methodology",
+      "Technical projects",
+    ]; // 6 highlights
+
+    const opt = makeOptimized();
+    opt.education[0].highlights = [
+      "Option: Mathématiques",
+      "Physique-Chimie",
+      "Mention Très Bien",
+      "Scientific methodology",
+      "Technical projects",
+    ]; // 5 highlights (1 cleaned by assembler)
+
+    const engineBulletCounts = new Map([["exp_001", 3]]);
+    const engineHighlightCounts = new Map([["ed_001", 5]]); // Assembler output count was 5
+
+    const verdict = await runGuardianValidation(opt, src, undefined, {
+      engineBulletCounts,
+      engineHighlightCounts,
+    });
+    const hl = verdict.checks.find((c) => c.name === "education_highlights_preserved");
+    expect(hl?.passed).toBe(true);
+  });
+
+  it("still vetoes education highlights dropped below engine-assembled baseline", async () => {
+    const src = makeSource();
+    src.education[0].highlights = [
+      "Highlight 1",
+      "Highlight 2",
+      "Highlight 3",
+    ];
+
+    const opt = makeOptimized();
+    opt.education[0].highlights = [
+      "Highlight 1",
+    ]; // 1 highlight (dropped 2 after assembly)
+
+    const engineHighlightCounts = new Map([["ed_001", 3]]); // Assembled was 3
+
+    const verdict = await runGuardianValidation(opt, src, undefined, {
+      engineHighlightCounts,
+    });
+    const hl = verdict.checks.find((c) => c.name === "education_highlights_preserved");
+    expect(hl?.passed).toBe(false);
+    expect(hl?.detail).toContain("missing");
+  });
 });
+

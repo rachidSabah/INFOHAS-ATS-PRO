@@ -100,4 +100,36 @@ describe("guardian skill-category relocation", () => {
     } as unknown as ResumeData;
     expect(checkSkillCategoriesPreserved(optimized, headerSource).passed).toBe(true);
   });
+
+  it("preserves all 6 education highlights in assembleResume including bullets starting with Communication and Teamwork", () => {
+    const eduSource = {
+      ...source,
+      education: [
+        {
+          id: "ed_galileo",
+          degree: "High school diploma",
+          institution: "Lycée scientifique Galileo",
+          highlights: [
+            "Option: Mathématiques",
+            "Physique-Chimie",
+            "Mention Très Bien",
+            "Communication and international projects",
+            "Teamwork in science Olympiad",
+            "Scientific methodology",
+          ],
+        },
+      ],
+    } as unknown as ResumeData;
+
+    const asm = assembleResume(eduSource, {
+      summary: "Crew member.",
+      skills: [{ name: "Customer Service", category: "Soft" }],
+      experiences: [{ id: "e1", bullets: ["Helped guests daily"] }],
+    } as never, {} as never);
+
+    expect(asm.resume.education[0].highlights).toHaveLength(6);
+    expect(asm.resume.education[0].highlights).toContain("Communication and international projects");
+    expect(asm.resume.education[0].highlights).toContain("Teamwork in science Olympiad");
+  });
 });
+

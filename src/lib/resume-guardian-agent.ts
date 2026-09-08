@@ -698,16 +698,22 @@ function checkEducationHighlightsPreserved(
     const srcCount = srcHL.length;
     const optCount = optHL.length;
 
-    if (srcCount > 0 && optCount < srcCount) {
+    // GATE-ALIGNMENT:
+    // If the pipeline passes engineHighlightCounts (the count as it stood right after assembly),
+    // use that as the baseline for what the deterministic assembler produced.
+    // An assembler cleanup (e.g. stripping contaminated section headers) may reduce highlights;
+    // page balancer expansion may add highlights.
+    // Only flag missing highlights if optCount dropped BELOW what the assembler produced,
+    // and only flag extra highlights if the extra was introduced before assembly (LLM hallucination).
+    const assembledCount = engineHighlightCounts?.get(optEdu.id ?? "");
+    const baselineMin = assembledCount !== undefined ? Math.min(srcCount, assembledCount) : srcCount;
+
+    if (srcCount > 0 && optCount < baselineMin) {
       failures.push(
-        `"${srcEdu.degree} @ ${srcEdu.institution}": ${srcCount} highlights → ${optCount} (${srcCount - optCount} missing)`
+        `"${srcEdu.degree} @ ${srcEdu.institution}": ${srcCount} highlights → ${optCount} (${baselineMin - optCount} missing)`
       );
     } else if (srcCount > 0 && optCount > srcCount) {
-      // GATE-ALIGNMENT: extras the Dynamic Section Engine / page balancer added
-      // deterministically after assembly are allowed; only LLM-invented extras
-      // (already present at assembly time) are hallucinations → VETO.
-      const assembledCount = engineHighlightCounts?.get(optEdu.id ?? "") ?? optCount;
-      if (assembledCount > srcCount) {
+      if ((assembledCount ?? optCount) > srcCount) {
         failures.push(
           `"${srcEdu.degree} @ ${srcEdu.institution}": ${srcCount} highlights → ${optCount} (${optCount - srcCount} extra — potential hallucination)`
         );
