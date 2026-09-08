@@ -1,0 +1,22 @@
+-- ResumeAI Pro — Migration 0023: users.last_active_at (fixes /api/users 500)
+--
+-- INCIDENT (2026-09-08, verified live against production via the deployed
+-- API): every signed-in (real D1 user) caller of GET /api/users got
+--   D1_ERROR: no such column: last_active_at
+-- → HTTP 500, because commit 0718daee added last_active_at to
+-- USER_PUBLIC_COLUMNS assuming the column existed. It exists in the CURRENT
+-- 0001 CREATE TABLE (fresh databases) but production's users table was born
+-- from 0008's CREATE TABLE (see migration 0018's reality check), which never
+-- had it, and no migration ever ALTERed it in. Anonymous/unknown identities
+-- exit the handler early (200 with []) which is why the failure only hit the
+-- owner's browser.
+--
+-- OWNERSHIP MODEL: this migration is the SOLE owner of users.last_active_at.
+-- It is unconditional (SQLite has no ADD COLUMN IF NOT EXISTS), which is only
+-- safe because 0001's CREATE TABLE no longer declares the column — every
+-- database (fresh or pre-existing) converges here. Do NOT re-add the column
+-- to 0001.
+--
+-- Run: npx wrangler d1 migrations apply resumeai-pro-db --remote
+
+ALTER TABLE users ADD COLUMN last_active_at TEXT;

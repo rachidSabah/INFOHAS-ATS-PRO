@@ -20,7 +20,9 @@ CREATE TABLE IF NOT EXISTS users (
   -- 'suspended', 'deleted' soft-delete).
   status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active','suspended','pending','approved','deleted')),
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
-  last_active_at TEXT,
+  -- last_active_at is NOT born here: it is owned by migration 0023 (added
+  -- unconditionally to ALL databases). Declaring it here too would make
+  -- 0023's ALTER fail with "duplicate column" on fresh databases.
   -- Management-workflow columns (previously added by 0007's ALTERs — those
   -- ALTERs duplicated 0001 columns and broke the fresh-database chain).
   username TEXT,

@@ -30,6 +30,8 @@
 | `0019_pipeline_jobs.sql` | pipeline_jobs: durable per-stage queue for the optimization pipeline (claim/lease, bounded backoff, result checkpoints) | 0001, 0008 |
 | `0020_branding_admin_settings.sql` | branding: admin_settings_json — persists Super Admin settings (optimizerDirective, fallbackChain, pipelineProfiles, selectedProfileId, aiDevSettings, scenarios, interviewPersonas) that PUT /api/settings/branding previously dropped | 0001 |
 | `0021_provider_concurrency_cap.sql` | ai_providers: concurrency_cap — completes persistence for the provider editor's concurrencyCap / retryAttempts / rateLimitPerMinute fields | 0001 |
+| `0022_resume_shares.sql` | resume_shares table — server-backed shareable resume links (stable token per (user, resume), snapshot_json, view counter, active flag, optional expiry). No FKs by design (shares outlive the source resume; anonymous sync identity has no users row) | 0001, 0008 |
+| `0023_users_last_active_at.sql` | users: last_active_at — fixes GET /api/users 500 ("no such column") for pre-0001-birth databases. Sole owner of the column (0001 no longer declares it) so the unconditional ALTER converges every database | 0001, 0008 |
 
 ## How to Add a New Migration
 
