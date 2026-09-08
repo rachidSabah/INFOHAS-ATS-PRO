@@ -13,7 +13,7 @@ import type {
   RenderSectionType,
   ResumeLayoutModel,
 } from "./types";
-import { getDefaultResumeLayout } from "./exporter";
+import { getDefaultResumeLayout } from "./resume-layout";
 
 /** Map from ResumeData's field names to canonical section types */
 function detectSectionType(field: string): RenderSectionType {

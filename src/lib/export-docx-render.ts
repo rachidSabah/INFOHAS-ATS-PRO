@@ -28,7 +28,7 @@ import type {
   TextAlignment,
 } from "./types";
 import { resolveSectionAlignment } from "./types";
-import { getDefaultResumeLayout } from "./exporter";
+import { getDefaultResumeLayout } from "./resume-layout";
 
 type DocxTabStop = { type: typeof TabStopType; position: number };
 

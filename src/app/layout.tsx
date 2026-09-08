@@ -1,25 +1,36 @@
 import type { Metadata, Viewport } from "next";
-import { Inter, Sora, Geist_Mono } from "next/font/google";
+import localFont from "next/font/local";
 import "./globals.css";
 import { Toaster } from "@/components/ui/toaster";
 import { Toaster as SonnerToaster } from "@/components/ui/sonner";
 import { PWAInstaller } from "@/components/pwa/PWAInstaller";
 
-const inter = Inter({
+// Self-hosted variable fonts (latin subset — identical coverage to the
+// previous subsets:["latin"] Google fetch). This removes the build-time AND
+// runtime dependency on fonts.googleapis.com / fonts.gstatic.com: builds now
+// run fully offline, render is faster (no third-party font handshake), and
+// no visitor IP is shared with Google Fonts.
+const inter = localFont({
+  src: "./fonts/inter-latin-var.woff2",
   variable: "--font-inter",
-  subsets: ["latin"],
+  weight: "100 900",
+  style: "normal",
   display: "swap",
 });
 
-const sora = Sora({
+const sora = localFont({
+  src: "./fonts/sora-latin-var.woff2",
   variable: "--font-sora",
-  subsets: ["latin"],
+  weight: "100 800",
+  style: "normal",
   display: "swap",
 });
 
-const geistMono = Geist_Mono({
+const geistMono = localFont({
+  src: "./fonts/geist-mono-latin-var.woff2",
   variable: "--font-geist-mono",
-  subsets: ["latin"],
+  weight: "100 900",
+  style: "normal",
   display: "swap",
 });
 
