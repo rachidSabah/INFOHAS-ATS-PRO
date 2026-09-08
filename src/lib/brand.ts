@@ -98,6 +98,7 @@ export const NAV_USER: { key: string; label: string; icon: string; group: string
   { key: "networking", label: "Networking", icon: "Network", group: "Career Tools" },
   { key: "ai-coach", label: "AI Career Coach", icon: "Bot", group: "AI Tools" },
   { key: "ai-mock-interview", label: "Mock Interview", icon: "Mic", group: "AI Tools" },
+  { key: "ai-voice-interview", label: "Voice Interview", icon: "AudioLines", group: "AI Tools" },
   { key: "ai-salary-coach", label: "Salary Coach", icon: "HandCoins", group: "AI Tools" },
   { key: "ai-email-writer", label: "AI Email Writer", icon: "Mail", group: "AI Tools" },
   { key: "ai-resume-review", label: "AI Resume Review", icon: "FileSearch", group: "AI Tools" },

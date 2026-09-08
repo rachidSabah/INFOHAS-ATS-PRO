@@ -1471,6 +1471,7 @@ export type ViewKey =
   | "networking"
   | "ai-coach"
   | "ai-mock-interview"
+  | "ai-voice-interview"
   | "ai-salary-coach"
   | "ai-email-writer"
   | "ai-resume-review"

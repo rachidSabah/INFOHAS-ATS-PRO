@@ -1783,7 +1783,7 @@ function parseInterviewResponse(text: string): { displayText: string; question?:
 }
 
 // Interview topics — thematic fields the user can select
-const INTERVIEW_TOPICS = [
+export const INTERVIEW_TOPICS = [
   { id: "cabin-crew", label: "Cabin Crew / Flight Attendant", icon: "Plane", description: "Aviation service, safety, emergency procedures" },
   { id: "technical", label: "Technical / Engineering", icon: "Code2", description: "Software, systems, architecture, coding" },
   { id: "behavioral", label: "Behavioral", icon: "Users", description: "STAR method, past experiences, teamwork" },
@@ -1795,7 +1795,7 @@ const INTERVIEW_TOPICS = [
 ] as const;
 
 // Position presets per topic — quick-select for common roles
-const POSITION_PRESETS: Record<string, string[]> = {
+export const POSITION_PRESETS: Record<string, string[]> = {
   "cabin-crew": ["Cabin Crew (Emirates)", "Cabin Crew (Qatar Airways)", "Flight Attendant (Ryanair)", "Cabin Crew (Etihad)", "Senior Cabin Crew", "Purser / Cabin Supervisor"],
   "technical": ["Software Engineer", "Senior Frontend Engineer", "Backend Developer", "Full-Stack Engineer", "DevOps Engineer", "Data Scientist", "Mobile Developer"],
   "behavioral": ["Project Manager", "Team Lead", "Product Manager", "Business Analyst", "Operations Manager"],
@@ -1808,7 +1808,7 @@ const POSITION_PRESETS: Record<string, string[]> = {
 
 // Topic-specific question examples — injected into the prompt to force the AI
 // to ask role-relevant questions instead of generic ones.
-const TOPIC_QUESTION_EXAMPLES: Record<string, string[]> = {
+export const TOPIC_QUESTION_EXAMPLES: Record<string, string[]> = {
   "cabin-crew": [
     "Tell me about a time you handled a difficult passenger on a flight.",
     "What would you do if you noticed a safety equipment issue during pre-flight checks?",

@@ -51,6 +51,7 @@ import {
   AiCoach, AiMockInterview, AiSalaryCoach, AiEmailWriter,
   AiJobMatch, AiAchievement, Integrations,
 } from "./modules/CareerTools";
+import { VoiceMockInterview } from "./modules/VoiceMockInterview";
 import { ApplicationTracker } from "./modules/ApplicationTracker";
 import { ResumeReviewPlatform } from "./modules/ResumeReviewPlatform";
 import { BatchOptimizer } from "./modules/BatchOptimizer";
@@ -111,6 +112,7 @@ const VIEW_COMPONENTS: Record<ViewKey, React.FC> = {
   "networking": Networking,
   "ai-coach": AiCoach,
   "ai-mock-interview": AiMockInterview,
+  "ai-voice-interview": VoiceMockInterview,
   "ai-salary-coach": AiSalaryCoach,
   "ai-email-writer": AiEmailWriter,
   "ai-resume-review": ResumeReviewPlatform,

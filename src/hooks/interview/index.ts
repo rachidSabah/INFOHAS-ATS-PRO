@@ -8,6 +8,7 @@ export { useDeviceCheck } from "./useDeviceCheck";
 export { useMediaRecorder } from "./useMediaRecorder";
 export { useAudioMeter } from "./useAudioMeter";
 export { useSpeechRecognition } from "./useSpeechRecognition";
+export { useSpeechSynthesis } from "./useSpeechSynthesis";
 export {
   useFillerWordDetector,
   analyzeFillerWords,
@@ -22,5 +23,6 @@ export type {
   UseSpeechRecognitionOptions,
   UseSpeechRecognitionResult,
 } from "./useSpeechRecognition";
+export type { UseSpeechSynthesisResult } from "./useSpeechSynthesis";
 export type { FillerStats } from "./useFillerWordDetector";
 export * from "./types";
