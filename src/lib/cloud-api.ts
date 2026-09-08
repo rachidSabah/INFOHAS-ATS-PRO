@@ -282,6 +282,25 @@ export const api = {
   putProviderSession: (provider: string, session: any) =>
     apiFetch(`/api/provider-sessions/${provider}`, { method: "PUT", body: JSON.stringify(session) }),
 
+  // Resume shares (migration 0022) — server-backed shareable links.
+  // createOrRefresh UPSERTS on (user, resume): the token/URL stays stable
+  // across refreshes so already-sent links keep working with fresh content.
+  createOrRefreshShare: (payload: { resumeId: string; resume: unknown; hideContact?: boolean; expiresInDays?: number | null }) =>
+    apiFetch<{ ok: boolean; share: { id: string; token: string; resumeId: string; active: boolean; expiresAt: string | null } }>(
+      "/api/shares", { method: "POST", body: JSON.stringify(payload) },
+    ),
+  getShares: () => apiFetch<{ shares: any[] }>("/api/shares"),
+  updateShare: (id: string, patch: { active?: boolean; resume?: unknown; hideContact?: boolean }) =>
+    apiFetch<{ ok: boolean; share: any }>(`/api/shares/${id}`, { method: "PUT", body: JSON.stringify(patch) }),
+  deleteShare: (id: string) => apiFetch(`/api/shares/${id}`, { method: "DELETE" }),
+  // PUBLIC reader for /r/<token> — no identity needed. Uses apiFetch for the
+  // retry/timeout handling; the harmless X-User-Id header it attaches is
+  // simply ignored by the public route.
+  fetchPublicShare: (token: string) =>
+    apiFetch<{ ok: boolean; resume: unknown; hideContact: boolean; sharedAt: string }>(
+      `/api/public/shares/${encodeURIComponent(token)}`,
+    ),
+
   // Health
   health: () => apiFetch<{ ok: boolean }>("/api/health"),
 };

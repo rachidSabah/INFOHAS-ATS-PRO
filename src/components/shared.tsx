@@ -242,4 +242,5 @@ export function StatPill({ icon, label, value }: { icon: string; label: string; 
 
 export { AICopilotPanel } from "./shared/AICopilotPanel";
 export { AgentConsole } from "./shared/AgentConsole";
+export { QrCode } from "./shared/QrCode";
 export { RegionalNormsPanel } from "./shared/RegionalNormsPanel";

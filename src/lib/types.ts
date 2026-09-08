@@ -176,6 +176,14 @@ export interface ResumeData {
   updatedAt: string;
   source?: "upload" | "manual" | "ai-optimized" | "ai-optimized-aviation" | "template";
   fileName?: string;
+  /**
+   * Set ONLY inside public share snapshots when the owner chose to hide
+   * contact details (see src/lib/share.ts buildShareSnapshot). The live
+   * resume never carries this flag — it marks the /r/<token> reader so it
+   * can show "contact details hidden by the owner" instead of silently
+   * rendering an empty contact block.
+   */
+  shareContactHidden?: boolean;
 }
 
 export type ResumeTemplate =

@@ -444,6 +444,12 @@ app.use("/api/downloads/*", requireAuth);
 // collection and the :id subpaths.
 app.use("/api/job-descriptions", requireAuth);
 app.use("/api/job-descriptions/*", requireAuth);
+// Resume shares — owner operations (create/refresh, list, toggle, delete).
+// The PUBLIC read endpoint lives at /api/public/shares/:token and is
+// deliberately NOT covered by this middleware (it must work without any
+// identity — that is the entire point of a shareable link).
+app.use("/api/shares", requireAuth);
+app.use("/api/shares/*", requireAuth);
 
 /**
  * Resolve the caller's identity inside a handler. Prefers the VERIFIED
@@ -946,6 +952,156 @@ app.delete("/api/resumes/:id", async (c) => {
   const id = c.req.param("id");
   await c.env.DB.prepare("DELETE FROM resumes WHERE id = ? AND user_id = ?").bind(id, userId).run();
   return c.json({ ok: true });
+});
+
+// ============================================================================
+// RESUME SHARES — server-backed shareable links (migration 0022)
+//
+// Product model: ONE share per (user, resume) with a STABLE token, so the
+// public URL a user has already sent to recruiters never breaks — POSTing
+// again only refreshes the snapshot (and optionally the options). The public
+// reader is GET /api/public/shares/:token below.
+// ============================================================================
+
+/** URL-safe share token — no ambiguous characters, fits any QR density. */
+function shareToken(): string {
+  const bytes = new Uint8Array(12);
+  crypto.getRandomValues(bytes);
+  return Array.from(bytes)
+    .map((b) => "abcdefghijkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789"[b % 55])
+    .join("");
+}
+
+function shareRow(c: any, id: string) {
+  return c.env.DB.prepare(
+    `SELECT id, token, resume_id, hide_contact, active, view_count, expires_at,
+            json_extract(snapshot_json, '$.name') AS resume_name,
+            json_extract(snapshot_json, '$.headline') AS resume_headline,
+            created_at, updated_at
+     FROM resume_shares WHERE id = ? AND user_id = ?`
+  ).bind(id, handlerUserId(c) || "");
+}
+
+app.post("/api/shares", async (c) => {
+  const userId = handlerUserId(c);
+  if (!userId) return c.json(AUTH_REQUIRED_JSON, 401);
+  const body = await parseBody(c.req.raw);
+  const resume = body?.resume;
+  const resumeId = body?.resumeId || resume?.id;
+  if (!resumeId || !resume || typeof resume !== "object" || Array.isArray(resume)) {
+    return c.json({ ok: false, error: "A resume object and resumeId are required to create a share link." }, 422);
+  }
+  const hideContact = body.hideContact ? 1 : 0;
+  const expiresDays = Number(body.expiresInDays);
+  const expiresAt = Number.isFinite(expiresDays) && expiresDays > 0
+    ? new Date(Date.now() + expiresDays * 86400000).toISOString()
+    : null;
+  const now = new Date().toISOString();
+  const snapshot = JSON.stringify(resume);
+
+  // Upsert on (user_id, resume_id): keep the SAME token when a share already
+  // exists so previously-shared URLs keep working with fresh content.
+  const existing = await c.env.DB.prepare(
+    "SELECT id, token FROM resume_shares WHERE user_id = ? AND resume_id = ?"
+  ).bind(userId, resumeId).first<any>();
+
+  let id: string;
+  let token: string;
+  if (existing) {
+    id = existing.id;
+    token = existing.token;
+    await c.env.DB.prepare(
+      `UPDATE resume_shares SET snapshot_json = ?, hide_contact = ?, expires_at = ?, active = 1, updated_at = ?
+       WHERE id = ? AND user_id = ?`
+    ).bind(snapshot, hideContact, expiresAt, now, id, userId).run();
+  } else {
+    id = uuid("sh");
+    token = shareToken();
+    await c.env.DB.prepare(
+      `INSERT INTO resume_shares (id, token, user_id, resume_id, snapshot_json, hide_contact, active, view_count, expires_at, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, 1, 0, ?, ?, ?)`
+    ).bind(id, token, userId, resumeId, snapshot, hideContact, expiresAt, now, now).run();
+  }
+  return c.json({ ok: true, share: { id, token, resumeId, hideContact: !!hideContact, active: true, expiresAt } });
+});
+
+app.get("/api/shares", async (c) => {
+  const userId = handlerUserId(c);
+  if (!userId) return c.json(AUTH_REQUIRED_JSON, 401);
+  const { results } = await c.env.DB.prepare(
+    `SELECT id, token, resume_id, hide_contact, active, view_count, expires_at,
+            json_extract(snapshot_json, '$.name') AS resume_name,
+            json_extract(snapshot_json, '$.headline') AS resume_headline,
+            created_at, updated_at
+     FROM resume_shares WHERE user_id = ? ORDER BY updated_at DESC`
+  ).bind(userId).all();
+  return c.json({ shares: results || [] });
+});
+
+app.put("/api/shares/:id", async (c) => {
+  const userId = handlerUserId(c);
+  if (!userId) return c.json(AUTH_REQUIRED_JSON, 401);
+  const id = c.req.param("id");
+  const body = await parseBody(c.req.raw);
+  const now = new Date().toISOString();
+  // Optional snapshot refresh (e.g. the resume changed since the share was
+  // created). hideContact defaults to the row's current value.
+  if (body?.resume && typeof body.resume === "object" && !Array.isArray(body.resume)) {
+    const row = await c.env.DB.prepare(
+      "SELECT hide_contact FROM resume_shares WHERE id = ? AND user_id = ?"
+    ).bind(id, userId).first<any>();
+    if (!row) return c.json({ ok: false, error: "Share not found." }, 404);
+    const hideContact = body.hideContact !== undefined ? (body.hideContact ? 1 : 0) : row.hide_contact;
+    await c.env.DB.prepare(
+      "UPDATE resume_shares SET snapshot_json = ?, hide_contact = ?, updated_at = ? WHERE id = ? AND user_id = ?"
+    ).bind(JSON.stringify(body.resume), hideContact, now, id, userId).run();
+  }
+  if (body?.active !== undefined) {
+    await c.env.DB.prepare(
+      "UPDATE resume_shares SET active = ?, updated_at = ? WHERE id = ? AND user_id = ?"
+    ).bind(body.active ? 1 : 0, now, id, userId).run();
+  }
+  const share = await shareRow(c, id).first();
+  if (!share) return c.json({ ok: false, error: "Share not found." }, 404);
+  return c.json({ ok: true, share });
+});
+
+app.delete("/api/shares/:id", async (c) => {
+  const userId = handlerUserId(c);
+  if (!userId) return c.json(AUTH_REQUIRED_JSON, 401);
+  const id = c.req.param("id");
+  await c.env.DB.prepare("DELETE FROM resume_shares WHERE id = ? AND user_id = ?").bind(id, userId).run();
+  return c.json({ ok: true });
+});
+
+// PUBLIC reader — no auth middleware on this path by design. Only active,
+// unexpired shares resolve; each successful read bumps the view counter so
+// the owner can see traction in the Sharing panel.
+app.get("/api/public/shares/:token", async (c) => {
+  const token = c.req.param("token");
+  if (!token || !/^[A-Za-z0-9_-]{8,64}$/.test(token)) {
+    return c.json({ ok: false, error: "Invalid share token." }, 404);
+  }
+  const row = await c.env.DB.prepare(
+    `SELECT id, snapshot_json, hide_contact, view_count, created_at, updated_at
+     FROM resume_shares
+     WHERE token = ? AND active = 1 AND (expires_at IS NULL OR expires_at > ?)`
+  ).bind(token, new Date().toISOString()).first<any>();
+  if (!row) return c.json({ ok: false, error: "Share not found or no longer active." }, 404);
+  c.executionCtx.waitUntil(
+    c.env.DB.prepare("UPDATE resume_shares SET view_count = view_count + 1 WHERE id = ?").bind(row.id).run()
+  );
+  let resume: any = null;
+  try { resume = JSON.parse(row.snapshot_json); } catch { resume = null; }
+  if (!resume || typeof resume !== "object") {
+    return c.json({ ok: false, error: "Share snapshot is corrupted." }, 404);
+  }
+  return c.json({
+    ok: true,
+    resume,
+    hideContact: !!row.hide_contact,
+    sharedAt: row.updated_at || row.created_at,
+  });
 });
 
 // ============ COVER LETTERS ============

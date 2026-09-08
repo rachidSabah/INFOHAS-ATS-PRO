@@ -14,8 +14,15 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { Badge, Icon } from "@/components/shared";
+import { Badge, Icon, QrCode } from "@/components/shared";
 import { useApp, uid } from "@/lib/store";
+import { api as cloudApi } from "@/lib/cloud-api";
+import {
+  buildShareSnapshot,
+  parseShareRow,
+  shareUrlFor,
+  type ShareRecord,
+} from "@/lib/share";
 import { callAI, extractJSON } from "@/lib/ai";
 import { detectIndustry, INDUSTRY_PROFILES } from "@/lib/industry-ats";
 import { scoreATS } from "@/lib/ats";
@@ -233,45 +240,193 @@ export function MultiLanguage() {
 // ============================================================================
 
 export function ResumeSharing() {
-  const resume = useResume();
-  const [shareUrl, setShareUrl] = useState("");
+  const resumes = useApp((s) => s.resumes);
+  const activeResumeId = useApp((s) => s.activeResumeId);
+  const [pickedId, setPickedId] = useState("");
+  const [hideContact, setHideContact] = useState(false);
+  const [creating, setCreating] = useState(false);
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const [shares, setShares] = useState<ShareRecord[]>([]);
+  const [loaded, setLoaded] = useState(false);
 
-  const generateShareLink = () => {
-    if (!resume) { toast.error("Create a resume first."); return; }
-    
-    // Encode resume data for cross-device sharing (works even if store is empty on viewer's device)
-    const shareData = {
-      n: resume.name || "Resume",
-      h: resume.headline || "",
-      s: (resume.summary || "").slice(0, 500),
-      e: (resume.experience || []).map(e => ({ t: e.title, c: e.company, d: `${e.startDate} - ${e.endDate}` })),
-      edu: (resume.education || []).map(e => ({ d: e.degree, i: e.institution })),
-      sk: (resume.skills || []).map(s => s.name).slice(0, 15),
-      l: (resume.languages || []).map(l => l.name),
-    };
-    const encoded = encodeURIComponent(btoa(JSON.stringify(shareData)));
-    const url = `${window.location.origin}/r/${resume.id}?d=${encoded}`;
-    setShareUrl(url);
+  // Default the picker to the active resume; fall back to the first one.
+  useEffect(() => {
+    if (!pickedId && resumes.length > 0) {
+      const next = resumes.find((r) => r.id === activeResumeId) ?? resumes[0];
+      setPickedId(next.id);
+    }
+  }, [resumes, activeResumeId, pickedId]);
+
+  const loadShares = (silent = false) => {
+    cloudApi
+      .getShares()
+      .then((res) => setShares((res.shares || []).map(parseShareRow)))
+      .catch(() => { if (!silent) toast.error("Could not load your share links — cloud sync may be offline."); })
+      .finally(() => setLoaded(true));
+  };
+  useEffect(() => { loadShares(); }, []);
+
+  const picked = resumes.find((r) => r.id === pickedId) || null;
+  const currentShare = shares.find((s) => s.resumeId === pickedId) || null;
+  const currentUrl = currentShare ? shareUrlFor(currentShare.token) : "";
+
+  const copy = (url: string, what = "Share link") => {
     navigator.clipboard.writeText(url);
-    toast.success("Share link copied to clipboard!");
+    toast.success(`${what} copied to clipboard!`);
+  };
+
+  const publish = async () => {
+    if (!picked) { toast.error("Create a resume first."); return; }
+    setCreating(true);
+    try {
+      const res = await cloudApi.createOrRefreshShare({
+        resumeId: picked.id,
+        resume: buildShareSnapshot(picked, { hideContact }),
+        hideContact,
+      });
+      toast.success(
+        currentShare
+          ? "Share snapshot refreshed — the same link now serves your latest edits."
+          : "Public share link created and copied to clipboard!",
+      );
+      copy(shareUrlFor(res.share.token));
+      loadShares(true);
+    } catch (e: any) {
+      toast.error(e?.message || "Could not create the share link.");
+    } finally {
+      setCreating(false);
+    }
+  };
+
+  const refreshSnapshot = async (share: ShareRecord) => {
+    const source = resumes.find((r) => r.id === share.resumeId);
+    if (!source) { toast.error("The source resume no longer exists locally — refresh it via cloud sync first."); return; }
+    setBusyId(share.id);
+    try {
+      await cloudApi.updateShare(share.id, {
+        resume: buildShareSnapshot(source, { hideContact: share.hideContact }),
+      });
+      toast.success("Snapshot refreshed — visitors now see the latest version.");
+      loadShares(true);
+    } catch (e: any) {
+      toast.error(e?.message || "Could not refresh the snapshot.");
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const toggleActive = async (share: ShareRecord) => {
+    setBusyId(share.id);
+    try {
+      await cloudApi.updateShare(share.id, { active: !share.active });
+      toast.success(share.active ? "Share paused — the link now shows 'not available'." : "Share reactivated.");
+      loadShares(true);
+    } catch (e: any) {
+      toast.error(e?.message || "Could not update the share.");
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const removeShare = async (share: ShareRecord) => {
+    if (!window.confirm(`Delete the share link for "${share.resumeName}"? Recruiters with the old link will see it as unavailable.`)) return;
+    setBusyId(share.id);
+    try {
+      await cloudApi.deleteShare(share.id);
+      toast.success("Share link deleted.");
+      loadShares(true);
+    } catch (e: any) {
+      toast.error(e?.message || "Could not delete the share.");
+    } finally {
+      setBusyId(null);
+    }
   };
 
   return (
     <div className="space-y-6">
-      <div><h1 className="font-display text-2xl font-bold flex items-center gap-2"><Icon name="Share2" className="w-6 h-6 text-brand" /> Resume Sharing</h1><p className="text-sm text-muted-foreground mt-1">Generate a public shareable link and QR code for your resume.</p></div>
-      <Card><CardContent className="p-4 space-y-3">
-        <Button onClick={generateShareLink} disabled={!resume} className="bg-brand hover:bg-brand-dark text-white gap-2"><Icon name="Link" className="w-4 h-4" /> Generate Share Link</Button>
-        {shareUrl && (
-          <div className="space-y-3">
-            <div className="rounded-lg border border-border p-3"><div className="text-xs text-muted-foreground mb-1">Shareable URL</div><div className="font-mono text-sm break-all">{shareUrl}</div></div>
-            <div className="flex gap-2">
-              <Button size="sm" variant="outline" onClick={() => window.open(`https://wa.me/?text=${encodeURIComponent("Check out my resume: " + shareUrl)}`)} className="gap-2"><Icon name="MessageCircle" className="w-4 h-4" /> WhatsApp</Button>
-              <Button size="sm" variant="outline" onClick={() => window.open(`mailto:?subject=My Resume&body=${encodeURIComponent(shareUrl)}`)} className="gap-2"><Icon name="Mail" className="w-4 h-4" /> Email</Button>
-              <Button size="sm" variant="outline" onClick={() => { navigator.clipboard.writeText(shareUrl); toast.success("Copied!"); }} className="gap-2"><Icon name="Copy" className="w-4 h-4" /> Copy</Button>
+      <div><h1 className="font-display text-2xl font-bold flex items-center gap-2"><Icon name="Share2" className="w-6 h-6 text-brand" /> Resume Sharing</h1><p className="text-sm text-muted-foreground mt-1">Publish a stable public link (with QR code) that recruiters can open on any device — served from the cloud, never stuffed into the URL.</p></div>
+
+      <Card><CardContent className="p-4 space-y-4">
+        <div className="grid sm:grid-cols-[1fr_auto] gap-3 items-end">
+          <div>
+            <Label>Resume to share</Label>
+            <select value={pickedId} onChange={(e) => setPickedId(e.target.value)} className="w-full h-9 px-3 rounded-md border border-input bg-background text-sm mt-1">
+              {resumes.length === 0 && <option value="">No resumes yet</option>}
+              {resumes.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
+            </select>
+          </div>
+          <Button onClick={publish} disabled={!picked || creating} className="bg-brand hover:bg-brand-dark text-white gap-2">
+            <Icon name={creating ? "Loader2" : "Link"} className={`w-4 h-4 ${creating ? "animate-spin" : ""}`} />
+            {currentShare ? "Refresh Share Snapshot" : "Create Share Link"}
+          </Button>
+        </div>
+        <label className="flex items-start gap-2 text-sm cursor-pointer select-none">
+          <input type="checkbox" checked={hideContact} onChange={(e) => setHideContact(e.target.checked)} className="mt-0.5 accent-[var(--brand)]" />
+          <span>
+            <span className="font-medium">Hide contact details</span>
+            <span className="text-muted-foreground"> — publishes the resume without email, phone, location, links or personal details, so you can post it publicly and still route responses through your own channels.</span>
+          </span>
+        </label>
+
+        {currentShare && (
+          <div className="rounded-lg border border-border p-4 space-y-4">
+            <div className="flex flex-wrap items-center gap-2">
+              <Badge variant={currentShare.active ? "success" : "warning"}>{currentShare.active ? "Live" : "Paused"}</Badge>
+              {currentShare.hideContact && <Badge variant="outline">Contact hidden</Badge>}
+              <Badge variant="outline"><Icon name="Eye" className="w-3 h-3 mr-1 inline" />{currentShare.viewCount} view{currentShare.viewCount === 1 ? "" : "s"}</Badge>
+              {currentShare.resumeHeadline && <span className="text-xs text-muted-foreground">{currentShare.resumeHeadline}</span>}
+            </div>
+            <div className="flex flex-col sm:flex-row gap-4 items-start">
+              <div className="shrink-0 rounded-lg border border-border bg-white p-2">
+                <QrCode text={currentUrl} size={160} downloadName={`resume-qr-${currentShare.token}.png`} />
+              </div>
+              <div className="flex-1 min-w-0 space-y-3">
+                <div>
+                  <div className="text-xs text-muted-foreground mb-1">Public link — anyone with this URL can view the snapshot (click the QR to download it)</div>
+                  <div className="font-mono text-sm break-all select-all">{currentUrl}</div>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <Button size="sm" variant="outline" onClick={() => copy(currentUrl)} className="gap-2"><Icon name="Copy" className="w-4 h-4" /> Copy link</Button>
+                  <Button size="sm" variant="outline" onClick={() => window.open(currentUrl, "_blank")} className="gap-2"><Icon name="ExternalLink" className="w-4 h-4" /> Preview</Button>
+                  <Button size="sm" variant="outline" onClick={() => window.open(`https://wa.me/?text=${encodeURIComponent("Check out my resume: " + currentUrl)}`)} className="gap-2"><Icon name="MessageCircle" className="w-4 h-4" /> WhatsApp</Button>
+                  <Button size="sm" variant="outline" onClick={() => window.open(`mailto:?subject=My Resume&body=${encodeURIComponent(currentUrl)}`)} className="gap-2"><Icon name="Mail" className="w-4 h-4" /> Email</Button>
+                </div>
+              </div>
             </div>
           </div>
         )}
       </CardContent></Card>
+
+      <Card>
+        <CardContent className="p-4 space-y-3">
+          <div className="font-semibold text-sm">All share links</div>
+          {loaded && shares.length === 0 && (
+            <p className="text-sm text-muted-foreground">No share links yet. Create one above — the link keeps working across snapshot refreshes, so you can update your resume without resending it.</p>
+          )}
+          <div className="space-y-2">
+            {shares.map((share) => (
+              <div key={share.id} className="rounded-lg border border-border p-3 flex flex-col md:flex-row md:items-center gap-3">
+                <div className="flex-1 min-w-0">
+                  <div className="font-medium text-sm truncate">{share.resumeName}</div>
+                  <div className="text-xs text-muted-foreground font-mono truncate">/r/{share.token}</div>
+                  <div className="flex flex-wrap items-center gap-2 mt-1">
+                    <Badge variant={share.active ? "success" : "warning"}>{share.active ? "Live" : "Paused"}</Badge>
+                    {share.hideContact && <Badge variant="outline">Contact hidden</Badge>}
+                    <span className="text-xs text-muted-foreground"><Icon name="Eye" className="w-3 h-3 inline mr-1" />{share.viewCount} views</span>
+                    <span className="text-xs text-muted-foreground">Updated {new Date(share.updatedAt).toLocaleDateString()}</span>
+                  </div>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <Button size="sm" variant="outline" onClick={() => copy(shareUrlFor(share.token))} className="gap-1.5"><Icon name="Copy" className="w-3.5 h-3.5" /> Copy</Button>
+                  <Button size="sm" variant="outline" disabled={busyId === share.id} onClick={() => refreshSnapshot(share)} className="gap-1.5"><Icon name="RefreshCw" className="w-3.5 h-3.5" /> Refresh</Button>
+                  <Button size="sm" variant="outline" disabled={busyId === share.id} onClick={() => toggleActive(share)} className="gap-1.5"><Icon name={share.active ? "Pause" : "Play"} className="w-3.5 h-3.5" /> {share.active ? "Pause" : "Resume"}</Button>
+                  <Button size="sm" variant="outline" disabled={busyId === share.id} onClick={() => removeShare(share)} className="gap-1.5 text-destructive hover:text-destructive"><Icon name="Trash2" className="w-3.5 h-3.5" /> Delete</Button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </CardContent>
+      </Card>
     </div>
   );
 }
@@ -2310,7 +2465,6 @@ export function Integrations() {
   const resume = useResume();
   const setView = useApp((s) => s.setView);
   const [emailTo, setEmailTo] = useState("");
-  const [qrOpen, setQrOpen] = useState(false);
   const [activeTab, setActiveTab] = useState("exports");
 
   // MCP States
@@ -2584,8 +2738,6 @@ export function Integrations() {
     setDialogOpen(true);
   };
 
-  const shareUrl = typeof window !== "undefined" ? `${window.location.origin}/r/${resume?.id || ""}` : "";
-
   return (
     <div className="space-y-6">
       {/* Page Header */}
@@ -2616,7 +2768,7 @@ export function Integrations() {
             <Card><CardContent className="p-4"><div className="flex items-center gap-3 mb-3"><Icon name="FileText" className="w-8 h-8 text-[#000000]" /><div><div className="font-semibold text-sm">Notion Sync</div><div className="text-xs text-muted-foreground">Format for Notion</div></div></div><Button size="sm" variant="outline" onClick={notionExport} className="w-full gap-2"><Icon name="Copy" className="w-3.5 h-3.5" /> Copy for Notion</Button></CardContent></Card>
             <Card><CardContent className="p-4"><div className="flex items-center gap-3 mb-3"><Icon name="HardDrive" className="w-8 h-8 text-[#4285F4]" /><div><div className="font-semibold text-sm">Google Drive</div><div className="text-xs text-muted-foreground">Backup as JSON</div></div></div><Button size="sm" variant="outline" onClick={gdriveBackup} className="w-full gap-2"><Icon name="Download" className="w-3.5 h-3.5" /> Download Backup</Button></CardContent></Card>
             <Card><CardContent className="p-4"><div className="flex items-center gap-3 mb-3"><Icon name="Calendar" className="w-8 h-8 text-[#4285F4]" /><div><div className="font-semibold text-sm">Calendar</div><div className="text-xs text-muted-foreground">Schedule interview</div></div></div><Button size="sm" variant="outline" onClick={() => { window.open("https://calendar.google.com/calendar/render?action=TEMPLATE&text=Interview&dates=20260620T100000Z/20260620T110000Z&details=Interview%20scheduled%20from%20ResumeAI%20Pro"); toast.success("Calendar opened"); }} className="w-full gap-2"><Icon name="Plus" className="w-3.5 h-3.5" /> Add to Calendar</Button></CardContent></Card>
-            <Card><CardContent className="p-4"><div className="flex items-center gap-3 mb-3"><Icon name="QrCode" className="w-8 h-8 text-[#9333EA]" /><div><div className="font-semibold text-sm">QR Code Share</div><div className="text-xs text-muted-foreground">Mobile access code</div></div></div><Button size="sm" variant="outline" onClick={() => { if (!resume) { toast.error("Create a resume first"); return; } setQrOpen(true); }} className="w-full gap-2"><Icon name="QrCode" className="w-3.5 h-3.5" /> Show QR Code</Button></CardContent></Card>
+            <Card><CardContent className="p-4"><div className="flex items-center gap-3 mb-3"><Icon name="QrCode" className="w-8 h-8 text-[#9333EA]" /><div><div className="font-semibold text-sm">QR Code Share</div><div className="text-xs text-muted-foreground">Public link + local QR</div></div></div><Button size="sm" variant="outline" onClick={() => { if (!resume) { toast.error("Create a resume first"); return; } setView("resume-sharing"); toast.info("Create or manage your public share link and QR code here."); }} className="w-full gap-2"><Icon name="QrCode" className="w-3.5 h-3.5" /> Share & QR Code</Button></CardContent></Card>
             <Card><CardContent className="p-4"><div className="flex items-center gap-3 mb-3"><Icon name="Code" className="w-8 h-8 text-[#059669]" /><div><div className="font-semibold text-sm">JSON Resume</div><div className="text-xs text-muted-foreground">jsonresume.org Schema</div></div></div><Button size="sm" variant="outline" onClick={jsonResumeExport} className="w-full gap-2"><Icon name="Copy" className="w-3.5 h-3.5" /> Copy JSON Schema</Button></CardContent></Card>
             <Card><CardContent className="p-4"><div className="flex items-center gap-3 mb-3"><Icon name="FileDown" className="w-8 h-8 text-[#DC2626]" /><div><div className="font-semibold text-sm">Markdown Export</div><div className="text-xs text-muted-foreground">Download as .md file</div></div></div><Button size="sm" variant="outline" onClick={markdownExport} className="w-full gap-2"><Icon name="Download" className="w-3.5 h-3.5" /> Download Markdown</Button></CardContent></Card>
           </div>
@@ -2801,28 +2953,6 @@ export function Integrations() {
           )}
         </TabsContent>
       </Tabs>
-
-      {/* QR Code Share Modal */}
-      {qrOpen && resume && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-in fade-in duration-200">
-          <Card className="max-w-sm w-full p-6 text-center space-y-4 animate-in zoom-in-95 duration-200 shadow-premium relative bg-card border border-border">
-            <Button variant="ghost" size="icon" className="absolute right-3 top-3" onClick={() => setQrOpen(false)}>
-              <Icon name="X" className="w-4 h-4" />
-            </Button>
-            <div className="font-display text-lg font-bold">QR Code Share</div>
-            <p className="text-xs text-muted-foreground">Scan this code with a mobile device to view and download your resume instantly.</p>
-            <div className="bg-white p-4 rounded-xl border border-border inline-block mx-auto">
-              <img
-                src={`https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(shareUrl)}`}
-                alt="Resume QR Code"
-                className="w-[200px] h-[200px]"
-              />
-            </div>
-            <div className="text-xs font-mono bg-muted p-2 rounded truncate select-all">{shareUrl}</div>
-            <Button size="sm" className="w-full bg-brand text-white" onClick={() => { navigator.clipboard.writeText(shareUrl); toast.success("Share link copied!"); }}>Copy Link</Button>
-          </Card>
-        </div>
-      )}
 
       {/* Register / Edit MCP Dialog */}
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
