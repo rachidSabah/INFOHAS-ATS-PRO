@@ -47,4 +47,18 @@ describe("locked-pipeline retry feedback contract", () => {
     expect(buildPromptHash({ systemPrompt: b.systemPrompt, userPrompt: b.userPrompt }))
       .toBe(buildPromptHash({ systemPrompt: a.systemPrompt, userPrompt: a.userPrompt }));
   });
+
+  it("prompt carries the machine-validated keyword integration contract", () => {
+    // REGRESSION (2026-09-08, "0 of 5" UNRECOVERABLE): the factual-integrity
+    // instructions ban inserting JD duties into unrelated past roles, and a
+    // compliant model read that as "integrate NO keywords anywhere". The
+    // prompt must explicitly reconcile the two rules: bullets stay factual,
+    // but the SUMMARY + SKILLS are sanctioned (required) integration points.
+    const { userPrompt } = buildOptimizerInput(resume, jd, "", null, null, undefined);
+    expect(userPrompt).toContain("KEYWORD INTEGRATION CONTRACT");
+    expect(userPrompt).toContain("SANCTIONED INTEGRATION POINTS");
+    expect(userPrompt).toContain("at least ONE of the job description's priority keywords");
+    expect(userPrompt).toContain("EXPERIENCE BULLETS ONLY");
+    expect(userPrompt).toContain("career-changer");
+  });
 });

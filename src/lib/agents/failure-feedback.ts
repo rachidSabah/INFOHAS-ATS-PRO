@@ -49,7 +49,11 @@ export function buildStructuredFailureFeedback(f: StructuredFailureFeedback): st
     sections.push(`KEYWORD COVERAGE: ${f.keywordCoverage.integrated}/${f.keywordCoverage.total} actionable keywords integrated.`);
   }
   if (f.missingKeywords?.length) {
-    sections.push(`MISSING KEYWORDS to integrate NATURALLY (no stuffing):\n${f.missingKeywords.slice(0, 8).map((k) => `- ${k}`).join("\n")}`);
+    sections.push(
+      `MISSING KEYWORDS to integrate NATURALLY (no stuffing):\n${f.missingKeywords.slice(0, 8).map((k) => `- ${k}`).join("\n")}\n` +
+      `SANCTIONED INTEGRATION POINTS: the SUMMARY (frame the career objective around the target role using these terms) and the SKILLS list (honest transferable skills). ` +
+      `Experience bullets must stay strictly factual — never invent duties just to place a keyword, and do not "over-comply" with that rule by omitting the keywords everywhere. At least ONE keyword must appear in the output.`
+    );
   }
   if (f.failedChecks?.length) {
     sections.push(`FAILED QA CHECKS:\n${f.failedChecks.map((c) => `- ${c}`).join("\n")}`);

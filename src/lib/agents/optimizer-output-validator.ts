@@ -158,7 +158,8 @@ export function validateOptimizerOutput(
   const actionable = coverage.total - coverage.alreadyPresent;
   if (actionable >= 3 && coverage.integrated === 0) {
     violations.push(
-      `Keyword integration floor not met: 0 of ${actionable} actionable JD keywords integrated (${coverage.stillMissing.slice(0, 5).join(", ")}…). Optimization is INCOMPLETE, not successful.`
+      `Keyword integration floor not met: 0 of ${actionable} actionable JD keywords integrated (${coverage.stillMissing.slice(0, 5).join(", ")}…). Optimization is INCOMPLETE, not successful. ` +
+      `Fix: integrate at least one of these keywords in the SUMMARY (career-objective framing around the target role) or the SKILLS list (honest transferable skills). Do not fabricate experience duties to place a keyword — but do not omit the keywords everywhere either.`
     );
   }
 

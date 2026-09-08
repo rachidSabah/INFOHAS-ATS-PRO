@@ -184,6 +184,14 @@ CRITICAL FACTUAL INTEGRITY INSTRUCTIONS:
 3. NEVER invent fake percentages or metrics (like "100% accuracy" or "achieving 100% improvement").
 4. Keep the exact number of bullets as provided in the source for each experience entry.
 
+KEYWORD INTEGRATION CONTRACT (MACHINE-VALIDATED — the output is rejected if violated):
+5. The output is machine-checked: at least ONE of the job description's priority keywords MUST appear verbatim somewhere in your returned JSON. Zero keyword integration is automatically REJECTED and the whole optimization is retried.
+6. SANCTIONED INTEGRATION POINTS (use these — they are honest and allowed):
+   - The SUMMARY: frame the career objective around the target role using the JD's terms (e.g. "…transferring precision and customer-facing discipline to premium check-in and boarding-gate operations…").
+   - The SKILLS list: add honest transferable skills aligned with the JD (when transferable skills are allowed by the directives above).
+7. The factual-integrity rule above applies to EXPERIENCE BULLETS ONLY — it forbids inventing duties for past roles; it must NEVER result in zero keyword integration. Do not "over-comply" by omitting keywords everywhere: integrate them in the summary/skills instead.
+8. A career-changer resume (past roles in a different industry) satisfies this contract through the summary + transferable skills, NOT through fabricated experience bullets.
+
 Return ONLY the JSON object with this EXACT shape:
 {
   "summary": "...",

@@ -41,4 +41,21 @@ describe("buildStructuredFailureFeedback", () => {
     expect(fb).toMatch(/- h/);
     expect(fb).not.toMatch(/- i\n/);
   });
+
+  it("guides missing-keyword retries to the sanctioned integration points", () => {
+    // REGRESSION (2026-09-08): the retry feedback listed the missing keywords
+    // but never told the model WHERE integration is allowed, while the
+    // factual-integrity instructions banned keyword placement in bullets —
+    // a reasoning model "over-complied" and integrated 0 keywords forever,
+    // deadlocking the pipeline (UNRECOVERABLE after 4 identical attempts).
+    const fb = buildStructuredFailureFeedback({
+      stage: "optimizer attempt 1 (rejected by OptimizerOutputValidator)",
+      missingKeywords: ["Check-in Counters", "Boarding Gates"],
+    });
+    expect(fb).toContain("SANCTIONED INTEGRATION POINTS");
+    expect(fb).toContain("SUMMARY");
+    expect(fb).toContain("SKILLS list");
+    expect(fb).toContain("never invent duties");
+    expect(fb).toContain("At least ONE keyword must appear");
+  });
 });

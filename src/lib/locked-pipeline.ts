@@ -46,6 +46,7 @@ import { ProviderHealer } from "./ai/healing/provider-healer";
 import { validateOptimizerOutput, type KeywordCoverageReport } from "./agents/optimizer-output-validator";
 import { describeSalvageStageFailures, type ProgressiveStageResult } from "./agents/progressive-generator";
 import { runProgressiveOptimization } from "./agents/progressive-generator";
+import { getRecentAIDiagnostics, type AICallDiagnostic } from "./ai-diagnostics";
 import { buildStructuredFailureFeedback } from "./agents/failure-feedback";
 import type { MatchingStrategy } from "./agents/profile-resolution";
 
@@ -123,6 +124,60 @@ export class OptimizerUnrecoverableError extends Error {
     super(message);
     this.name = "OptimizerUnrecoverableError";
   }
+}
+
+/**
+ * Aggregate the recent AI-call diagnostics into a per-provider health digest
+ * for failure reports. Pure function (takes the diagnostics as input) so it
+ * is directly unit-testable.
+ *
+ * INCIDENT (2026-09-08): the optimizer failed 4 attempts with only the
+ * keyword-floor symptom visible, while the console showed the real disease —
+ * every provider in the rotation 401/429/400/404-ing upstream. Without this
+ * digest the final UNRECOVERABLE error never told the user their keys were
+ * dead / quotas exhausted.
+ *
+ * @param diags - Recent AI call diagnostics (most useful: getRecentAIDiagnostics(100))
+ * @param windowMs - Only calls that ENDED within this window are counted (default 10 min)
+ * @returns A compact multi-line digest, or null when there is nothing to report
+ */
+export function buildProviderHealthDigest(
+  diags: AICallDiagnostic[],
+  windowMs = 10 * 60_000,
+): string | null {
+  const now = Date.now();
+  const recent = diags.filter((d) => {
+    if (!d.endedAt) return false;
+    const ended = Date.parse(d.endedAt);
+    return Number.isFinite(ended) && now - ended >= 0 && now - ended <= windowMs;
+  });
+  if (recent.length === 0) return null;
+
+  interface ProviderStat { fails: number; lastError: string; ok: number; }
+  const perProvider = new Map<string, ProviderStat>();
+  for (const d of recent) {
+    const stat = perProvider.get(d.provider) ?? { fails: 0, lastError: "", ok: 0 };
+    if (d.success) {
+      stat.ok++;
+    } else {
+      stat.fails++;
+      stat.lastError = String(d.error || "unknown error").slice(0, 140);
+    }
+    perProvider.set(d.provider, stat);
+  }
+
+  const lines: string[] = [];
+  for (const [provider, stat] of perProvider) {
+    if (stat.fails > 0) {
+      lines.push(
+        `- ${provider}: ${stat.fails} failed call(s), last error: ${stat.lastError}` +
+        (stat.ok > 0 ? ` (${stat.ok} succeeded)` : " (none succeeded)"),
+      );
+    } else {
+      lines.push(`- ${provider}: healthy (${stat.ok} succeeded)`);
+    }
+  }
+  return `AI PROVIDER HEALTH (last ${Math.round(windowMs / 60_000)} min):\n${lines.join("\n")}`;
 }
 
 /**
@@ -1044,6 +1099,16 @@ export async function runLockedPipeline(
   // RECOVERABLE state (completed agents + snapshots preserved). The original
   // resume remains the SOURCE snapshot — never the OPTIMIZED RESULT.
   // ========================================================================
+  // PROVIDER HEALTH DIGEST: attempt errors often show only the SYMPTOM (e.g.
+  // "keyword floor not met") while the DISEASE is that every provider in the
+  // rotation is failing upstream (401 invalid key / 429 quota / 400 bad
+  // model). Surface the recent per-provider call outcomes from the AI
+  // diagnostics ring buffer so the final error tells the user what to FIX.
+  const providerDigest = buildProviderHealthDigest(getRecentAIDiagnostics(100));
+  if (providerDigest) {
+    attemptErrors.push(providerDigest);
+    console.error(`[Locked Pipeline] ${providerDigest.replace(/\n/g, " | ")}`);
+  }
   console.error(`[Locked Pipeline] Optimization UNRECOVERABLE after ${attempts} attempt(s). No original-resume substitution. Errors: ${attemptErrors.join(" | ")}`);
   throw new OptimizerUnrecoverableError(
     `Optimization could not be completed after ${attempts} validated attempt(s) (bounded auto-heal ran between attempts). The original resume was NOT substituted as the result.`,
