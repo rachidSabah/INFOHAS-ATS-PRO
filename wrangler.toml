@@ -36,6 +36,12 @@ CORS_ORIGIN = "*"
 # secret of the same name (NOT stored in this public file):
 #   deploy command: wrangler deploy --var WORKERSAI_SHARED_SECRET:${{ secrets.WORKERSAI_SHARED_SECRET }}
 
+# Cron Triggers — Zen free-model warming (ingest + 1-token probes + KV write).
+# Pages Functions cannot run scheduled handlers, so warming lives on this
+# Worker: every hour at minute 0, ahead of the 3900s KV TTL.
+[triggers]
+crons = ["0 * * * *"]
+
 [observability]
 enabled = true
 

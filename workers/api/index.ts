@@ -5,6 +5,8 @@ import { cors } from "hono/cors";
 import { logger } from "hono/logger";
 import { getDb, schema } from "./db";
 import { eq } from "drizzle-orm";
+import { handleZenScheduled } from "./zen-cron";
+import { ZEN_KV_KEY } from "../../src/lib/ai/providers/zen-ingest";
 
 export interface Env {
   DB: D1Database;
@@ -24,6 +26,12 @@ export interface Env {
   // WORKERSAI_SHARED_SECRET:${{ secrets.WORKERSAI_SHARED_SECRET }}` (kept out
   // of this public repo). /api/ai/workers-ai rejects unauthenticated calls.
   WORKERSAI_SHARED_SECRET?: string;
+  // Optional warmer identity for Zen ingestion/probes (never in source):
+  //   wrangler secret put OPENCODE_API_KEY
+  // Keyless operation also works (free-tier IP quota); a key only changes
+  // whose account the cron's probes attribute to.
+  OPENCODE_API_KEY?: string;
+  OPENCODE_API_BASE?: string;
 }
 
 const app = new Hono<{ Bindings: Env }>();
@@ -557,6 +565,35 @@ app.post("/api/ai/workers-ai", async (c) => {
       ? `Workers AI daily neurons exhausted (free tier). It will recover after the UTC reset — failover to the next provider. Detail: ${String(e?.message ?? e).slice(0, 200)}`
       : String(e?.message ?? e).slice(0, 300);
     return c.json({ ok: false, success: false, error: msg, message: msg, latencyMs: Date.now() - t0, isTimeout }, isTimeout ? 504 : quota ? 429 : 500);
+  }
+});
+
+// ============================================================================
+// ZEN WARMED-LIST ROUTE + HOURLY CRON — Task: Zen free-model hardening.
+// GET /api/ai/zen-models returns the cron-warmed free id list from the
+// shared CACHE KV (same key the Pages edge routes read/write). Secret-gated
+// with the same shared secret as the workers-ai relay — the ONLY legitimate
+// callers are our own Pages routes and the scheduled cron below.
+// Hourly cron (wrangler.toml [triggers]): ingest → 1-token probe each free
+// candidate → KV write. Zero-healthy runs retain the old cache.
+// Required secrets (never in source):
+//   wrangler secret put WORKERSAI_SHARED_SECRET
+//   wrangler secret put OPENCODE_API_KEY   (optional: warmer account identity)
+// ============================================================================
+app.get("/api/ai/zen-models", async (c) => {
+  const provided = c.req.header("X-WorkersAI-Secret") || "";
+  const expected = (c.env as any).WORKERSAI_SHARED_SECRET || "";
+  if (!expected || !provided || provided !== expected) {
+    return c.json({ ok: false, error: "Unauthorized" }, 401);
+  }
+  try {
+    const kv = (c.env as any).CACHE;
+    if (!kv) return c.json({ ok: false, error: "CACHE binding missing" }, 501);
+    const ids = await kv.get(ZEN_KV_KEY, "json");
+    if (!Array.isArray(ids)) return c.json({ ok: true, ids: [], warmed: false });
+    return c.json({ ok: true, ids, warmed: true });
+  } catch (e: any) {
+    return c.json({ ok: false, error: String(e?.message ?? e).slice(0, 200) }, 500);
   }
 });
 
@@ -2675,4 +2712,10 @@ function safeJson(s: string | null, fallback: any): any {
   try { return JSON.parse(s); } catch { return fallback; }
 }
 
-export default app;
+export default {
+  fetch: app.fetch,
+  // Hourly Zen free-model warming (see [triggers] in wrangler.toml).
+  async scheduled(_controller: any, env: any, ctx: any) {
+    ctx.waitUntil(handleZenScheduled(env));
+  },
+};
