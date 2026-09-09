@@ -1,6 +1,7 @@
 // Proxy for fetching live models from AI provider APIs
 // Solves CORS issues — browser calls this route, Worker calls the provider API
 import { NextRequest, NextResponse } from "next/server";
+import { getZenFreeModelSet } from "@/lib/ai/providers/zen-ingest";
 
 export const runtime = "edge";
 
@@ -101,6 +102,32 @@ export async function POST(req: NextRequest) {
     }
 
     const data = (await res.json()) as any;
+
+    // === Zen dynamic ingestion (Fetch reconciliation source of truth) ===
+    // Replace the raw 35+ live list with the pricing-discriminated free set
+    // (shared 1h cache: KV → edge Cache API → live). Paid/retired ids never
+    // reach the editor, so rows cannot re-pollute with 401-bait. On any
+    // ingestion failure fall through to the raw list below — a failed fetch
+    // must never wipe the row's existing config.
+    try {
+      const modelsHost = new URL(baseUrl).hostname.toLowerCase();
+      if (modelsHost === "opencode.ai") {
+        let modelsKv: any = null;
+        try {
+          const { getRequestContext } = await import("@cloudflare/next-on-pages");
+          modelsKv = (getRequestContext() as any)?.env?.CACHE ?? null;
+        } catch { modelsKv = null; }
+        const free = await getZenFreeModelSet(baseUrl, { apiKey: apiKey || undefined, kv: modelsKv });
+        if (free && free.ids.length > 0) {
+          return NextResponse.json({
+            models: [...free.ids].sort(),
+            zenFree: true,
+            pricingAvailable: free.pricingAvailable,
+            via: free.via,
+          });
+        }
+      }
+    } catch { /* fall through to generic parsing */ }
 
     let models: string[] = [];
     if (data?.data) {

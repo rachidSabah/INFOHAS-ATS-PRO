@@ -27,6 +27,7 @@ import { isProviderInCooldown } from "../../provider-cooldown";
 import { getCooldownRemaining, resetCircuitBreaker } from "../../circuit-breaker";
 import { recordSuccess as recordHealthSuccess, recordFailure as recordHealthFailure } from "../../provider-health";
 import { isBillingError } from "../../token-rotation";
+import { isZenRotationAllowed, zenHealthyPool } from "../zen-free-models";
 
 // ============================================================================
 // Types
@@ -134,8 +135,18 @@ export function pickReplacementModel(provider: AIProvider, catalogModels: string
   }
   // Live catalog unavailable (fetch failed or empty) — fall back to the
   // provider's own enabled list, which may still hold working alternates.
+  // ZEN NEVER-HEAL-INTO-PAID: a zen row heals only into rotation-admitted
+  // free ids with no session eviction/cooldown; otherwise no replacement
+  // (returning undefined forces honest manual_required, not a paid 401).
   const enabled = (provider.enabledModels ?? []).filter((m) => m && m !== failedModel);
-  if (enabled.length > 0) return enabled[0];
+  if (enabled.length > 0) {
+    const ptype = String((provider as any)?.type || "").toLowerCase();
+    if (ptype === "opencode" || ptype === "opencode-zen" || ptype === "zencode") {
+      const admitted = (enabled as string[]).filter((m: string) => isZenRotationAllowed(m));
+      return zenHealthyPool(admitted)[0];
+    }
+    return enabled[0];
+  }
   return getProviderCatalogEntry(provider.type).defaultModel || undefined;
 }
 

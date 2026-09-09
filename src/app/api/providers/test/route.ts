@@ -107,9 +107,13 @@ export async function POST(req: NextRequest) {
     }
   }
 
+  let t0 = 0;
+  let timeoutMs = 15000;
+  let modelForMsg: unknown = "";
   try {
     const body = ((await req.json().catch(() => ({}))) as any) as any;
     let { baseUrl, apiKey, authType, headersJson, model, testPrompt, timeout } = body;
+    modelForMsg = model;
 
     if (!baseUrl) {
       return NextResponse.json({ ok: false, message: "baseUrl is required" }, { status: 400 });
@@ -222,10 +226,11 @@ export async function POST(req: NextRequest) {
     // reasoning-route model (e.g. nemotron-3-ultra-free, answers in 8-33s)
     // gets the requested/provider timeout up to 60s. Pure relative import —
     // no "@/" aliases on the Edge runtime.
-    const timeoutMs = resolveTestTimeoutMs({ modelName: model, providerTimeoutMs: Number(timeout) || null });
+    timeoutMs = resolveTestTimeoutMs({ modelName: model, providerTimeoutMs: Number(timeout) || null });
     const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
-    const t0 = performance.now();
+    const t0inner = performance.now();
+    t0 = t0inner;
     const res = await fetch(url, {
       method: "POST",
       headers,
@@ -351,11 +356,15 @@ export async function POST(req: NextRequest) {
       outputTokens,
     });
   } catch (e: any) {
-    const msg = e?.name === "AbortError"
-      ? "Request timed out — the API took too long to respond."
+    // Report REAL elapsed time — the old hardcoded latencyMs: 0 made every
+    // DNS/TLS failure look like a "0ms abort" and hid which timeout fired.
+    const elapsedMs = Math.round(performance.now() - t0);
+    const isAbort = e?.name === "AbortError";
+    const msg = isAbort
+      ? "Request timed out after " + Math.round(timeoutMs / 1000) + "s waiting for model '" + String(modelForMsg || "default") + "' — the API took too long to respond (cold free-tier model or queueing)."
       : e?.message?.includes("fetch")
-      ? "Network error — the API URL may be unreachable or blocking requests."
-      : e?.message || "Connection failed";
-    return NextResponse.json({ ok: false, latencyMs: 0, message: msg });
+      ? "Network error after " + elapsedMs + "ms — the API URL may be unreachable or blocking requests. Detail: " + String(e?.message || e).slice(0, 200)
+      : (e?.message || "Connection failed") + " (after " + elapsedMs + "ms)";
+    return NextResponse.json({ ok: false, latencyMs: elapsedMs, message: msg, timedOut: isAbort });
   }
 }

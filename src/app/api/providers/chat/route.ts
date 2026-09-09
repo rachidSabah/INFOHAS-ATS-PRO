@@ -4,6 +4,7 @@
 // cacheEnabled, are served from the Cloudflare edge cache — zero upstream calls, zero provider quota.
 import { NextRequest, NextResponse } from "next/server";
 import { chatCacheKey, matchCachedChat, putCachedChat } from "@/lib/ai/providers/chat-proxy-cache";
+import { isZenFreeModelId } from "@/lib/ai/zen-free-models";
 import { isWorkersAIQuotaError, runWorkersAIChat } from "@/lib/ai/providers/workers-ai-core";
 
 export const runtime = "edge";
@@ -27,6 +28,9 @@ const ALLOWED_PROVIDER_HOSTS = new Set([
 const BLOCKED_PROXY_HEADERS = new Set([
   "host", "cookie", "authorization", "x-forwarded-for", "x-real-ip",
   "proxy-authorization", "connection", "content-length",
+  // Egress-IP hygiene (Zen free limits are IP-keyed): never forward client
+  // IP signals Cloudflare adds or the browser sends.
+  "cf-connecting-ip", "true-client-ip",
 ]);
 
 function isAllowedProviderUrl(urlStr: string): boolean {
@@ -186,6 +190,35 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    // === Zen free-tier guest gate (no upstream call spent on refusal) ===
+    // Keyless calls to opencode.ai ride the shared edge-IP free quota and
+    // 401 (CreditsError: No payment method) on paid ids. Refuse anything
+    // that is not recognizably a free model BEFORE the fetch; keyed calls
+    // pass through untouched (the caller's own key and billing apply).
+    //
+    // Server key fallback: Pages env OPENCODE_API_KEY (dashboard secret, never
+    // in source) acts as the shared account for keyless Zen rows. A client
+    // key always wins; without either, the guest gate below applies.
+    let zenHost = "";
+    try { zenHost = new URL(baseUrl).hostname.toLowerCase(); } catch { zenHost = ""; }
+    const isZenUpstream = zenHost === "opencode.ai";
+    let edgeEnv: any = null;
+    try {
+      const { getRequestContext } = await import("@cloudflare/next-on-pages");
+      edgeEnv = (getRequestContext() as any)?.env ?? null;
+    } catch { edgeEnv = null; }
+    let edgeZenKey = String(edgeEnv?.OPENCODE_API_KEY || "");
+    if (!edgeZenKey) {
+      try { edgeZenKey = String((process as any)?.env?.OPENCODE_API_KEY || ""); } catch { edgeZenKey = ""; }
+    }
+    const effectiveKey = apiKey || (isZenUpstream ? edgeZenKey : "");
+    if (isZenUpstream && !effectiveKey && !isZenFreeModelId(model)) {
+      return NextResponse.json({
+        ok: false, latencyMs: 0,
+        error: "Zen free-tier guard: model '" + String(model) + "' is not a recognized OpenCode Zen free model id. Paid Zen models need an API key with billing — attach your opencode.ai key to the provider, or pick a free id such as nemotron-3-ultra-free.",
+      }, { status: 400 });
+    }
+
     // === Edge response cache (opt-in via body.cacheEnabled) ===
     // Keyed AFTER the baseUrl rewrites above so the key reflects the FINAL
     // upstream URL. The key never includes the API key — identical prompts
@@ -211,23 +244,28 @@ export async function POST(req: NextRequest) {
         }
       } catch (e) { console.warn("[ProviderChat] Invalid headersJson:", e); }
     }
-    if (apiKey) {
+    if (effectiveKey) {
       if (baseUrl.includes("generativelanguage.googleapis.com")) {
-        headers["Authorization"] = `Bearer ${apiKey}`;
+        headers["Authorization"] = "Bearer " + effectiveKey;
       } else if (authType === "header") {
-        headers["x-api-key"] = apiKey;
+        headers["x-api-key"] = effectiveKey;
       } else {
-        headers["Authorization"] = `Bearer ${apiKey}`;
+        headers["Authorization"] = "Bearer " + effectiveKey;
       }
+    }
+    // Stable worker identity for upstream quota attribution (Zen limits are
+    // IP-keyed; a fixed UA keeps our egress classifiable instead of random).
+    if (isZenUpstream) {
+      headers["User-Agent"] = "ATSOptimizer-CloudflareWorker/1.0";
     }
 
     let url = baseUrl.endsWith("/chat/completions")
       ? baseUrl
       : `${baseUrl.replace(/\/$/, "")}/chat/completions`;
 
-    if (authType === "query" && apiKey && !baseUrl.includes("generativelanguage.googleapis.com")) {
+    if (authType === "query" && effectiveKey && !baseUrl.includes("generativelanguage.googleapis.com")) {
       const sep = url.includes("?") ? "&" : "?";
-      url = `${url}${sep}key=${encodeURIComponent(apiKey)}`;
+      url = url + sep + "key=" + encodeURIComponent(effectiveKey);
     }
 
     const reqBody: Record<string, unknown> = {
@@ -306,6 +344,20 @@ export async function POST(req: NextRequest) {
         }
       }
       const retryNote = retryAfterSeconds !== undefined ? ` (retry-after: ${retryAfterSeconds}s)` : "";
+
+      // ZEN KV WRITE-THROUGH EVICTION: a relayed 401/404/410 means the id is
+      // retiered or retired — prune it from the shared list instantly so
+      // every edge isolate (and the next Fetch) stops offering it. Awaited
+      // single KV round-trip; best-effort and never breaks the error path.
+      if (isZenUpstream && (res.status === 401 || res.status === 404 || res.status === 410)) {
+        try {
+          const kv = edgeEnv?.CACHE ?? null;
+          if (kv) {
+            const { evictZenModelFromKV } = await import("@/lib/ai/providers/zen-ingest");
+            await evictZenModelFromKV(kv, String(model || ""));
+          }
+        } catch { /* eviction must never break the error path */ }
+      }
 
       return NextResponse.json({
         ok: false, latencyMs,

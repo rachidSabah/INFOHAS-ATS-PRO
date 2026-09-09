@@ -520,13 +520,15 @@ const NVIDIA_PROVIDER: AIProvider = {
   temperature: 0.2,
   retryAttempts: 2,
   rateLimitPerMinute: 40,
-  // Reverted from llama-4-scout-17b back to llama-3.3-70b: Llama 4 Scout
-  // was returning errors on the Nvidia free tier. Llama-3.3-70b was working
-  // (returned 2874 chars in testing) and has good instruction-following.
-  // NVIDIA NIM default now points to a model NVIDIA still serves.
-  // stepfun-ai/step-3.7-flash was retired (HTTP 410 EOL on 2026-08-28).
-  modelName: "nvidia/nemotron-3-super-120b-a12b",
+  // Fast, warm default: meta/llama-3.1-8b-instruct stays provisioned on
+  // NVIDIA's dedicated GPU pools and answers test prompts in <1s. The
+  // previous 120b default (and OpenRouter-style ids like openai/gpt-oss-20b
+  // pasted into NIM rows) scale to zero / queue for minutes on the free
+  // tier and read as timeouts. Heavy models remain in enabledModels for
+  // pipeline use behind the 90s timeout above.
+  modelName: "meta/llama-3.1-8b-instruct",
   enabledModels: [
+    "meta/llama-3.1-8b-instruct",
     "nvidia/nemotron-3-super-120b-a12b",
     "deepseek-ai/deepseek-v4-flash",
     "deepseek-ai/deepseek-v4-pro",

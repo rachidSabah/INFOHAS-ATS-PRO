@@ -25,10 +25,14 @@ import { aiHealthManager } from "../health/ai-health-manager";
 
 /** Catalog ids that providers have proven NOT to support (directive #11). */
 export const KNOWN_INVALID_MODEL_IDS = new Set<string>([
-  "nemotron-3-ultra-free",
   "hy3-free",
-  "big-pickle",
 ]);
+// NOTE: nemotron-3-ultra-free and big-pickle were REMOVED from this set —
+// they are live free ids (user whitelist ZEN_FREE_WHITELIST + verified
+// registry). A stale entry here silently vetoes them inside
+// filterCompatibleRotationCandidates, which starves rotation to an empty
+// pool even when healthy models exist. Transient 401/429s belong in the
+// session ModelRegistry, never in this permanent denylist.
 
 export interface ProviderLike {
   id: string;

@@ -46,6 +46,11 @@ import {
 } from "../../provider-concurrency";
 import { getPromptCache, setPromptCache, buildPromptHash } from "../../prompt-cache";
 import { tryRotateProviderToken, isRotatableAuthError, isBillingError, isPermanentEntitlementError } from "../../token-rotation";
+import {
+  isZenProviderType, isZenRotationAllowed, zenObserveFailure, zenRecordSuccess,
+  zenHealthyPool, isZenModelUsable, ZEN_ZERO_MODEL_VALVE,
+} from "../zen-free-models";
+import { rateGovernor } from "../rate-governor";
 import { withTimeout, OptimizationProviderExhaustedError, AI_CALL_TIMEOUT_MS } from "../../pipeline-watchdog";
 import { truncatePromptToTokenLimit, MAX_INPUT_TOKENS } from "../../ai-diagnostics";
 import { isOpenCodeZenFree } from "../../provider-capabilities";
@@ -1054,9 +1059,35 @@ export class ProviderRouter {
     // Without this, a 403 age-gate walked aion-2.0/3.0/3.0-mini to triple
     // 402s on every pipeline retry. Failover for those happens at PROVIDER
     // level via the validated chain.
-    if (!isBillingError(primaryError) && !isPermanentEntitlementError(primaryError) && enabledModels.length > 1) {
+    const zenRowPre = isZenProviderType(provider.type);
+    // ZEN EXCEPTION to the billing/entitlement skip below: a billing-shaped
+    // Zen error (401 CreditsError on a wrong-tier id) MUST still enter
+    // rotation — the pool is free-only and the registry evicts the offender
+    // after this single call, so no storm is possible (rotationState dedups;
+    // each id is tried at most once per run). Non-zen providers keep the
+    // strict skip (openrouter 403→402×3 storm).
+    if ((zenRowPre || (!isBillingError(primaryError) && !isPermanentEntitlementError(primaryError))) && enabledModels.length > 1) {
+      const zenRow = zenRowPre;
+      const zenKeyed = Boolean((config as any)?.apiKey && String((config as any).apiKey).trim());
       const rawCandidates = enabledModels.filter((m: string) => m !== currentModel && !rotationState.triedModels.has(m));
-      const maxAltModels = filterCompatibleRotationCandidates(provider, rawCandidates, new Set()).slice(0, 3);
+      // ZEN WHITELIST + REGISTRY (adaptive eviction): non-free ids never
+      // enter rotation; evicted/cooled models are skipped without spending
+      // an upstream call (the shared-IP quota makes every call expensive).
+      // Keyed rows keep paid ids (caller's own billing) but still respect
+      // retirements and cooldowns.
+      const admitted = zenRow && !zenKeyed
+        ? rawCandidates.filter((m: string) => isZenRotationAllowed(m))
+        : rawCandidates;
+      const calmed = zenRow
+        ? admitted.filter((m: string) => {
+            if (!isZenModelUsable(m, undefined, zenKeyed ? { keyed: true } : undefined)) return false;
+            try {
+              if (rateGovernor.parkedFor(provider.id, m) > 0) return false;
+            } catch { /* governor unavailable — attempt normally */ }
+            return true;
+          })
+        : admitted;
+      const maxAltModels = filterCompatibleRotationCandidates(provider, calmed, new Set()).slice(0, 3);
       for (const altModel of maxAltModels) {
         rotationState.triedModels.add(altModel);
         console.log(`[PROVIDER] Rotating model to "${altModel}" for ${provider.name}...`);
@@ -1072,6 +1103,9 @@ export class ProviderRouter {
           useApp.getState().updateProvider(provider.id, { modelName: altModel });
 
           rateLimitTracker.recordSuccess(provider.id, res.model || altModel);
+          if (isZenProviderType(provider.type)) {
+            try { zenRecordSuccess(altModel); } catch { /* never break rotation */ }
+          }
           aiHealthManager.recordSuccess({
             providerId: provider.id,
             providerName: provider.name,
@@ -1094,6 +1128,14 @@ export class ProviderRouter {
           return res;
         } catch (modelErr: any) {
           console.warn(`[PROVIDER] Model "${altModel}" failed for ${provider.name}: ${modelErr?.message || modelErr}`);
+          // ZEN ADAPTIVE EVICTION: 401/404/410 evict the id for the session,
+          // 429 parks it until retry-after; rotation already skipped these on
+          // the next pass via the calmed pool above.
+          if (isZenProviderType(provider.type)) {
+            try {
+              zenObserveFailure(altModel, modelErr, undefined, zenKeyed ? { keyed: true } : undefined);
+            } catch { /* registry must never break rotation */ }
+          }
           aiHealthManager.recordFailure({
             providerId: provider.id,
             providerName: provider.name,
@@ -1107,6 +1149,42 @@ export class ProviderRouter {
     }
 
     return null;
+  }
+
+  /**
+   * Zero-model safety valve executor: runs the native Workers AI rescue
+   * model through the registered workers-ai adapter (same-origin proxy,
+   * in-account inference, zero external egress). Throws on valve failure so
+   * the provider chain keeps failing over — never resolves empty.
+   */
+  private static async runZenZeroModelValve(
+    provider: AIProvider,
+    req: ChatRequest,
+    config: ProviderConfig,
+    timeoutMs: number,
+    requestType: AIProviderLog["requestType"]
+  ): Promise<ChatResponse> {
+    const adapter = ProviderFactory.get("workers-ai");
+    const valveReq = { ...req, model: ZEN_ZERO_MODEL_VALVE };
+    const valveConfig = { ...config, modelName: ZEN_ZERO_MODEL_VALVE };
+    const res = await withTimeout(
+      adapter.chat(valveReq, valveConfig),
+      timeoutMs,
+      provider.name + ".zen-valve"
+    );
+    this.log({
+      providerId: provider.id,
+      providerName: provider.name,
+      requestType,
+      modelName: ZEN_ZERO_MODEL_VALVE,
+      status: "success",
+      latencyMs: res.latencyMs,
+      inputTokens: res.inputTokens,
+      outputTokens: res.outputTokens,
+      requestPreview: req.messages[req.messages.length - 1]?.content?.slice(0, 200),
+      responsePreview: res.text.slice(0, 200),
+    });
+    return res;
   }
 
   /**
@@ -1135,8 +1213,43 @@ export class ProviderRouter {
     };
 
     let lastError: any;
+    // ZERO-MODEL SAFETY VALVE (zen): every free model evicted or cooling →
+    // run the native Workers AI rescue model directly instead of burning
+    // quota on doomed calls. Valve failure propagates to the chain (which
+    // fails over further) — never an unhandled crash.
+    const zenRowMain = isZenProviderType(provider.type);
+    const zenKeyedMain = zenRowMain && Boolean((config as any)?.apiKey && String((config as any).apiKey).trim());
+    if (zenRowMain) {
+      const declaredMain = (provider.enabledModels?.length
+        ? provider.enabledModels
+        : [modelForAttempt || (req as any)?.model || config.modelName]) as string[];
+      const admissibleMain = (zenKeyedMain
+        ? declaredMain
+        : (declaredMain as string[]).filter((m: any) => isZenRotationAllowed(m))) as string[];
+      if (zenHealthyPool(admissibleMain, undefined, zenKeyedMain ? { keyed: true } : undefined).length === 0) {
+        console.warn("[ZenValve] No healthy Zen free model left for " + provider.name + " — failing over to Workers AI (" + ZEN_ZERO_MODEL_VALVE + ").");
+        return await this.runZenZeroModelValve(provider, req, config, timeoutMs, requestType);
+      }
+    }
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
       try {
+        // ZEN SESSION SKIP: primary model already evicted/cooled (or paid on
+        // a keyless row) → synthetic error straight into the shared rotation
+        // path below: zero upstream burn, 429 shape so rotation cascades to
+        // the next healthy free model.
+        if (zenRowMain) {
+          const curSkipModel = modelForAttempt || (req as any)?.model || config.modelName || "";
+          const allowedPrimary = zenKeyedMain ? true : isZenRotationAllowed(curSkipModel);
+          const usablePrimary = isZenModelUsable(curSkipModel, undefined, zenKeyedMain ? { keyed: true } : undefined);
+          let parkedPrimary = false;
+          try { parkedPrimary = rateGovernor.parkedFor(provider.id, curSkipModel) > 0; } catch { parkedPrimary = false; }
+          if (!allowedPrimary || !usablePrimary || parkedPrimary) {
+            const skip: any = new Error("Zen model " + curSkipModel + " skipped for this session (not free, evicted, or cooling down) — cascading to the next healthy free model.");
+            skip.statusCode = 429;
+            skip.__zenSkipped = true;
+            throw skip;
+          }
+        }
         // Run with timeout watchdog. withAttemptDeadline also aborts the
         // underlying fetch at the SAME deadline — the withTimeout race alone
         // never aborts the request, so the adapter fell back to its own
@@ -1160,6 +1273,9 @@ export class ProviderRouter {
         });
         // Evidence of recovery clears any stale cooldown (P1 early-clear).
         clearProviderCooldownOnSuccess(provider.id || provider.name || provider.type);
+        if (zenRowMain) {
+          try { zenRecordSuccess(modelForAttempt || (req as any)?.model || config.modelName); } catch { /* never break routing */ }
+        }
 
         // Log success
         this.log({
@@ -1178,9 +1294,21 @@ export class ProviderRouter {
         return res;
       } catch (e: any) {
         lastError = e;
+        // Synthetic zen session-skip (see above): feeds rotation but must
+        // never pollute health evidence or the eviction registry.
+        const zenSkipped = !!(e && (e as any).__zenSkipped);
+
+        // ZEN ADAPTIVE EVICTION feed for real failures.
+        if (!zenSkipped && zenRowMain) {
+          try {
+            const curModel = modelForAttempt || (req as any)?.model || config.modelName || "";
+            zenObserveFailure(curModel, e, undefined, zenKeyedMain ? { keyed: true } : undefined);
+          } catch { /* registry must never break routing */ }
+        }
 
         // Central health registry observation (directive #9, #10) — preserves
         // the explicit failure reason (quota vs auth vs unsupported model...).
+        if (!zenSkipped) {
         aiHealthManager.recordFailure({
           providerId: provider.id,
           providerName: provider.name,
@@ -1189,6 +1317,7 @@ export class ProviderRouter {
           httpStatus: e?.statusCode || e?.status || undefined,
           errorMessage: e?.message || String(e ?? ""),
         });
+        }
 
         const { keyRotation, modelRotation } = this.classifyRotationError(e);
         if (keyRotation || modelRotation) {
