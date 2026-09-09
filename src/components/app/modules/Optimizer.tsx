@@ -1060,7 +1060,20 @@ Guidelines:
       // failovers, no per-agent model picking).
       setAiLog((l) => [...l, "🧪 AI readiness gate: running REAL preflight requests against candidate providers…"]);
       const { runReadinessGate } = await import("@/lib/ai/readiness/preflight");
-      const gate = await runReadinessGate({ jobId: `opt_${Date.now()}`, maxCandidates: 6 });
+      const pSettings = useApp.getState().providerSettings;
+      const targetOptProvId = pSettings?.agentRoutes?.optimizer && pSettings.agentRoutes.optimizer !== "default"
+        ? pSettings.agentRoutes.optimizer
+        : pSettings?.defaultProviderId;
+      const targetOptModel = (targetOptProvId && pSettings?.agentRoutes?.optimizer === targetOptProvId && pSettings?.agentModelRoutes?.optimizer)
+        ? pSettings.agentModelRoutes.optimizer
+        : undefined;
+
+      const gate = await runReadinessGate({
+        jobId: `opt_${Date.now()}`,
+        maxCandidates: 6,
+        preferredProviderId: targetOptProvId,
+        preferredModel: targetOptModel,
+      });
       setAiLog((l) => [...l, `🧪 ${gate.summary}`]);
       if (gate.healed) {
         setAiLog((l) => [...l, "🔧 Auto-Heal repaired one or more providers during the readiness gate — preflight re-run completed."]);

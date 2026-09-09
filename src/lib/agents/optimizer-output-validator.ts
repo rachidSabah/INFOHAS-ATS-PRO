@@ -70,6 +70,54 @@ function normalizeText(s: string): string {
 }
 
 /**
+ * Checks whether a normalized keyword matches the target normalized text.
+ * Supports:
+ * 1. Direct substring match
+ * 2. Singular/plural inflection (e.g., "boarding gates" matches "boarding gate")
+ * 3. Multi-token partial stem matching for compound job duties (e.g. "check-in counters" matches "passenger check-in" or "check-in")
+ */
+function keywordMatchesText(normKeyword: string, targetText: string): boolean {
+  if (!normKeyword || !targetText) return false;
+  if (targetText.includes(normKeyword)) return true;
+
+  // Plural/singular normalization of full phrase
+  if (normKeyword.endsWith("s") && normKeyword.length > 3) {
+    const singular = normKeyword.slice(0, -1).trim();
+    if (singular && targetText.includes(singular)) return true;
+  }
+  if (normKeyword.endsWith("es") && normKeyword.length > 4) {
+    const singular = normKeyword.slice(0, -2).trim();
+    if (singular && targetText.includes(singular)) return true;
+  }
+
+  // Multi-word phrase matching
+  const tokens = normKeyword.split(/\s+/).filter((t) => t.length >= 3 && !isJunkKeyword(t));
+  if (tokens.length >= 2) {
+    const matchedTokens = tokens.filter((t) => {
+      if (targetText.includes(t)) return true;
+      if (t.endsWith("s") && targetText.includes(t.slice(0, -1))) return true;
+      if (t.endsWith("es") && targetText.includes(t.slice(0, -2))) return true;
+      return false;
+    });
+
+    // If at least half of meaningful tokens (and at least 2 tokens) match, or 1 token if total was 2 and it's distinctive
+    if (matchedTokens.length >= 2 && matchedTokens.length >= Math.ceil(tokens.length * 0.6)) {
+      return true;
+    }
+    // For 2-token keywords (e.g. "check-in counters"), if either primary distinctive token matches (e.g. "check-in")
+    if (tokens.length === 2 && matchedTokens.length >= 1) {
+      // If the matched token is not generic
+      const matched = matchedTokens[0];
+      if (matched.length >= 4 && !["service", "services", "system", "systems", "operations"].includes(matched)) {
+        return true;
+      }
+    }
+  }
+
+  return false;
+}
+
+/**
  * Evaluate keyword coverage: of the JD's actionable keywords, how many were
  * already present in the source, and how many did the optimizer integrate?
  */
@@ -89,11 +137,11 @@ export function computeKeywordCoverage(
   const outputText = normalizeText(JSON.stringify(optimizerOutput ?? {}));
 
   // Actionable = JD keyword that the SOURCE does not already contain.
-  const actionable = jdKeywords.filter((k) => !sourceText.includes(normalizeText(k)));
+  const actionable = jdKeywords.filter((k) => !keywordMatchesText(normalizeText(k), sourceText));
   let integrated = 0;
   const stillMissing: string[] = [];
   for (const k of actionable) {
-    if (outputText.includes(normalizeText(k))) integrated++;
+    if (keywordMatchesText(normalizeText(k), outputText)) integrated++;
     else stillMissing.push(k);
   }
 

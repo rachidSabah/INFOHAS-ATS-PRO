@@ -230,11 +230,21 @@ export const PREBUILT_MODELS_BY_PROVIDER: Record<string, ModelGroup[]> = {
 
   "workers-ai": [
     {
-      group: "⭐ Cloudflare Workers AI",
+      group: "⭐ Cloudflare Workers AI (Powerful / Flagship)",
       models: [
-        { id: "@cf/meta/llama-3.3-70b-instruct-fp8-fast", label: "Llama 3.3 70B Fast", badge: "Recommended", isStable: true },
-        { id: "@cf/meta/llama-3.1-8b-instruct", label: "Llama 3.1 8B Instruct", badge: "Fast" },
-        { id: "@cf/mistral/mistral-7b-instruct-v0.1", label: "Mistral 7B", badge: "Compact" },
+        { id: "@cf/meta/llama-3.3-70b-instruct-fp8-fast", label: "Llama 3.3 70B Fast (FP8)", badge: "Recommended", isStable: true },
+        { id: "@cf/meta/llama-3.3-70b-instruct", label: "Llama 3.3 70B Full", badge: "High Precision", isStable: true },
+        { id: "@cf/qwen/qwen2.5-72b-instruct", label: "Qwen 2.5 72B Instruct", badge: "Most Powerful", isStable: true },
+        { id: "@cf/deepseek-ai/deepseek-r1-distill-qwen-32b", label: "DeepSeek R1 Distill 32B", badge: "Reasoning", isStable: true },
+        { id: "@cf/meta/llama-3.1-70b-instruct", label: "Llama 3.1 70B Instruct", badge: "High Accuracy" },
+      ],
+    },
+    {
+      group: "⚡ Cloudflare Workers AI (Fast & Compact)",
+      models: [
+        { id: "@cf/google/gemma-2-27b-it", label: "Gemma 2 27B IT", badge: "Fast" },
+        { id: "@cf/meta/llama-3.1-8b-instruct", label: "Llama 3.1 8B Instruct", badge: "Ultra Fast" },
+        { id: "@cf/mistral/mistral-7b-instruct-v0.2", label: "Mistral 7B v0.2", badge: "Compact" },
       ],
     },
   ],

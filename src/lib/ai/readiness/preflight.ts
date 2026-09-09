@@ -162,6 +162,8 @@ export async function runReadinessPreflight(opts: {
   maxCandidates?: number;
   timeoutMs?: number;
   providerIds?: string[];
+  preferredProviderId?: string;
+  preferredModel?: string;
   deps?: HealerDeps;
 } = {}): Promise<PreflightResult> {
   const t0 = Date.now();
@@ -180,15 +182,39 @@ export async function runReadinessPreflight(opts: {
     return p.isActive && p.allowedForRegularUsers === true;
   });
 
-  // Order: default provider first, then by priority — cap for speed.
+  const configuredOptimizerRoute = state.providerSettings?.agentRoutes?.optimizer;
+  const preferredTargetId = opts.preferredProviderId
+    ?? (configuredOptimizerRoute && configuredOptimizerRoute !== "default"
+      ? configuredOptimizerRoute
+      : state.providerSettings?.defaultProviderId);
+  const preferredTargetModel = opts.preferredModel
+    ?? (preferredTargetId && configuredOptimizerRoute === preferredTargetId
+      ? state.providerSettings?.agentModelRoutes?.optimizer
+      : undefined);
+
+  // Order: user's preferred/routed provider first, then default provider, then by priority — cap for speed.
   const defaultId = state.providerSettings?.defaultProviderId;
-  eligible = eligible.sort((a, b) => (a.id === defaultId ? -1 : b.id === defaultId ? 1 : a.priority - b.priority));
+  eligible = eligible.sort((a, b) => {
+    if (preferredTargetId) {
+      if (a.id === preferredTargetId) return -1;
+      if (b.id === preferredTargetId) return 1;
+    }
+    if (defaultId) {
+      if (a.id === defaultId) return -1;
+      if (b.id === defaultId) return 1;
+    }
+    return a.priority - b.priority;
+  });
   const eligibleIds = eligible.map((p) => p.id);
   if (opts.maxCandidates && eligible.length > opts.maxCandidates) eligible = eligible.slice(0, opts.maxCandidates);
 
   const candidates: PreflightCandidate[] = [];
   for (const provider of eligible) {
-    const { model, source } = resolveProviderBenchmarkModel(provider);
+    let { model, source } = resolveProviderBenchmarkModel(provider);
+    if (provider.id === preferredTargetId && preferredTargetModel && preferredTargetModel.trim() !== "") {
+      model = preferredTargetModel.trim();
+      source = "configured";
+    }
     if (source === "none") {
       candidates.push({
         providerId: provider.id, providerName: provider.name, model: "(none configured)", modelSource: source,
@@ -244,7 +270,14 @@ export async function runReadinessPreflight(opts: {
 
   const passed = candidates
     .filter((c) => c.ok)
-    .sort((a, b) => (b.readinessScore - a.readinessScore) || (a.latencyMs - b.latencyMs));
+    .sort((a, b) => {
+      // User's explicitly preferred/routed provider takes precedence as primary when healthy
+      if (preferredTargetId) {
+        if (a.providerId === preferredTargetId && b.providerId !== preferredTargetId) return -1;
+        if (b.providerId === preferredTargetId && a.providerId !== preferredTargetId) return 1;
+      }
+      return (b.readinessScore - a.readinessScore) || (a.latencyMs - b.latencyMs);
+    });
 
   return {
     at: new Date().toISOString(),
@@ -270,6 +303,8 @@ export async function runReadinessGate(opts: {
   jobId?: string;
   maxCandidates?: number;
   timeoutMs?: number;
+  preferredProviderId?: string;
+  preferredModel?: string;
   deps?: HealerDeps;
 } = {}): Promise<ReadinessGateResult> {
   const preflight = await runReadinessPreflight(opts);

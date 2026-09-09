@@ -554,10 +554,46 @@ function InfohasSection({
 
 function groupSkillsByCategory(skills: ResumeData["skills"]): { category: string; items: string[] }[] {
   const map = new Map<string, string[]>();
+  const seenPerCat = new Map<string, Set<string>>();
+
   for (const s of skills) {
-    const cat = s.category || "General";
-    if (!map.has(cat)) map.set(cat, []);
-    map.get(cat)!.push(s.name);
+    let cat = s.category?.trim();
+    let name = (s.name || "").trim();
+    if (!cat) {
+      const colonIdx = name.indexOf(":");
+      if (colonIdx > 0 && colonIdx < 35) {
+        cat = name.slice(0, colonIdx).trim();
+        name = name.slice(colonIdx + 1).trim();
+      } else {
+        cat = "General";
+      }
+    }
+    // Strip redundant "Category: " prefix if present inside name
+    if (name.toLowerCase().startsWith(cat.toLowerCase() + ":")) {
+      name = name.slice(cat.length + 1).trim();
+    }
+
+    const rawTokens = (name.includes("•") || name.includes(",") || name.includes(";"))
+      ? name.split(/[,;•]/).map(t => t.trim()).filter(Boolean)
+      : [name];
+
+    if (!map.has(cat)) {
+      map.set(cat, []);
+      seenPerCat.set(cat, new Set<string>());
+    }
+    const catItems = map.get(cat)!;
+    const catSeen = seenPerCat.get(cat)!;
+
+    for (let token of rawTokens) {
+      if (token.toLowerCase().startsWith(cat.toLowerCase() + ":")) {
+        token = token.slice(cat.length + 1).trim();
+      }
+      if (!token) continue;
+      const canon = token.toLowerCase().replace(/[\u2010-\u2015\u2212-]+/g, " ").replace(/\s+/g, " ").trim();
+      if (!canon || catSeen.has(canon)) continue;
+      catSeen.add(canon);
+      catItems.push(token);
+    }
   }
   return Array.from(map.entries()).map(([category, items]) => ({ category, items }));
 }

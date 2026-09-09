@@ -40,6 +40,7 @@ import type { ResumeData, JobDescription, OptimizerDirectiveConfig } from "../ty
 import { computeExperienceFingerprint } from "../experience-fingerprint";
 import { getVisibleCharCount } from "../layout-validator";
 import { filterJunkKeywords } from "../keyword-quality";
+import { canonicalSkillKey } from "../resume-assembler";
 
 // ============================================================================
 // Page-fill estimation
@@ -239,19 +240,36 @@ export function expandResume(
   // junk as fake skills — "Job-Relevant: Duty, Free, Ensure, Till, Assistant."
   if (missingKeywords.length > 0 && expanded.skills.length > 0) {
     const existingSkillNames = new Set(
-      expanded.skills.map((s) => (s.name ?? "").toLowerCase()),
+      expanded.skills.map((s) => (s.name ?? "").toLowerCase().trim()),
     );
-    const keywordsToAdd = filterJunkKeywords(missingKeywords)
-      .filter((k) => !existingSkillNames.has(k.toLowerCase()))
+    const existingCanon = new Set(
+      expanded.skills.map((s) => canonicalSkillKey(s.name ?? "")).filter(Boolean),
+    );
+    const filteredKeywords = filterJunkKeywords(missingKeywords);
+    // Split any compound keywords by comma/bullet/semicolon
+    const atomicKeywords = filteredKeywords.flatMap((k) =>
+      k.split(/[,;•]/).map((part) => part.trim()).filter(Boolean)
+    );
+    const keywordsToAdd = atomicKeywords
+      .filter((k) => {
+        const key = k.toLowerCase();
+        const canon = canonicalSkillKey(k);
+        return !existingSkillNames.has(key) && !(canon && existingCanon.has(canon));
+      })
       .slice(0, 5); // max 5 new keywords
 
     if (keywordsToAdd.length > 0) {
       // Add as new skill entries with a "Job-Relevant" category
-      const newSkills = keywordsToAdd.map((k, i) => ({
-        id: `skill_jd_${Date.now()}_${i}`,
-        name: k,
-        category: "Job-Relevant",
-      }));
+      const newSkills = keywordsToAdd.map((k, i) => {
+        const canon = canonicalSkillKey(k);
+        if (canon) existingCanon.add(canon);
+        existingSkillNames.add(k.toLowerCase());
+        return {
+          id: `skill_jd_${Date.now()}_${i}`,
+          name: k,
+          category: "Job-Relevant",
+        };
+      });
       expanded.skills = [...expanded.skills, ...newSkills];
     }
   }

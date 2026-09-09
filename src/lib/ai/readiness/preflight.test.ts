@@ -173,6 +173,24 @@ describe("runReadinessGate", () => {
 
     (useApp as any).getState = originalGetState;
   });
+
+  it("prioritizes user's explicit preferredProviderId or agentRoutes.optimizer over a lower-latency provider", async () => {
+    // p_a has 45ms latency (higher score), p_b is user's explicit target with 400ms latency
+    const ping = vi.fn(async (provider: any) =>
+      provider.id === "p_a"
+        ? { ok: true, latencyMs: 45, reply: "READY" }
+        : { ok: true, latencyMs: 400, reply: "READY" }
+    );
+    const gate = await runReadinessGate({
+      preferredProviderId: "p_b",
+      preferredModel: "special-model",
+      deps: { ping },
+    });
+
+    expect(gate.lock).toBeTruthy();
+    expect(gate.lock!.primary.providerId).toBe("p_b");
+    expect(gate.lock!.fallbacks[0].providerId).toBe("p_a"); // p_a locked as validated fallback
+  });
 });
 
 describe("config-lock + supervisor failover", () => {

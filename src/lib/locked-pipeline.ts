@@ -413,23 +413,27 @@ export async function runLockedPipeline(
         const valid = arenaResults.filter(Boolean) as NonNullable<typeof arenaResults[number]>[];
         if (valid.length > 0) {
           const { scoreATS } = await import("./ats");
-          // Judge: assemble each candidate and score with the deterministic ATS engine.
+          // Judge: assemble each candidate and score with the deterministic ATS engine,
+          // prioritizing candidates whose output satisfies OptimizerOutputValidator.
           let best = valid[0];
           let bestScore = -1;
           let bestProviderId = "";
           for (let i = 0; i < arenaResults.length; i++) {
             const r = arenaResults[i];
             if (!r) continue;
+            const validation = validateOptimizerOutput(idReadyResume, r.output, jd);
             const rResume = assembleResume(idReadyResume, r.output, { matchingStrategy: options?.matchingStrategy }).resume;
-            const rScore = scoreATS(rResume, jd).scores.ats;
-            console.info(`[Model Arena] Candidate ${arenaProviders[i].id} ATS score: ${rScore}/100.`);
+            const baseScore = scoreATS(rResume, jd).scores.ats;
+            // Heavily penalize invalid candidate output so valid candidates win over invalid ones
+            const rScore = validation.valid ? baseScore : Math.max(0, baseScore - 50);
+            console.info(`[Model Arena] Candidate ${arenaProviders[i].id} ATS score: ${baseScore}/100 (valid: ${validation.valid}, effective: ${rScore}/100).`);
             if (rScore > bestScore) {
               best = r;
               bestScore = rScore;
               bestProviderId = arenaProviders[i].id;
             }
           }
-          console.info(`[Model Arena] Winner: ${bestProviderId} (score ${bestScore}/100).`);
+          console.info(`[Model Arena] Winner: ${bestProviderId} (effective score ${bestScore}/100).`);
           optimizerResult = best;
         } else {
           optimizerResult = null;

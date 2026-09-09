@@ -18,8 +18,13 @@ export const WORKERS_AI_DEFAULT_MODEL = "@cf/meta/llama-3.3-70b-instruct-fp8-fas
 /** Curated model options for the Providers UI + listModels(). */
 export const WORKERS_AI_MODEL_OPTIONS: string[] = [
   WORKERS_AI_DEFAULT_MODEL,
-  "@cf/meta/llama-3.1-8b-instruct-fp8",
+  "@cf/meta/llama-3.3-70b-instruct",
+  "@cf/qwen/qwen2.5-72b-instruct",
   "@cf/deepseek-ai/deepseek-r1-distill-qwen-32b",
+  "@cf/meta/llama-3.1-70b-instruct",
+  "@cf/google/gemma-2-27b-it",
+  "@cf/meta/llama-3.1-8b-instruct-fp8",
+  "@cf/mistral/mistral-7b-instruct-v0.2",
 ];
 
 export interface WorkersAIMessage {

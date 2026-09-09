@@ -192,4 +192,23 @@ describe("validateOptimizerOutput", () => {
     expect(res.keywordCoverage.total).toBe(8);
     expect(res.violations.some((v) => v.includes("Keyword integration floor"))).toBe(true);
   });
+
+  it("RECOGNIZES inflected and plural/singular keywords as integrated (e.g. Boarding Gates vs Boarding Gate Control)", () => {
+    const resume = makeResume();
+    resume.skills = [];
+    const jd: JobDescription = {
+      ...makeJD(),
+      keywords: ["Boarding Gates", "Check-in Counters", "VIP Operations", "Passport and Visa Verification"],
+    };
+    const output = {
+      summary: "Aviation customer service specialist experienced in Passenger Check-in, Boarding Gate Control, and Travel Document & Visa Checks.",
+      experiences: [{ id: "e1", bullets: resume.experience[0].bullets }],
+      skills: [{ id: "s1", name: "VIP Escort & Operations", category: "Aviation" }],
+    };
+    const res = validateOptimizerOutput(resume, output, jd);
+    expect(res.keywordCoverage.integrated).toBeGreaterThanOrEqual(3);
+    expect(res.violations.some((v) => v.includes("Keyword integration floor"))).toBe(false);
+    expect(res.valid).toBe(true);
+  });
 });
+

@@ -444,17 +444,42 @@ export function assembleResume(
   // 4. SKILLS — from optimizer, filtered for forbidden patterns
   // ========================================================================
 
-  // Helper: split compound skills into individual bullets
+  // Helper: split compound skills into individual bullets and strip redundant category prefixes
   const splitCompoundSkills = (skills: ResumeSkill[]): ResumeSkill[] => {
     return skills.flatMap((s) => {
-      if (s.name.includes("•") || s.name.includes(",") || s.name.includes(";")) {
-        return s.name.split(/[,;•]/).map((item, idx) => ({
-          id: `${s.id}_${idx}`, // Stable ID per part
-          name: item.trim(),
-          category: s.category || "General",
-        }));
+      let rawName = (s.name || "").trim();
+      let cat = s.category?.trim() || "General";
+      // If name has "Category: item1, item2" or "Category: item", extract category prefix
+      const colonIdx = rawName.indexOf(":");
+      if (colonIdx > 0 && colonIdx < 40) {
+        const potentialCat = rawName.slice(0, colonIdx).trim();
+        if (!s.category || s.category === "General" || s.category.toLowerCase() === potentialCat.toLowerCase()) {
+          cat = potentialCat;
+          rawName = rawName.slice(colonIdx + 1).trim();
+        }
       }
-      return [s];
+      if (rawName.includes("•") || rawName.includes(",") || rawName.includes(";")) {
+        return rawName.split(/[,;•]/).map((item, idx) => {
+          let cleanItem = item.trim();
+          const itemColon = cleanItem.indexOf(":");
+          if (itemColon > 0 && itemColon < 35) {
+            const itemPrefix = cleanItem.slice(0, itemColon).trim();
+            if (itemPrefix.toLowerCase() === cat.toLowerCase()) {
+              cleanItem = cleanItem.slice(itemColon + 1).trim();
+            }
+          }
+          return {
+            id: `${s.id}_${idx}`, // Stable ID per part
+            name: cleanItem,
+            category: cat,
+          };
+        }).filter((item) => item.name.length > 0);
+      }
+      return [{
+        ...s,
+        name: rawName,
+        category: cat,
+      }];
     });
   };
 
@@ -482,22 +507,25 @@ export function assembleResume(
     // optimizer's rewritten "Passenger Check-in" are the SAME skill — treat
     // the optimizer's spelling as present instead of merging a lookalike
     // duplicate that renders as a double entry on the final resume.
+    // Also split source skills so compound source entries (e.g. whole bullet list)
+    // are checked and preserved item-by-item rather than appended as an un-split duplicate block.
     const existingNames = new Set(filtered.map(s => s.name?.toLowerCase().trim()).filter(Boolean));
     const existingCanon = new Set(filtered.map(s => canonicalSkillKey(s.name || "")).filter(Boolean));
-    for (const srcSkill of sourceResume.skills || []) {
+    const splitSource = splitCompoundSkills(sourceResume.skills || []);
+    let preservedSourceCount = 0;
+    for (const srcSkill of splitSource) {
       const key = srcSkill.name?.toLowerCase().trim();
       const canon = canonicalSkillKey(srcSkill.name || "");
       if (key && !existingNames.has(key) && !(canon && existingCanon.has(canon))) {
         skills.push({ ...srcSkill });
         existingNames.add(key);
         if (canon) existingCanon.add(canon);
+        preservedSourceCount++;
       }
     }
-    const totalDropped = (sourceResume.skills?.length || 0) - existingNames.size;
-    if (totalDropped > 0) {
+    if (preservedSourceCount > 0) {
       warnings.push(
-        `Optimizer returned ${filtered.length} skills vs ${sourceResume.skills?.length || 0} in source. ` +
-        `Merged ${totalDropped} dropped source skill(s) to prevent data loss.`
+        `Preserved ${preservedSourceCount} dropped source skill(s) to prevent data loss.`
       );
     }
     // === SKILL CATEGORY RESTORATION ===
@@ -507,13 +535,13 @@ export function assembleResume(
     // vs source "Check - in"), so exact-key lookup alone misses the source row.
     const sourceCategoryMap = new Map<string, string>();
     const sourceCategoryCanon = new Map<string, string>();
-    for (const src of sourceResume.skills) {
+    for (const src of splitSource) {
       const key = src.name.toLowerCase().trim();
-      if (!sourceCategoryMap.has(key) && src.category) {
+      if (!sourceCategoryMap.has(key) && src.category && src.category !== "General") {
         sourceCategoryMap.set(key, src.category);
       }
       const canon = canonicalSkillKey(src.name || "");
-      if (canon && !sourceCategoryCanon.has(canon) && src.category) {
+      if (canon && !sourceCategoryCanon.has(canon) && src.category && src.category !== "General") {
         sourceCategoryCanon.set(canon, src.category);
       }
     }
@@ -532,6 +560,22 @@ export function assembleResume(
     if (categoryRestoreCount > 0) {
       warnings.push(`Restored categories for ${categoryRestoreCount} skill(s) from source (optimizer dropped them).`);
     }
+
+    // === DEFINITIVE DEDUPLICATION PASS ===
+    // Zero tolerance for duplicate skill entries (case-insensitive + dash-canonical)
+    const seenFinalCanon = new Set<string>();
+    const dedupedFinalSkills: ResumeSkill[] = [];
+    for (const sk of skills) {
+      let cleanName = (sk.name || "").trim();
+      if (sk.category && cleanName.toLowerCase().startsWith(sk.category.toLowerCase() + ":")) {
+        cleanName = cleanName.slice(sk.category.length + 1).trim();
+      }
+      const canon = canonicalSkillKey(cleanName);
+      if (!canon || seenFinalCanon.has(canon)) continue;
+      seenFinalCanon.add(canon);
+      dedupedFinalSkills.push({ ...sk, name: cleanName });
+    }
+    skills = dedupedFinalSkills;
   }
 
   // ========================================================================

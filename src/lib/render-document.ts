@@ -157,9 +157,11 @@ function buildSkillsSection(resume: ResumeData): RenderDocumentSection | null {
   if (!resume.skills?.length) return null;
   // Group by category
   const categorized = new Map<string, string[]>();
+  const seenPerCat = new Map<string, Set<string>>();
+
   for (const s of resume.skills) {
     let cat = s.category?.trim();
-    let name = s.name;
+    let name = (s.name || "").trim();
     // Fallback: if no explicit category, detect "Category: skill" pattern in name
     if (!cat) {
       const colonIdx = name.indexOf(":");
@@ -170,8 +172,31 @@ function buildSkillsSection(resume: ResumeData): RenderDocumentSection | null {
         cat = "General";
       }
     }
-    if (!categorized.has(cat)) categorized.set(cat, []);
-    categorized.get(cat)!.push(name);
+    if (name.toLowerCase().startsWith(cat.toLowerCase() + ":")) {
+      name = name.slice(cat.length + 1).trim();
+    }
+
+    const rawTokens = (name.includes("•") || name.includes(",") || name.includes(";"))
+      ? name.split(/[,;•]/).map(t => t.trim()).filter(Boolean)
+      : [name];
+
+    if (!categorized.has(cat)) {
+      categorized.set(cat, []);
+      seenPerCat.set(cat, new Set<string>());
+    }
+    const catItems = categorized.get(cat)!;
+    const catSeen = seenPerCat.get(cat)!;
+
+    for (let token of rawTokens) {
+      if (token.toLowerCase().startsWith(cat.toLowerCase() + ":")) {
+        token = token.slice(cat.length + 1).trim();
+      }
+      if (!token) continue;
+      const canon = token.toLowerCase().replace(/[\u2010-\u2015\u2212-]+/g, " ").replace(/\s+/g, " ").trim();
+      if (!canon || catSeen.has(canon)) continue;
+      catSeen.add(canon);
+      catItems.push(token);
+    }
   }
   // Rename "General" category to the first non-General category if it only has one item
   // and that item looks like a category header

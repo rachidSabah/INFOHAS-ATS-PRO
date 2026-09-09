@@ -18,6 +18,7 @@ export function AIProviderSettings() {
   const settings = useApp((s) => s.providerSettings);
   const providers = useApp((s) => s.providers);
   const updateProviderSettings = useApp((s) => s.updateProviderSettings);
+  const updateProvider = useApp((s) => s.updateProvider);
 
   // Local form state (editable, saved on "Save")
   const [form, setForm] = useState(settings);
@@ -153,7 +154,15 @@ export function AIProviderSettings() {
       nextModelRoutes[agentKey] = modelId;
     }
 
-    update({ agentRoutes: nextRoutes, agentModelRoutes: nextModelRoutes });
+    update({
+      agentRoutes: nextRoutes,
+      agentModelRoutes: nextModelRoutes,
+      defaultProviderId: puterProv.id,
+      defaultModel: preset.routes.optimizer,
+    });
+    if (puterProv.modelName !== preset.routes.optimizer) {
+      updateProvider(puterProv.id, { modelName: preset.routes.optimizer });
+    }
     toast.success(`Applied "${preset.name}". All 4 agents assigned to Puter.js models. Click Save Changes to persist.`);
   };
 
@@ -247,6 +256,31 @@ export function AIProviderSettings() {
     }
     setTestingChain(false);
     toast.success("AI Routing Chain diagnostics complete.");
+  };
+
+  const [prefetchingAll, setPrefetchingAll] = useState(false);
+  const handlePrefetchAllChainModels = async () => {
+    setPrefetchingAll(true);
+    const chain = [defaultProvider, ...fallbackProviders].filter(Boolean) as typeof providers;
+    let count = 0;
+    for (const p of chain) {
+      try {
+        setFetchingAgentModels((prev) => ({ ...prev, [p.id]: true }));
+        const res = await ProviderManager.fetchModels(p as any);
+        setFetchingAgentModels((prev) => ({ ...prev, [p.id]: false }));
+        if (res.ok && res.models.length > 0) {
+          setAgentModels((prev) => ({ ...prev, [p.id]: res.models }));
+          if (p.id === defaultProvider?.id) {
+            setLiveModels(res.models);
+          }
+          count++;
+        }
+      } catch (err) {
+        setFetchingAgentModels((prev) => ({ ...prev, [p.id]: false }));
+      }
+    }
+    setPrefetchingAll(false);
+    toast.success(`Prefetched models for ${count} chain provider${count === 1 ? "" : "s"}.`);
   };
 
   // === Import / Export ===
@@ -386,21 +420,34 @@ export function AIProviderSettings() {
       {/* Diagnostics Card */}
       <Card>
         <CardHeader>
-          <CardTitle className="text-lg flex items-center justify-between">
+          <CardTitle className="text-lg flex flex-col sm:flex-row sm:items-center justify-between gap-2">
             <span className="flex items-center gap-2">
               <Icon name="Activity" className="w-4 h-4 text-emerald-500" /> 
               Routing Chain Diagnostics
             </span>
-            <Button 
-              onClick={handleTestChain} 
-              disabled={testingChain || (!defaultProvider && fallbackProviders.length === 0)}
-              variant="outline" 
-              size="sm"
-              className="text-xs gap-1.5"
-            >
-              {testingChain ? <Icon name="Loader2" className="w-3.5 h-3.5 animate-spin" /> : <Icon name="Play" className="w-3.5 h-3.5 text-brand" />}
-              {testingChain ? "Testing..." : "Test Entire Chain"}
-            </Button>
+            <div className="flex items-center gap-2 self-start sm:self-auto flex-wrap">
+              <Button
+                onClick={handlePrefetchAllChainModels}
+                disabled={prefetchingAll || (!defaultProvider && fallbackProviders.length === 0)}
+                variant="outline"
+                size="sm"
+                className="text-xs gap-1.5"
+                title="Prefetch and cache available models for all providers currently in the routing chain"
+              >
+                {prefetchingAll ? <Icon name="Loader2" className="w-3.5 h-3.5 animate-spin" /> : <Icon name="DownloadCloud" className="w-3.5 h-3.5 text-brand" />}
+                {prefetchingAll ? "Prefetching..." : "Prefetch All Models"}
+              </Button>
+              <Button 
+                onClick={handleTestChain} 
+                disabled={testingChain || (!defaultProvider && fallbackProviders.length === 0)}
+                variant="outline" 
+                size="sm"
+                className="text-xs gap-1.5"
+              >
+                {testingChain ? <Icon name="Loader2" className="w-3.5 h-3.5 animate-spin" /> : <Icon name="Play" className="w-3.5 h-3.5 text-brand" />}
+                {testingChain ? "Testing..." : "Test Entire Chain"}
+              </Button>
+            </div>
           </CardTitle>
           <CardDescription>
             Simulate live API calls to verify credentials, check latency, and ensure failover resilience across your configuration.
@@ -453,23 +500,126 @@ export function AIProviderSettings() {
 
       {/* Fallback Chain */}
       <Card>
-        <CardHeader><CardTitle className="text-lg flex items-center gap-2"><Icon name="Layers" className="w-4 h-4 text-brand" /> Fallback Chain</CardTitle><CardDescription>Providers tried in order if the default fails.</CardDescription></CardHeader>
+        <CardHeader>
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+            <div>
+              <CardTitle className="text-lg flex items-center gap-2">
+                <Icon name="Layers" className="w-4 h-4 text-brand" /> Fallback Chain
+              </CardTitle>
+              <CardDescription>Providers tried in order if the default fails. Assign specific rescue models and prefetch live options.</CardDescription>
+            </div>
+            {fallbackProviders.length > 0 && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handlePrefetchAllChainModels}
+                disabled={prefetchingAll}
+                className="text-xs gap-1.5 self-start sm:self-auto shrink-0"
+              >
+                {prefetchingAll ? <Icon name="Loader2" className="w-3.5 h-3.5 animate-spin" /> : <Icon name="DownloadCloud" className="w-3.5 h-3.5 text-brand" />}
+                Prefetch Chain Models
+              </Button>
+            )}
+          </div>
+        </CardHeader>
         <CardContent className="space-y-3">
           {fallbackProviders.length === 0 && (
             <div className="text-sm text-muted-foreground text-center py-4 rounded-lg border border-dashed border-border">No fallback providers configured.</div>
           )}
-          {fallbackProviders.map((p, i) => (
-            <div key={p.id} className="flex items-center gap-3 p-3 rounded-lg border border-border">
-              <div className="w-7 h-7 rounded-full bg-brand text-white flex items-center justify-center text-xs font-bold">{i + 1}</div>
-              <div className="flex-1 min-w-0">
-                <div className="font-medium text-sm truncate">{p.name}</div>
-                <div className="text-xs text-muted-foreground capitalize">{p.type.replace("-", " ")} · {p.modelName}</div>
+          {fallbackProviders.map((p, i) => {
+            const prebuilt = getPrebuiltModelsForProvider(p.type);
+            const prebuiltIds = new Set(prebuilt ? prebuilt.flatMap((g) => g.models.map((m) => m.id)) : []);
+            const cached = agentModels[p.id] || [];
+            const extraModels = cached.filter((m) => !prebuiltIds.has(m));
+            const isFetchingThis = !!fetchingAgentModels[p.id];
+
+            return (
+              <div key={p.id} className="p-3 rounded-lg border border-border bg-card space-y-2.5">
+                <div className="flex items-center gap-3">
+                  <div className="w-7 h-7 rounded-full bg-brand text-white flex items-center justify-center text-xs font-bold shrink-0">{i + 1}</div>
+                  <div className="flex-1 min-w-0">
+                    <div className="font-medium text-sm truncate flex items-center gap-2">
+                      {p.name}
+                      <Badge variant="outline" className="text-[10px] uppercase">{p.type.replace("-", " ")}</Badge>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-1 shrink-0">
+                    <Button size="sm" variant="ghost" disabled={i === 0} onClick={() => { const ids = [...form.fallbackProviderIds]; [ids[i-1], ids[i]] = [ids[i], ids[i-1]]; update({ fallbackProviderIds: ids }); }} title="Move up in priority">
+                      <Icon name="ChevronUp" className="w-4 h-4" />
+                    </Button>
+                    <Button size="sm" variant="ghost" disabled={i === fallbackProviders.length - 1} onClick={() => { const ids = [...form.fallbackProviderIds]; [ids[i+1], ids[i]] = [ids[i], ids[i+1]]; update({ fallbackProviderIds: ids }); }} title="Move down in priority">
+                      <Icon name="ChevronDown" className="w-4 h-4" />
+                    </Button>
+                    <Button size="sm" variant="ghost" className="text-destructive hover:text-destructive" onClick={() => update({ fallbackProviderIds: form.fallbackProviderIds.filter((fid) => fid !== p.id) })} title="Remove from fallback chain">
+                      <Icon name="X" className="w-4 h-4" />
+                    </Button>
+                  </div>
+                </div>
+
+                {/* Model Selector & Prefetch for this Fallback Link */}
+                <div className="flex flex-col sm:flex-row sm:items-center gap-2 pt-1 border-t border-border/40 text-xs">
+                  <div className="flex items-center justify-between sm:justify-start gap-2 min-w-[130px]">
+                    <span className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">Fallback Model:</span>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      type="button"
+                      onClick={() => fetchModelsForAgentProvider(p)}
+                      disabled={isFetchingThis}
+                      className="h-6 px-2 text-[11px] text-brand hover:text-brand-dark gap-1"
+                      title={`Fetch live model catalog for ${p.name}`}
+                    >
+                      {isFetchingThis ? <Icon name="Loader2" className="w-3 h-3 animate-spin" /> : <Icon name="RefreshCw" className="w-3 h-3" />}
+                      Prefetch
+                    </Button>
+                  </div>
+
+                  <div className="flex-1 min-w-0">
+                    <select
+                      value={p.modelName || ""}
+                      onChange={(e) => {
+                        const newModel = e.target.value;
+                        updateProvider(p.id, { modelName: newModel });
+                        toast.success(`Assigned fallback model "${newModel}" to ${p.name}`);
+                      }}
+                      className="w-full h-8 px-2.5 rounded-md border border-input bg-background text-xs font-mono"
+                    >
+                      <option value="">— Select Fallback Model —</option>
+                      {p.modelName && !prebuiltIds.has(p.modelName) && !extraModels.includes(p.modelName) && (
+                        <option value={p.modelName}>{p.modelName} (current active)</option>
+                      )}
+                      {prebuilt ? (
+                        <>
+                          {prebuilt.map((group) => (
+                            <optgroup key={group.group} label={group.group}>
+                              {group.models.map((m) => (
+                                <option key={m.id} value={m.id}>
+                                  {m.label}{m.badge ? ` [${m.badge}]` : ""}
+                                </option>
+                              ))}
+                            </optgroup>
+                          ))}
+                          {extraModels.length > 0 && (
+                            <optgroup label="🌐 Live Discovered Models">
+                              {extraModels.map((m) => (
+                                <option key={m} value={m}>{m}</option>
+                              ))}
+                            </optgroup>
+                          )}
+                        </>
+                      ) : cached.length > 0 ? (
+                        cached.map((m) => (
+                          <option key={m} value={m}>{m}</option>
+                        ))
+                      ) : (
+                        <option value={p.modelName || ""}>{p.modelName || "Default model"}</option>
+                      )}
+                    </select>
+                  </div>
+                </div>
               </div>
-              <Button size="sm" variant="ghost" disabled={i === 0} onClick={() => { const ids = [...form.fallbackProviderIds]; [ids[i-1], ids[i]] = [ids[i], ids[i-1]]; update({ fallbackProviderIds: ids }); }}><Icon name="ChevronUp" className="w-4 h-4" /></Button>
-              <Button size="sm" variant="ghost" disabled={i === fallbackProviders.length - 1} onClick={() => { const ids = [...form.fallbackProviderIds]; [ids[i+1], ids[i]] = [ids[i], ids[i+1]]; update({ fallbackProviderIds: ids }); }}><Icon name="ChevronDown" className="w-4 h-4" /></Button>
-              <Button size="sm" variant="ghost" className="text-destructive" onClick={() => update({ fallbackProviderIds: form.fallbackProviderIds.filter((fid) => fid !== p.id) })}><Icon name="X" className="w-4 h-4" /></Button>
-            </div>
-          ))}
+            );
+          })}
           {availableForFallback.length > 0 && (
             <div className="pt-2 border-t border-border">
               <Label className="text-xs uppercase tracking-wide text-muted-foreground">Add to fallback chain</Label>
