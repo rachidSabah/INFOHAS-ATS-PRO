@@ -2,7 +2,10 @@ import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
   // For Cloudflare Pages deployment, do NOT use "standalone" — next-on-pages handles output.
-  // For Docker/Vercel deployment, change to output: "standalone".
+  // For Docker/Vercel deployment, change to "standalone".
+  // Desktop (Electron/Windows) packaging opts in via BUILD_STANDALONE=1 so the
+  // regular Pages CI build is completely unaffected.
+  ...(process.env.BUILD_STANDALONE === "1" ? { output: "standalone" as const } : {}),
   typescript: {
     // Phase 9.0 (production hardening): type errors must FAIL the build.
     // The codebase is type-clean (tsc --noEmit passes), so this is safe and

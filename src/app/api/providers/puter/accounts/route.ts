@@ -14,7 +14,16 @@ export const runtime = "edge";
  */
 export async function GET(req: NextRequest) {
   try {
-    const ctx = getRequestContext();
+    // getRequestContext() only exists under next-on-pages (Cloudflare Pages /
+    // wrangler). In plain-Node runtimes (desktop Electron build, `next dev`)
+    // it throws — treat that as "no binding" instead of a 500 so the client
+    // keeps localStorage as the source of truth.
+    let ctx: ReturnType<typeof getRequestContext> | null = null;
+    try {
+      ctx = getRequestContext();
+    } catch {
+      ctx = null;
+    }
     const userId = req.headers.get("X-User-Id") || "anonymous";
     const cache = (ctx?.env as any)?.CACHE;
     if (!cache) {
@@ -42,7 +51,12 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   try {
     const body = (await req.json()) as any;
-    const ctx = getRequestContext();
+    let ctx: ReturnType<typeof getRequestContext> | null = null;
+    try {
+      ctx = getRequestContext();
+    } catch {
+      ctx = null;
+    }
     const userId = req.headers.get("X-User-Id") || "anonymous";
     const cache = (ctx?.env as any)?.CACHE;
     if (cache) {

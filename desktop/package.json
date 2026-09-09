@@ -1,0 +1,60 @@
+{
+  "name": "resumeai-pro-desktop",
+  "productName": "ResumeAI Pro",
+  "version": "0.2.0",
+  "private": true,
+  "description": "ResumeAI Pro desktop app for Windows — bundles the Next.js standalone server with local SQLite storage and optional LAN sharing.",
+  "author": "rachidSabah",
+  "license": "UNLICENSED",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "dist": "electron-builder --win nsis --publish never"
+  },
+  "devDependencies": {
+    "electron": "^33.0.0",
+    "electron-builder": "^26.0.12"
+  },
+  "build": {
+    "appId": "com.resumeai.pro.desktop",
+    "productName": "ResumeAI Pro",
+    "copyright": "Copyright © 2026 ResumeAI Pro",
+    "directories": {
+      "buildResources": "build",
+      "output": "release"
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "../desktop-resources",
+        "to": "resources"
+      }
+    ],
+    "asar": true,
+    "win": {
+      "icon": "build/icon.ico",
+      "target": [
+        {
+          "target": "nsis",
+          "arch": ["x64"]
+        }
+      ]
+    },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": true,
+      "deleteAppDataOnUninstall": false,
+      "createDesktopShortcut": "always",
+      "createStartMenuShortcut": true,
+      "shortcutName": "ResumeAI Pro",
+      "artifactName": "ResumeAI-Pro-Setup-${version}.${ext}",
+      "runAfterFinish": true,
+      "include": "build/installer.nsh"
+    },
+    "publish": null
+  }
+}

@@ -1,0 +1,121 @@
+# Desktop Release (Windows) — ResumeAI Pro
+#
+# Builds ResumeAI-Pro-Setup.exe (Electron + NSIS, one-click install/uninstall,
+# local SQLite, optional LAN sharing) and:
+#   - on tag push (v*) / release publish → attaches the exe to the GitHub Release
+#   - on workflow_dispatch → uploads it as a CI artifact (dry-run validation,
+#     never publishes)
+#
+# Pipeline (windows-latest, so Prisma/NNext binary assets match Windows):
+#   npm ci → prisma generate → empty template DB (prisma db push)
+#   → next build with BUILD_STANDALONE=1 → assemble desktop-resources/
+#   → electron-builder NSIS → artifact / release upload
+#
+# Code signing: intentionally unsigned (no certificate configured). Windows
+# SmartScreen will show "unknown publisher" on first run — see
+# docs/desktop-windows.md for what that means and how to proceed.
+
+name: Desktop Release (Windows)
+
+on:
+  push:
+    tags: ["v*"]
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Build only (upload CI artifact) — never publishes"
+        type: boolean
+        default: true
+
+permissions:
+  contents: write
+
+env:
+  NODE_VERSION: "22"
+
+concurrency:
+  group: desktop-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-windows:
+    name: Build ResumeAI-Pro-Setup.exe
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - name: Resolve installer version
+        id: ver
+        run: |
+          if [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
+            V="${GITHUB_REF_NAME#v}"
+          elif [ -n "${{ github.event.release.tag_name }}" ]; then
+            V="${{ github.event.release.tag_name }}"
+            V="${V#v}"
+          else
+            V="0.2.0-dev.${GITHUB_RUN_NUMBER}"
+          fi
+          echo "version=${V}" >> "$GITHUB_OUTPUT"
+          echo "Installer version: ${V}"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build Prisma client
+        run: npx prisma generate
+
+      - name: Create empty SQLite template DB (schema only)
+        env:
+          DATABASE_URL: file:./prisma/desktop-template.db
+        run: npx prisma db push --skip-generate
+
+      - name: Build Next.js standalone (desktop output)
+        env:
+          BUILD_STANDALONE: "1"
+          NEXT_TELEMETRY_DISABLED: "1"
+          NEXTAUTH_SECRET: ${{ secrets.NEXTAUTH_SECRET }}
+          NEXT_PUBLIC_APP_URL: http://localhost:34567
+        run: npm run build
+
+      - name: Assemble desktop resources
+        run: node scripts/desktop/prepare-standalone.mjs
+
+      - name: Install desktop build tools + stamp version
+        run: |
+          cd desktop
+          npm ci --no-audit --no-fund
+          npm version "${{ steps.ver.outputs.version }}" --no-git-tag-version --allow-same-version
+
+      - name: Build NSIS installer
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          cd desktop
+          npx electron-builder --win nsis --x64 --publish never
+
+      - name: Upload installer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ResumeAI-Pro-Setup-${{ steps.ver.outputs.version }}
+          path: desktop/release/*.exe
+          if-no-files-found: error
+
+      # Publish ONLY on real tag builds / release events. workflow_dispatch is
+      # always artifact-only (dry run) — it can never create a stray release.
+      - name: Attach installer to GitHub Release
+        if: ${{ github.event_name == 'release' || (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')) }}
+        uses: softprops/action-gh-release@v2
+        with:
+          files: desktop/release/ResumeAI-Pro-Setup-*.exe
+          tag_name: ${{ github.event.release.tag_name || github.ref_name }}
+          generate_release_notes: false
