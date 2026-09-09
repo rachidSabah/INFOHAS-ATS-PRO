@@ -11,7 +11,8 @@ import { useApp } from "@/lib/store";
 import { ProviderManager } from "@/lib/ai/services";
 import { toast } from "sonner";
 import { chainLinkDisplay, type ChainLinkTestResult } from "./routing-chain-diagnostics";
-import { PUTER_CURATED_MODEL_IDS } from "@/lib/puter-models";
+import { PUTER_CURATED_MODEL_IDS, PUTER_AGENT_PRESETS, type PuterAgentRoutingPreset } from "@/lib/puter-models";
+import { getPrebuiltModelsForProvider } from "@/lib/ai/prebuilt-models";
 
 export function AIProviderSettings() {
   const settings = useApp((s) => s.providerSettings);
@@ -22,6 +23,7 @@ export function AIProviderSettings() {
   const [form, setForm] = useState(settings);
   const [saving, setSaving] = useState(false);
   const [hasChanges, setHasChanges] = useState(false);
+  const [customModelMode, setCustomModelMode] = useState<Record<string, boolean>>({});
 
   // Sync form when settings change from the store (only if no unsaved changes)
   const settingsRef = settings;
@@ -135,6 +137,37 @@ export function AIProviderSettings() {
     }
 
     setSimulatingFailover(false);
+  };
+
+  const applyPuterPreset = (preset: PuterAgentRoutingPreset) => {
+    const puterProv = providers.find((p) => p.type === "puter" || p.id === "p_puter");
+    if (!puterProv) {
+      toast.error("Puter.js provider not found in providers list. Please add Puter in AI Providers first.");
+      return;
+    }
+    const nextRoutes = { ...(form.agentRoutes || {}) };
+    const nextModelRoutes = { ...(form.agentModelRoutes || {}) };
+
+    for (const [agentKey, modelId] of Object.entries(preset.routes)) {
+      nextRoutes[agentKey] = puterProv.id;
+      nextModelRoutes[agentKey] = modelId;
+    }
+
+    update({ agentRoutes: nextRoutes, agentModelRoutes: nextModelRoutes });
+    toast.success(`Applied "${preset.name}". All 4 agents assigned to Puter.js models. Click Save Changes to persist.`);
+  };
+
+  const resetAgentRoutesToDefault = () => {
+    update({
+      agentRoutes: {
+        optimizer: "default",
+        supervisor: "default",
+        guardian: "default",
+        assembler: "default",
+      },
+      agentModelRoutes: {},
+    });
+    toast.info("Reset all agent routes to Default Fallback Chain. Click Save Changes to persist.");
   };
 
   const defaultProvider = providers.find((p) => p.id === form.defaultProviderId);
@@ -311,6 +344,23 @@ export function AIProviderSettings() {
                     <option value="">— Select a model —</option>
                     {liveModels.map((m) => <option key={m} value={m}>{m}</option>)}
                   </select>
+                ) : defaultProvider && getPrebuiltModelsForProvider(defaultProvider.type) ? (
+                  <select
+                    value={form.defaultModel}
+                    onChange={(e) => update({ defaultModel: e.target.value })}
+                    className="w-full h-9 px-3 rounded-md border border-input bg-background text-sm flex-1"
+                  >
+                    <option value="">— Select a curated model —</option>
+                    {getPrebuiltModelsForProvider(defaultProvider.type)!.map((group) => (
+                      <optgroup key={group.group} label={group.group}>
+                        {group.models.map((m) => (
+                          <option key={m.id} value={m.id}>
+                            {m.label}{m.badge ? ` (${m.badge})` : ""}
+                          </option>
+                        ))}
+                      </optgroup>
+                    ))}
+                  </select>
                 ) : (
                   <Input value={form.defaultModel} onChange={(e) => update({ defaultModel: e.target.value })} placeholder="claude-sonnet-4" className="flex-1" />
                 )}
@@ -446,6 +496,75 @@ export function AIProviderSettings() {
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
+          {/* 1-Click Puter.js Agent Presets Toolbar */}
+          <div className="p-3.5 rounded-xl border border-amber-500/25 bg-amber-500/5 space-y-3">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+              <div>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="text-xs font-semibold text-foreground flex items-center gap-1.5">
+                    <Icon name="Sparkles" className="w-3.5 h-3.5 text-amber-500" />
+                    One-Click Puter.js Agent Presets
+                  </span>
+                  <span className="inline-flex items-center text-[10px] px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-700 dark:text-amber-300 font-medium border border-amber-500/30">
+                    Client-side .js · Free & Keyless
+                  </span>
+                </div>
+                <p className="text-[11px] text-muted-foreground mt-0.5">
+                  Assign verified, stable models to the 4 pipeline agents via Puter.js (runs in-browser via Puter.js, no API key needed). Preserves all other custom providers.
+                </p>
+              </div>
+              <Button
+                variant="ghost"
+                size="sm"
+                type="button"
+                onClick={resetAgentRoutesToDefault}
+                className="text-[11px] text-muted-foreground hover:text-foreground h-7 px-2 self-start sm:self-center"
+              >
+                <Icon name="RotateCcw" className="w-3 h-3 mr-1" /> Reset to Default
+              </Button>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2">
+              {PUTER_AGENT_PRESETS.map((preset) => {
+                const puterProv = providers.find((p) => p.type === "puter" || p.id === "p_puter");
+                const isCurrentlyActive = !!(puterProv &&
+                  form.agentRoutes?.optimizer === puterProv.id &&
+                  form.agentModelRoutes?.optimizer === preset.routes.optimizer &&
+                  form.agentRoutes?.supervisor === puterProv.id &&
+                  form.agentModelRoutes?.supervisor === preset.routes.supervisor);
+
+                return (
+                  <button
+                    key={preset.id}
+                    type="button"
+                    onClick={() => applyPuterPreset(preset)}
+                    className={`flex flex-col text-left p-2.5 rounded-lg border transition-all text-xs group ${
+                      isCurrentlyActive
+                        ? "border-amber-500 bg-amber-500/15 shadow-sm ring-1 ring-amber-500/30"
+                        : "border-border/70 hover:border-amber-500/50 bg-background/80 hover:bg-amber-500/10"
+                    }`}
+                  >
+                    <div className="flex items-center justify-between w-full font-medium text-foreground group-hover:text-amber-600 dark:group-hover:text-amber-400">
+                      <span>{preset.shortLabel}</span>
+                      {preset.badge && (
+                        <span className="text-[9px] px-1.5 py-0.2 rounded bg-amber-500/20 text-amber-700 dark:text-amber-300 font-semibold">
+                          {preset.badge}
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-[10px] text-muted-foreground mt-1 line-clamp-2 leading-relaxed">
+                      {preset.description}
+                    </p>
+                    <div className="mt-2 pt-1.5 border-t border-border/40 text-[9px] text-muted-foreground font-mono space-y-0.5">
+                      <div>Opt: <span className="text-foreground">{preset.routes.optimizer}</span></div>
+                      <div>Sup: <span className="text-foreground">{preset.routes.supervisor}</span></div>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
           <div className="grid sm:grid-cols-2 gap-4">
             {[
               { key: "optimizer", label: "Optimizer Specialist Agent", desc: "Rewrites and expands experience, skills, and summary sections." },
@@ -507,37 +626,34 @@ export function AIProviderSettings() {
                       <div>
                         <div className="flex items-center justify-between">
                           <Label className="text-[11px] uppercase tracking-wide text-muted-foreground">Assigned Model</Label>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            type="button"
-                            onClick={() => fetchModelsForAgentProvider(routedProvider)}
-                            disabled={isFetching}
-                            className="h-5 px-1.5 text-[10px] text-brand hover:text-brand-dark gap-1"
-                          >
-                            {isFetching ? <Icon name="Loader2" className="w-2.5 h-2.5 animate-spin" /> : <Icon name="RefreshCw" className="w-2.5 h-2.5" />}
-                            {isPuter ? "Fetch Puter models" : "Fetch models"}
-                          </Button>
-                        </div>
-                        <div className="flex gap-1.5 mt-1">
-                          {cachedModels.length > 0 ? (
-                            <select
-                              value={currentModel || routedProvider.modelName || ""}
-                              onChange={(e) => {
-                                const nextModelRoutes = { ...(form.agentModelRoutes || {}) };
-                                nextModelRoutes[agent.key] = e.target.value;
-                                update({ agentModelRoutes: nextModelRoutes });
-                              }}
-                              className="w-full h-8 px-2 rounded-md border border-input bg-background text-xs"
+                          <div className="flex items-center gap-1">
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              type="button"
+                              onClick={() => setCustomModelMode((prev) => ({ ...prev, [agent.key]: !prev[agent.key] }))}
+                              className="h-5 px-1.5 text-[10px] text-muted-foreground hover:text-foreground gap-1"
+                              title={customModelMode[agent.key] ? "Choose from curated list" : "Enter custom model ID"}
                             >
-                              {!cachedModels.includes(currentModel) && currentModel && (
-                                <option value={currentModel}>{currentModel} (current)</option>
-                              )}
-                              {cachedModels.map((m) => (
-                                <option key={m} value={m}>{m}</option>
-                              ))}
-                            </select>
-                          ) : (
+                              <Icon name={customModelMode[agent.key] ? "List" : "Edit3"} className="w-2.5 h-2.5" />
+                              {customModelMode[agent.key] ? "Curated list" : "Custom"}
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              type="button"
+                              onClick={() => fetchModelsForAgentProvider(routedProvider)}
+                              disabled={isFetching}
+                              className="h-5 px-1.5 text-[10px] text-brand hover:text-brand-dark gap-1"
+                            >
+                              {isFetching ? <Icon name="Loader2" className="w-2.5 h-2.5 animate-spin" /> : <Icon name="RefreshCw" className="w-2.5 h-2.5" />}
+                              {isPuter ? "Fetch live" : "Fetch"}
+                            </Button>
+                          </div>
+                        </div>
+
+                        <div className="mt-1">
+                          {customModelMode[agent.key] ? (
                             <Input
                               value={currentModel || routedProvider.modelName || ""}
                               onChange={(e) => {
@@ -546,10 +662,77 @@ export function AIProviderSettings() {
                                 update({ agentModelRoutes: nextModelRoutes });
                               }}
                               placeholder={routedProvider.modelName || "model-name"}
-                              className="w-full h-8 text-xs"
+                              className="w-full h-8 text-xs font-mono"
                             />
+                          ) : (
+                            <select
+                              value={currentModel || routedProvider.modelName || ""}
+                              onChange={(e) => {
+                                if (e.target.value === "__CUSTOM__") {
+                                  setCustomModelMode((prev) => ({ ...prev, [agent.key]: true }));
+                                  return;
+                                }
+                                const nextModelRoutes = { ...(form.agentModelRoutes || {}) };
+                                nextModelRoutes[agent.key] = e.target.value;
+                                update({ agentModelRoutes: nextModelRoutes });
+                              }}
+                              className="w-full h-8 px-2 rounded-md border border-input bg-background text-xs"
+                            >
+                              {(() => {
+                                const prebuilt = getPrebuiltModelsForProvider(routedProvider.type);
+                                const prebuiltIds = new Set(prebuilt ? prebuilt.flatMap((g) => g.models.map((m) => m.id)) : []);
+                                const extraModels = cachedModels.filter((m) => !prebuiltIds.has(m));
+                                const activeVal = currentModel || routedProvider.modelName || "";
+                                const isUnlisted = activeVal && !prebuiltIds.has(activeVal) && !extraModels.includes(activeVal);
+
+                                return (
+                                  <>
+                                    {isUnlisted && (
+                                      <option value={activeVal}>{activeVal} (current custom)</option>
+                                    )}
+                                    {prebuilt ? (
+                                      <>
+                                        {prebuilt.map((group) => (
+                                          <optgroup key={group.group} label={group.group}>
+                                            {group.models.map((m) => (
+                                              <option key={m.id} value={m.id}>
+                                                {m.label}{m.badge ? ` [${m.badge}]` : ""}
+                                              </option>
+                                            ))}
+                                          </optgroup>
+                                        ))}
+                                        {extraModels.length > 0 && (
+                                          <optgroup label={isPuter ? "🌐 More Live Puter Models" : "📋 Discovered Models"}>
+                                            {extraModels.map((m) => (
+                                              <option key={m} value={m}>{m}</option>
+                                            ))}
+                                          </optgroup>
+                                        )}
+                                      </>
+                                    ) : cachedModels.length > 0 ? (
+                                      cachedModels.map((m) => (
+                                        <option key={m} value={m}>{m}</option>
+                                      ))
+                                    ) : (
+                                      <option value={routedProvider.modelName || ""}>
+                                        {routedProvider.modelName || "Default model"}
+                                      </option>
+                                    )}
+                                    <option value="__CUSTOM__">✏️ Enter custom model ID...</option>
+                                  </>
+                                );
+                              })()}
+                            </select>
                           )}
                         </div>
+
+                        {isPuter && (
+                          <div className="mt-1.5 flex items-center gap-1.5 text-[9.5px] text-amber-700 dark:text-amber-300/90 bg-amber-500/10 px-2 py-1 rounded border border-amber-500/20">
+                            <Icon name="Sparkles" className="w-3 h-3 text-amber-500 shrink-0" />
+                            <span>Runs client-side via <strong>Puter.js</strong> (no API key). Active Puter browser session required.</span>
+                          </div>
+                        )}
+
                         {cachedModels.length > 0 && (
                           <p className="text-[9px] text-muted-foreground mt-0.5">
                             {cachedModels.length} models available from {routedProvider.name}

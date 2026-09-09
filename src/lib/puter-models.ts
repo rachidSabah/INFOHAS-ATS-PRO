@@ -119,10 +119,8 @@ export function isPuterTemperatureError(err: any): boolean {
   );
 }
 
-/**
- * Sanitize options for puter.ai.chat().
- * Strips `temperature` if the model does not support custom temperatures.
- */
+// Sanitize options for puter.ai.chat().
+// Strips `temperature` if the model does not support custom temperatures.
 export function sanitizePuterChatOpts<T extends { model?: string; temperature?: number }>(opts: T): T {
   const clean = { ...opts };
   if ("temperature" in clean && !supportsCustomTemperature(clean.model)) {
@@ -130,4 +128,79 @@ export function sanitizePuterChatOpts<T extends { model?: string; temperature?: 
   }
   return clean;
 }
+
+export interface PuterAgentRoutingPreset {
+  id: string;
+  name: string;
+  shortLabel: string;
+  description: string;
+  badge?: string;
+  routes: {
+    optimizer: string;
+    supervisor: string;
+    guardian: string;
+    assembler: string;
+  };
+}
+
+/**
+ * 1-Click Agent Pipeline Presets for Puter.js
+ * Puter runs client-side in the browser via Puter.js (`window.puter.ai.chat`),
+ * requiring zero API keys, zero setup, and zero billing.
+ */
+export const PUTER_AGENT_PRESETS: PuterAgentRoutingPreset[] = [
+  {
+    id: "puter-flagship-stable",
+    name: "⚡ Stable Flagship (Recommended)",
+    shortLabel: "Flagship",
+    badge: "Most Reliable",
+    description: "Claude Sonnet 4.5 (Optimizer) + GPT-4o (Supervisor) + Gemini 2.5 Flash (Guardian/Assembler). Maximum JSON compliance and strict ATS keyword floor adherence.",
+    routes: {
+      optimizer: "claude-sonnet-4-5",
+      supervisor: "gpt-4o",
+      guardian: "gemini-2.5-flash",
+      assembler: "gemini-2.5-flash",
+    },
+  },
+  {
+    id: "puter-high-speed",
+    name: "🚀 High Speed (Gemini 2.5 Flash)",
+    shortLabel: "Speed",
+    badge: "Fastest",
+    description: "Gemini 2.5 Flash across all 4 agents. Fast sub-second generation with 1M context window.",
+    routes: {
+      optimizer: "gemini-2.5-flash",
+      supervisor: "gemini-2.5-flash",
+      guardian: "gemini-2.5-flash",
+      assembler: "gemini-2.5-flash",
+    },
+  },
+  {
+    id: "puter-openai-balanced",
+    name: "⚖️ OpenAI Balanced (GPT-4o & 4o-mini)",
+    shortLabel: "OpenAI",
+    badge: "Balanced",
+    description: "GPT-4o for deep resume rewriting & QA evaluation + GPT-4o-mini for quick verification and layout assembly.",
+    routes: {
+      optimizer: "gpt-4o",
+      supervisor: "gpt-4o",
+      guardian: "gpt-4o-mini",
+      assembler: "gpt-4o-mini",
+    },
+  },
+  {
+    id: "puter-claude-pure",
+    name: "🖋️ Anthropic Claude Pure",
+    shortLabel: "Claude",
+    badge: "Best Prose",
+    description: "Claude Sonnet 4.5 for Optimizer + Claude 3.7 Sonnet for Supervisor + Gemini 2.5 Flash for Guardian/Assembler.",
+    routes: {
+      optimizer: "claude-sonnet-4-5",
+      supervisor: "claude-3-7-sonnet",
+      guardian: "gemini-2.5-flash",
+      assembler: "gemini-2.5-flash",
+    },
+  },
+];
+
 
