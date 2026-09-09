@@ -8,7 +8,7 @@
 // Pure except for the injected fetch — fully unit-testable.
 // ============================================================================
 
-import { filterZenIngestedModels } from "./zen-free-models";
+import { filterZenIngestedModels, zenSessionHeaders } from "./zen-free-models";
 
 export const ZEN_PROBE_TIMEOUT_MS = 6000;
 export const ZEN_PROBE_MAX_TOKENS = 1;
@@ -35,6 +35,8 @@ export async function probeZenModel(
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
     "User-Agent": "ATSOptimizer-Cron/1.0",
+    // Free tier rejects session-less completions (400 MissingSessionID).
+    ...zenSessionHeaders(base),
   };
   if (apiKey) headers["Authorization"] = "Bearer " + apiKey;
   try {

@@ -31,6 +31,8 @@ import {
   zenResetRegistry,
   zenHealthyPool,
   isZenModelUsable,
+  isZenChatUpstream,
+  zenSessionHeaders,
 } from "./zen-free-models";
 
 describe("zen-free-models registry integrity", () => {
@@ -215,5 +217,32 @@ describe("shipped configuration consistency (catalog + seed data)", () => {
     }
     expect(pickZenDefaultModel(zen.enabledModels)).toBe(zen.modelName);
     expect(ZEN_VERIFIED_WORKING_FREE_MODELS).toContain(zen.modelName);
+  });
+});
+
+describe("zen session header gate (MissingSessionID fix)", () => {
+  it("detects only the opencode.ai host as Zen chat upstream", () => {
+    expect(isZenChatUpstream("https://opencode.ai/zen/v1")).toBe(true);
+    expect(isZenChatUpstream("https://OPENCODE.AI/zen/v1")).toBe(true);
+    expect(isZenChatUpstream("https://api.openai.com/v1")).toBe(false);
+    expect(isZenChatUpstream("https://opencode.ai.evil.example/v1")).toBe(false);
+    expect(isZenChatUpstream("")).toBe(false);
+    expect(isZenChatUpstream(null)).toBe(false);
+    expect(isZenChatUpstream("not a url")).toBe(false);
+  });
+
+  it("injects x-opencode-session only for Zen and varies per request", () => {
+    const zenBase = "https://opencode.ai/zen/v1";
+    const h1 = zenSessionHeaders(zenBase);
+    const h2 = zenSessionHeaders(zenBase);
+    expect(h1["x-opencode-session"]).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+    );
+    expect(h2["x-opencode-session"]).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+    );
+    expect(h1["x-opencode-session"]).not.toBe(h2["x-opencode-session"]);
+    expect(zenSessionHeaders("https://api.openai.com/v1")).toEqual({});
+    expect(zenSessionHeaders(undefined)).toEqual({});
   });
 });

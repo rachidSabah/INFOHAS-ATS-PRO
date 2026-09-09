@@ -26,6 +26,40 @@
 export const ZEN_VERIFICATION_DATE = "2026-08-30";
 
 /**
+ * OpenCode's free tier rejects /chat/completions calls that don't identify an
+ * OpenCode client session: HTTP 400 MissingSessionID — "OpenCode's free tier
+ * can only be used in OpenCode" (verified live 2026-09-09 against
+ * nemotron-3.5-lightning-free / big-pickle / mimo-v2.5-free /
+ * ling-3.0-flash-fin-free). Both `x-opencode-session` and `x-session-id`
+ * request headers satisfy the gate; a body `session_id` field does NOT, and
+ * /models is unaffected. Keyed paid traffic is presumably unaffected too, but
+ * sending the header unconditionally on Zen chat calls is harmless and keeps
+ * the cron prober, the router and the Pages chat proxy on one code path.
+ * One UUID per request — no cross-request state on the edge.
+ */
+export function isZenChatUpstream(baseUrl: string | undefined | null): boolean {
+  if (!baseUrl) return false;
+  try {
+    return new URL(baseUrl).hostname.toLowerCase() === "opencode.ai";
+  } catch {
+    return false;
+  }
+}
+
+/** Session header demanded by the Zen free tier on chat completions (see above). */
+export function zenSessionHeaders(baseUrl: string | undefined | null): Record<string, string> {
+  if (!isZenChatUpstream(baseUrl)) return {};
+  try {
+    return { "x-opencode-session": crypto.randomUUID() };
+  } catch {
+    // No webcrypto (ancient Node / exotic runtime): proceed without the
+    // header — the call will fail with MissingSessionID and the registry
+    // handles it like any other upstream failure.
+    return {};
+  }
+}
+
+/**
  * Model ids that no longer exist on /zen/v1/models (or consistently 401
  * "Model not supported"). Never ship these in enabledModels / defaults.
  */

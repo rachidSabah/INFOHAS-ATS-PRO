@@ -2,6 +2,7 @@
 // Also used by: DeepSeek, Groq, OpenRouter, Together AI, HuggingFace (all use the OpenAI schema).
 import type { AIProviderAdapter, ChatRequest, ChatResponse, ProviderConfig } from "./interface";
 import { resolveTestTimeoutMs } from "../test-timeout";
+import { zenSessionHeaders } from "../zen-free-models";
 
 export class OpenAICompatibleProvider implements AIProviderAdapter {
   constructor(public readonly type: string = "openai") {}
@@ -14,6 +15,10 @@ export class OpenAICompatibleProvider implements AIProviderAdapter {
     const headers: Record<string, string> = {
       "Content-Type": "application/json",
       ...this.parseJson(config.headersJson),
+      // Zen free tier rejects session-less completions (400 MissingSessionID);
+      // no-op for every other host. Server-side egress only — browser clients
+      // go through /api/providers/chat, which injects its own session header.
+      ...zenSessionHeaders(baseUrl),
     };
     if (config.apiKey) {
       if (config.authType === "query") {

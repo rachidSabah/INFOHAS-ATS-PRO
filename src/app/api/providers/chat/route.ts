@@ -4,7 +4,7 @@
 // cacheEnabled, are served from the Cloudflare edge cache — zero upstream calls, zero provider quota.
 import { NextRequest, NextResponse } from "next/server";
 import { chatCacheKey, matchCachedChat, putCachedChat } from "@/lib/ai/providers/chat-proxy-cache";
-import { isZenFreeModelId } from "@/lib/ai/zen-free-models";
+import { isZenFreeModelId, zenSessionHeaders } from "@/lib/ai/zen-free-models";
 import { isWorkersAIQuotaError, runWorkersAIChat } from "@/lib/ai/providers/workers-ai-core";
 
 export const runtime = "edge";
@@ -257,6 +257,8 @@ export async function POST(req: NextRequest) {
     // IP-keyed; a fixed UA keeps our egress classifiable instead of random).
     if (isZenUpstream) {
       headers["User-Agent"] = "ATSOptimizer-CloudflareWorker/1.0";
+      // Zen free tier rejects session-less completions (400 MissingSessionID).
+      Object.assign(headers, zenSessionHeaders(baseUrl));
     }
 
     let url = baseUrl.endsWith("/chat/completions")
