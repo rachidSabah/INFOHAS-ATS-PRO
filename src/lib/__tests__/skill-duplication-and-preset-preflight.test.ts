@@ -48,9 +48,12 @@ describe("Skill Duplication & Compound Assembly Protection", () => {
         category: "Passenger Care",
       },
     ],
-    languages: [{ id: "l_1", name: "English", proficiency: "Fluent" }],
+    languages: [{ id: "l_1", name: "English", proficiency: "fluent" }],
     certifications: [],
     projects: [],
+    template: "ats-professional",
+    createdAt: "2026-01-01T00:00:00.000Z",
+    updatedAt: "2026-01-01T00:00:00.000Z",
   };
 
   it("does not duplicate compound skills when optimizer returns split versions", () => {
@@ -131,6 +134,9 @@ describe("Page Balancer Keyword Injection Deduplication", () => {
       languages: [],
       certifications: [],
       projects: [],
+      template: "ats-professional",
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
     };
 
     const jd: JobDescription = {
@@ -140,8 +146,10 @@ describe("Page Balancer Keyword Injection Deduplication", () => {
       keywords: ["Passenger Check - in", "Boarding Gate Control", "Flight Dispatch"],
       requiredSkills: [],
       preferredSkills: [],
-      experienceLevel: "entry",
-      education: [],
+      responsibilities: [],
+      technologies: [],
+      education: "",
+      createdAt: "2026-01-01T00:00:00.000Z",
       rawText: "Passenger Check-in Boarding Gate Control Flight Dispatch",
     };
 

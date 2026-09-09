@@ -1071,7 +1071,7 @@ Guidelines:
       const gate = await runReadinessGate({
         jobId: `opt_${Date.now()}`,
         maxCandidates: 6,
-        preferredProviderId: targetOptProvId,
+        preferredProviderId: targetOptProvId ?? undefined,
         preferredModel: targetOptModel,
       });
       setAiLog((l) => [...l, `🧪 ${gate.summary}`]);
