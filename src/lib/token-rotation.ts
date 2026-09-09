@@ -232,18 +232,26 @@ export function isBillingError(err: any): boolean {
 }
 
 /**
- * Returns true if the error indicates a credential/session expiry that
- * token rotation might fix (401 session expiry, invalid/expired token…).
- * Billing failures are explicitly EXCLUDED: rotating tokens against a
- * billing wall only burns time and spams CORS-doomed guest endpoints.
+ * Returns true for permanent account-entitlement failures that no request
+ * shaping can fix: dashboard opt-ins (opencode.ai DataPolicyError) and
+ * account-verification gates (OpenRouter 18+ age confirmation). These need a
+ * manual step in the provider dashboard — rotation only burns time.
  */
+export function isPermanentEntitlementError(err: any): boolean {
+  if (!err) return false;
+  const msg0 = (err?.message || String(err || "")).toLowerCase();
+  return (
+    /datapolicyerror|requires.?explicit.?opt.?in|opt.?in.?required|explicit.?consent.?required/i.test(msg0) ||
+    /age.?confirmation|verify.?your.?age|verification.?required|complete.?the.?following.?before.?use/i.test(msg0)
+  );
+}
 export function isRotatableAuthError(err: any): boolean {
   if (!err) return false;
   if (isBillingError(err)) return false;
-  // Entitlement opt-in (e.g. opencode.ai DataPolicyError): requires a manual
-  // opt-in click in the provider dashboard — no token swap fixes that.
-  const msg0 = (err?.message || String(err || "")).toLowerCase();
-  if (/datapolicyerror|requires.?explicit.?opt.?in|opt.?in.?required|explicit.?consent.?required/i.test(msg0)) return false;
+  // Billing failures are explicitly EXCLUDED: rotating tokens against a
+  // billing wall only burns time and spams CORS-doomed guest endpoints.
+  // Permanent entitlement/verification failures are excluded too.
+  if (isPermanentEntitlementError(err)) return false;
   const code = err?.statusCode || err?.status || 0;
   if (code === 401 || code === 403) return true;
   const msg = (err?.message || String(err || "")).toLowerCase();

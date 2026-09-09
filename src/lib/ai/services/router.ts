@@ -45,7 +45,7 @@ import {
   recordProviderTrafficSuccess,
 } from "../../provider-concurrency";
 import { getPromptCache, setPromptCache, buildPromptHash } from "../../prompt-cache";
-import { tryRotateProviderToken, isRotatableAuthError } from "../../token-rotation";
+import { tryRotateProviderToken, isRotatableAuthError, isBillingError, isPermanentEntitlementError } from "../../token-rotation";
 import { withTimeout, OptimizationProviderExhaustedError, AI_CALL_TIMEOUT_MS } from "../../pipeline-watchdog";
 import { truncatePromptToTokenLimit, MAX_INPUT_TOKENS } from "../../ai-diagnostics";
 import { isOpenCodeZenFree } from "../../provider-capabilities";
@@ -1047,7 +1047,14 @@ export class ProviderRouter {
     // rotation pool (no more 401 "Model not supported by provider" storms).
     const enabledModels = (provider.enabledModels as string[] | undefined) || [];
     const currentModel = modelForAttempt || req.model || config.modelName || "";
-    if (enabledModels.length > 1) {
+    // BILLING/ENTITLEMENT GUARD — model rotation runs for model errors,
+    // rate limits and other retriable failures, but NEVER for billing
+    // (402/insufficient-credits: account-level, every model hits the same
+    // wall) or permanent entitlement gates (18+ verification, opt-ins).
+    // Without this, a 403 age-gate walked aion-2.0/3.0/3.0-mini to triple
+    // 402s on every pipeline retry. Failover for those happens at PROVIDER
+    // level via the validated chain.
+    if (!isBillingError(primaryError) && !isPermanentEntitlementError(primaryError) && enabledModels.length > 1) {
       const rawCandidates = enabledModels.filter((m: string) => m !== currentModel && !rotationState.triedModels.has(m));
       const maxAltModels = filterCompatibleRotationCandidates(provider, rawCandidates, new Set()).slice(0, 3);
       for (const altModel of maxAltModels) {

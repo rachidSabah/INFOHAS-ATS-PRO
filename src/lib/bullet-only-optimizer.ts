@@ -260,7 +260,11 @@ export function parseOptimizerOutput(rawResponse: string): { output: OptimizerOu
         parsed = JSON.parse(stripped);
         warnings.push("Stripped markdown before parsing");
       } catch {
-        throw new Error("Failed to parse optimizer output as JSON after all repair attempts");
+        // Raw length plus head go into the message so production logs reveal
+        // WHETHER the model returned truncated JSON, prose, or a short refusal.
+        const rawLen = rawResponse ? rawResponse.length : 0;
+        const rawHead = String(rawResponse || "").slice(0, 120).replace(/\s+/g, " ");
+        throw new Error("Failed to parse optimizer output as JSON after all repair attempts (raw " + rawLen + " chars, head: " + rawHead + ")");
       }
     }
   }

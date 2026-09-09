@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { isBillingError, isRotatableAuthError } from "../token-rotation";
+import { isBillingError, isRotatableAuthError, isPermanentEntitlementError } from "../token-rotation";
 
 // Billing/entitlement failures must NEVER trigger silent token rotation:
 // a fresh token on the same workspace hits the same billing wall, and the
@@ -26,6 +26,19 @@ describe("token rotation billing guard", () => {
       statusCode: 403,
       message: "API returned HTTP 403: DataPolicyError: This model collects data and requires explicit opt in",
     })).toBe(false);
+  });
+
+  it("refuses rotation for account-verification failures (OpenRouter 18+ gate)", () => {
+    expect(isRotatableAuthError({
+      statusCode: 403,
+      message: "API returned HTTP 403: This model requires you to complete the following before use: 18+ age confirmation. Confirm at https://openrouter.ai/settings/preferences.",
+    })).toBe(false);
+    expect(isRotatableAuthError({ message: "Age confirmation required before use" })).toBe(false);
+    expect(isPermanentEntitlementError({
+      statusCode: 403,
+      message: "API returned HTTP 403: This model requires you to complete the following before use: 18+ age confirmation.",
+    })).toBe(true);
+    expect(isPermanentEntitlementError({ statusCode: 429, message: "Rate limit exceeded" })).toBe(false);
   });
 
   it("still rotates genuine session/key failures", () => {

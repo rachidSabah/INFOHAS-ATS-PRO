@@ -466,7 +466,13 @@ export async function runLockedPipeline(
       }
 
       if (!optimizerResult) {
-        throw new Error("Optimizer failed to return a result.");
+        // Tagged output-validation: every arena candidate RETURNED output but
+        // none of it parsed — the providers are reachable, so the section-7
+        // auto-heal sweep (pings and repairs) cannot help and only stalls the
+        // progress bar while it re-pings billing-dead providers.
+        const emptyArenaErr: any = new Error("Optimizer failed to return a result.");
+        emptyArenaErr.kind = "output-validation";
+        throw emptyArenaErr;
       }
       warnings.push(...optimizerResult.warnings);
       // Node record for the optimizer (salvage visibility: provider reveals
