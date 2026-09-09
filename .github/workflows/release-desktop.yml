@@ -76,7 +76,9 @@ jobs:
 
       - name: Create empty SQLite template DB (schema only)
         env:
-          DATABASE_URL: file:./prisma/desktop-template.db
+          # NOTE: Prisma resolves relative SQLite paths against the schema dir
+          # (prisma/), so this creates prisma/desktop-template.db.
+          DATABASE_URL: file:./desktop-template.db
         run: npx prisma db push --skip-generate
 
       - name: Build Next.js standalone (desktop output)

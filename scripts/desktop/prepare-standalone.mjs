@@ -38,7 +38,10 @@ if (!existsSync(standaloneSrc)) {
 if (!existsSync(staticSrc)) fail("missing .next/static — build output incomplete");
 if (!existsSync(publicSrc)) fail("missing public/ — checkout incomplete");
 if (!existsSync(templateSrc)) {
-  fail("missing prisma/desktop-template.db — run: DATABASE_URL=file:./prisma/desktop-template.db npx prisma db push --skip-generate");
+  fail(
+    "missing prisma/desktop-template.db — run: DATABASE_URL=file:./desktop-template.db npx prisma db push --skip-generate" +
+    " (relative file: paths resolve against prisma/)"
+  );
 }
 
 const out = path.join(root, "desktop-resources");
