@@ -72,3 +72,7 @@ dev.out.log
 
 # Plugin SDK — generated registry
 src/lib/plugin-sdk/plugin-registry.generated.ts
+
+# Local wrangler dev secrets (real API keys — never commit)
+.dev.vars
+.dev.vars.*
