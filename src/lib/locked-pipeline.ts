@@ -1081,13 +1081,29 @@ export async function runLockedPipeline(
       // maxAttempts; never infinite). Provider-class failures trigger ONE safe
       // auto-heal round before the next attempt. Output-validation failures
       // rely on the corrective feedback instead (config unchanged).
+      let healRecovered = false;
+      let healRan = false;
       if (autoHealOn && err?.kind !== "output-validation") {
         try {
           console.info("[Locked Pipeline] Running bounded auto-heal round before retry…");
-          await ProviderHealer.healAllProviders("auto");
+          const reports = await ProviderHealer.healAllProviders("auto");
+          healRan = true;
+          healRecovered = (reports || []).some((r) => r?.result === "recovered");
         } catch (hErr: any) {
           console.warn("[Locked Pipeline] Auto-heal round failed (non-fatal):", hErr?.message);
         }
+      }
+      if (err?.kind === "provider-exhausted" && healRan && !healRecovered) {
+        // Stall breaker: every provider failed AND the heal round recovered
+        // nothing — attempts 2..N would replay the identical exhaustion (plus
+        // a full heal sweep each) while the user stares at a stuck 50% bar.
+        // Fail fast with the per-attempt diagnoses instead.
+        console.warn(
+          `[Locked Pipeline] Provider exhaustion with no recovery in auto-heal — ` +
+          `failing fast instead of replaying ${maxAttempts - attempts} more doomed attempt(s). ` +
+          `Fix a provider (or wait out the rate-limit window) and retry.`,
+        );
+        attempts = maxAttempts;
       }
       if (attempts >= maxAttempts) {
         console.warn(`[Locked Pipeline] All ${maxAttempts} attempt(s) exhausted.`);

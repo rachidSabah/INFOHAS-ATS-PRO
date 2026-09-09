@@ -436,12 +436,16 @@ export async function runBulletOnlyOptimizer(
     if (onChunk) onChunk(chunk);
   });
 
-  // Reject local fallback
+  // Reject local fallback — and SAY SO: the pre-fix message ("No AI provider
+  // available…") masked whether the chain emptied, the provider errored, or
+  // the output was just short, making 50%-stuck runs undiagnosable.
   if (result.isLocalEngine || result.provider === "Local Engine (offline mode)" || (result.text?.length ?? 0) < 200) {
-    throw new Error(
+    const err: any = new Error(
       "No AI provider available. Optimization could not be completed. " +
-      "Configure an API provider in Settings or sign in to Puter.",
+      `Configure an API provider in Settings or sign in to Puter. (optimizer call fell back to ${result.provider} with ${result.text?.length ?? 0} chars)`,
     );
+    err.kind = "provider-exhausted";
+    throw err;
   }
 
   const { output, warnings } = parseOptimizerOutput(result.text);

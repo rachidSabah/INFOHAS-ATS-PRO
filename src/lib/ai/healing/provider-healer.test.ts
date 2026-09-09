@@ -389,4 +389,22 @@ describe("ProviderHealer", () => {
     });
     expect(wroteWindow).toBe(false);
   });
+
+  it("BILLING — 402 insufficient-credits skips the ping entirely (manual_required)", async () => {
+    providers[0] = makeProvider({
+      health: {
+        consecutiveFailures: 3, consecutiveSuccesses: 0,
+        lastError: "API returned HTTP 402: Insufficient credits. This account never purchased credits.",
+        lastFailureAt: new Date().toISOString(),
+      },
+    });
+    const ping = vi.fn().mockResolvedValue({ ok: true, latencyMs: 10, reply: "READY" });
+
+    const report = await ProviderHealer.healProvider("p_groq", "auto", undefined, { ping, fetchCatalog: vi.fn() });
+
+    // No probe heals billing: zero requests sent, honest manual action.
+    expect(ping).not.toHaveBeenCalled();
+    expect(report.result).toBe("manual_required");
+    expect(report.action).toMatch(/top up|free-tier|disable/i);
+  });
 });

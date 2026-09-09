@@ -26,6 +26,7 @@ import { rateLimitTracker } from "../../rate-limit-tracker";
 import { isProviderInCooldown } from "../../provider-cooldown";
 import { getCooldownRemaining, resetCircuitBreaker } from "../../circuit-breaker";
 import { recordSuccess as recordHealthSuccess, recordFailure as recordHealthFailure } from "../../provider-health";
+import { isBillingError } from "../../token-rotation";
 
 // ============================================================================
 // Types
@@ -247,6 +248,27 @@ export class ProviderHealer {
     // === STEP 1-2: capture + classify ===
     let rawError = trigger || provider.health?.lastError || "";
     let cls = classifyProviderFailure(rawError, { providerType: provider.type });
+
+    // === BILLING SHORT-CIRCUIT: deterministic account-side failure ===
+    // 402 insufficient-credits / CreditsError-no-payment can never be healed
+    // by pings, repairs, or rotation — without this, every heal round burns
+    // a full chat+rotation cycle per billing-dead provider on every retry.
+    // Skip the ping entirely and say what to fix.
+    if (rawError && isBillingError(rawError)) {
+      patchHealth(provider, {
+        healState: "auth_error",
+        lastDiagnosis: "Billing failure needs manual action (top up credits / use free-tier models). No ping performed — a fresh request hits the same billing wall.",
+        lastFailureKind: cls.kind,
+      });
+      const entry: HealReportEntry = {
+        ...base, problem: "Billing failure (manual action required)", failureKind: cls.kind,
+        diagnosis: "The account has no usable billing (insufficient credits / no payment method). Probes cannot fix billing.",
+        action: "Top up the provider account, switch to a free-tier model, or disable this provider. No request was sent.",
+        result: "manual_required", technical: rawError.slice(0, 300),
+      };
+      recordHealEvent(entry);
+      return entry;
+    }
     if (!rawError) {
       // No stored error — run a fresh diagnosis ping to get a REAL failure.
       const probe = await d.ping(provider);
