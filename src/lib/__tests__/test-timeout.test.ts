@@ -87,4 +87,43 @@ describe("resolveTestTimeoutMs", () => {
       resolveTestTimeoutMs({ modelName: "nemotron-3-ultra-free", providerTimeoutMs: 60000, fastCapMs: 10000 })
     ).toBe(60000);
   });
+
+  // Task 37 — honorExplicitTimeout: the main proxy path must honor an
+  // explicitly configured provider timeout for fast models too.
+  // Live evidence (2026-09-11): the Nvidia test modal displayed
+  // "Timeout 30000ms" yet the request aborted at 15s — the resolver
+  // silently clipped the user's configured value.
+  it("honorExplicitTimeout: fast model gets the provider's configured timeout verbatim", () => {
+    // THE BUG: Nvidia provider.timeout = 30000, model deepseek-v4-pro-0813
+    // (fast tokens) → old resolver returned 15000, contradicting the modal.
+    expect(
+      resolveTestTimeoutMs({ modelName: "deepseek-ai/deepseek-v4-pro-0813", providerTimeoutMs: 30000, honorExplicitTimeout: true })
+    ).toBe(30000);
+    expect(
+      resolveTestTimeoutMs({ modelName: "gpt-4o", providerTimeoutMs: 45000, honorExplicitTimeout: true })
+    ).toBe(45000);
+  });
+
+  it("honorExplicitTimeout: still clamped to the universal 60s ceiling", () => {
+    expect(
+      resolveTestTimeoutMs({ modelName: "gpt-4o", providerTimeoutMs: 120000, honorExplicitTimeout: true })
+    ).toBe(60000);
+    expect(
+      resolveTestTimeoutMs({ modelName: "gpt-4o", providerTimeoutMs: 120000, honorExplicitTimeout: true, reasoningCapMs: 90000 })
+    ).toBe(90000);
+  });
+
+  it("honorExplicitTimeout: unset timeout still falls back to the snappy 15s cap", () => {
+    expect(resolveTestTimeoutMs({ modelName: "gpt-4o", providerTimeoutMs: null, honorExplicitTimeout: true })).toBe(15000);
+    expect(resolveTestTimeoutMs({ modelName: "gpt-4o", honorExplicitTimeout: true })).toBe(15000);
+  });
+
+  it("honorExplicitTimeout: reasoning models keep the 30s floor / 60s ceiling contract", () => {
+    expect(
+      resolveTestTimeoutMs({ modelName: "deepseek-r1", providerTimeoutMs: 30000, honorExplicitTimeout: true })
+    ).toBe(30000);
+    expect(
+      resolveTestTimeoutMs({ modelName: "deepseek-r1", providerTimeoutMs: 8000, honorExplicitTimeout: true })
+    ).toBe(30000);
+  });
 });

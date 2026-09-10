@@ -201,7 +201,10 @@ export class ProviderManager {
           // (e.g. nemotron-3-ultra-free, answers in 8-33s) gets the provider's
           // generous timeout instead of the 15s cap that declared
           // verified-working providers "down".
-          timeout: resolveTestTimeoutMs({ modelName: provider.modelName, providerTimeoutMs: provider.timeout }),
+          // honorExplicitTimeout — an explicitly configured provider timeout
+          // (e.g. Nvidia @ 30000ms) must be honored end-to-end: the modal
+          // displays it, and the server route re-resolves with the same flag.
+          timeout: resolveTestTimeoutMs({ modelName: provider.modelName, providerTimeoutMs: provider.timeout, honorExplicitTimeout: true }),
         }),
       });
 

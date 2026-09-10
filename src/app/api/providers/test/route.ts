@@ -117,6 +117,9 @@ export async function POST(req: NextRequest) {
     const body = ((await req.json().catch(() => ({}))) as any) as any;
     let { baseUrl, apiKey, authType, headersJson, model, testPrompt, timeout } = body;
     modelForMsg = model;
+    // Trim once, use everywhere — a pasted key with a trailing newline/space
+    // produces a malformed "Bearer <key>" header upstream.
+    const key = typeof apiKey === "string" ? apiKey.trim() : "";
 
     if (!baseUrl) {
       return NextResponse.json({ ok: false, message: "baseUrl is required" }, { status: 400 });
@@ -180,13 +183,13 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    if (apiKey) {
+    if (key) {
       if (baseUrl.includes("generativelanguage.googleapis.com")) {
-        headers["Authorization"] = `Bearer ${apiKey}`;
+        headers["Authorization"] = `Bearer ${key}`;
       } else if (authType === "header") {
-        headers["x-api-key"] = apiKey;
+        headers["x-api-key"] = key;
       } else {
-        headers["Authorization"] = `Bearer ${apiKey}`;
+        headers["Authorization"] = `Bearer ${key}`;
       }
     }
     // Zen free tier rejects session-less completions (400 MissingSessionID)
@@ -199,7 +202,7 @@ export async function POST(req: NextRequest) {
     let reqBody: Record<string, unknown> = {};
 
     if (baseUrl.includes("anthropic.com")) {
-      headers["x-api-key"] = apiKey || "";
+      headers["x-api-key"] = key || "";
       headers["anthropic-version"] = "2023-06-01";
       url = `${baseUrl.replace(/\/$/, "")}/messages`;
       reqBody = {
@@ -233,11 +236,13 @@ export async function POST(req: NextRequest) {
     }
 
     const controller = new AbortController();
-    // Task 24① — reasoning-aware cap: fast models keep the 15s cap; a
-    // reasoning-route model (e.g. nemotron-3-ultra-free, answers in 8-33s)
-    // gets the requested/provider timeout up to 60s. Pure relative import —
-    // no "@/" aliases on the Edge runtime.
-    timeoutMs = resolveTestTimeoutMs({ modelName: model, providerTimeoutMs: Number(timeout) || null });
+    // Task 24① — reasoning-aware cap, extended: reasoning-route models
+    // (e.g. nemotron-3-ultra-free, answers in 8-33s) get 30-60s; fast models
+    // honor an explicitly configured provider timeout up to 60s (the modal
+    // displays it — silently clipping 30000ms to 15s contradicted the UI),
+    // and fall back to the snappy 15s cap when none is set. Pure relative
+    // import — no "@/" aliases on the Edge runtime.
+    timeoutMs = resolveTestTimeoutMs({ modelName: model, providerTimeoutMs: Number(timeout) || null, honorExplicitTimeout: true });
     const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
     const t0inner = performance.now();
@@ -273,6 +278,17 @@ export async function POST(req: NextRequest) {
         }
       } catch {
         // Not JSON — use raw text
+      }
+
+      // No-key diagnosis — if the request was sent UNAUTHENTICATED and the
+      // provider complained about auth, say so explicitly. Live evidence
+      // (2026-09-11): a keyless Gemini test surfaced Google's bare
+      // "HTTP 400: Missing or invalid Authorization header", which reads
+      // like a proxy bug when the real cause is an empty API key field
+      // (the seed provider ships keyless — the user must paste the key).
+      if (!key && res.status >= 400 && res.status < 500 && res.status !== 429 &&
+          /authorization|api[_ ]?key|unauthorized|authentication|invalid[_ ]?argument|credentials/i.test(errorMessage)) {
+        errorMessage += " — Note: this provider has NO API key configured in your settings, so the request was sent unauthenticated. Open AI Providers → edit this provider → paste its API key (and activate it), then re-run the test.";
       }
 
       if (res.status === 401) {
@@ -372,7 +388,7 @@ export async function POST(req: NextRequest) {
     const elapsedMs = Math.round(performance.now() - t0);
     const isAbort = e?.name === "AbortError";
     const msg = isAbort
-      ? "Request timed out after " + Math.round(timeoutMs / 1000) + "s waiting for model '" + String(modelForMsg || "default") + "' — the API took too long to respond (cold free-tier model or queueing)."
+      ? "Request timed out after " + Math.round(timeoutMs / 1000) + "s waiting for model '" + String(modelForMsg || "default") + "' — the API took too long to respond (cold free-tier model or queueing). This test used the provider's configured timeout — raise it in the provider settings if this model routinely needs longer."
       : e?.message?.includes("fetch")
       ? "Network error after " + elapsedMs + "ms — the API URL may be unreachable or blocking requests. Detail: " + String(e?.message || e).slice(0, 200)
       : (e?.message || "Connection failed") + " (after " + elapsedMs + "ms)";

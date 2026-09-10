@@ -57,8 +57,18 @@ export interface ResolveTestTimeoutOpts {
   providerTimeoutMs?: number | null;
   /** Cap for fast models. Default 15000 (adapter/direct-probe sites pass 10000). */
   fastCapMs?: number;
-  /** Ceiling for reasoning models. Default 60000. */
+  /** Ceiling for reasoning models — also the universal ceiling for an
+   *  honored explicit timeout. Default 60000. */
   reasoningCapMs?: number;
+  /** Honor an explicitly configured provider timeout verbatim (clamped to
+   *  reasoningCapMs) for FAST models too, instead of clipping it to the
+   *  snappy fastCap. Evidence (2026-09-11): the Test Connection modal
+   *  displays "Timeout 30000ms" yet the test aborted at 15s — the UI
+   *  promises one contract while the resolver silently enforces another.
+   *  Only the main proxy path (manager → /api/providers/test) sets this;
+   *  adapter tests and the direct browser probe keep their snappy caps
+   *  (they are health/fallback probes, not the user's declared intent). */
+  honorExplicitTimeout?: boolean;
 }
 
 /**
@@ -68,7 +78,10 @@ export interface ResolveTestTimeoutOpts {
  *   the provider's generosity is honored, tiny timeouts are floored at 30s
  *   (a reasoning route cannot answer faster reliably), 60s ceiling.
  * - Fast models: min(providerTimeout || cap, cap) — identical to the
- *   pre-fix behavior at every call site.
+ *   pre-fix behavior at every call site. EXCEPTION: with
+ *   honorExplicitTimeout, an explicitly configured providerTimeout is
+ *   honored up to the reasoningCap ceiling (user intent beats snappiness;
+ *   unset timeouts still fall back to the snappy cap).
  */
 export function resolveTestTimeoutMs(opts: ResolveTestTimeoutOpts): number {
   const fastCap = opts.fastCapMs ?? DEFAULT_FAST_TEST_TIMEOUT_MS;
@@ -80,6 +93,12 @@ export function resolveTestTimeoutMs(opts: ResolveTestTimeoutOpts): number {
   if (isReasoningModelName(opts.modelName)) {
     const base = providerTimeout ?? REASONING_TEST_TIMEOUT_MS;
     return Math.min(Math.max(base, REASONING_MIN_TEST_TIMEOUT_MS), reasoningCap);
+  }
+  if (providerTimeout !== null && opts.honorExplicitTimeout) {
+    // Explicit user-configured timeout — honor it (the modal displays it),
+    // clamped to the universal platform ceiling (60s; the Vercel Node
+    // function runs maxDuration 90 so the abort always fires first).
+    return Math.min(providerTimeout, reasoningCap);
   }
   return Math.min(providerTimeout ?? fastCap, fastCap);
 }
