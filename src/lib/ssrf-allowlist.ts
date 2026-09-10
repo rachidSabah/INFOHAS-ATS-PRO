@@ -14,6 +14,12 @@ export const ALLOWED_PROVIDER_HOSTS = new Set([
   "openrouter.ai",
   "api.opencode.com",
   "opencode.ai",
+  // Managed Zen relay (Vercel Edge, deployed from vercel-relay/). Single-
+  // upstream proxy: /zen/* → opencode.ai/zen/* — NOT an open proxy. Egresses
+  // from Vercel's (AWS) IP pool so Zen's per-IP free limiter gets an
+  // independent quota bucket away from Cloudflare's shared edge pool
+  // (docs/ZEN_SHARED_EGRESS_HEALTH.md).
+  "ats-zen-relay.vercel.app",
   "api.perplexity.ai",
   "api.mistral.ai",
   "api.cohere.com",

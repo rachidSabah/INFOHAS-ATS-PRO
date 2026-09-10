@@ -51,6 +51,63 @@ export function isZenChatUpstream(baseUrl: string | undefined | null): boolean {
 }
 
 /**
+ * The deployed managed Zen relay (Vercel Edge, AWS egress — NOT Cloudflare's
+ * shared IP pool). Single-upstream reverse proxy: /zen/* → opencode.ai/zen/*,
+ * headers + body verbatim, client-IP signals stripped. Deployed from
+ * `vercel-relay/` in the repo root (see its README); live verification
+ * 2026-09-10: /zen/v1/models 200, CORS OPTIONS 204, free-model chat
+ * completion 200 with a real completion.
+ *
+ * The flag `zenRelayEnabled` (Super Admin → Feature Flags) makes the app
+ * route all canonical-Zen traffic through this base URL instead of
+ * opencode.ai — a second, independent per-IP quota bucket for the shared
+ * Pages deployment. Detection still keys off the `/zen` path prefix, so
+ * every Zen behavior (session headers, quota grace, free-model registry)
+ * follows automatically.
+ */
+export const ZEN_RELAY_HOST = "ats-zen-relay.vercel.app";
+export const ZEN_RELAY_BASE_URL = `https://${ZEN_RELAY_HOST}/zen/v1`;
+
+/** True when the baseUrl points at the CANONICAL Zen gateway (opencode.ai)
+ * — i.e. traffic that the relay flag should redirect. Relay URLs themselves,
+ * other /zen mirrors and non-Zen providers are passed through untouched. */
+export function isCanonicalZenBaseUrl(baseUrl: string | undefined | null): boolean {
+  if (!baseUrl) return false;
+  try {
+    return new URL(baseUrl).hostname.toLowerCase() === "opencode.ai";
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Zen egress routing (pure, testable): swap the canonical opencode.ai host
+ * for the managed Vercel relay while preserving the path and everything
+ * after it. Applies ONLY when:
+ *   - the feature flag zenRelayEnabled is on (undefined = on),
+ *   - the URL is the canonical gateway (isCanonicalZenBaseUrl).
+ * Non-Zen URLs, already-relayed URLs and self-hosted relay URLs are
+ * returned unchanged. If the swap cannot be built (unreachable branch),
+ * the original URL is returned — never throw, never fabricate a URL.
+ */
+export function resolveZenEgressBaseUrl(
+  baseUrl: string | undefined | null,
+  relayEnabled: boolean
+): string | undefined | null {
+  if (!relayEnabled || !baseUrl || !isCanonicalZenBaseUrl(baseUrl)) return baseUrl;
+  try {
+    const u = new URL(baseUrl);
+    // Only route canonical URLs that actually carry the /zen API prefix (the
+    // registry/UI always use /zen/v1); swap the ORIGIN and keep the entire
+    // path + query — the relay serves the identical /zen/* namespace.
+    if (!u.pathname.toLowerCase().startsWith("/zen")) return baseUrl;
+    return `https://${ZEN_RELAY_HOST}${u.pathname}${u.search}`;
+  } catch {
+    return baseUrl;
+  }
+}
+
+/**
  * Session header demanded by the Zen free tier on chat completions.
  *
  * OpenCode's free tier rejects /chat/completions calls that don't identify an

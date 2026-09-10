@@ -6,6 +6,7 @@
 //   responsePath: "choices[0].message.content"
 import { ProviderError } from "./openai-compatible";
 import type { AIProviderAdapter, ChatRequest, ChatResponse, ProviderConfig } from "./interface";
+import { zenEgressBaseUrl } from "../zen-egress";
 
 export class CustomProvider implements AIProviderAdapter {
   readonly type = "custom";
@@ -14,6 +15,9 @@ export class CustomProvider implements AIProviderAdapter {
     const t0 = performance.now();
     if (!config.baseUrl) throw new Error("Custom provider requires baseUrl");
     const model = req.model || config.modelName || "default";
+    // Zen relay routing (flag zenRelayEnabled) — canonical opencode.ai URLs
+    // egress through the managed Vercel relay; every other host unchanged.
+    const baseUrl = (await zenEgressBaseUrl(config.baseUrl)) ?? config.baseUrl;
 
     // Build headers from template
     const headers: Record<string, string> = { "Content-Type": "application/json", ...this.parseJson(config.headersJson) };
@@ -48,17 +52,17 @@ export class CustomProvider implements AIProviderAdapter {
     }
 
     const url = config.authType === "query" && config.apiKey
-      ? `${config.baseUrl}${config.baseUrl.includes("?") ? "&" : "?"}api_key=${encodeURIComponent(config.apiKey)}`
-      : config.baseUrl;
+      ? `${baseUrl}${baseUrl.includes("?") ? "&" : "?"}api_key=${encodeURIComponent(config.apiKey)}`
+      : baseUrl;
 
     // CORS proxy fallback for browser clients calling third-party provider APIs
-    const isLocal = config.baseUrl.includes("localhost") || config.baseUrl.includes("127.0.0.1") || config.baseUrl.includes("0.0.0.0");
+    const isLocal = baseUrl.includes("localhost") || baseUrl.includes("127.0.0.1") || baseUrl.includes("0.0.0.0");
     if (typeof window !== "undefined" && !isLocal) {
       const proxyRes = await fetch("/api/providers/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          baseUrl: config.baseUrl,
+          baseUrl,
           apiKey: config.apiKey,
           authType: config.authType,
           headersJson: config.headersJson,

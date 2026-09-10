@@ -3,13 +3,19 @@
 import type { AIProviderAdapter, ChatRequest, ChatResponse, ProviderConfig } from "./interface";
 import { resolveTestTimeoutMs } from "../test-timeout";
 import { zenSessionHeaders } from "../zen-free-models";
+import { zenEgressBaseUrl } from "../zen-egress";
 
 export class OpenAICompatibleProvider implements AIProviderAdapter {
   constructor(public readonly type: string = "openai") {}
 
   async chat(req: ChatRequest, config: ProviderConfig): Promise<ChatResponse> {
     const t0 = performance.now();
-    const baseUrl = (config.baseUrl || "https://api.openai.com/v1").replace(/\/$/, "");
+    const rawBase = (config.baseUrl || "https://api.openai.com/v1").replace(/\/$/, "");
+    // Zen relay routing (flag zenRelayEnabled) — canonical opencode.ai URLs
+    // egress through the managed Vercel relay (AWS pool); every other host
+    // unchanged. Applied BEFORE session-header detection, which keys off the
+    // /zen path and therefore follows the relay automatically.
+    const baseUrl = ((await zenEgressBaseUrl(rawBase)) ?? rawBase).replace(/\/$/, "");
     const model = req.model || config.modelName || "gpt-4o-mini";
 
     const headers: Record<string, string> = {

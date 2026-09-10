@@ -32,6 +32,10 @@ import {
   zenHealthyPool,
   isZenModelUsable,
   isZenChatUpstream,
+  ZEN_RELAY_HOST,
+  ZEN_RELAY_BASE_URL,
+  isCanonicalZenBaseUrl,
+  resolveZenEgressBaseUrl,
   zenSessionHeaders,
   zenHealthStatusOverride,
   isRateLimitShaped,
@@ -301,5 +305,80 @@ describe("zen quota-grace health override (enableZenQuotaGrace)", () => {
     expect(isRateLimitShaped("you hit your quota")).toBe(true);
     expect(isRateLimitShaped("too many requests")).toBe(true);
     expect(isRateLimitShaped("connection refused")).toBe(false);
+  });
+});
+
+// ============================================================================
+// Managed Vercel relay routing (zenRelayEnabled) — the deployed escape hatch
+// from Cloudflare's SHARED egress pool (docs/ZEN_SHARED_EGRESS_HEALTH.md,
+// vercel-relay/ in the repo root, live at ats-zen-relay.vercel.app).
+// ============================================================================
+describe("zen relay routing (zenRelayEnabled)", () => {
+  it("recognizes the canonical gateway as the routing target", () => {
+    expect(isCanonicalZenBaseUrl("https://opencode.ai/zen/v1")).toBe(true);
+    expect(isCanonicalZenBaseUrl("https://OPENCODE.ai/zen/v1")).toBe(true);
+    expect(isCanonicalZenBaseUrl(ZEN_RELAY_BASE_URL)).toBe(false); // already relayed
+    expect(isCanonicalZenBaseUrl("https://relay.example.com/zen/v1")).toBe(false);
+    expect(isCanonicalZenBaseUrl("https://api.openai.com/v1")).toBe(false);
+    expect(isCanonicalZenBaseUrl("opencode.ai.evil.example")).toBe(false);
+    expect(isCanonicalZenBaseUrl("")).toBe(false);
+    expect(isCanonicalZenBaseUrl(null)).toBe(false);
+    expect(isCanonicalZenBaseUrl(undefined)).toBe(false);
+  });
+
+  it("swaps the canonical host for the relay, preserving path and query", () => {
+    expect(resolveZenEgressBaseUrl("https://opencode.ai/zen/v1", true)).toBe(ZEN_RELAY_BASE_URL);
+    expect(resolveZenEgressBaseUrl("https://opencode.ai/zen/v1/", true)).toBe(
+      `${ZEN_RELAY_BASE_URL}/`
+    );
+    expect(resolveZenEgressBaseUrl("https://opencode.ai/zen/v1/chat/completions", true)).toBe(
+      `${ZEN_RELAY_BASE_URL}/chat/completions`
+    );
+    expect(resolveZenEgressBaseUrl("https://opencode.ai/zen/v1/models?key=k", true)).toBe(
+      `${ZEN_RELAY_BASE_URL}/models?key=k`
+    );
+  });
+
+  it("passes everything through untouched when the flag is off", () => {
+    expect(resolveZenEgressBaseUrl("https://opencode.ai/zen/v1", false)).toBe(
+      "https://opencode.ai/zen/v1"
+    );
+    expect(resolveZenEgressBaseUrl("https://opencode.ai/zen/v1", undefined as unknown as boolean)).toBe(
+      "https://opencode.ai/zen/v1"
+    );
+  });
+
+  it("never touches non-canonical URLs (relays, mirrors, other providers)", () => {
+    expect(resolveZenEgressBaseUrl(ZEN_RELAY_BASE_URL, true)).toBe(ZEN_RELAY_BASE_URL);
+    expect(resolveZenEgressBaseUrl("https://relay.example.com/zen/v1", true)).toBe(
+      "https://relay.example.com/zen/v1"
+    );
+    expect(resolveZenEgressBaseUrl("https://api.openai.com/v1", true)).toBe("https://api.openai.com/v1");
+    expect(resolveZenEgressBaseUrl("https://opencode.ai.evil.example/v1", true)).toBe(
+      "https://opencode.ai.evil.example/v1"
+    );
+  });
+
+  it("handles empty/malformed input without throwing", () => {
+    expect(resolveZenEgressBaseUrl("", true)).toBe("");
+    expect(resolveZenEgressBaseUrl(null, true)).toBeNull();
+    expect(resolveZenEgressBaseUrl(undefined, true)).toBeUndefined();
+    expect(resolveZenEgressBaseUrl("not a url", true)).toBe("not a url");
+  });
+
+  it("does not route canonical-host URLs that lack the /zen API prefix", () => {
+    // Degenerate config (opencode type, bare host): leave it alone rather
+    // than sending it to the relay root, which 404s with a usage message.
+    expect(resolveZenEgressBaseUrl("https://opencode.ai/v1", true)).toBe("https://opencode.ai/v1");
+  });
+
+  it("keeps the relay URL itself recognized as a Zen upstream (path detection)", () => {
+    // The whole point: after the swap, session headers / quota grace /
+    // free-model registry follow because the path still says /zen.
+    expect(isZenChatUpstream(ZEN_RELAY_BASE_URL)).toBe(true);
+    expect(isZenChatUpstream(`https://${ZEN_RELAY_HOST}/zen/v1/chat/completions`)).toBe(true);
+    expect(zenSessionHeaders(ZEN_RELAY_BASE_URL)["x-opencode-session"]).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+    );
   });
 });

@@ -1119,6 +1119,7 @@ export const SEED_FLAGS: FeatureFlags = {
   enableSelfHealing: true,
   enableModelArena: true,
   enableZenQuotaGrace: true,
+  zenRelayEnabled: true,
 };
 
 /**

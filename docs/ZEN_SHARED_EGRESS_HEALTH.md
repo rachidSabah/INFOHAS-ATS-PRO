@@ -13,12 +13,13 @@ as health failures, which painted Zen degraded → down (red) in the health
 panels.
 
 A 429 is *proof the upstream answers*. It is a capacity signal, not a health
-signal. Two levers now separate the two:
+signal. Three levers now separate the two:
 
 | Lever | Where | Effect |
 |---|---|---|
 | **`enableZenQuotaGrace`** (flag, default ON) | Super Admin → Feature Flags | Quota-shaped failures (429 / `FreeUsageLimitError` / "quota" / "rate limit") on Zen upstreams never demote health below **healthy**; the panel shows green with the rate-limited badge. Routing cooldowns still apply, so the router still backs off for the 60 s window — grace only fixes the *display*, not the traffic policy. |
-| **Zen relay (egress bypass)** | AI Providers → edit the Zen provider's **Base URL** | Point the provider at your own relay that serves the API under a `/zen…` path (e.g. `https://relay.yourdomain.com/zen/v1`). Any host with a `/zen` path prefix is detected as a Zen upstream automatically — session headers (`x-opencode-session`), quota grace and the free-model registry all follow. The relay's IP — not Cloudflare's shared pool — is what Zen's limiter sees. |
+| **`zenRelayEnabled` — Zen Vercel Relay (flag, default ON)** | Super Admin → Feature Flags | DEPLOYED & LIVE (2026-09-10): routes all canonical Zen traffic through the managed **Vercel Edge relay** `https://ats-zen-relay.vercel.app/zen/v1` (source: `vercel-relay/` in the repo root). The relay egresses from **Vercel's (AWS) IP pool**, not Cloudflare's shared edge pool — Zen's per-IP limiter sees a second, independent quota bucket. Verified live: `/zen/v1/models` 200, CORS preflight 204, free-model chat completion 200 with a real completion. |
+| **Self-hosted relay (BYO domain)** | AI Providers → edit the Zen provider's **Base URL** | Point the provider at your own relay that serves the API under a `/zen…` path (e.g. `https://relay.yourdomain.com/zen/v1`). Any host with a `/zen` path prefix is detected as a Zen upstream automatically — session headers (`x-opencode-session`), quota grace and the free-model registry all follow. |
 
 ## Why "just call it from the browser" doesn't work
 
@@ -29,7 +30,37 @@ calls are impossible for Zen; every call must hop a server-side proxy. That
 proxy's egress IP is what the limiter keys on — so the only real fix is
 changing **whose** IP egresses.
 
-## The relay escape hatch (recommended for real traffic)
+## The managed Vercel relay (deployed — zero self-hosting)
+
+`vercel-relay/` in the repo root is a two-file Vercel Edge project
+(`api/zen.ts` + a `/zen/:path*` rewrite in `vercel.json`) that transparently
+forwards `/zen/*` to `https://opencode.ai/zen/*`: request headers
+(`Authorization`, `x-opencode-session`, …) and bodies pass through verbatim,
+client-IP signals (`x-forwarded-*`, `cf-*`) are stripped upstream, and
+response status codes/bodies pass through untouched so the health layer keeps
+seeing real 200/401/404/429/5xx semantics. It is a **single-upstream** proxy —
+not an open relay.
+
+When `zenRelayEnabled` is on (default), every client call site
+(`manager.ts` test/models, `openai-compatible.ts` and `custom.ts` chat,
+`model-discovery.ts`) swaps the canonical `https://opencode.ai/zen/v1` for
+`https://ats-zen-relay.vercel.app/zen/v1` before handing the URL to the
+`/api/providers/*` edge proxies (pure helper: `resolveZenEgressBaseUrl` in
+`zen-free-models.ts`; flag-reading wrapper: `src/lib/ai/zen-egress.ts`). The
+edge proxies allowlist the relay host (`ssrf-allowlist.ts` + the inlined
+copies) and detect it as a Zen upstream by its `/zen` path. The Workers API
+cron prober egresses through the relay too via the `OPENCODE_API_BASE` var in
+`wrangler.toml`.
+
+Redeploying the relay after editing it:
+
+```bash
+cd vercel-relay
+npx vercel link --yes --project ats-zen-relay --scope <team-slug> --token <VERCEL_TOKEN>
+npx vercel deploy --prod --yes --token <VERCEL_TOKEN>
+```
+
+## The self-hosted relay escape hatch (BYO domain)
 
 1. Run a tiny reverse proxy on any non-Cloudflare host you control (VPS, home
    lab, or the desktop app's local server — the Electron build already runs
@@ -69,9 +100,14 @@ quota — one relay per household/team is usually plenty.
 
 | File | Role |
 |---|---|
-| `src/lib/ai/zen-free-models.ts` | `isZenChatUpstream` (host OR `/zen` path), `zenHealthStatusOverride` (pure grace rule), `isRateLimitShaped` |
+| `src/lib/ai/zen-free-models.ts` | `isZenChatUpstream` (host OR `/zen` path), `zenHealthStatusOverride` (pure grace rule), `isRateLimitShaped`, `ZEN_RELAY_BASE_URL` + `isCanonicalZenBaseUrl` + `resolveZenEgressBaseUrl` (pure relay routing) |
+| `src/lib/ai/zen-egress.ts` | Flag-aware async wrapper (`zenEgressBaseUrl`) — lazy store import, no adapter→store cycle |
+| `src/lib/ai/services/manager.ts`, `src/lib/ai/providers/openai-compatible.ts`, `src/lib/ai/providers/custom.ts`, `src/lib/model-discovery.ts` | Client call sites applying the relay swap before the `/api/providers/*` proxies |
+| `src/lib/ssrf-allowlist.ts` + inlined copies in `/api/providers/{chat,test,models}/route.ts` | Allowlist the relay host; path-based Zen detection |
+| `vercel-relay/` | The deployed Vercel Edge relay (`api/zen.ts` + rewrite; see its README) |
+| `wrangler.toml` | `OPENCODE_API_BASE` var — cron prober egress through the relay |
 | `src/lib/provider-health.ts` | `recordFailure` grace branch (quota failures don't poison counters/status) + display override in `getHealthForProvider` |
-| `src/lib/types.ts` | `FeatureFlags.enableZenQuotaGrace` |
-| `src/components/app/modules/FeatureFlags.tsx` | Flag UI entry ("Zen Quota Grace") |
+| `src/lib/types.ts` | `FeatureFlags.enableZenQuotaGrace`, `FeatureFlags.zenRelayEnabled` |
+| `src/components/app/modules/FeatureFlags.tsx` | Flag UI entries ("Zen Quota Grace", "Zen Vercel Relay") |
 | `src/lib/mock-data.ts` | Default ON in `SEED_FLAGS` |
-| `src/lib/ai/zen-free-models.test.ts` | Unit tests for detection + grace rule |
+| `src/lib/ai/zen-free-models.test.ts` | Unit tests for detection + grace rule + relay routing |

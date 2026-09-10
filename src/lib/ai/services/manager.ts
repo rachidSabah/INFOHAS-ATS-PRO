@@ -5,6 +5,7 @@
 
 import { useApp, uid } from "../../store";
 import { resolveTestTimeoutMs } from "../test-timeout";
+import { zenEgressBaseUrl } from "../zen-egress";
 import { ProviderRouter } from "./router";
 import { ProviderFactory } from "./factory";
 import { toProviderConfig } from "./fallback";
@@ -179,11 +180,14 @@ export class ProviderManager {
 
     // All other providers — route through the CORS proxy
     try {
+      // Zen relay routing (flag zenRelayEnabled) — canonical opencode.ai URLs
+      // egress through the managed Vercel relay; every other host unchanged.
+      const egressBase = (await zenEgressBaseUrl(provider.baseUrl)) ?? provider.baseUrl;
       const res = await fetch("/api/providers/test", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          baseUrl: provider.baseUrl,
+          baseUrl: egressBase,
           apiKey: provider.apiKey,
           authType: provider.authType || "bearer",
           headersJson: provider.headersJson,
@@ -361,12 +365,13 @@ export class ProviderManager {
         return this.fetchPuterModelsLive();
       }
 
-      // 1. Try primary key first
+      // 1. Try primary key first (Zen relay routing applies via egressBase)
+      const egressBase = (await zenEgressBaseUrl(config.baseUrl)) ?? config.baseUrl;
       const res = await fetch("/api/providers/models", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          baseUrl: config.baseUrl,
+          baseUrl: egressBase,
           apiKey: config.apiKey,
           authType: config.authType,
           headersJson: config.headersJson,
@@ -396,7 +401,7 @@ export class ProviderManager {
               method: "POST",
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({
-                baseUrl: config.baseUrl,
+                baseUrl: egressBase,
                 apiKey: altKey,
                 authType: config.authType,
                 headersJson: config.headersJson,

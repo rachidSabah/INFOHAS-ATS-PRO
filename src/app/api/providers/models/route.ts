@@ -2,6 +2,7 @@
 // Solves CORS issues — browser calls this route, Worker calls the provider API
 import { NextRequest, NextResponse } from "next/server";
 import { getZenFreeModelSet } from "@/lib/ai/providers/zen-ingest";
+import { isZenChatUpstream } from "@/lib/ai/zen-free-models";
 
 export const runtime = "edge";
 
@@ -13,6 +14,8 @@ const ALLOWED_PROVIDER_HOSTS = new Set([
   "api.openai.com", "api.anthropic.com", "generativelanguage.googleapis.com",
   "api.groq.com", "api.deepseek.com", "integrate.api.nvidia.com",
   "openrouter.ai", "api.opencode.com", "opencode.ai",
+  // Managed Zen relay (vercel-relay/): /zen/* → opencode.ai/zen/*, AWS egress.
+  "ats-zen-relay.vercel.app",
   "api.perplexity.ai", "api.mistral.ai", "api.cohere.com",
   "api.together.xyz", "api.z.ai", "api.aimlapi.com", "api.azure.com",
   "api-inference.huggingface.co", "api.puter.com",
@@ -110,8 +113,9 @@ export async function POST(req: NextRequest) {
     // ingestion failure fall through to the raw list below — a failed fetch
     // must never wipe the row's existing config.
     try {
-      const modelsHost = new URL(baseUrl).hostname.toLowerCase();
-      if (modelsHost === "opencode.ai") {
+      // Path-aware: canonical gateway OR /zen relay host (managed Vercel
+      // relay) — dynamic free-model ingestion follows the relay too.
+      if (isZenChatUpstream(baseUrl)) {
         let modelsKv: any = null;
         try {
           const { getRequestContext } = await import("@cloudflare/next-on-pages");
