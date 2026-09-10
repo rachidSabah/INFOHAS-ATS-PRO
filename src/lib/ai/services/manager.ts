@@ -180,6 +180,10 @@ export class ProviderManager {
 
     // All other providers — route through the CORS proxy
     try {
+      // Wall-clock for the proxy round-trip — reported even when the proxy
+      // answer is unparseable (the old fallback omitted latencyMs, so the
+      // Test Connection modal printed "Received response in undefinedms").
+      const proxyT0 = performance.now();
       // Zen relay routing (flag zenRelayEnabled) — canonical opencode.ai URLs
       // egress through the managed Vercel relay; every other host unchanged.
       const egressBase = (await zenEgressBaseUrl(provider.baseUrl)) ?? provider.baseUrl;
@@ -207,12 +211,17 @@ export class ProviderManager {
       try {
         data = JSON.parse(responseText);
       } catch {
-        // The proxy returned HTML (likely a 500 error page from Cloudflare Pages)
+        // The proxy returned HTML (likely a platform error page — e.g. Vercel
+        // FUNCTION_INVOCATION_TIMEOUT when a serverless function was killed)
         // Include the HTTP status code and first chars of the response for debugging
         const preview = responseText.slice(0, 100).replace(/\n/g, " ").trim();
+        const platformKill = /FUNCTION_INVOCATION_TIMEOUT|FUNCTION_INVOCATION_FAILED/i.test(responseText);
         data = {
           ok: false,
-          message: `Proxy returned a non-JSON response (HTTP ${res.status}). ${res.status === 500 ? "The API route may be misconfigured on the deployment. Try refreshing the page or redeploying." : ""} Response: "${preview}"`,
+          latencyMs: Math.round(performance.now() - proxyT0),
+          message: platformKill
+            ? `The server-side proxy function was killed by the hosting platform (HTTP ${res.status}). ${preview.includes("FUNCTION_INVOCATION_TIMEOUT") ? "The upstream model needed longer than the function's execution-time cap (Vercel Edge kills at ~30s and ignores maxDuration — deploy the latest main, which routes through Node-runtime functions with maxDuration 90-150s)." : "The deployment's function crashed or was recycled."} Response: "${preview}"`
+            : `Proxy returned a non-JSON response (HTTP ${res.status}). ${res.status === 500 ? "The API route may be misconfigured on the deployment. Try refreshing the page or redeploying." : ""} Response: "${preview}"`,
         };
       }
 

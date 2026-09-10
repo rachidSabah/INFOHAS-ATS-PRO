@@ -1,5 +1,5 @@
 // ============================================================================
-// ATS Zen Relay — Vercel Edge Function (static mount + rewrite router)
+// ATS Zen Relay — Vercel Function (static mount + rewrite router)
 //
 // WHAT: A transparent, single-upstream reverse proxy for the OpenCode Zen API.
 //   https://<this-deployment>/zen/v1/models            →  https://opencode.ai/zen/v1/models
@@ -12,7 +12,7 @@
 // of the ORIGINAL request are forwarded upstream.
 //
 // WHY: ResumeAI Pro's Cloudflare Pages deployment funnels every AI call
-// through edge functions that egress from Cloudflare's SHARED IP pool. Zen's
+// through serverless functions that egress from Cloudflare's SHARED IP pool. Zen's
 // free-usage limiter is keyed to the REQUESTER'S IP (anomalyco/opencode
 // #33318), so every Pages tenant collectively drains ONE quota and Zen is
 // painted degraded → down. This relay egresses from Vercel's (AWS) pool — a
@@ -34,11 +34,14 @@
 // is forwarded unchanged.
 // ============================================================================
 
-export const config = { runtime: "edge" };
-// Reasoning-route Zen models answer in 8–33 s; optimizer calls request up to
-// 120 s. 60 s covers the test route (≤60 s) and most chat calls; if the plan
-// rejects the value at deploy time, Vercel's plan default applies instead.
-export const maxDuration = 60;
+// Node runtime, NOT edge: Vercel Hobby Edge Functions have a hard ~30 s
+// wall-clock cap and SILENTLY IGNORE the maxDuration export — a reasoning-route
+// Zen model (nemotron-3-ultra-free answers in 8–33 s+) got the function killed
+// at ~28 s with FUNCTION_INVOCATION_TIMEOUT (incident 2026-09-11). Node
+// (Fluid compute) honors maxDuration up to 300 s on Hobby.
+export const config = { runtime: "nodejs" };
+// Covers the test route (≤60 s) and optimizer calls (up to 120 s) with margin.
+export const maxDuration = 150;
 
 const UPSTREAM_ORIGIN = "https://opencode.ai";
 const ZEN_ROOT = "/zen"; // the path prefix the app recognizes as a Zen upstream
@@ -85,8 +88,94 @@ function corsHeaders(): Record<string, string> {
  * upstream instead of looking like random automation noise. */
 const RELAY_UA = "ATS-ZenRelay/1.0";
 
-export default async function handler(req: Request): Promise<Response> {
-  const url = new URL(req.url);
+// ============================================================================
+// Runtime-shim layer — the same handler must run on:
+//   - Vercel Edge runtime:  default export receives a Web Request.
+//   - Vercel Node runtime:  the launcher may pass a Node IncomingMessage
+//     (relative req.url, plain-object headers) plus a ServerResponse.
+// toWebRequest() normalizes the first argument; the default export bridges a
+// Web Response back onto a Node ServerResponse when one is provided.
+// ============================================================================
+
+async function toWebRequest(req: unknown): Promise<Request> {
+  if (typeof Request !== "undefined" && req instanceof Request) return req;
+  const node = (req ?? {}) as {
+    url?: string;
+    method?: string;
+    headers?: unknown;
+    [Symbol.asyncIterator]?: unknown;
+  };
+  const rawHeaders = (node.headers ?? {}) as Record<string, string | string[] | undefined>;
+  const host = typeof rawHeaders.host === "string" ? rawHeaders.host : "relay.local";
+  const headers = new Headers();
+  for (const [key, value] of Object.entries(rawHeaders)) {
+    if (value === undefined) continue;
+    if (Array.isArray(value)) value.forEach((v) => headers.append(key, String(v)));
+    else headers.set(key, String(value));
+  }
+  const method = (node.method ?? "GET").toUpperCase();
+  const init: RequestInit = { method, headers };
+  if (method !== "GET" && method !== "HEAD") {
+    const chunks: Uint8Array[] = [];
+    for await (const chunk of node as unknown as AsyncIterable<Uint8Array | string>) {
+      chunks.push(typeof chunk === "string" ? new TextEncoder().encode(chunk) : new Uint8Array(chunk));
+    }
+    if (chunks.length > 0) {
+      const total = chunks.reduce((n, c) => n + c.length, 0);
+      const body = new Uint8Array(total);
+      let offset = 0;
+      for (const c of chunks) {
+        body.set(c, offset);
+        offset += c.length;
+      }
+      init.body = body;
+    }
+  }
+  return new Request(`https://${host}${node.url ?? "/"}`, init);
+}
+
+async function sendResponseToNodeRes(response: Response, res: {
+  writeHead: (status: number, headers: Record<string, string>) => void;
+  write: (chunk: Uint8Array) => unknown;
+  end: () => unknown;
+  writableEnded?: boolean;
+}): Promise<void> {
+  const headers: Record<string, string> = {};
+  response.headers.forEach((value, key) => {
+    headers[key] = value; // duplicate header names collapse — acceptable for this contract
+  });
+  res.writeHead(response.status, headers);
+  if (!response.body) {
+    res.end();
+    return;
+  }
+  for await (const chunk of response.body as unknown as AsyncIterable<Uint8Array>) {
+    res.write(new Uint8Array(chunk)); // chunk-wise — upstream streaming passes through
+  }
+  res.end();
+}
+
+export default async function handler(req: unknown, res?: unknown): Promise<Response | undefined> {
+  const request = await toWebRequest(req);
+  const response = await handle(request);
+  const nodeRes = res as {
+    writeHead?: (status: number, headers: Record<string, string>) => void;
+    write?: (chunk: Uint8Array) => unknown;
+    end?: () => unknown;
+    writableEnded?: boolean;
+  } | undefined;
+  if (nodeRes && typeof nodeRes.writeHead === "function" && !nodeRes.writableEnded) {
+    await sendResponseToNodeRes(response, nodeRes as Parameters<typeof sendResponseToNodeRes>[1]);
+    return undefined; // already sent through the Node response object
+  }
+  return response;
+}
+
+async function handle(req: Request): Promise<Response> {
+  // Node runtime: req.url is a RELATIVE path ("/zen/..."), unlike the Edge
+  // runtime which provided an absolute URL — new URL() needs a synthetic base.
+  // Only pathname + search are used below, so the base host is irrelevant.
+  const url = new URL(req.url, "https://relay.local");
 
   // ---- CORS preflight -----------------------------------------------------
   if (req.method === "OPTIONS") {
@@ -114,9 +203,12 @@ export default async function handler(req: Request): Promise<Response> {
   }
 
   // Forward the ORIGINAL query (minus the internal zenpath param) — e.g.
-  // /zen/v1/models?key=… keeps its key upstream.
+  // /zen/v1/models?key=… keeps its key upstream. The Node runtime's router
+  // additionally injects a `path` param mirroring the rewrite wildcard —
+  // strip it too so internal routing metadata never reaches opencode.ai.
   const fwdParams = new URLSearchParams(url.searchParams);
   fwdParams.delete("zenpath");
+  fwdParams.delete("path");
   const fwdQuery = fwdParams.toString();
   const upstreamUrl = `${UPSTREAM_ORIGIN}${ZEN_ROOT}/${rest}${fwdQuery ? `?${fwdQuery}` : ""}`;
 

@@ -1,7 +1,7 @@
 // CORS proxy for testing AI provider connections
 // The browser can't call provider APIs directly due to CORS — this route proxies the request
 import { NextRequest, NextResponse } from "next/server";
-import { resolveTestTimeoutMs } from "../../../../lib/ai/test-timeout";
+import { resolveTestTimeoutMs, isReasoningModelName } from "../../../../lib/ai/test-timeout";
 import { zenSessionHeaders } from "../../../../lib/ai/zen-free-models";
 
 export const runtime = "edge";
@@ -222,7 +222,11 @@ export async function POST(req: NextRequest) {
       reqBody = {
         model: model || "gpt-4o-mini",
         messages: [{ role: "user", content: testPrompt || "Reply with exactly: OK" }],
-        max_tokens: 10,
+        // Reasoning-route models burn tokens on hidden thinking before emitting
+        // visible text — 10 tokens produced finish_reason:"length" with an
+        // empty/truncated content (relay evidence 2026-09-11). Give them room;
+        // fast models keep the snappy 10-token cap.
+        max_tokens: isReasoningModelName(model) ? 1024 : 10,
         temperature: 0,
         stream: false,
       };

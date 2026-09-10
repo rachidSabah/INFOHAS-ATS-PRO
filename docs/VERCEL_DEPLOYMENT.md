@@ -16,7 +16,7 @@ Cloudflare deployment:
 | Plane | Cloudflare (canonical, auto) | Vercel (test/parallel, manual CLI) |
 |---|---|---|
 | UI | Pages `resumeai-pro` (auto on push to main) | `resumeai-pro-web-woad.vercel.app` (CLI) |
-| App API routes | Pages edge functions | Vercel Edge Functions |
+| App API routes | Pages edge functions | Vercel Functions — Node (with `maxDuration`) for duration-critical routes, Edge for the rest |
 | Data (D1) | Workers API `resumeai-pro-api.rachidelsabah.workers.dev` | **same worker, same D1** (client sync is hardcoded to the worker URL) |
 | AI egress | Cloudflare shared IPs | Vercel AWS IPs |
 
@@ -79,11 +79,18 @@ Only two repo files were needed:
 
 ## Known limits & differences
 
-- **30 s wall-clock cap** on Edge Functions (Vercel Hobby). Upstream calls that
-  legitimately need longer (heavy Zen models, big optimizer steps with
-  `timeoutMs: 120000`) will fail with `FUNCTION_INVOCATION_TIMEOUT` on Vercel
-  while working on Cloudflare. Use fast models on the Vercel deployment, or the
-  desktop app for long jobs.
+- ~~**30 s wall-clock cap** on Edge Functions~~ **FIXED 2026-09-11**: the
+  duration-critical routes (`/api/providers/test`, `/api/providers/chat`) now
+  ship as **Node serverless functions on Vercel** (Fluid compute honors
+  `maxDuration`: test=90s, chat=150s) via the `scripts/vercel-prebuild.mjs`
+  hook — the same platform-divergent mechanism as `/r/[id]`. Root cause of the
+  incident: Vercel Hobby Edge Functions die at ~30s wall clock and **silently
+  ignore the `maxDuration` export**, so `nemotron-3-ultra-free` (reasoning
+  model, answers in 8–33s+) got the test proxy killed →
+  `FUNCTION_INVOCATION_TIMEOUT` HTML → "Proxy returned a non-JSON response".
+  The Zen relay (`ats-zen-relay`) got the same treatment (edge → node,
+  `maxDuration: 150`). Cloudflare keeps every route on edge (next-on-pages
+  requirement) — CF has no equivalent wall-clock problem.
 - **No server-side provider keys** are configured (parity with Cloudflare — the
   live Pages bundle also ships `apiKey:""` for the seeded OpenCode provider;
   verified by scanning the deployed chunks). Free Zen models work keyless;
