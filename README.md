@@ -86,6 +86,15 @@ See [DEPLOYMENT.md](DEPLOYMENT.md) for prerequisites, secrets, and the
 verification checklist ([docs/PRODUCTION_VERIFICATION.md](docs/PRODUCTION_VERIFICATION.md)).
 CI/CD is defined in [`.github/workflows/ci-cd.yml`](.github/workflows/ci-cd.yml).
 
+### Parallel Vercel deployment (full app, same D1)
+
+The full application also runs on **Vercel** (`resumeai-pro-web`) as a
+manual-CLI, test-oriented deployment that egresses AI traffic from Vercel's
+AWS IP pool — bypassing Cloudflare's shared-IP provider rate limiting (the
+OpenCode Zen squeeze). It shares the same D1 database via the same Workers API.
+Cloudflare remains the canonical auto-deployed environment. Details,
+verification results and operating notes: [docs/VERCEL_DEPLOYMENT.md](docs/VERCEL_DEPLOYMENT.md).
+
 ---
 
 ## Project structure

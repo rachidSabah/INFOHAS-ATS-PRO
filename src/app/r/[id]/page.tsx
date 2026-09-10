@@ -1,5 +1,8 @@
 "use client";
-export const runtime = "edge";
+// NOTE: no `runtime = "edge"` here — this page is fully client-rendered and
+// its SSR shell pulls in the whole store + A4 renderer (1.5MB), which blows
+// past Vercel Hobby's 1MB Edge Function cap. Default Node runtime on Vercel
+// is fine; Cloudflare Pages (next-on-pages) still ships it as edge either way.
 
 import { useParams, useSearchParams } from "next/navigation";
 import { useEffect, useState, useMemo, Suspense } from "react";
