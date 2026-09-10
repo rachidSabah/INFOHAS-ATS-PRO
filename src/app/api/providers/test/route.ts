@@ -2,6 +2,7 @@
 // The browser can't call provider APIs directly due to CORS — this route proxies the request
 import { NextRequest, NextResponse } from "next/server";
 import { resolveTestTimeoutMs } from "../../../../lib/ai/test-timeout";
+import { zenSessionHeaders } from "../../../../lib/ai/zen-free-models";
 
 export const runtime = "edge";
 
@@ -186,6 +187,10 @@ export async function POST(req: NextRequest) {
         headers["Authorization"] = `Bearer ${apiKey}`;
       }
     }
+    // Zen free tier rejects session-less completions (400 MissingSessionID)
+    // on EVERY entry point — the health check failed red here while the chat
+    // proxy (already wired) worked. Same per-request UUID helper.
+    Object.assign(headers, zenSessionHeaders(baseUrl));
 
     // Build URL and body for different provider types
     let url = "";
