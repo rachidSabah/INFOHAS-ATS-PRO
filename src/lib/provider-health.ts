@@ -7,6 +7,7 @@
 import { useApp } from "./store";
 import { isApiProvider, isBrowserAuthProvider } from "./provider-router";
 import { getPuterAuthStatus, isPuterLoaded } from "./puter-client";
+import { isZenChatUpstream, zenHealthStatusOverride } from "./ai/zen-free-models";
 import type { AIProvider } from "./types";
 
 export interface ProviderHealthInfo {
@@ -68,10 +69,25 @@ export function getHealthForProvider(p: AIProvider): ProviderHealthInfo {
 
   // Determine overall status
   let status: ProviderHealthInfo["status"] = p.status || "untested";
-  if (rateLimited) status = "degraded";
-  if (health.consecutiveFailures >= 3) status = "down";
-  else if (health.consecutiveFailures >= 1) status = "degraded";
-  else if (health.consecutiveSuccesses >= 1) status = "healthy";
+  // Quota-grace (enableZenQuotaGrace): a Zen 429 from Cloudflare's SHARED
+  // egress pool is evidence the upstream ANSWERS, not that it is sick —
+  // never let quota-only symptoms paint Zen red. Real (non-quota) failures
+  // still follow the normal rules below (see zenHealthStatusOverride).
+  const graceStatus = zenHealthStatusOverride({
+    graceEnabled: useApp.getState().flags?.enableZenQuotaGrace !== false,
+    isZen: isZenChatUpstream(p.baseUrl || p.apiUrl),
+    currentStatus: status,
+    consecutiveFailures: health.consecutiveFailures || 0,
+    lastError: health.lastError || null,
+  });
+  if (graceStatus) {
+    status = graceStatus;
+  } else {
+    if (rateLimited) status = "degraded";
+    if (health.consecutiveFailures >= 3) status = "down";
+    else if (health.consecutiveFailures >= 1) status = "degraded";
+    else if (health.consecutiveSuccesses >= 1) status = "healthy";
+  }
 
   return {
     provider: p,
@@ -130,6 +146,33 @@ export function recordFailure(providerId: string, error: string, isRateLimit = f
 
   const now = new Date().toISOString();
   const health = provider.health || { consecutiveFailures: 0, consecutiveSuccesses: 0 };
+
+  // Quota-grace (enableZenQuotaGrace): a rate-limit failure on a Zen upstream
+  // under the shared Cloudflare egress pool is NOT a health event — the 429
+  // proves the upstream is reachable. Record ONLY the 60s routing window
+  // (rateLimitedUntil) and diagnostics; never bump consecutiveFailures /
+  // usage.errors, never demote status. Real failures skip this branch and
+  // follow the strict path below. See docs/ZEN_SHARED_EGRESS_HEALTH.md.
+  const zenQuotaGrace =
+    isRateLimit &&
+    state.flags?.enableZenQuotaGrace !== false &&
+    isZenChatUpstream((provider as AIProvider).baseUrl || (provider as AIProvider).apiUrl);
+  if (zenQuotaGrace) {
+    state.updateProvider(providerId, {
+      health: {
+        ...health,
+        lastFailureAt: now,
+        lastError: error,
+        rateLimitedUntil: new Date(Date.now() + 60 * 1000).toISOString(),
+      },
+      lastUsedAt: now,
+      usage: {
+        ...provider.usage,
+        requests: provider.usage.requests + 1,
+      },
+    });
+    return;
+  }
 
   state.updateProvider(providerId, {
     health: {

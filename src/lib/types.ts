@@ -729,6 +729,15 @@ export interface FeatureFlags {
    */
   enableDurablePipeline?: boolean;
   /**
+   * Quota-grace health for OpenCode Zen (and /zen relays): a 429 from the
+   * IP-keyed free limiter (which every Cloudflare Pages user shares — see
+   * docs/ZEN_SHARED_EGRESS_HEALTH.md) proves the upstream is REACHABLE, not
+   * sick. When true (default), quota-shaped failures never demote Zen below
+   * "healthy" in the health panels; routing cooldowns still apply. Set false
+   * to restore strict degradation on any failure.
+   */
+  enableZenQuotaGrace?: boolean;
+  /**
    * Option 1 — Rate Governor: proactive per-provider pacing (token bucket +
    * AIMD + Retry-After parking) at the single raw AI call path. Prevents
    * agents from colliding into provider 429s. Default: true. Set false to

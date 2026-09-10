@@ -30,6 +30,7 @@ const DEFAULT_SEED_FLAGS: Record<keyof Flags, boolean> = {
   enableModelArena: true,
   enableDurablePipeline: true,
   enableRateGovernor: true,
+  enableZenQuotaGrace: true,
 };
 
 const FLAGS: { key: keyof Flags; label: string; desc: string; icon: string; severity: "safe" | "feature" | "danger" }[] = [
@@ -48,6 +49,7 @@ const FLAGS: { key: keyof Flags; label: string; desc: string; icon: string; seve
   { key: "enableModelArena", label: "Multi-Model Variant Arena", desc: "Run optimization variants in parallel on different providers and choose the highest-scoring layout/ATS output.", icon: "Swords", severity: "safe" },
   { key: "enableDurablePipeline", label: "Durable Pipeline Queue", desc: "Run optimizer stages as durable D1 jobs (resumable, retry with backoff on rate limits, stage checkpoints). Falls back to the inline pipeline on any failure.", icon: "DatabaseZap", severity: "safe" },
   { key: "enableRateGovernor", label: "Rate Governor", desc: "Proactively pace AI calls per provider (token bucket + Retry-After) so parallel agents avoid hitting provider 429 limits.", icon: "Gauge", severity: "safe" },
+  { key: "enableZenQuotaGrace", label: "Zen Quota Grace", desc: "OpenCode Zen 429s caused by Cloudflare's SHARED egress IPs (its free limiter is keyed per requester IP) no longer mark the provider unhealthy — a 429 proves the upstream answers. Routing cooldowns still apply. See docs/ZEN_SHARED_EGRESS_HEALTH.md for the relay escape hatch.", icon: "HeartPulse", severity: "safe" },
   { key: "maintenanceMode", label: "Maintenance Mode", desc: "Take the entire app offline for users.", icon: "Wrench", severity: "danger" },
 ];
 

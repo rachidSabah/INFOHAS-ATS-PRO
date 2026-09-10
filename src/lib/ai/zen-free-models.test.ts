@@ -33,6 +33,8 @@ import {
   isZenModelUsable,
   isZenChatUpstream,
   zenSessionHeaders,
+  zenHealthStatusOverride,
+  isRateLimitShaped,
 } from "./zen-free-models";
 
 describe("zen-free-models registry integrity", () => {
@@ -221,10 +223,16 @@ describe("shipped configuration consistency (catalog + seed data)", () => {
 });
 
 describe("zen session header gate (MissingSessionID fix)", () => {
-  it("detects only the opencode.ai host as Zen chat upstream", () => {
+  it("detects the opencode.ai host or a /zen relay path as Zen chat upstream", () => {
     expect(isZenChatUpstream("https://opencode.ai/zen/v1")).toBe(true);
     expect(isZenChatUpstream("https://OPENCODE.AI/zen/v1")).toBe(true);
+    // Relay escape hatch (docs/ZEN_SHARED_EGRESS_HEALTH.md): any host serving
+    // a /zen path prefix is treated as a Zen mirror — session headers, quota
+    // grace and the free-model registry follow it automatically.
+    expect(isZenChatUpstream("https://relay.example.com/zen/v1")).toBe(true);
+    expect(isZenChatUpstream("https://10.0.0.7:8080/ZEN/v1")).toBe(true);
     expect(isZenChatUpstream("https://api.openai.com/v1")).toBe(false);
+    expect(isZenChatUpstream("https://relay.example.com/openai/v1")).toBe(false);
     expect(isZenChatUpstream("https://opencode.ai.evil.example/v1")).toBe(false);
     expect(isZenChatUpstream("")).toBe(false);
     expect(isZenChatUpstream(null)).toBe(false);
@@ -244,5 +252,54 @@ describe("zen session header gate (MissingSessionID fix)", () => {
     expect(h1["x-opencode-session"]).not.toBe(h2["x-opencode-session"]);
     expect(zenSessionHeaders("https://api.openai.com/v1")).toEqual({});
     expect(zenSessionHeaders(undefined)).toEqual({});
+  });
+
+  it("injects x-opencode-session for a /zen relay too", () => {
+    const h = zenSessionHeaders("https://relay.example.com/zen/v1");
+    expect(h["x-opencode-session"]).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+    );
+  });
+});
+
+describe("zen quota-grace health override (enableZenQuotaGrace)", () => {
+  const base = {
+    graceEnabled: true,
+    isZen: true,
+    consecutiveFailures: 5,
+    lastError: "HTTP 429 FreeUsageLimitError — free tier exhausted",
+  };
+
+  it("keeps a quota-throttled Zen provider green", () => {
+    expect(zenHealthStatusOverride({ ...base, currentStatus: "down" })).toBe("healthy");
+    expect(zenHealthStatusOverride({ ...base, currentStatus: "degraded" })).toBe("healthy");
+  });
+
+  it("never claims verification for an untested provider", () => {
+    expect(zenHealthStatusOverride({ ...base, currentStatus: "untested" })).toBe("untested");
+    expect(zenHealthStatusOverride({ ...base, currentStatus: null })).toBe("untested");
+  });
+
+  it("does not mask real failures (auth / model / outage)", () => {
+    expect(zenHealthStatusOverride({ ...base, lastError: "401 invalid api key" })).toBeNull();
+    expect(zenHealthStatusOverride({ ...base, lastError: "404 model not found" })).toBeNull();
+    expect(zenHealthStatusOverride({ ...base, lastError: "502 bad gateway" })).toBeNull();
+  });
+
+  it("applies only to Zen upstreams and only when the flag is on", () => {
+    expect(zenHealthStatusOverride({ ...base, isZen: false })).toBeNull();
+    expect(zenHealthStatusOverride({ ...base, graceEnabled: false })).toBeNull();
+  });
+
+  it("treats a clean provider (no lastError) as healthy under grace", () => {
+    expect(zenHealthStatusOverride({ ...base, lastError: null, currentStatus: "down" })).toBe("healthy");
+  });
+
+  it("recognizes quota-shaped errors", () => {
+    expect(isRateLimitShaped("HTTP 429")).toBe(true);
+    expect(isRateLimitShaped("FreeUsageLimitError")).toBe(true);
+    expect(isRateLimitShaped("you hit your quota")).toBe(true);
+    expect(isRateLimitShaped("too many requests")).toBe(true);
+    expect(isRateLimitShaped("connection refused")).toBe(false);
   });
 });

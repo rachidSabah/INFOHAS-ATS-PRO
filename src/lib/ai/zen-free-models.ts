@@ -26,6 +26,33 @@
 export const ZEN_VERIFICATION_DATE = "2026-08-30";
 
 /**
+ * Zen upstream detection — host match OR path match.
+ *
+ *  1. hostname === "opencode.ai"  → the canonical Zen gateway.
+ *  2. ANY host with a "/zen" path prefix (e.g. https://relay.example.com/zen/v1)
+ *    → a self-hosted RELAY/mirror of the Zen API. This is the supported
+ *    escape hatch from Cloudflare's SHARED egress pool (see
+ *    docs/ZEN_SHARED_EGRESS_HEALTH.md): the admin points the provider's
+ *    baseUrl at their own non-Cloudflare relay, and every Zen-specific
+ *    behavior (session headers, quota-grace health, free-model registry)
+ *    follows automatically because the path still says /zen.
+ *
+ * A random unknown header (x-opencode-session) on a non-Zen origin that
+ * happens to serve /zen is harmless — unknown headers are ignored upstream.
+ */
+export function isZenChatUpstream(baseUrl: string | undefined | null): boolean {
+  if (!baseUrl) return false;
+  try {
+    const u = new URL(baseUrl);
+    return u.hostname.toLowerCase() === "opencode.ai" || u.pathname.toLowerCase().startsWith("/zen");
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Session header demanded by the Zen free tier on chat completions.
+ *
  * OpenCode's free tier rejects /chat/completions calls that don't identify an
  * OpenCode client session: HTTP 400 MissingSessionID — "OpenCode's free tier
  * can only be used in OpenCode" (verified live 2026-09-09 against
@@ -37,16 +64,6 @@ export const ZEN_VERIFICATION_DATE = "2026-08-30";
  * the cron prober, the router and the Pages chat proxy on one code path.
  * One UUID per request — no cross-request state on the edge.
  */
-export function isZenChatUpstream(baseUrl: string | undefined | null): boolean {
-  if (!baseUrl) return false;
-  try {
-    return new URL(baseUrl).hostname.toLowerCase() === "opencode.ai";
-  } catch {
-    return false;
-  }
-}
-
-/** Session header demanded by the Zen free tier on chat completions (see above). */
 export function zenSessionHeaders(baseUrl: string | undefined | null): Record<string, string> {
   if (!isZenChatUpstream(baseUrl)) return {};
   try {
@@ -57,6 +74,49 @@ export function zenSessionHeaders(baseUrl: string | undefined | null): Record<st
     // handles it like any other upstream failure.
     return {};
   }
+}
+
+/**
+ * Quota-grace health rule (pure, testable) — should a Zen provider's health
+ * status be OVERRIDDEN to "healthy" because its only symptom is IP-keyed
+ * quota throttling?
+ *
+ * WHY: on Cloudflare Pages every call egresses from SHARED edge IPs, and
+ * Zen's free limiter is keyed to the REQUESTER'S IP (zen-free-models.ts
+ * header comment; upstream anomalyco/opencode #33318). A 429 from that pool
+ * is evidence the upstream is ALIVE and answering — it says nothing about
+ * provider health. Painting Zen red for a shared-pool 429 is a false alarm,
+ * while the 60s rateLimitedUntil window still protects ROUTING.
+ *
+ * Override applies ONLY when ALL of:
+ *   - the feature flag enableZenQuotaGrace is on (undefined = on),
+ *   - the provider resolves to a Zen upstream (host or /zen relay path),
+ *   - the most recent failure — if any — was itself quota-shaped
+ *     (429 / FreeUsageLimitError / "rate limit" / "quota"). A real failure
+ *     (401 auth, 404 model, 5xx outage) as the latest signal must follow
+ *     the NORMAL degradation rules.
+ *
+ * Returns the overridden status, or null = "no override, use normal rules".
+ */
+export function zenHealthStatusOverride(opts: {
+  graceEnabled: boolean;
+  isZen: boolean;
+  currentStatus?: string | null;
+  consecutiveFailures: number;
+  lastError?: string | null;
+}): "healthy" | "degraded" | "down" | "untested" | null {
+  if (!opts.graceEnabled || !opts.isZen) return null;
+  if (opts.lastError && !isRateLimitShaped(opts.lastError)) return null;
+  // Quota-only evidence: the upstream answers, so it is healthy. Keep
+  // "untested" as untested (never claim verification we don't have).
+  if (!opts.currentStatus || opts.currentStatus === "untested") return "untested";
+  return "healthy";
+}
+
+/** Shared quota-error shape test (kept in sync with provider-health.ts's
+ * isRateLimitError regex — both live here so Zen and non-Zen callers agree). */
+export function isRateLimitShaped(error: string): boolean {
+  return /429|rate.?limit|too.?many.?requests|quota|FreeUsageLimitError/i.test(error);
 }
 
 /**
