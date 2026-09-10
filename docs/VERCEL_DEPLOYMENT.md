@@ -50,14 +50,22 @@ Only two repo files were needed:
    - `"git": {"deploymentEnabled": false}` — incident-proofing: a stray git
      connection can never silently replace CLI deployments with untested builds
      (this is exactly what broke `ats-zen-relay` on 2026-09-09).
-2. **`src/app/r/[id]/`** — the share page kept its `runtime = "edge"` export
-   (next-on-pages **requires** every non-static route to be edge; removing it
-   broke the Cloudflare Pages deploy), but its heavy tree was split into
-   `PublicResumeContent.tsx` loaded via `next/dynamic` with `ssr: false`.
-   The edge SSR shell shrinks from **1.52 MB → shared-chunk size** (the page
-   was always client-rendered; the previous SSR pass only emitted the spinner
-   fallback), getting under Vercel Hobby's **1 MB Edge Function cap** on both
-   platforms at once.
+2. **`src/app/r/[id]/` + `scripts/vercel-prebuild.mjs` + `buildCommand`** —
+   the share page must be `runtime = "edge"` on Cloudflare (next-on-pages
+   refuses non-static routes without it) but must NOT be an Edge Function on
+   Vercel: its edge SSR bundle measures **1.51 MB** (the App Router
+   client-reference graph pulls the whole store + A4 renderer server-side —
+   `next/dynamic ssr:false` does NOT shed that weight), over Vercel Hobby's
+   **1 MB Edge Function cap**. Next.js only accepts a **string literal** for
+   route segment config (a conditional `export const runtime` fails the
+   build), so the divergence is resolved at build time:
+   - `vercel.json` sets `"buildCommand": "node scripts/vercel-prebuild.mjs && next build"`.
+   - On Vercel (`VERCEL=1`, `CI` unset) the prebuild rewrites the page's
+     literal to `"nodejs"` → Node serverless function, no size cap.
+   - Everywhere else (GitHub Actions sets `CI=true`; local dev has no
+     `VERCEL`) the script is a logged no-op → CF keeps its required edge.
+   The page itself also got a light split (`PublicResumeContent.tsx` via
+   `next/dynamic ssr:false`) — same UX everywhere, spinner-only SSR shell.
 
 ## Verified end-to-end (2026-09-10)
 

@@ -1,6 +1,7 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "framework": "nextjs",
+  "buildCommand": "node scripts/vercel-prebuild.mjs && next build",
   "git": {
     "deploymentEnabled": false
   }
