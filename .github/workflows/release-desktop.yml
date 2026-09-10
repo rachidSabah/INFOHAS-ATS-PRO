@@ -105,11 +105,19 @@ jobs:
           cd desktop
           npx electron-builder --win nsis --x64 --publish never
 
+      - name: Generate SHA256 checksums
+        run: |
+          cd desktop/release
+          sha256sum *.exe > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+
       - name: Upload installer artifact
         uses: actions/upload-artifact@v4
         with:
           name: ResumeAI-Pro-Setup-${{ steps.ver.outputs.version }}
-          path: desktop/release/*.exe
+          path: |
+            desktop/release/*.exe
+            desktop/release/SHA256SUMS.txt
           if-no-files-found: error
 
       # Publish ONLY on real tag builds / release events. workflow_dispatch is
@@ -118,6 +126,8 @@ jobs:
         if: ${{ github.event_name == 'release' || (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')) }}
         uses: softprops/action-gh-release@v2
         with:
-          files: desktop/release/ResumeAI-Pro-Setup-*.exe
+          files: |
+            desktop/release/ResumeAI-Pro-Setup-*.exe
+            desktop/release/SHA256SUMS.txt
           tag_name: ${{ github.event.release.tag_name || github.ref_name }}
           generate_release_notes: false

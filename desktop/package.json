@@ -1,7 +1,7 @@
 {
   "name": "resumeai-pro-desktop",
   "productName": "ResumeAI Pro",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "private": true,
   "description": "ResumeAI Pro desktop app for Windows — bundles the Next.js standalone server with local SQLite storage and optional LAN sharing.",
   "author": "rachidSabah",
@@ -31,7 +31,7 @@
     "extraResources": [
       {
         "from": "../desktop-resources",
-        "to": "resources"
+        "to": "."
       }
     ],
     "asar": true,

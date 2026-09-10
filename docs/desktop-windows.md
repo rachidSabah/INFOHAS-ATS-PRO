@@ -29,6 +29,46 @@ a blue *"Windows protected your PC"* SmartScreen dialog. Click
 software from your own repository. Adding a code-signing certificate later
 removes the warning entirely.
 
+### Antivirus false positives (Kaspersky, etc.)
+
+Because the installer is unsigned, heuristic antivirus engines may flag it
+as suspicious (typically generic names like `UDS:DangerousObject.Multi.gen`
+or `HEUR:Trojan.Win32.Generic`). **This is a false positive caused by the
+unsigned/packed installer pattern, not actual malware** — every exe is
+built reproducibly by GitHub Actions from the public source in this repo.
+
+How to verify the installer you downloaded is the exact bytes CI produced:
+
+```bat
+:: Windows (cmd or PowerShell)
+certutil -hashfile ResumeAI-Pro-Setup-0.2.1.exe SHA256
+:: compare with the hash in SHA256SUMS.txt attached to the same release
+```
+
+If your AV still blocks or quarantines it:
+
+1. **Restore the file** from the antivirus quarantine and add an exclusion
+   for it (Kaspersky: *Settings → Security settings → Exclusions → Manage
+   exclusions → Add*, specify the file or download folder; also allow the
+   app in *Threats and exclusions* if it flags the installed
+   `ResumeAI Pro.exe`).
+2. **Report the false positive to the vendor** so the detection is removed
+   for everyone:
+   - Kaspersky: <https://opentip.kaspersky.com/> (submit the file as
+     *"False positive"*)
+   - Microsoft Defender: <https://www.microsoft.com/en-us/wdsi/filesubmission>
+3. **The permanent fix is code signing.** Options, cheapest first:
+   - **Azure Trusted Signing** (~$9.99/month) — individual developers can
+     sign up; electron-builder supports it natively (`azureSignOptions`);
+     SmartScreen reputation builds within days of signed releases.
+   - **SignPath Foundation** — free code-signing certificate for open-source
+     projects (application required).
+   - A purchased **OV code-signing certificate** (~$100–400/year from
+     Sectigo/DigiCert resellers).
+   When a certificate exists, wire it into `desktop/package.json`
+   (`win.azureSignOptions` or a custom `win.sign` script) plus the
+   corresponding GitHub secrets — no other changes needed.
+
 ---
 
 ## 2. Install
