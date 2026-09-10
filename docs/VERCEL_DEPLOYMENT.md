@@ -50,12 +50,14 @@ Only two repo files were needed:
    - `"git": {"deploymentEnabled": false}` — incident-proofing: a stray git
      connection can never silently replace CLI deployments with untested builds
      (this is exactly what broke `ats-zen-relay` on 2026-09-09).
-2. **`src/app/r/[id]/page.tsx`** — removed `export const runtime = "edge"`.
-   The share page is fully client-rendered; its SSR shell drags the whole store
-   + A4 renderer in (1.52 MB), over Vercel Hobby's **1 MB Edge Function cap**.
-   As a default Node serverless function there is no such limit. Cloudflare
-   Pages is unaffected (next-on-pages ships every route as edge regardless; the
-   other pages — `/`, `/debug`, `/qa` — never had the export either).
+2. **`src/app/r/[id]/`** — the share page kept its `runtime = "edge"` export
+   (next-on-pages **requires** every non-static route to be edge; removing it
+   broke the Cloudflare Pages deploy), but its heavy tree was split into
+   `PublicResumeContent.tsx` loaded via `next/dynamic` with `ssr: false`.
+   The edge SSR shell shrinks from **1.52 MB → shared-chunk size** (the page
+   was always client-rendered; the previous SSR pass only emitted the spinner
+   fallback), getting under Vercel Hobby's **1 MB Edge Function cap** on both
+   platforms at once.
 
 ## Verified end-to-end (2026-09-10)
 
