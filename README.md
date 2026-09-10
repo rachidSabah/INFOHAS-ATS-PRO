@@ -23,7 +23,11 @@
 - **Cover Letter Generator** — modern, traditional, executive, short email templates · PDF / DOCX / TXT
 - **Interview Prep** — technical, behavioral, situational, HR, company-specific questions with STAR examples + follow-ups
 - **Job Description Scraper** — drop in any URL (LinkedIn / Indeed / Glassdoor / company careers page) or paste text
-- **Multi-AI Provider System** — Puter.js (free, user-authenticated) + 15+ cloud providers with automatic failover
+- **Multi-AI Provider System** — Puter.js (free, user-authenticated) + 25 provider types with automatic failover, one-click agent routing presets (Flagship / Speed / OpenAI / DeepSeek), and live model Fetch with retired-model reconciliation
+- **Free-tier hardening** — OpenCode Zen adaptive eviction registry, pricing-discriminated model ingestion, hourly cron warming, and a Workers AI safety valve, so shared-IP quota limits degrade gracefully instead of failing runs (see [docs/ZEN_SHARED_EGRESS_HEALTH.md](docs/ZEN_SHARED_EGRESS_HEALTH.md))
+- **Windows desktop app** — Electron + NSIS installer with local SQLite storage and optional LAN sharing ([docs/desktop-windows.md](docs/desktop-windows.md), releases carry signed-hash `SHA256SUMS.txt`)
+- **Voice mock interviews** — spoken questions with live speech-recognition answers and a coaching report, plus STAR examples + follow-ups
+- **Shareable resume links** — server-backed share URLs with local QR codes
 - **RBAC + Admin Dashboards** — User / Admin / Super Admin roles with full control panel
 - **PWA + Cloudflare-Native** — installable, offline-friendly, pre-wired for Pages + Workers + D1 + R2 + KV + Queues
 - **100% Free** — no paywalls, no watermarks, no feature restrictions, no email walls
@@ -34,7 +38,7 @@
 
 | Layer | Tech |
 |-------|------|
-| Frontend | Next.js 16 · React 19 · TypeScript · Tailwind CSS 4 · shadcn/ui · Zustand · TanStack Query · Framer Motion · React Hook Form + Zod |
+| Frontend | Next.js 15 · React 19 · TypeScript · Tailwind CSS 4 · shadcn/ui · Zustand · TanStack Query · Framer Motion · React Hook Form + Zod |
 | Backend | Cloudflare Workers · Hono · TypeScript |
 | Database | Cloudflare D1 · Drizzle ORM |
 | Storage | Cloudflare R2 |
@@ -44,7 +48,7 @@
 | Auth | Auth.js (NextAuth) · JWT · Google / GitHub / LinkedIn / Magic Link · Puter.js |
 | PDF Engine | jsPDF (client-side, strict one-page A4) · docx · file-saver |
 | Primary AI | Puter.js (free, users authenticate via Google) |
-| Fallback AI | Z.ai SDK (built-in) · OpenAI · Claude · Gemini · DeepSeek · Groq · Mistral · Cohere · Perplexity · OpenRouter · Together · HuggingFace · Ollama · Azure OpenAI · AWS Bedrock · custom |
+| Fallback AI | Workers AI native rescue tier ([ai] binding, zero egress) · Z.ai SDK (built-in) · OpenAI · Claude · Gemini · DeepSeek · Groq · Mistral · Cohere · Perplexity · OpenRouter · Together · HuggingFace · Cerebras · SambaNova · NVIDIA NIM · OpenCode Zen (free) · Ollama · Azure OpenAI · AWS Bedrock · custom |
 | Deployment | Cloudflare Pages · Cloudflare Workers · GitHub Actions |
 
 ---
@@ -192,9 +196,9 @@ Add any of 17 supported provider types by entering your own:
 - Cost per 1K input/output tokens (for cost tracking)
 - Streaming, function calling toggles
 
-Supported types:
+Supported types (25):
 
-`Puter.js · Z.ai Fallback · OpenAI · Anthropic Claude · Google Gemini · DeepSeek · Groq · Mistral · Cohere · Perplexity · OpenRouter · Together AI · HuggingFace · Ollama · Azure OpenAI · AWS Bedrock · Custom / self-hosted LLM`
+`Puter.js · Workers AI (native) · Z.ai Fallback · OpenAI · Anthropic Claude · Google Gemini · DeepSeek · Groq · Mistral · Cohere · Perplexity · OpenRouter · Together AI · HuggingFace · Cerebras · SambaNova · NVIDIA NIM · OpenCode Zen / ZenCode (free) · GitHub Models · Ollama · Azure OpenAI · AWS Bedrock · Custom / self-hosted LLM`
 
 Future providers can be added **without code changes** — just register a new row in the `ai_providers` table. The `ProviderFactory` falls back to the `CustomProvider` adapter for unknown types, which uses the `requestTemplate` + `responsePath` config.
 
@@ -240,6 +244,12 @@ Browse a model catalog per provider type (OpenAI, Claude, Gemini, DeepSeek, Groq
 
 Configure default provider, default model, fallback chain (with reorder), retry attempts, timeout, rate limit, and feature toggles (failover, caching, cost tracking).
 
+**One-click agent routing presets** (Puter.js): Flagship (Claude Sonnet optimizer + GPT-4o supervisor, maximum JSON compliance), Speed (Gemini Flash everywhere), OpenAI Balanced, and DeepSeek — each pins optimizer / supervisor / guardian / assembler models in one click.
+
+**Fetch live models**: the Fetch button pulls the provider's real model catalog, adds new live IDs, and flags retired ones (marked `-M retired`, never silently deleted). The open Zen catalog is additionally filtered to the free tier before it can reach a provider row.
+
+**Routing Chain Diagnostics**: per-link Primary / Fallback rows with live Test Entire Chain runs, per-model latency, and honest demotion states — excluded providers are labeled, never silently skipped.
+
 ### Test Connection
 
 Every provider has a "Test Connection" button that:
@@ -258,6 +268,16 @@ Every provider has a "Test Connection" button that:
 ### Production deployment (Cloudflare Workers)
 
 In production, the same routing logic lives in `workers/api/index.ts → /api/ai/chat`. Set provider keys as Worker secrets via `wrangler secret put OPENAI_API_KEY` etc. The `ProviderManager` reads from D1 (production) or Zustand store (dev).
+
+---
+
+## Desktop app (Windows)
+
+A full Electron desktop build ships from the same codebase (see [docs/desktop-windows.md](docs/desktop-windows.md)):
+
+- One-click NSIS installer (`ResumeAI-Pro-Setup-<version>.exe` on GitHub Releases) with local SQLite storage (seeded from a bundled template DB) and optional LAN sharing mode
+- Built by the `Desktop Release (Windows)` CI workflow: Prisma generate → template DB → `next build` standalone → `electron-builder`
+- Releases publish `SHA256SUMS.txt` — verify with `certutil -hashfile` before installing; unsigned builds may trip AV heuristics (exclusion + submission steps in the docs)
 
 ---
 
@@ -294,7 +314,7 @@ openssl rand -base64 32  # → ENCRYPTION_KEY
 # 4. Push to GitHub (creates the repo if needed, pushes to main)
 ./scripts/deploy.sh push
 
-# 5. Apply D1 migrations (both 0001_init.sql and 0002_ai_providers_enhanced.sql)
+# 5. Apply D1 migrations (state-tracked, in order, idempotent — see migrations/)
 ./scripts/deploy.sh migrate
 
 # 6. Deploy Cloudflare Workers (Hono API)
@@ -342,9 +362,8 @@ openssl rand -base64 32  # → ENCRYPTION_KEY
    # Create Queue
    wrangler queues create resumeai-pro-queue
 
-   # Apply migrations (both files)
-   wrangler d1 execute resumeai-pro-db --file=migrations/0001_init.sql --remote
-   wrangler d1 execute resumeai-pro-db --file=migrations/0002_ai_providers_enhanced.sql --remote
+   # Apply migrations (all files in migrations/, in order — tracked, idempotent)
+   wrangler d1 migrations apply resumeai-pro-db --remote
    ```
 
 3. **Set secrets**
@@ -430,15 +449,13 @@ To install: open the app in Chrome/Edge → click the install icon in the addres
 ## Testing
 
 ```bash
-# Unit + integration tests (bun:test)
-bun test
+# Unit + integration tests (Vitest, ~2,300 tests, must stay green)
+npm test            # vitest run
 
-# E2E tests (Playwright)
-bunx playwright test
-
-# Lint + type-check
-bun run lint
-bunx tsc --noEmit
+# Lint + type-check (both must pass; workers/ has its own tsconfig)
+npm run lint
+npx tsc --noEmit
+npx tsc -p workers/tsconfig.json --noEmit
 ```
 
 ---
