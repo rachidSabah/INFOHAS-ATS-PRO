@@ -6,12 +6,12 @@
 
 import type { StateCreator } from "zustand";
 import type { AppState } from "../store";
-import type { User, UserStatus as US } from "../types";
+import type { User, UserStatus as US, Role } from "../types";
 import {
   persistSession, clearSession, restoreSession, uid, INITIAL_SUPER_ADMIN
 } from "./helpers";
 import {
-  hashPassword, verifyPassword, canSignIn
+  hashPassword, verifyPassword, canSignIn, validatePassword
 } from "../auth-utils";
 import { getRoleForEmail } from "../brand";
 import {
@@ -60,6 +60,15 @@ export interface AuthSlice {
   signOut: () => void;
   signInWithEmail: (email: string, password: string) => { ok: boolean; error?: string; user?: User };
   registerWithEmail: (email: string, password: string, name: string, username?: string) => { ok: boolean; error?: string; user?: User };
+  /** Super-admin manual user creation from User Management (no self sign-in). */
+  adminCreateUser: (input: {
+    name: string;
+    email: string;
+    username?: string;
+    password: string;
+    role: Role;
+    status: "approved" | "pending" | "suspended";
+  }) => { ok: boolean; error?: string; user?: User };
   signInWithPuter: () => Promise<{ ok: boolean; error?: string; user?: User }>;
   reconcileRole: () => void;
   approveUser: (userId: string) => void;
@@ -230,6 +239,53 @@ export const createAuthSlice: StateCreator<AppState, [], [], AuthSlice> = (set, 
     // Fresh account — make sure no previous session's data is visible.
     resetUserDataForSignIn(set);
     set({ user: newUser, isAuthed: true, authOpen: false, view: "dashboard", synced: false });
+    return { ok: true, user: newUser };
+  },
+
+  /**
+   * Admin-side manual user creation (User Management → Add User).
+   * Unlike registerWithEmail this does NOT sign the new user in, does not
+   * touch the current session, and lets the admin pick role + initial
+   * status up front. The account row is synced to D1 via createUser, so
+   * the person can sign in from any device immediately.
+   */
+  adminCreateUser: (input) => {
+    const normalizedEmail = input.email.trim().toLowerCase();
+    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(normalizedEmail)) {
+      return { ok: false, error: "Please enter a valid email address." };
+    }
+    if (get().users.some((u) => u.email.toLowerCase() === normalizedEmail)) {
+      return { ok: false, error: "An account with this email already exists." };
+    }
+    const check = validatePassword(input.password);
+    if (!check.valid) {
+      return { ok: false, error: `Password requirements: ${check.errors.join(", ")}` };
+    }
+    const now = new Date().toISOString();
+    const newUser: User = {
+      id: uid("u"),
+      name: input.name.trim() || normalizedEmail.split("@")[0],
+      username: input.username?.trim() || normalizedEmail.split("@")[0],
+      email: normalizedEmail,
+      passwordHash: hashPassword(input.password),
+      role: input.role,
+      status: input.status,
+      provider: "email",
+      createdAt: now,
+      updatedAt: now,
+      lastActiveAt: now,
+      // lastLoginAt stays unset — the table shows "Never" until their first sign-in.
+      usage: { resumesGenerated: 0, atsChecks: 0, coverLetters: 0, interviewPreps: 0, downloads: 0 },
+    };
+    set((s) => ({ users: [...s.users, newUser] }));
+    cloudApiSafe(createUser)(newUser).catch((e) => { console.warn("[store] Cloud sync failed:", e); });
+    get().log({
+      actor: get().user?.email ?? "admin",
+      action: "User created manually by admin",
+      category: "admin",
+      details: `${newUser.email} (role: ${newUser.role}, status: ${newUser.status})`,
+      severity: "info",
+    });
     return { ok: true, user: newUser };
   },
 

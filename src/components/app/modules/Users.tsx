@@ -9,6 +9,7 @@ import { useApp } from "@/lib/store";
 import { refreshUsers } from "@/lib/cloud-api";
 import { toast } from "sonner";
 import { UserDetailModal, type ManagedUser } from "./UserDetailModal";
+import { AddUserModal } from "./AddUserModal";
 import { validatePassword } from "@/lib/auth-utils";
 
 const AVATAR_COLORS = ["#1154A3", "#F59E0B", "#10B981", "#8B5CF6", "#EC4899", "#0EA5E9", "#DC2626", "#0B1F3A"];
@@ -38,6 +39,8 @@ export function Users() {
   const [selected, setSelected] = useState<ManagedUser | null>(null);
   const [resetTarget, setResetTarget] = useState<ManagedUser | null>(null);
   const [newPassword, setNewPassword] = useState("");
+  const [addOpen, setAddOpen] = useState(false);
+  const isSuperAdmin = currentUser?.role === "super_admin";
 
   const filtered = users.filter((u) => {
     if (roleFilter !== "all" && u.role !== roleFilter) return false;
@@ -108,6 +111,11 @@ export function Users() {
           <h1 className="font-display text-2xl font-bold flex items-center gap-2"><Icon name="Users" className="w-6 h-6 text-brand" /> User Management</h1>
           <p className="text-sm text-muted-foreground mt-1">Manage users, roles, and status. Approve, suspend, promote, or delete accounts.</p>
         </div>
+        {isSuperAdmin && (
+          <Button onClick={() => setAddOpen(true)} className="bg-brand hover:bg-brand-dark text-white gap-2">
+            <Icon name="UserPlus" className="w-4 h-4" /> Add user manually
+          </Button>
+        )}
       </div>
 
       <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
@@ -212,6 +220,7 @@ export function Users() {
       </Card>
 
       {selected && <UserDetailModal user={selected} onClose={() => setSelected(null)} />}
+      {addOpen && <AddUserModal onClose={() => setAddOpen(false)} />}
       {resetTarget && (
         <div className="fixed inset-0 z-50 bg-background/80 backdrop-blur-sm flex items-center justify-center p-4" onClick={() => setResetTarget(null)}>
           <div className="bg-card rounded-2xl border border-border shadow-premium w-full max-w-md p-6 space-y-4" onClick={(e) => e.stopPropagation()}>

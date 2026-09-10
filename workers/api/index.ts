@@ -793,11 +793,28 @@ app.get("/api/users", async (c) => {
 
 app.post("/api/users", async (c) => {
   const body = await parseBody(c.req.raw);
+  if (!body?.email || !body?.name) {
+    return c.json({ ok: false, error: "email and name are required." }, 400);
+  }
+  // users.email is UNIQUE — let the insert collide raw and D1 surfaces a bare
+  // 500. Pre-resolve the common case to a clean 409 so callers can react:
+  // the admin "Add user manually" flow shows it as a toast; self-registration
+  // already dedupes locally and treats cloud failures as non-fatal.
+  const email = String(body.email).trim().toLowerCase();
+  try {
+    const existing = await c.env.DB.prepare("SELECT id FROM users WHERE email = ?").bind(email).first<any>();
+    if (existing) {
+      return c.json({ ok: false, error: "An account with this email already exists." }, 409);
+    }
+  } catch {
+    // Lookup failure must not block registration — the UNIQUE constraint
+    // remains the last line of defense.
+  }
   const id = body.id || uuid("u");
   const now = new Date().toISOString();
   await c.env.DB.prepare(
     "INSERT INTO users (id, email, username, name, password_hash, avatar, provider, role, status, created_at, updated_at, last_login_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
-  ).bind(id, body.email, body.username || null, body.name, body.passwordHash || null, body.avatarUrl || null, body.provider || "email", body.role || "user", body.status || "pending", now, now, now).run();
+  ).bind(id, email, body.username || null, body.name, body.passwordHash || null, body.avatarUrl || null, body.provider || "email", body.role || "user", body.status || "pending", now, now, now).run();
   return c.json({ ok: true, user: { ...body, id } });
 });
 
