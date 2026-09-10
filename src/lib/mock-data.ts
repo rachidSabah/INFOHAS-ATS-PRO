@@ -1119,7 +1119,10 @@ export const SEED_FLAGS: FeatureFlags = {
   enableSelfHealing: true,
   enableModelArena: true,
   enableZenQuotaGrace: true,
-  zenRelayEnabled: true,
+  // Relay opt-in is STRICT (zen-egress.ts uses === true). Default OFF until
+  // the Vercel alias (ats-zen-relay.vercel.app) is verified serving /zen —
+  // flip to true after running vercel-relay/README.md's verify step.
+  zenRelayEnabled: false,
 };
 
 /**

@@ -32,11 +32,12 @@ APP_URL = "https://resumeai-pro.pages.dev"
 # preview deployments which have dynamic URLs like bcf5bbd9.resumeai-pro.pages.dev).
 # For production with a custom domain, set to "https://yourdomain.com".
 CORS_ORIGIN = "*"
-# Zen cron prober egress: route the hourly free-model ingest/probe through the
-# managed Vercel relay (vercel-relay/ in the repo root, ats-zen-relay.vercel.app)
-# so its 1-token probes draw from the relay's IP quota bucket instead of this
-# Worker's shared Cloudflare egress pool (docs/ZEN_SHARED_EGRESS_HEALTH.md).
-OPENCODE_API_BASE = "https://ats-zen-relay.vercel.app/zen/v1"
+# Zen cron prober egress: UNCOMMENT once the managed Vercel relay alias is
+# verified serving /zen (curl https://ats-zen-relay.vercel.app/zen/v1/models)
+# and re-aliased to the relay build — see vercel-relay/README.md. While the
+# alias is unstable this stays off so hourly model warming keeps its
+# known-good direct egress (docs/ZEN_SHARED_EGRESS_HEALTH.md).
+# OPENCODE_API_BASE = "https://ats-zen-relay.vercel.app/zen/v1"
 # WORKERSAI_SHARED_SECRET is injected at deploy time from the GitHub Actions
 # secret of the same name (NOT stored in this public file):
 #   deploy command: wrangler deploy --var WORKERSAI_SHARED_SECRET:${{ secrets.WORKERSAI_SHARED_SECRET }}

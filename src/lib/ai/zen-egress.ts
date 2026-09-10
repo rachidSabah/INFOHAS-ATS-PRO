@@ -15,11 +15,16 @@
 // bundle, which imports zen-free-models transitively. Dynamic import keeps
 // every bundle clean.
 //
-// Flag semantics match the rest of the app: `undefined` = enabled (the
-// SEED default is on), explicit `false` = off → pass the URL through
-// untouched. Any store failure = pass through (fail-open to direct egress,
-// never break a chat call on a routing detail).
-// ============================================================================
+// Flag semantics — STRICT OPT-IN (=== true), deliberately different from
+// flags like enableZenQuotaGrace (undefined = on): this flag RE-ROUTES
+// NETWORK TRAFFIC to a second infrastructure host, so an ambiguous default
+// would silently send every tenant's Zen calls to the relay even when the
+// relay is unreachable (2026-09-10 lesson: the Vercel alias flipped to a
+// repo-root build and /zen 404'd while the flag was default-on). The Super
+// Admin must explicitly switch it on in Feature Flags AFTER the relay URL
+// has been verified (see vercel-relay/README.md verify step). Any store
+// failure = pass through (fail-open to direct egress, never break a chat
+// call on a routing detail).
 
 import { resolveZenEgressBaseUrl } from "./zen-free-models";
 
@@ -29,7 +34,7 @@ export async function zenEgressBaseUrl(
   if (!baseUrl) return baseUrl;
   try {
     const { useApp } = await import("@/lib/store");
-    return resolveZenEgressBaseUrl(baseUrl, useApp.getState()?.flags?.zenRelayEnabled !== false);
+    return resolveZenEgressBaseUrl(baseUrl, useApp.getState()?.flags?.zenRelayEnabled === true);
   } catch {
     return baseUrl;
   }
