@@ -18,7 +18,6 @@ const eslintConfig = [
       "examples/**",
       "skills/**",
       "workers/**",
-      "vercel-relay/**",
       "scripts/**",
       "*.config.ts",
       "*.config.mjs",

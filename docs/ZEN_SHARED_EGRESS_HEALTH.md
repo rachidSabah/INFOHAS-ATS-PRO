@@ -18,7 +18,7 @@ signal. Three levers now separate the two:
 | Lever | Where | Effect |
 |---|---|---|
 | **`enableZenQuotaGrace`** (flag, default ON) | Super Admin → Feature Flags | Quota-shaped failures (429 / `FreeUsageLimitError` / "quota" / "rate limit") on Zen upstreams never demote health below **healthy**; the panel shows green with the rate-limited badge. Routing cooldowns still apply, so the router still backs off for the 60 s window — grace only fixes the *display*, not the traffic policy. |
-| **`zenRelayEnabled` — Zen Vercel Relay (STRICT opt-in flag)** | Super Admin → Feature Flags | BUILT & LIVE-VERIFIED (2026-09-10): routes all canonical Zen traffic through the managed **Vercel relay** `https://ats-zen-relay.vercel.app/zen/v1` (source: `vercel-relay/` in the repo root). The relay egresses from **Vercel's (AWS) IP pool**, not Cloudflare's shared edge pool — Zen's per-IP limiter sees a second, independent quota bucket. Verified live at deploy time: `/zen/v1/models` 200, CORS preflight 204, free-model chat completion 200 with a real completion. **Enable it ONLY after re-verifying the URL** (the project auto-linked to the GitHub repo and a push rebuilt it from the repo root — see `vercel-relay/README.md` for the fix). 2026-09-11: relay runtime switched edge → **Node** (`maxDuration: 150`) — Hobby Edge functions die at ~30 s wall clock (ignoring `maxDuration`), which killed reasoning-model calls (`nemotron-3-ultra-free` answers in 8–33 s+) with `FUNCTION_INVOCATION_TIMEOUT`. |
+| **~~`zenRelayEnabled` — Zen Vercel Relay~~ (RETIRED 2026-09-11)** | — | The managed Vercel relay (`ats-zen-relay.vercel.app`, source `vercel-relay/`) is **gone** — the project moved to a Cloudflare-only posture and no Vercel hosting/tokens are maintained. The flag, the `zen-egress.ts` routing layer and the relay source were removed from the codebase. See the self-hosted relay below for the surviving egress lever. |
 | **Self-hosted relay (BYO domain)** | AI Providers → edit the Zen provider's **Base URL** | Point the provider at your own relay that serves the API under a `/zen…` path (e.g. `https://relay.yourdomain.com/zen/v1`). Any host with a `/zen` path prefix is detected as a Zen upstream automatically — session headers (`x-opencode-session`), quota grace and the free-model registry all follow. |
 
 ## Why "just call it from the browser" doesn't work
@@ -30,37 +30,19 @@ calls are impossible for Zen; every call must hop a server-side proxy. That
 proxy's egress IP is what the limiter keys on — so the only real fix is
 changing **whose** IP egresses.
 
-## The managed Vercel relay (deployed — zero self-hosting)
+## The managed Vercel relay (RETIRED 2026-09-11)
 
-`vercel-relay/` in the repo root is a two-file Vercel Edge project
-(`api/zen.ts` + a `/zen/:path*` rewrite in `vercel.json`) that transparently
-forwards `/zen/*` to `https://opencode.ai/zen/*`: request headers
-(`Authorization`, `x-opencode-session`, …) and bodies pass through verbatim,
-client-IP signals (`x-forwarded-*`, `cf-*`) are stripped upstream, and
-response status codes/bodies pass through untouched so the health layer keeps
-seeing real 200/401/404/429/5xx semantics. It is a **single-upstream** proxy —
-not an open relay.
+The managed relay — `vercel-relay/` in the repo root, live at
+`ats-zen-relay.vercel.app`, routed by the `zenRelayEnabled` flag through
+`zen-egress.ts` — has been **retired** with the Cloudflare-only posture
+switch. The relay source, the flag, the routing helper
+(`resolveZenEgressBaseUrl` / `zenEgressBaseUrl`) and its allowlist entries
+were removed from the codebase, and the Vercel projects/tokens were dropped.
 
-When `zenRelayEnabled` is **explicitly on** (strict `=== true` opt-in — see
-`zen-egress.ts`; a rerouting flag must never silently become the default
-path), every client call site
-(`manager.ts` test/models, `openai-compatible.ts` and `custom.ts` chat,
-`model-discovery.ts`) swaps the canonical `https://opencode.ai/zen/v1` for
-`https://ats-zen-relay.vercel.app/zen/v1` before handing the URL to the
-`/api/providers/*` edge proxies (pure helper: `resolveZenEgressBaseUrl` in
-`zen-free-models.ts`; flag-reading wrapper: `src/lib/ai/zen-egress.ts`). The
-edge proxies allowlist the relay host (`ssrf-allowlist.ts` + the inlined
-copies) and detect it as a Zen upstream by its `/zen` path. The Workers API
-cron prober can egress through the relay too via the `OPENCODE_API_BASE` var
-in `wrangler.toml` (currently commented out until the alias is stable).
-
-Redeploying the relay after editing it:
-
-```bash
-cd vercel-relay
-npx vercel link --yes --project ats-zen-relay --scope <team-slug> --token <VERCEL_TOKEN>
-npx vercel deploy --prod --yes --token <VERCEL_TOKEN>
-```
+**Why:** maintaining a second full platform (hosting + tokens + CI
+coordinates) only to move one provider's egress IP was judged too heavy. The
+documented self-hosted relay below is the supported escape hatch if a
+different egress IP is ever needed again.
 
 ## The self-hosted relay escape hatch (BYO domain)
 
@@ -102,17 +84,15 @@ quota — one relay per household/team is usually plenty.
 
 | File | Role |
 |---|---|
-| `src/lib/ai/zen-free-models.ts` | `isZenChatUpstream` (host OR `/zen` path), `zenHealthStatusOverride` (pure grace rule), `isRateLimitShaped`, `ZEN_RELAY_BASE_URL` + `isCanonicalZenBaseUrl` + `resolveZenEgressBaseUrl` (pure relay routing) |
-| `src/lib/ai/zen-egress.ts` | Flag-aware async wrapper (`zenEgressBaseUrl`) — lazy store import, no adapter→store cycle |
-| `src/lib/ai/services/manager.ts`, `src/lib/ai/providers/openai-compatible.ts`, `src/lib/ai/providers/custom.ts`, `src/lib/model-discovery.ts` | Client call sites applying the relay swap before the `/api/providers/*` proxies |
-| `src/lib/ssrf-allowlist.ts` + inlined copies in `/api/providers/{chat,test,models}/route.ts` | Allowlist the relay host; path-based Zen detection |
-| `vercel-relay/` | The deployed Vercel Edge relay (`api/zen.ts` + rewrite; see its README) |
-| `wrangler.toml` | `OPENCODE_API_BASE` var — cron prober egress through the relay |
+| `src/lib/ai/zen-free-models.ts` | `isZenChatUpstream` (host OR `/zen` path), `zenHealthStatusOverride` (pure grace rule), `isRateLimitShaped`, `isZenSharedEgressSymptom` (WAF/edge-symptom detector) |
+| `src/lib/ai/services/manager.ts`, `src/lib/ai/providers/openai-compatible.ts`, `src/lib/ai/providers/custom.ts`, `src/lib/model-discovery.ts` | Client call sites — pass the provider baseUrl straight to the `/api/providers/*` proxies (no rerouting layer since the managed relay was retired) |
+| `src/lib/ssrf-allowlist.ts` + inlined copies in `/api/providers/{chat,test,models}/route.ts` | Provider host allowlist; path-based Zen detection |
+| `wrangler.toml` | `OPENCODE_API_BASE` var — cron prober egress (direct; point at a self-hosted relay if ever needed) |
 | `src/lib/provider-health.ts` | `recordFailure` grace branch (quota failures don't poison counters/status) + display override in `getHealthForProvider` |
-| `src/lib/types.ts` | `FeatureFlags.enableZenQuotaGrace`, `FeatureFlags.zenRelayEnabled` |
-| `src/components/app/modules/FeatureFlags.tsx` | Flag UI entries ("Zen Quota Grace", "Zen Vercel Relay") |
+| `src/lib/types.ts` | `FeatureFlags.enableZenQuotaGrace` (`zenRelayEnabled` removed) |
+| `src/components/app/modules/FeatureFlags.tsx` | Flag UI entry ("Zen Shared-Egress Grace") |
 | `src/lib/mock-data.ts` | Default ON in `SEED_FLAGS` |
-| `src/lib/ai/zen-free-models.test.ts` | Unit tests for detection + grace rule + relay routing |
+| `src/lib/ai/zen-free-models.test.ts` | Unit tests for detection + grace rule + self-hosted relay path detection |
 
 ## Task 38 — WAF challenges and 52x edge errors join the grace (CF-only posture)
 
@@ -149,8 +129,8 @@ Cloudflare offers **no dedicated egress IPs for Workers/Pages** — every fetch
 shares the global anycast pool, and no platform configuration changes that.
 The grace makes health *truth-seeking* on the shared pool (symptoms of IP
 reputation no longer masquerade as provider death); the rotator + KV
-model-cache absorb the traffic-level bumps. The **Vercel relay**
-(`zenRelayEnabled`, one lightweight function) remains the only lever that
-actually changes the egress IP — a strictly optional escape hatch, zero
-maintenance while the flag is off. The full Vercel app mirror is unnecessary
-for Zen: everything in this document works on Cloudflare alone.
+model-cache absorb the traffic-level bumps. Since the managed Vercel relay
+was retired (same day), the **self-hosted relay** (BYO domain, section above)
+is the only lever that actually changes the egress IP — strictly optional,
+zero maintenance while unused. Everything in this document works on
+Cloudflare alone.

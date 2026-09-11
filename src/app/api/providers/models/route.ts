@@ -14,8 +14,6 @@ const ALLOWED_PROVIDER_HOSTS = new Set([
   "api.openai.com", "api.anthropic.com", "generativelanguage.googleapis.com",
   "api.groq.com", "api.deepseek.com", "integrate.api.nvidia.com",
   "openrouter.ai", "api.opencode.com", "opencode.ai",
-  // Managed Zen relay (vercel-relay/): /zen/* → opencode.ai/zen/*, AWS egress.
-  "ats-zen-relay.vercel.app",
   "api.perplexity.ai", "api.mistral.ai", "api.cohere.com",
   "api.together.xyz", "api.z.ai", "api.aimlapi.com", "api.azure.com",
   "api-inference.huggingface.co", "api.puter.com",
@@ -113,8 +111,8 @@ export async function POST(req: NextRequest) {
     // ingestion failure fall through to the raw list below — a failed fetch
     // must never wipe the row's existing config.
     try {
-      // Path-aware: canonical gateway OR /zen relay host (managed Vercel
-      // relay) — dynamic free-model ingestion follows the relay too.
+      // Path-aware: canonical gateway OR /zen relay host (self-hosted
+      // mirror) — dynamic free-model ingestion follows the relay too.
       if (isZenChatUpstream(baseUrl)) {
         let modelsKv: any = null;
         try {

@@ -96,8 +96,8 @@ export function resolveTestTimeoutMs(opts: ResolveTestTimeoutOpts): number {
   }
   if (providerTimeout !== null && opts.honorExplicitTimeout) {
     // Explicit user-configured timeout — honor it (the modal displays it),
-    // clamped to the universal platform ceiling (60s; the Vercel Node
-    // function runs maxDuration 90 so the abort always fires first).
+    // clamped to the universal platform ceiling (60s; the server route
+    // aborts at the provider timeout, so the abort always fires first).
     return Math.min(providerTimeout, reasoningCap);
   }
   return Math.min(providerTimeout ?? fastCap, fastCap);

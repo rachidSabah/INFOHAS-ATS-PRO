@@ -5,7 +5,6 @@
 
 import { useApp, uid } from "../../store";
 import { resolveTestTimeoutMs } from "../test-timeout";
-import { zenEgressBaseUrl } from "../zen-egress";
 import { ProviderRouter } from "./router";
 import { ProviderFactory } from "./factory";
 import { toProviderConfig } from "./fallback";
@@ -184,14 +183,11 @@ export class ProviderManager {
       // answer is unparseable (the old fallback omitted latencyMs, so the
       // Test Connection modal printed "Received response in undefinedms").
       const proxyT0 = performance.now();
-      // Zen relay routing (flag zenRelayEnabled) — canonical opencode.ai URLs
-      // egress through the managed Vercel relay; every other host unchanged.
-      const egressBase = (await zenEgressBaseUrl(provider.baseUrl)) ?? provider.baseUrl;
       const res = await fetch("/api/providers/test", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          baseUrl: egressBase,
+          baseUrl: provider.baseUrl,
           apiKey: provider.apiKey,
           authType: provider.authType || "bearer",
           headersJson: provider.headersJson,
@@ -214,8 +210,8 @@ export class ProviderManager {
       try {
         data = JSON.parse(responseText);
       } catch {
-        // The proxy returned HTML (likely a platform error page — e.g. Vercel
-        // FUNCTION_INVOCATION_TIMEOUT when a serverless function was killed)
+        // The proxy returned HTML (likely a platform error page — e.g. a
+        // serverless function killed by its execution-time cap)
         // Include the HTTP status code and first chars of the response for debugging
         const preview = responseText.slice(0, 100).replace(/\n/g, " ").trim();
         const platformKill = /FUNCTION_INVOCATION_TIMEOUT|FUNCTION_INVOCATION_FAILED/i.test(responseText);
@@ -223,7 +219,7 @@ export class ProviderManager {
           ok: false,
           latencyMs: Math.round(performance.now() - proxyT0),
           message: platformKill
-            ? `The server-side proxy function was killed by the hosting platform (HTTP ${res.status}). ${preview.includes("FUNCTION_INVOCATION_TIMEOUT") ? "The upstream model needed longer than the function's execution-time cap (Vercel Edge kills at ~30s and ignores maxDuration — deploy the latest main, which routes through Node-runtime functions with maxDuration 90-150s)." : "The deployment's function crashed or was recycled."} Response: "${preview}"`
+            ? `The server-side proxy function was killed by the hosting platform (HTTP ${res.status}). ${preview.includes("FUNCTION_INVOCATION_TIMEOUT") ? "The upstream model needed longer than the function's execution-time cap — retry, or lower the provider's configured timeout so the client abort fires first." : "The deployment's function crashed or was recycled."} Response: "${preview}"`
             : `Proxy returned a non-JSON response (HTTP ${res.status}). ${res.status === 500 ? "The API route may be misconfigured on the deployment. Try refreshing the page or redeploying." : ""} Response: "${preview}"`,
         };
       }
@@ -377,13 +373,12 @@ export class ProviderManager {
         return this.fetchPuterModelsLive();
       }
 
-      // 1. Try primary key first (Zen relay routing applies via egressBase)
-      const egressBase = (await zenEgressBaseUrl(config.baseUrl)) ?? config.baseUrl;
+      // 1. Try primary key first
       const res = await fetch("/api/providers/models", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          baseUrl: egressBase,
+          baseUrl: config.baseUrl,
           apiKey: config.apiKey,
           authType: config.authType,
           headersJson: config.headersJson,
@@ -413,7 +408,7 @@ export class ProviderManager {
               method: "POST",
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({
-                baseUrl: egressBase,
+                baseUrl: config.baseUrl,
                 apiKey: altKey,
                 authType: config.authType,
                 headersJson: config.headersJson,

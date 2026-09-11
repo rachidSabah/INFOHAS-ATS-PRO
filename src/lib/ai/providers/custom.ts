@@ -6,7 +6,6 @@
 //   responsePath: "choices[0].message.content"
 import { ProviderError } from "./openai-compatible";
 import type { AIProviderAdapter, ChatRequest, ChatResponse, ProviderConfig } from "./interface";
-import { zenEgressBaseUrl } from "../zen-egress";
 
 export class CustomProvider implements AIProviderAdapter {
   readonly type = "custom";
@@ -15,9 +14,7 @@ export class CustomProvider implements AIProviderAdapter {
     const t0 = performance.now();
     if (!config.baseUrl) throw new Error("Custom provider requires baseUrl");
     const model = req.model || config.modelName || "default";
-    // Zen relay routing (flag zenRelayEnabled) — canonical opencode.ai URLs
-    // egress through the managed Vercel relay; every other host unchanged.
-    const baseUrl = (await zenEgressBaseUrl(config.baseUrl)) ?? config.baseUrl;
+    const baseUrl = config.baseUrl;
 
     // Build headers from template
     const headers: Record<string, string> = { "Content-Type": "application/json", ...this.parseJson(config.headersJson) };

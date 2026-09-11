@@ -738,19 +738,6 @@ export interface FeatureFlags {
    */
   enableZenQuotaGrace?: boolean;
   /**
-   * Managed Zen relay (zenRelayEnabled — STRICT opt-in): route all canonical
-   * OpenCode Zen traffic through the deployed Vercel Edge relay
-   * (ats-zen-relay.vercel.app/zen/v1, built from vercel-relay/ in the repo
-   * root). The relay egresses from Vercel's (AWS) IP pool instead of
-   * Cloudflare's shared edge pool, giving Zen's per-IP free limiter a second,
-   * independent quota bucket — the concrete "overpass" for the shared-IP
-   * rate limiting described in docs/ZEN_SHARED_EGRESS_HEALTH.md.
-   * Only `true` activates the reroute (zen-egress.ts checks === true):
-   * verify the relay URL serves /zen before enabling, so an outage of the
-   * relay never silently becomes the default path for everyone.
-   */
-  zenRelayEnabled?: boolean;
-  /**
    * Option 1 — Rate Governor: proactive per-provider pacing (token bucket +
    * AIMD + Retry-After parking) at the single raw AI call path. Prevents
    * agents from colliding into provider 429s. Default: true. Set false to

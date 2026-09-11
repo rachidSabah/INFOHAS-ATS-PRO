@@ -103,7 +103,7 @@ export function classifyProviderFailure(
   // 403 and the word "Forbidden").
   if (isZenSharedEgressSymptom(text, status)) {
     return mk("rate_limited", true, false,
-      "Cloudflare WAF/edge challenge — the provider's own Cloudflare zone challenged the shared egress IP pool of this deployment. This is an IP-reputation symptom, not an invalid API key and not an outage. The router treats it as a transient rate limit (retry + failover); if it recurs, enable the Zen Vercel Relay flag for a dedicated egress pool.");
+      "Cloudflare WAF/edge challenge — the provider's own Cloudflare zone challenged the shared egress IP pool of this deployment. This is an IP-reputation symptom, not an invalid API key and not an outage. The router treats it as a transient rate limit (retry + failover); if it recurs, point the provider's baseUrl at a self-hosted non-Cloudflare relay (see docs/ZEN_SHARED_EGRESS_HEALTH.md) for a dedicated egress pool.");
   }
 
   // --- Auth / credits (never auto-repairable: keys are user assets) ---

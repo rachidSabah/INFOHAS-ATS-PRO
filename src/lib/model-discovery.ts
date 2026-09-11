@@ -10,7 +10,6 @@
 import type { AIProvider } from "./types";
 import { aiHealthManager } from "./ai/health/ai-health-manager";
 import { recordProviderFailure } from "./telemetry";
-import { zenEgressBaseUrl } from "./ai/zen-egress";
 
 export interface ModelDiscoveryResult {
   providerId: string;
@@ -34,9 +33,6 @@ export async function discoverModels(provider: AIProvider): Promise<string[] | n
   if (provider.providerCategory === "browser_auth") return null;
 
   try {
-    // Zen relay routing (flag zenRelayEnabled) — canonical opencode.ai URLs
-    // egress through the managed Vercel relay; every other host unchanged.
-    const egressBase = (await zenEgressBaseUrl(baseUrl)) ?? baseUrl;
     const headers: Record<string, string> = { "Content-Type": "application/json" };
     if (provider.apiKey) {
       const isGemini = baseUrl.includes("generativelanguage.googleapis.com");
@@ -52,7 +48,7 @@ export async function discoverModels(provider: AIProvider): Promise<string[] | n
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        baseUrl: egressBase,
+        baseUrl,
         apiKey: provider.apiKey,
         authType: provider.authType || "bearer",
         headersJson: provider.headersJson,

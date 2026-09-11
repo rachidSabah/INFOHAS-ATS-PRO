@@ -2,7 +2,9 @@ import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
   // For Cloudflare Pages deployment, do NOT use "standalone" — next-on-pages handles output.
-  // For Docker/Vercel deployment, change to "standalone".
+  // (next-on-pages wraps `vercel build` OFFLINE as a build tool only — no Vercel
+  // account, project or hosting involved; the .vercel/output dir is its convention.)
+  // For Docker deployment, change to "standalone".
   // Desktop (Electron/Windows) packaging opts in via BUILD_STANDALONE=1 so the
   // regular Pages CI build is completely unaffected.
   ...(process.env.BUILD_STANDALONE === "1" ? { output: "standalone" as const } : {}),

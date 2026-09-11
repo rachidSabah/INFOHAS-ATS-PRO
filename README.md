@@ -86,14 +86,16 @@ See [DEPLOYMENT.md](DEPLOYMENT.md) for prerequisites, secrets, and the
 verification checklist ([docs/PRODUCTION_VERIFICATION.md](docs/PRODUCTION_VERIFICATION.md)).
 CI/CD is defined in [`.github/workflows/ci-cd.yml`](.github/workflows/ci-cd.yml).
 
-### Parallel Vercel deployment (full app, same D1)
+### Cloudflare-only deployment posture (2026-09-11)
 
-The full application also runs on **Vercel** (`resumeai-pro-web`) as a
-manual-CLI, test-oriented deployment that egresses AI traffic from Vercel's
-AWS IP pool — bypassing Cloudflare's shared-IP provider rate limiting (the
-OpenCode Zen squeeze). It shares the same D1 database via the same Workers API.
-Cloudflare remains the canonical auto-deployed environment. Details,
-verification results and operating notes: [docs/VERCEL_DEPLOYMENT.md](docs/VERCEL_DEPLOYMENT.md).
+This project deploys **exclusively to Cloudflare** (Pages + Workers). The
+experimental Vercel mirror (`resumeai-pro-web`) and the managed Vercel Zen
+relay (`ats-zen-relay.vercel.app`) were retired — no Vercel hosting, projects
+or tokens are maintained anymore. (`@cloudflare/next-on-pages` still wraps
+`vercel build` OFFLINE as a build tool; that is a build convention, not a
+Vercel deployment.) If AI egress ever needs to escape Cloudflare's shared IP
+pool again, the supported path is a self-hosted non-Cloudflare relay serving
+`/zen/*` — see [docs/ZEN_SHARED_EGRESS_HEALTH.md](docs/ZEN_SHARED_EGRESS_HEALTH.md).
 
 ---
 
@@ -412,9 +414,9 @@ docker compose --profile llm up --build
 
 App: http://localhost:3000 · MinIO console: http://localhost:9001 · Ollama API: http://localhost:11434
 
-### Option C: Vercel / Netlify (works, but loses Cloudflare Workers features)
+### Option C: Other PaaS (Netlify, Render, …)
 
-Standard Next.js deployment — `vercel deploy` or connect repo to Netlify. AI provider failover will use the Puter.js + Z.ai client-side path only.
+Standard Next.js deployment — connect the repo to any Node host. AI provider failover will use the Puter.js + Z.ai client-side path only. (Vercel-specific docs were removed with the CF-only posture switch; nothing prevents a standard Next.js host from building this repo.)
 
 ---
 

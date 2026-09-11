@@ -20,8 +20,6 @@ const ALLOWED_PROVIDER_HOSTS = new Set([
   "openrouter.ai",
   "api.opencode.com",
   "opencode.ai",
-  // Managed Zen relay (vercel-relay/): /zen/* → opencode.ai/zen/*, AWS egress.
-  "ats-zen-relay.vercel.app",
   "api.perplexity.ai",
   "api.mistral.ai",
   "api.cohere.com",

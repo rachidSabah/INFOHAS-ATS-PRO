@@ -45,7 +45,6 @@
     "mini-services",
     "tool-results",
     "tests",
-    "vercel-relay",
     "drizzle.config.ts"
   ]
 }

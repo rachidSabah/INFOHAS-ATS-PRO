@@ -17,8 +17,6 @@ const ALLOWED_PROVIDER_HOSTS = new Set([
   "api.openai.com", "api.anthropic.com", "generativelanguage.googleapis.com",
   "api.groq.com", "api.deepseek.com", "integrate.api.nvidia.com",
   "openrouter.ai", "api.opencode.com", "opencode.ai",
-  // Managed Zen relay (vercel-relay/): /zen/* → opencode.ai/zen/*, AWS egress.
-  "ats-zen-relay.vercel.app",
   "api.perplexity.ai", "api.mistral.ai", "api.cohere.com",
   "api.together.xyz", "api.z.ai", "api.aimlapi.com", "api.azure.com",
   "api-inference.huggingface.co", "api.puter.com",
@@ -202,9 +200,9 @@ export async function POST(req: NextRequest) {
     // in source) acts as the shared account for keyless Zen rows. A client
     // key always wins; without either, the guest gate below applies.
     // Path-aware Zen detection: the canonical gateway OR any /zen-prefixed
-    // relay host (managed Vercel relay, self-hosted mirror). The guest gate,
-    // server-key fallback, stable UA, session headers and KV eviction all
-    // follow the /zen path automatically (isZenChatUpstream never throws).
+    // self-hosted relay/mirror. The guest gate, server-key fallback, stable
+    // UA, session headers and KV eviction all follow the /zen path
+    // automatically (isZenChatUpstream never throws).
     const isZenUpstream = isZenChatUpstream(baseUrl);
     let edgeEnv: any = null;
     try {
