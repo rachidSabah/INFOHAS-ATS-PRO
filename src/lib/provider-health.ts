@@ -7,7 +7,7 @@
 import { useApp } from "./store";
 import { isApiProvider, isBrowserAuthProvider } from "./provider-router";
 import { getPuterAuthStatus, isPuterLoaded } from "./puter-client";
-import { isZenChatUpstream, zenHealthStatusOverride } from "./ai/zen-free-models";
+import { isZenChatUpstream, isZenSharedEgressSymptom, zenHealthStatusOverride } from "./ai/zen-free-models";
 import type { AIProvider } from "./types";
 
 export interface ProviderHealthInfo {
@@ -147,23 +147,28 @@ export function recordFailure(providerId: string, error: string, isRateLimit = f
   const now = new Date().toISOString();
   const health = provider.health || { consecutiveFailures: 0, consecutiveSuccesses: 0 };
 
-  // Quota-grace (enableZenQuotaGrace): a rate-limit failure on a Zen upstream
-  // under the shared Cloudflare egress pool is NOT a health event — the 429
-  // proves the upstream is reachable. Record ONLY the 60s routing window
-  // (rateLimitedUntil) and diagnostics; never bump consecutiveFailures /
-  // usage.errors, never demote status. Real failures skip this branch and
-  // follow the strict path below. See docs/ZEN_SHARED_EGRESS_HEALTH.md.
-  const zenQuotaGrace =
-    isRateLimit &&
+  // Shared-egress grace (enableZenQuotaGrace — extended in Task 38): on a Zen
+  // upstream under Cloudflare's SHARED egress pool, NEITHER a rate-limit
+  // failure (429 — the 429 proves the upstream is reachable) NOR a
+  // Cloudflare WAF/edge symptom (challenge page / 1015 / 1020 / 52x — the
+  // provider's own CF zone reacting to the shared IP pool) is a HEALTH
+  // event. Record diagnostics only; never bump consecutiveFailures /
+  // usage.errors, never demote status. The 60s routing window is armed ONLY
+  // for declared live-traffic rate limits (isRateLimit=true) — probe/healer
+  // evidence keeps the phantom-cooldown guarantee (no traffic-blocking
+  // window from probe data). Real failures skip this branch and follow the
+  // strict path below. See docs/ZEN_SHARED_EGRESS_HEALTH.md.
+  const zenSharedEgressGrace =
     state.flags?.enableZenQuotaGrace !== false &&
+    (isRateLimit || isZenSharedEgressSymptom(error)) &&
     isZenChatUpstream((provider as AIProvider).baseUrl || (provider as AIProvider).apiUrl);
-  if (zenQuotaGrace) {
+  if (zenSharedEgressGrace) {
     state.updateProvider(providerId, {
       health: {
         ...health,
         lastFailureAt: now,
         lastError: error,
-        rateLimitedUntil: new Date(Date.now() + 60 * 1000).toISOString(),
+        ...(isRateLimit ? { rateLimitedUntil: new Date(Date.now() + 60 * 1000).toISOString() } : {}),
       },
       lastUsedAt: now,
       usage: {

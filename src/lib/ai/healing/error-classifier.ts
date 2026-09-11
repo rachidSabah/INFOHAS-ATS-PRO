@@ -8,6 +8,8 @@
 // real errors behind generic messages).
 // ============================================================================
 
+import { isZenSharedEgressSymptom } from "../zen-free-models";
+
 export type FailureKind =
   | "rate_limited"          // 429 / quota — temporary, cooldown + retry later
   | "cooldown"              // local cooldown state (not an API error)
@@ -90,6 +92,18 @@ export function classifyProviderFailure(
       QUOTA_EXHAUSTION.test(text)
         ? "Provider is reachable and the key was accepted, but this account/model has exhausted its usage quota. Wait for the quota window to reset, switch model, or top up. No configuration change is needed. Note: free-tier limits (e.g. OpenCode Zen FreeUsageLimitError) are enforced per IP/server — a fresh key or new account will NOT lift them; switch to a sibling free model instead."
         : "Temporary rate limit — the provider is reachable and the key was accepted. The router applies cooldown + automatic retry/failover.");
+  }
+
+  // --- Cloudflare WAF/edge challenge (shared-egress symptom, Task 38) ---
+  // A challenge page / firewall block / 52x edge error is the provider's own
+  // Cloudflare zone reacting to the shared egress IP pool — NOT an invalid
+  // key (the AUTH branch below must not fire) and NOT an outage. Treat as a
+  // transient rate limit: retry/failover applies, no repair, no key finger-
+  // pointing. Must sit BEFORE the AUTH check (challenge pages often carry
+  // 403 and the word "Forbidden").
+  if (isZenSharedEgressSymptom(text, status)) {
+    return mk("rate_limited", true, false,
+      "Cloudflare WAF/edge challenge — the provider's own Cloudflare zone challenged the shared egress IP pool of this deployment. This is an IP-reputation symptom, not an invalid API key and not an outage. The router treats it as a transient rate limit (retry + failover); if it recurs, enable the Zen Vercel Relay flag for a dedicated egress pool.");
   }
 
   // --- Auth / credits (never auto-repairable: keys are user assets) ---

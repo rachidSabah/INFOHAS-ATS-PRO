@@ -203,3 +203,46 @@ describe("redactSecrets", () => {
     expect(redactSecrets("Monthly usage limit reached for model x")).toBe("Monthly usage limit reached for model x");
   });
 });
+
+// ============================================================================
+// Task 38 — shared-egress WAF/edge symptoms in the ROUTING classifier.
+// A Cloudflare challenge (403 + markers) or 52x must classify as a
+// transient rate_limit (short burst cooldown, authState untouched), never
+// "authentication" (which parked Zen 30 min with a false not_authenticated).
+// ============================================================================
+describe("classifyProviderFailure — Cloudflare shared-egress symptoms (Task 38)", () => {
+  it("WAF challenge page → rate_limit, not authentication", () => {
+    const r = classifyProviderFailure({
+      httpStatus: 403,
+      errorMessage: "API returned HTTP 403 Forbidden: <html>Attention Required! | Cloudflare</html>",
+    });
+    expect(r.category).toBe("rate_limit");
+    expect(r.state).toBe("rate_limited");
+  });
+
+  it("52x edge errors → rate_limit (status-driven)", () => {
+    expect(classifyProviderFailure({ httpStatus: 522, errorMessage: "" }).category).toBe("rate_limit");
+    expect(classifyProviderFailure({ httpStatus: 403, errorMessage: "error code: 1020" }).category).toBe("rate_limit");
+  });
+
+  it("bare 403 without Cloudflare markers stays authentication", () => {
+    const r = classifyProviderFailure({ httpStatus: 403, errorMessage: "invalid api key" });
+    expect(r.category).toBe("authentication");
+    expect(r.state).toBe("authentication_required");
+  });
+
+  it("recordFailure on a WAF challenge does NOT flip authState (end-to-end)", () => {
+    const m = fresh();
+    m.recordSuccess({ providerId: "pzen", canonicalModelId: "m1", ok: true });
+    const r = m.recordFailure({
+      providerId: "pzen", canonicalModelId: "m1", ok: false,
+      httpStatus: 403,
+      errorMessage: "API returned HTTP 403 Forbidden: <html>Just a moment...</html>",
+    });
+    expect(r.authState).not.toBe("not_authenticated");
+    expect(r.state).toBe("rate_limited");
+    expect(r.rateLimitState).toBe("burst");
+    expect(r.cooldownUntil).toBeGreaterThan(Date.now());
+    expect(r.cooldownUntil).toBeLessThanOrEqual(Date.now() + 4 * 60_000);
+  });
+});

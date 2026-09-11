@@ -39,6 +39,7 @@ import {
   zenSessionHeaders,
   zenHealthStatusOverride,
   isRateLimitShaped,
+  isZenSharedEgressSymptom,
 } from "./zen-free-models";
 
 describe("zen-free-models registry integrity", () => {
@@ -305,6 +306,56 @@ describe("zen quota-grace health override (enableZenQuotaGrace)", () => {
     expect(isRateLimitShaped("you hit your quota")).toBe(true);
     expect(isRateLimitShaped("too many requests")).toBe(true);
     expect(isRateLimitShaped("connection refused")).toBe(false);
+  });
+});
+
+// ============================================================================
+// Task 38 — shared-egress symptom detection (CF-only posture). Cloudflare
+// WAF challenges / firewall blocks / 52x edge errors from the SHARED egress
+// pool are IP-reputation symptoms, never application-level failures.
+// ============================================================================
+describe("isZenSharedEgressSymptom (shared-egress WAF/edge fingerprints)", () => {
+  it("matches Cloudflare challenge-page fingerprints", () => {
+    expect(isZenSharedEgressSymptom("API returned HTTP 403 Forbidden: <!DOCTYPE html><title>Attention Required! | Cloudflare</title>")).toBe(true);
+    expect(isZenSharedEgressSymptom("<html>Just a moment...</html><!-- cf-ray: 8f2a -->")).toBe(true);
+    expect(isZenSharedEgressSymptom("error code: 1015 — you are being rate limited")).toBe(true);
+    expect(isZenSharedEgressSymptom("error code: 1020 — Access ruled out by firewall")).toBe(true);
+    expect(isZenSharedEgressSymptom("cloudflare HTML response instead of JSON")).toBe(true);
+  });
+
+  it("matches Cloudflare 52x edge errors in text and status form", () => {
+    expect(isZenSharedEgressSymptom("API returned HTTP 522: Connection timed out")).toBe(true);
+    expect(isZenSharedEgressSymptom("error code: 521 — web server is down")).toBe(true);
+    expect(isZenSharedEgressSymptom("upstream failed", 522)).toBe(true);
+    expect(isZenSharedEgressSymptom(null, 530)).toBe(true);
+  });
+
+  it("never matches real application-level failures", () => {
+    // A bare 403 without Cloudflare markers stays a real auth failure.
+    expect(isZenSharedEgressSymptom("API returned HTTP 403 Forbidden: invalid api key")).toBe(false);
+    // Zen's real AuthError JSON carries no Cloudflare markers.
+    expect(isZenSharedEgressSymptom('{"error":{"type":"AuthError","message":"Invalid API key"}}')).toBe(false);
+    expect(isZenSharedEgressSymptom("401 unauthorized")).toBe(false);
+    expect(isZenSharedEgressSymptom("404 model not found")).toBe(false);
+    expect(isZenSharedEgressSymptom("502 bad gateway")).toBe(false);
+    expect(isZenSharedEgressSymptom("503 service unavailable")).toBe(false);
+    expect(isZenSharedEgressSymptom("", null)).toBe(false);
+    expect(isZenSharedEgressSymptom(null, 200)).toBe(false);
+    expect(isZenSharedEgressSymptom(null, 429)).toBe(false);
+  });
+
+  it("extends the display override: WAF-shaped lastError keeps Zen green, real errors still mask through", () => {
+    const base = {
+      graceEnabled: true,
+      isZen: true,
+      consecutiveFailures: 4,
+      currentStatus: "down",
+    };
+    expect(zenHealthStatusOverride({ ...base, lastError: "HTTP 403 Attention Required | Cloudflare" })).toBe("healthy");
+    expect(zenHealthStatusOverride({ ...base, lastError: "API returned HTTP 522: Connection timed out" })).toBe("healthy");
+    // Real failures still follow normal rules.
+    expect(zenHealthStatusOverride({ ...base, lastError: "401 invalid api key" })).toBeNull();
+    expect(zenHealthStatusOverride({ ...base, lastError: "404 model not found" })).toBeNull();
   });
 });
 

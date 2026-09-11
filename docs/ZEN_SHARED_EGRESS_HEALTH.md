@@ -113,3 +113,44 @@ quota — one relay per household/team is usually plenty.
 | `src/components/app/modules/FeatureFlags.tsx` | Flag UI entries ("Zen Quota Grace", "Zen Vercel Relay") |
 | `src/lib/mock-data.ts` | Default ON in `SEED_FLAGS` |
 | `src/lib/ai/zen-free-models.test.ts` | Unit tests for detection + grace rule + relay routing |
+
+## Task 38 — WAF challenges and 52x edge errors join the grace (CF-only posture)
+
+The original grace covered only quota-shaped failures (429 family). Live
+evidence (2026-09-11) showed a second false-negative channel: when
+opencode.ai's own Cloudflare zone challenges or blocks the SHARED egress pool,
+the app receives **Cloudflare edge symptoms** — WAF challenge pages
+("Just a moment", "Attention Required"), firewall blocks (`error code: 1015` /
+`1020`) and 52x edge errors — which every layer used to misread:
+
+| Layer | Old misclassification | Damage |
+|---|---|---|
+| Routing registry (`ai-health-manager`) | `authentication` | 30-min cooldown + false `not_authenticated` — Zen excluded from routing half an hour |
+| Auto-Heal classifier (`error-classifier`) | `auth_error` (temporary=false) | No retry, "verify your API key" advice that cannot help |
+| Store health (`provider-health`) | strict failure path | 3 strikes → `status: "down"` (red panel) |
+
+**Fix** — one marker-based detector, `isZenSharedEgressSymptom()` in
+`zen-free-models.ts`, applied at all three layers. A challenge page is by
+definition not an application-level auth rejection, so the detection is
+*provider-agnostic*: any provider behind Cloudflare benefits. The fingerprints
+are specific (challenge-page text, `cf-ray`, `error code: 1015/1020`,
+`HTTP 5xx` edge family, or a 520–530 status hint) so a **real** Zen
+`AuthError` JSON or a bare 403 "invalid api key" still classifies as auth.
+
+The feature flag keeps the name `enableZenQuotaGrace` (shown as **"Zen
+Shared-Egress Grace"** in the flags panel) and now covers both evidence
+classes. The 60 s routing window is armed only for declared live-traffic rate
+limits — probe/healer evidence records diagnostics without blocking traffic
+(phantom-cooldown guarantee preserved).
+
+### CF-only deployment posture (why this matters)
+
+Cloudflare offers **no dedicated egress IPs for Workers/Pages** — every fetch
+shares the global anycast pool, and no platform configuration changes that.
+The grace makes health *truth-seeking* on the shared pool (symptoms of IP
+reputation no longer masquerade as provider death); the rotator + KV
+model-cache absorb the traffic-level bumps. The **Vercel relay**
+(`zenRelayEnabled`, one lightweight function) remains the only lever that
+actually changes the egress IP — a strictly optional escape hatch, zero
+maintenance while the flag is off. The full Vercel app mirror is unnecessary
+for Zen: everything in this document works on Cloudflare alone.

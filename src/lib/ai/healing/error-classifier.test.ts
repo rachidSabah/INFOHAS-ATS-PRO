@@ -85,3 +85,33 @@ describe("classifyProviderFailure", () => {
     expect(chipForClassification(classifyProviderFailure("404 page not found"))).toBe("ENDPOINT ERROR");
   });
 });
+
+// ============================================================================
+// Task 38 — shared-egress WAF/edge symptoms. A Cloudflare challenge page /
+// 1015 / 1020 / 52x is the provider's own CF zone reacting to the SHARED
+// egress pool — transient, NOT an auth error, never key finger-pointing.
+// ============================================================================
+describe("classifyProviderFailure — Cloudflare shared-egress symptoms", () => {
+  it("WAF challenge page → transient rate_limited, never auth_error", () => {
+    const c = classifyProviderFailure(
+      "API returned HTTP 403 Forbidden: <!DOCTYPE html><title>Attention Required! | Cloudflare</title>"
+    );
+    expect(c.kind).toBe("rate_limited");
+    expect(c.temporary).toBe(true);
+    expect(c.healable).toBe(false);
+    expect(c.humanMessage).toMatch(/Cloudflare WAF/i);
+    expect(c.humanMessage).toMatch(/not an invalid API key/i);
+    expect(chipForClassification(c)).toBe("COOLDOWN");
+  });
+
+  it("52x edge errors → transient rate_limited (status hint and text form)", () => {
+    expect(classifyProviderFailure("upstream failed", { statusCode: 522 }).kind).toBe("rate_limited");
+    expect(classifyProviderFailure("API returned HTTP 522: Connection timed out").kind).toBe("rate_limited");
+    expect(classifyProviderFailure("error code: 1015", { statusCode: 403 }).kind).toBe("rate_limited");
+  });
+
+  it("bare 403/401 without Cloudflare markers stays auth_error", () => {
+    expect(classifyProviderFailure("API returned HTTP 403 Forbidden: invalid api key").kind).toBe("auth_error");
+    expect(classifyProviderFailure("401 unauthorized", { statusCode: 401 }).kind).toBe("auth_error");
+  });
+});

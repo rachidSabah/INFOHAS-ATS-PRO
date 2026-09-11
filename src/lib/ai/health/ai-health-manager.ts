@@ -17,6 +17,8 @@
 // stored here (directive #43).
 // ============================================================================
 
+import { isZenSharedEgressSymptom } from "../zen-free-models";
+
 // ----------------------------------------------------------------------------
 // Types
 // ----------------------------------------------------------------------------
@@ -129,6 +131,13 @@ export function classifyProviderFailure(input: {
   if (UNSUPPORTED_MODEL_PATTERNS.test(msg)) return { category: "unsupported_model", state: "unsupported_model" };
   if (QUOTA_PATTERNS.test(msg)) return { category: "quota_exhausted", state: "quota_exhausted" };
   if (status === 429 || RATE_LIMIT_PATTERNS.test(msg)) return { category: "rate_limit", state: "rate_limited" };
+  // Task 38 — Cloudflare WAF/edge challenge (shared-egress symptom). A
+  // challenge page / 1015 / 1020 / 52x is the provider's own Cloudflare zone
+  // reacting to the SHARED egress IP pool — never an application-level auth
+  // rejection. Classify as a transient rate limit (short burst cooldown,
+  // authState untouched) instead of "authentication" (30-min park + false
+  // not_authenticated). Marker-based, provider-agnostic.
+  if (isZenSharedEgressSymptom(msg, status)) return { category: "rate_limit", state: "rate_limited" };
   if (status === 401 || status === 403 || AUTH_PATTERNS.test(msg)) return { category: "authentication", state: "authentication_required" };
   if (TIMEOUT_PATTERNS.test(msg)) return { category: "timeout", state: "timeout" };
   if (status === 400) return { category: "invalid_request", state: "unavailable" };

@@ -149,9 +149,12 @@ export function zenSessionHeaders(baseUrl: string | undefined | null): Record<st
  *   - the feature flag enableZenQuotaGrace is on (undefined = on),
  *   - the provider resolves to a Zen upstream (host or /zen relay path),
  *   - the most recent failure — if any — was itself quota-shaped
- *     (429 / FreeUsageLimitError / "rate limit" / "quota"). A real failure
- *     (401 auth, 404 model, 5xx outage) as the latest signal must follow
- *     the NORMAL degradation rules.
+ *     (429 / FreeUsageLimitError / "rate limit" / "quota") OR a
+ *     shared-egress symptom (Cloudflare WAF challenge / 52x edge error —
+ *     Task 38: same evidence class, the upstream answered or its edge
+ *     challenged the shared pool, neither says anything about health).
+ *     A real failure (401 auth, 404 model, 5xx outage) as the latest
+ *     signal must follow the NORMAL degradation rules.
  *
  * Returns the overridden status, or null = "no override, use normal rules".
  */
@@ -163,7 +166,7 @@ export function zenHealthStatusOverride(opts: {
   lastError?: string | null;
 }): "healthy" | "degraded" | "down" | "untested" | null {
   if (!opts.graceEnabled || !opts.isZen) return null;
-  if (opts.lastError && !isRateLimitShaped(opts.lastError)) return null;
+  if (opts.lastError && !isRateLimitShaped(opts.lastError) && !isZenSharedEgressSymptom(opts.lastError)) return null;
   // Quota-only evidence: the upstream answers, so it is healthy. Keep
   // "untested" as untested (never claim verification we don't have).
   if (!opts.currentStatus || opts.currentStatus === "untested") return "untested";
@@ -174,6 +177,47 @@ export function zenHealthStatusOverride(opts: {
  * isRateLimitError regex — both live here so Zen and non-Zen callers agree). */
 export function isRateLimitShaped(error: string): boolean {
   return /429|rate.?limit|too.?many.?requests|quota|FreeUsageLimitError/i.test(error);
+}
+
+// ----------------------------------------------------------------------------
+// Shared-egress symptom detection (Task 38 — CF-only posture).
+//
+// When THIS app runs on Cloudflare Pages/Workers, every outbound fetch to
+// opencode.ai (itself behind Cloudflare) egresses from Cloudflare's SHARED
+// anycast IP pool. When opencode's zone challenges or throttles that pool,
+// the app sees Cloudflare EDGE symptoms — WAF challenge pages ("Just a
+// moment", "Attention Required"), firewall blocks (error code 1015/1020)
+// and 52x edge errors — none of which are application-level failures:
+// a challenge page is by definition NOT "invalid API key" and NOT "model
+// unsupported". Misclassifying them as auth errors parked Zen for 30 min
+// and painted it red (live evidence 2026-09-11).
+//
+// Marker-based (not bare-status) so a REAL Zen AuthError JSON
+// ({"error":{"type":"AuthError",...}}) never matches: bare 403 without
+// Cloudflare markers stays a real auth failure. Provider-agnostic by
+// design — any provider behind Cloudflare benefits from the same rule.
+// ----------------------------------------------------------------------------
+
+/** Distinctive Cloudflare WAF/challenge page fingerprints. */
+const CF_WAF_MARKERS = /attention required|just a moment|checking your browser|ddos.?protection|challenge-platform|cf-ray|error code:\s*(1015|1020)|cloudflare/i;
+
+/** Cloudflare edge error statuses in text form ("HTTP 522", "error code: 521"). */
+const CF_EDGE_HTTP_TEXT = /\bHTTP\s+5(2[0-7]|30)\b|error code:\s*5(2[0-7]|30)\b/i;
+
+/**
+ * True when the failure is a Cloudflare edge/WAF symptom (challenge page,
+ * firewall block 1015/1020, or a 520-527/530 edge error) — i.e. shared
+ * egress IP reputation, not provider health. Accepts the raw error text
+ * and/or the HTTP status hint.
+ */
+export function isZenSharedEgressSymptom(
+  error: string | null | undefined,
+  httpStatus?: number | null
+): boolean {
+  if (typeof httpStatus === "number" && httpStatus >= 520 && httpStatus <= 530) return true;
+  const text = String(error ?? "");
+  if (!text) return false;
+  return CF_WAF_MARKERS.test(text) || CF_EDGE_HTTP_TEXT.test(text);
 }
 
 /**
